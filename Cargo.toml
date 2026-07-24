@@ -13,7 +13,7 @@ edition.workspace = true
 # `cargo run` resolving to the CLI for tooling like the pre-commit format hook.
 default-run = "panache"
 readme = "README.md"
-description = "An LSP, formatter, and linter for Markdown, Quarto, and R Markdown"
+description = "Language server, formatter, and linter for Markdown, Quarto, and R Markdown"
 license.workspace = true
 repository.workspace = true
 homepage = "https://panache.bz"
