@@ -3,6 +3,22 @@ use super::text_buffer::{ParagraphBuffer, TextBuffer};
 use crate::parser::blocks::lists::ListMarker;
 use rowan::Checkpoint;
 
+/// Which multi-line display-math delimiter is currently open in a paragraph.
+///
+/// One field (rather than parallel per-delimiter flags) so that delimiters of
+/// one kind occurring inside an open region of another kind cannot latch a
+/// second "open" state: while a region is open, only its own closer matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpenDisplayMath {
+    /// `$$`-delimited; holds the opening run length (a closer needs
+    /// `run_len >= open_len`).
+    Dollars(usize),
+    /// `\[ ... \]` (extension `tex_math_single_backslash`).
+    SingleBrackets,
+    /// `\\[ ... \\]` (extension `tex_math_double_backslash`).
+    DoubleBrackets,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Container {
     BlockQuote {
@@ -65,7 +81,7 @@ pub(crate) enum Container {
     Paragraph {
         buffer: ParagraphBuffer, // Interleaved buffer for paragraph content with markers
         open_inline_math_envs: Vec<String>,
-        open_display_math_dollar_count: Option<usize>,
+        open_display_math: Option<OpenDisplayMath>,
         // Checkpoint at the position the paragraph started; used to retroactively
         // wrap buffered content as PARAGRAPH (or HEADING for multi-line setext)
         // when the paragraph is closed.

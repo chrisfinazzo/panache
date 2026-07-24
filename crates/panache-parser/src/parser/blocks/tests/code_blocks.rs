@@ -2,7 +2,7 @@ use super::helpers::{
     assert_block_kinds, assert_block_kinds_for_node, find_all, find_first, parse_blocks,
     parse_blocks_gfm, parse_blocks_quarto, parse_blocks_with_config,
 };
-use crate::options::{Extensions, Flavor, ParserOptions};
+use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::syntax::SyntaxKind;
 
 fn get_code_content(node: &crate::syntax::SyntaxNode) -> Option<String> {
@@ -707,6 +707,119 @@ fn standalone_dollar_math_delimiters_do_not_split_into_tex_block() {
     assert!(
         find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
         "display math delimited by standalone $$ lines should stay paragraph-inline, not TEX_BLOCK"
+    );
+}
+
+fn single_backslash_math_options() -> ParserOptions {
+    let mut config = ParserOptions::default();
+    config.extensions.tex_math_single_backslash = true;
+    config
+}
+
+#[test]
+fn bracket_display_math_does_not_split_into_tex_block() {
+    let input = "Before\n\n\\[\nN(A)=\\operatorname{span}\n\\left\\{\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix},\n\\begin{bmatrix}0\\\\0\\\\1\\end{bmatrix}\n\\right\\}\n\\]\n\nAfter\n\n# Heading\n\nText\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "display math delimited by `\\[` and `\\]` lines should stay paragraph-inline, not TEX_BLOCK"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after bracket-delimited display math should remain a HEADING"
+    );
+}
+
+#[test]
+fn bracket_display_math_delimiters_with_content_do_not_split_into_tex_block() {
+    // Pandoc does not require `\[`/`\]` to sit on their own lines.
+    let input = "Before\n\n\\[ N(A)=\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\n\nText\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "an opener with trailing content (`\\[ N(A)=`) should still hold the paragraph together"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after bracket-delimited display math should remain a HEADING"
+    );
+}
+
+#[test]
+fn bracket_display_math_closer_with_content_releases_paragraph() {
+    // A closer sharing its line with math content must clear the open state so
+    // following blocks can interrupt the paragraph again.
+    let input = "Before\n\n\\[\nE = mc^2 \\]\n``` python\nx = 1\n```\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::CODE_BLOCK).is_some(),
+        "a fence after a `... \\]` closer line should interrupt the paragraph"
+    );
+}
+
+#[test]
+fn bracket_delimiters_inside_dollar_math_do_not_latch() {
+    // A `\[` line inside open `$$` math is dollar-math content; it must not
+    // leave bracket state latched once the dollars close.
+    let input = "$$\n\\[\n$$\n``` python\nx = 1\n```\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::CODE_BLOCK).is_some(),
+        "a fence after closed `$$` math should interrupt the paragraph even if the math contained `\\[`"
+    );
+}
+
+#[test]
+fn bracket_delimiters_ignored_without_tex_math_extension() {
+    // Without `tex_math_single_backslash` (Pandoc and Quarto defaults), `\[`
+    // is not a display-math delimiter; pandoc splits the environment into a
+    // raw TeX block, and so do we.
+    let input = "Before\n\n\\[\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n";
+    let tree = parse_blocks(input);
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_some(),
+        "without the extension, `\\begin{{...}}` after a `\\[` line still starts a TEX_BLOCK (pandoc parity)"
+    );
+}
+
+#[test]
+fn commonmark_escaped_bracket_line_does_not_hold_paragraph_open() {
+    // In CommonMark `\[` is just an escaped bracket; a heading must still
+    // interrupt the paragraph.
+    let input = "text\n\\[\n# Heading\n";
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let tree = parse_blocks_with_config(input, &config);
+
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "an escaped `\\[` line in CommonMark must not suppress paragraph interruption"
+    );
+}
+
+#[test]
+fn double_backslash_bracket_display_math_does_not_split_into_tex_block() {
+    let input = "Before\n\n\\\\[\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\\\]\n\nAfter\n\n# Heading\n\nText\n";
+    let mut config = ParserOptions::default();
+    config.extensions.tex_math_double_backslash = true;
+    let tree = parse_blocks_with_config(input, &config);
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "display math delimited by `\\\\[` and `\\\\]` lines should stay paragraph-inline, not TEX_BLOCK"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after double-backslash display math should remain a HEADING"
     );
 }
 

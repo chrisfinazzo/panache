@@ -1,0 +1,53 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..74
+  PARAGRAPH@0..7
+    TEXT@0..6 "Before"
+    NEWLINE@6..7 "\n"
+  BLANK_LINE@7..8
+    BLANK_LINE@7..8 "\n"
+  PARAGRAPH@8..50
+    DISPLAY_MATH@8..49
+      DISPLAY_MATH_MARKER@8..10 "\\["
+      MATH_CONTENT@10..47
+        MATH_NEWLINE@10..11 "\n"
+        MATH_ENVIRONMENT@11..46
+          MATH_COMMAND@11..17 "\\begin"
+          MATH_GROUP@17..26
+            MATH_GROUP_OPEN@17..18 "{"
+            MATH_TEXT@18..25 "bmatrix"
+            MATH_GROUP_CLOSE@25..26 "}"
+          MATH_TEXT@26..27 "1"
+          MATH_LINE_BREAK@27..29 "\\\\"
+          MATH_TEXT@29..30 "1"
+          MATH_LINE_BREAK@30..32 "\\\\"
+          MATH_TEXT@32..33 "0"
+          MATH_COMMAND@33..37 "\\end"
+          MATH_GROUP@37..46
+            MATH_GROUP_OPEN@37..38 "{"
+            MATH_TEXT@38..45 "bmatrix"
+            MATH_GROUP_CLOSE@45..46 "}"
+        MATH_NEWLINE@46..47 "\n"
+      DISPLAY_MATH_MARKER@47..49 "\\]"
+    NEWLINE@49..50 "\n"
+  BLANK_LINE@50..51
+    BLANK_LINE@50..51 "\n"
+  PARAGRAPH@51..57
+    TEXT@51..56 "After"
+    NEWLINE@56..57 "\n"
+  BLANK_LINE@57..58
+    BLANK_LINE@57..58 "\n"
+  HEADING@58..68
+    ATX_HEADING_MARKER@58..59
+      ATX_HEADING_MARKER@58..59 "#"
+    WHITESPACE@59..60 " "
+    HEADING_CONTENT@60..67
+      TEXT@60..67 "Heading"
+    NEWLINE@67..68 "\n"
+  BLANK_LINE@68..69
+    BLANK_LINE@68..69 "\n"
+  PARAGRAPH@69..74
+    TEXT@69..73 "Text"
+    NEWLINE@73..74 "\n"

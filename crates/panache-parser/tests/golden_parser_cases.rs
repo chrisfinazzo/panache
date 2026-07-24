@@ -191,6 +191,8 @@ golden_test_cases!(
     blockquote_marker_in_display_math_multiline,
     blockquote_marker_in_link_text_multiline,
     blockquotes,
+    bracket_display_math_commonmark,
+    bracket_display_math_pandoc,
     bracketed_spans,
     bookdown,
     chunk_options_complex,

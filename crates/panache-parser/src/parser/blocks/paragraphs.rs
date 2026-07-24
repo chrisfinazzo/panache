@@ -7,37 +7,115 @@ use crate::options::ParserOptions;
 use rowan::GreenNodeBuilder;
 
 use crate::parser::blocks::raw_blocks::{extract_environment_name, is_inline_math_environment};
-use crate::parser::utils::container_stack::{Container, ContainerStack};
+use crate::parser::utils::container_stack::{Container, ContainerStack, OpenDisplayMath};
 use crate::parser::utils::helpers::trim_end_newlines;
 use crate::parser::utils::text_buffer::ParagraphBuffer;
 
-fn update_display_math_dollar_state(
-    line_no_newline: &str,
-    open_display_math_dollar_count: &mut Option<usize>,
-) {
-    let trimmed = line_no_newline.trim();
-    if trimmed.len() < 2 {
-        return;
-    }
-
+/// Split a trimmed line into a leading `$$...` run and the rest, if the run
+/// has at least two dollars.
+fn dollar_run(trimmed: &str) -> Option<(usize, &str)> {
     let run_len = trimmed.bytes().take_while(|b| *b == b'$').count();
     if run_len < 2 {
-        return;
+        return None;
+    }
+    Some((run_len, &trimmed[run_len..]))
+}
+
+/// Scan a paragraph line for pandoc bracket display-math delimiters and return
+/// the open state after the line.
+///
+/// Mirrors the inline parsers (`try_parse_single_backslash_display_math` /
+/// `try_parse_double_backslash_display_math`): delimiters may share a line
+/// with content, the double form wins at a position when both extensions are
+/// enabled, and there is no escape handling inside an open region.
+fn scan_bracket_delimiters(
+    line: &str,
+    mut state: Option<OpenDisplayMath>,
+    config: &ParserOptions,
+) -> Option<OpenDisplayMath> {
+    let single = config.extensions.tex_math_single_backslash;
+    let double = config.extensions.tex_math_double_backslash;
+    if !single && !double {
+        return state;
     }
 
-    let rest = &trimmed[run_len..];
-    let is_pure_dollars = rest.is_empty();
-    let is_quarto_equation_attr_closer = rest.starts_with(char::is_whitespace) && {
-        let attr = rest.trim_start();
-        attr.starts_with('{') && attr.ends_with('}')
-    };
-
-    if let Some(open_len) = *open_display_math_dollar_count {
-        if (is_pure_dollars || is_quarto_equation_attr_closer) && run_len >= open_len {
-            *open_display_math_dollar_count = None;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match state {
+            None => {
+                if double && bytes[i..].starts_with(br"\\[") {
+                    state = Some(OpenDisplayMath::DoubleBrackets);
+                    i += 3;
+                } else if single && bytes[i..].starts_with(br"\[") {
+                    state = Some(OpenDisplayMath::SingleBrackets);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            Some(OpenDisplayMath::SingleBrackets) => {
+                if bytes[i..].starts_with(br"\]") {
+                    state = None;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            Some(OpenDisplayMath::DoubleBrackets) => {
+                if bytes[i..].starts_with(br"\\]") {
+                    state = None;
+                    i += 3;
+                } else {
+                    i += 1;
+                }
+            }
+            // Callers only pass bracket states; dollars are handled before
+            // this scan and suppress it entirely.
+            Some(OpenDisplayMath::Dollars(_)) => return state,
         }
-    } else if is_pure_dollars {
-        *open_display_math_dollar_count = Some(run_len);
+    }
+    state
+}
+
+/// Track multi-line display-math regions (`$$ ... $$`, `\[ ... \]`,
+/// `\\[ ... \\]`) across buffered paragraph lines.
+///
+/// While a region of one delimiter kind is open, delimiters of the other
+/// kinds are content and are ignored; only the matching closer changes state.
+fn update_display_math_state(
+    line_no_newline: &str,
+    open_display_math: &mut Option<OpenDisplayMath>,
+    config: &ParserOptions,
+) {
+    match *open_display_math {
+        Some(OpenDisplayMath::Dollars(open_len)) => {
+            let trimmed = line_no_newline.trim();
+            if let Some((run_len, rest)) = dollar_run(trimmed) {
+                let is_pure_dollars = rest.is_empty();
+                let is_quarto_equation_attr_closer = rest.starts_with(char::is_whitespace) && {
+                    let attr = rest.trim_start();
+                    attr.starts_with('{') && attr.ends_with('}')
+                };
+                if (is_pure_dollars || is_quarto_equation_attr_closer) && run_len >= open_len {
+                    *open_display_math = None;
+                }
+            }
+        }
+        Some(OpenDisplayMath::SingleBrackets) | Some(OpenDisplayMath::DoubleBrackets) => {
+            *open_display_math =
+                scan_bracket_delimiters(line_no_newline, *open_display_math, config);
+        }
+        None => {
+            let trimmed = line_no_newline.trim();
+            if let Some((run_len, rest)) = dollar_run(trimmed)
+                && rest.is_empty()
+            {
+                *open_display_math = Some(OpenDisplayMath::Dollars(run_len));
+            } else {
+                *open_display_math = scan_bracket_delimiters(line_no_newline, None, config);
+            }
+        }
     }
 }
 
@@ -70,7 +148,7 @@ pub(in crate::parser) fn start_paragraph_if_needed(
         containers.push(Container::Paragraph {
             buffer: ParagraphBuffer::new(),
             open_inline_math_envs: Vec::new(),
-            open_display_math_dollar_count: None,
+            open_display_math: None,
             start_checkpoint,
         });
     }
@@ -81,25 +159,26 @@ pub(in crate::parser) fn append_paragraph_line(
     containers: &mut ContainerStack,
     _builder: &mut GreenNodeBuilder<'static>,
     line: &str,
-    _config: &ParserOptions,
+    config: &ParserOptions,
 ) {
     // Buffer the line (with newline for losslessness)
     // Works for ALL paragraphs including those in blockquotes
     if let Some(Container::Paragraph {
         buffer,
         open_inline_math_envs,
-        open_display_math_dollar_count,
+        open_display_math,
         ..
     }) = containers.stack.last_mut()
     {
         buffer.push_text(line);
 
         let line_no_newline = trim_end_newlines(line);
-        // Track standalone `$$` delimiter lines for all paragraphs so we keep
-        // multi-line display math in a single paragraph parse context.
-        // This prevents `$$` + `\begin{...}` forms from being split into
-        // PARAGRAPH + TEX_BLOCK across parse passes.
-        update_display_math_dollar_state(line_no_newline, open_display_math_dollar_count);
+        // Track display-math delimiter lines (`$$`, and `\[`/`\]` when the
+        // tex-math bracket extensions are on) so we keep multi-line display
+        // math in a single paragraph parse context. This prevents delimiter +
+        // `\begin{...}` forms from being split into PARAGRAPH + TEX_BLOCK
+        // across parse passes.
+        update_display_math_state(line_no_newline, open_display_math, config);
         if let Some(env_name) = extract_environment_name(line_no_newline)
             && is_inline_math_environment(env_name)
         {
@@ -142,13 +221,13 @@ pub(in crate::parser) fn has_open_inline_math_environment(containers: &Container
     )
 }
 
-pub(in crate::parser) fn has_open_display_math_dollars(containers: &ContainerStack) -> bool {
+pub(in crate::parser) fn has_open_display_math(containers: &ContainerStack) -> bool {
     matches!(
         containers.last(),
         Some(Container::Paragraph {
-            open_display_math_dollar_count,
+            open_display_math: Some(_),
             ..
-        }) if open_display_math_dollar_count.is_some()
+        })
     )
 }
 

@@ -51,6 +51,23 @@ fn display_math_default_indent_multiline_idempotent() {
 }
 
 #[test]
+fn bracket_display_math_preserves_following_markdown_structure() {
+    // Multi-line `\[ ... \]` display math (tex_math_single_backslash) must
+    // stay one paragraph so following blocks keep their structure.
+    let mut config = math_config(false);
+    config.parser_extensions.tex_math_single_backslash = true;
+
+    let input = "Before\n\n\\[\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\nText\n";
+    // Bracket display math gets the same layout as `$$` blocks: delimiters on
+    // their own lines, content at the default two-space `math-indent`.
+    let expected = "Before\n\n\\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\n\nText\n";
+    let output = format(input, Some(config.clone()), None);
+
+    similar_asserts::assert_eq!(output, expected);
+    similar_asserts::assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
 fn display_math_indent_zero_stays_flush() {
     // Explicit `math-indent = 0` keeps the old flush-left behavior.
     let cfg = Config {
