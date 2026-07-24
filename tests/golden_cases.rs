@@ -401,6 +401,7 @@ golden_test_cases!(
     raw_blocks,
     raw_tex_commands,
     reference_definition_attached_title_commonmark,
+    reflow_wrap_block_markers,
     reference_footnotes,
     reference_images,
     reference_links,

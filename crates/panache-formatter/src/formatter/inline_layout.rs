@@ -241,8 +241,8 @@ pub(super) struct NodeWrapOptions<'a> {
     pub avoid_unsafe_line_start: bool,
     pub avoid_blockquote_line_start: bool,
     /// Avoid starting a wrapped line with an ATX heading (`#`) or setext/thematic
-    /// (`---`/`===`) marker. Set by the sentence/semantic modes; left off for
-    /// reflow, whose width-driven breaks rarely land on such a marker.
+    /// (`---`/`===`) marker. Set by every mode: a `=`/`-` run pushed to its own
+    /// line promotes the paragraph into a setext heading in every flavor.
     pub avoid_heading_line_start: bool,
     /// Force a line break at every existing soft break (`NEWLINE`) in addition
     /// to the breaks `mode` produces. Set by the `Semantic` wrap mode, which
@@ -252,6 +252,10 @@ pub(super) struct NodeWrapOptions<'a> {
 
 impl<'a> NodeWrapOptions<'a> {
     pub(super) fn reflow(widths: &'a [usize]) -> Self {
+        // Unlike the flavor-gated list/blockquote guards, the heading guard is
+        // unconditional: a `=`/`-` run at a line start turns the paragraph
+        // into a setext heading even under `blank-before-header`, so a width
+        // break before one is never safe in any flavor.
         Self {
             widths,
             mode: NodeWrapMode::Reflow,
@@ -259,7 +263,7 @@ impl<'a> NodeWrapOptions<'a> {
             strip_standalone_blockquote_markers: false,
             avoid_unsafe_line_start: false,
             avoid_blockquote_line_start: false,
-            avoid_heading_line_start: false,
+            avoid_heading_line_start: true,
             preserve_newlines: false,
         }
     }

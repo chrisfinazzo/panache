@@ -15,6 +15,14 @@ fn cfg_sentence() -> Config {
     }
 }
 
+fn cfg_reflow_narrow() -> Config {
+    Config {
+        wrap: Some(WrapMode::Reflow),
+        line_width: 30,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn paragraph_preserve_keeps_line_breaks() {
     let input = "\
@@ -136,6 +144,54 @@ fn sentence_keeps_inline_heading_marker_off_line_start() {
 
     let out = format(input, Some(cfg_sentence()), None);
     let out2 = format(&out, Some(cfg_sentence()), None);
+    assert_eq!(out, out2);
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn reflow_keeps_inline_heading_marker_off_line_start() {
+    // The width break lands exactly before the lone `#`; letting it through
+    // would put `#` at column 1 and open an ATX heading on reparse.
+    let input = "Alpha beta gamma delta epsilon # zeta eta theta iota kappa\n";
+    let expected = "Alpha beta gamma delta epsilon #\nzeta eta theta iota kappa\n";
+
+    let out = format(input, Some(cfg_reflow_narrow()), None);
+    let out2 = format(&out, Some(cfg_reflow_narrow()), None);
+    assert_eq!(out, out2);
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn reflow_keeps_inline_setext_marker_off_line_start() {
+    // A trailing `===` pushed to its own line turns the paragraph into a
+    // setext heading on reparse (flavor-independent in pandoc).
+    let input = "Alpha beta gamma delta epsilon ===\n";
+    let expected = "Alpha beta gamma delta epsilon ===\n";
+
+    let out = format(input, Some(cfg_reflow_narrow()), None);
+    let out2 = format(&out, Some(cfg_reflow_narrow()), None);
+    assert_eq!(out, out2);
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn reflow_keeps_inline_thematic_marker_off_line_start() {
+    let input = "Alpha beta gamma delta epsilon ---\n";
+    let expected = "Alpha beta gamma delta epsilon ---\n";
+
+    let out = format(input, Some(cfg_reflow_narrow()), None);
+    let out2 = format(&out, Some(cfg_reflow_narrow()), None);
+    assert_eq!(out, out2);
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn list_reflow_keeps_inline_setext_marker_off_line_start() {
+    let input = "- Alpha beta gamma delta epsi ===\n";
+    let expected = "- Alpha beta gamma delta epsi ===\n";
+
+    let out = format(input, Some(cfg_reflow_narrow()), None);
+    let out2 = format(&out, Some(cfg_reflow_narrow()), None);
     assert_eq!(out, out2);
     assert_eq!(out, expected);
 }
