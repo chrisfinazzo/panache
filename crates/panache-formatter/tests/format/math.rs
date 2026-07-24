@@ -68,6 +68,23 @@ fn bracket_display_math_preserves_following_markdown_structure() {
 }
 
 #[test]
+fn list_item_bracket_display_math_preserves_following_markdown_structure() {
+    // Multi-line `\[ ... \]` display math inside a list item must stay one
+    // paragraph so a following top-level heading keeps its structure.
+    let mut config = math_config(false);
+    config.parser_extensions.tex_math_single_backslash = true;
+
+    let input = "- item\n\n  \\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n  \\]\n\n# Heading\n\nText\n";
+    let output = format(input, Some(config.clone()), None);
+
+    assert!(
+        output.contains("# Heading"),
+        "the heading after the list must survive formatting, got:\n{output}"
+    );
+    similar_asserts::assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
 fn display_math_indent_zero_stays_flush() {
     // Explicit `math-indent = 0` keeps the old flush-left behavior.
     let cfg = Config {

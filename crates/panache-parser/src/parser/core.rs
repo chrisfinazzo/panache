@@ -1142,7 +1142,7 @@ impl<'a> Parser<'a> {
                     ..
                 }) = self.containers.stack.last_mut()
                 {
-                    buffer.push_text(content);
+                    buffer.push_text(content, self.config);
                     if !content.trim().is_empty() {
                         *marker_only = false;
                     }
@@ -2954,7 +2954,7 @@ impl<'a> Parser<'a> {
                                     );
                                 }
                             }
-                            buffer.push_text(inner_content);
+                            buffer.push_text(inner_content, self.config);
                             if !inner_content.trim().is_empty() {
                                 *marker_only = false;
                             }
@@ -2965,7 +2965,7 @@ impl<'a> Parser<'a> {
                         ..
                     }) = self.containers.stack.last_mut()
                     {
-                        buffer.push_text(line);
+                        buffer.push_text(line, self.config);
                         if !line.trim().is_empty() {
                             *marker_only = false;
                         }
@@ -3746,6 +3746,48 @@ impl<'a> Parser<'a> {
             return LineDispatch::consumed(1);
         }
 
+        // List-item analogue of the paragraph hold above: while the item's
+        // buffered lines leave a display-math region open, keep buffering so
+        // block detection (e.g. `\begin{...}` -> TEX_BLOCK) cannot split the
+        // region. Exception: a sibling list marker of an open list still
+        // interrupts — pandoc splits items before scanning math — while
+        // indented nested markers and dedented lazy text are math content.
+        if matches!(
+            self.containers.last(),
+            Some(Container::ListItem { buffer, .. }) if buffer.has_open_display_math()
+        ) {
+            use super::blocks::lists;
+            let is_sibling_marker = try_parse_list_marker(
+                content,
+                self.config,
+                lists::open_list_hint_at_indent(&self.containers, leading_indent(content).0),
+            )
+            .is_some_and(|marker_match| {
+                lists::find_matching_list_level(
+                    &self.containers,
+                    &marker_match.marker,
+                    leading_indent(content).0,
+                    self.config.dialect,
+                )
+                .is_some()
+            });
+            if !is_sibling_marker {
+                let line = line_to_append.unwrap_or(self.lines[self.pos]);
+                if let Some(Container::ListItem {
+                    buffer,
+                    marker_only,
+                    ..
+                }) = self.containers.stack.last_mut()
+                {
+                    buffer.push_text(line, self.config);
+                    if !is_blank_line(line) {
+                        *marker_only = false;
+                    }
+                }
+                return LineDispatch::consumed(1);
+            }
+        }
+
         // Precompute dispatcher match once per line (reused by multiple branches below).
         // This covers: blocks requiring blank lines, blocks that can interrupt paragraphs,
         // and blocks that can appear without blank lines (e.g. reference definitions).
@@ -4292,7 +4334,7 @@ impl<'a> Parser<'a> {
                 ..
             }) = self.containers.stack.last_mut()
             {
-                buffer.push_text(line);
+                buffer.push_text(line, self.config);
                 if !is_blank_line(line) {
                     *marker_only = false;
                 }

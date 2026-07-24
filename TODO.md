@@ -487,20 +487,6 @@ intentionally excluded.
   `crates/panache-formatter/src/formatter/inline_layout.rs`; start with a
   reproducing golden fixture per TDD.
 
-- [ ] Multi-line display math is not tracked inside list items. The paragraph
-  display-math state (`open_display_math` on `Container::Paragraph`,
-  consulted at the paragraph-hold check in `parser/core.rs`) never engages
-  for list-item content, which buffers as `PLAIN` via `ListItemBuffer` with
-  no `Container::Paragraph` on the stack. So `\[ ... \]` display math in a
-  list item (with `tex-math-single-backslash`) still lets a `\begin{...}`
-  line start an unterminated `TEX_BLOCK` that swallows everything to EOF,
-  including subsequent headings---the same failure mode fixed at top level
-  for PR #437 (and presumably the `$$` variant shares the gap). Verified
-  pre-existing (identical on `main`). A fix needs the open-math state
-  plumbed into the list-item buffering path (or its block-detection in
-  `ListItemBuffer::emit_as_block`) rather than only `containers.last()`;
-  start with a reproducing test per TDD.
-
 ### Horizontal rules vs YAML delimiters (#417 investigation, 2026-07-13)
 
 Findings from investigating issue #417 (a compact `---` horizontal-rule option).

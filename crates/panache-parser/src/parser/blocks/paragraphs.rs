@@ -83,7 +83,10 @@ fn scan_bracket_delimiters(
 ///
 /// While a region of one delimiter kind is open, delimiters of the other
 /// kinds are content and are ignored; only the matching closer changes state.
-fn update_display_math_state(
+///
+/// Shared with `ListItemBuffer`, which tracks the same regions across
+/// buffered list-item lines.
+pub(in crate::parser) fn update_display_math_state(
     line_no_newline: &str,
     open_display_math: &mut Option<OpenDisplayMath>,
     config: &ParserOptions,

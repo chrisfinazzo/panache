@@ -823,6 +823,111 @@ fn double_backslash_bracket_display_math_does_not_split_into_tex_block() {
     );
 }
 
+#[test]
+fn list_item_bracket_display_math_does_not_split_into_tex_block() {
+    let input = "- item\n\n  \\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n  \\]\n\n# Heading after\n\ntext\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "bracket display math inside a list item should stay inline, not TEX_BLOCK"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after list-item display math should remain a HEADING"
+    );
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+    assert!(
+        find_first(&item, SyntaxKind::DISPLAY_MATH).is_some(),
+        "the bracket region should parse as DISPLAY_MATH inside the LIST_ITEM"
+    );
+}
+
+#[test]
+fn list_item_dollar_display_math_does_not_split_into_tex_block() {
+    let input = "- item\n\n  $$\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n  $$\n\n# Heading after\n\ntext\n";
+    let tree = parse_blocks(input);
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "`$$` display math inside a list item should stay inline, not TEX_BLOCK"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after list-item `$$` math should remain a HEADING"
+    );
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+    assert!(
+        find_first(&item, SyntaxKind::DISPLAY_MATH).is_some(),
+        "the `$$` region should parse as DISPLAY_MATH inside the LIST_ITEM"
+    );
+}
+
+#[test]
+fn list_item_marker_line_bracket_opener_does_not_split_into_tex_block() {
+    // The opener sits on the marker line itself, exercising the buffer seed
+    // in `lists.rs` rather than the continuation path.
+    let input = "- \\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n  \\]\n\n# Heading after\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::TEX_BLOCK).is_none(),
+        "a marker-line `\\[` opener should hold the item together, not TEX_BLOCK"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a heading after the list should remain a HEADING"
+    );
+}
+
+#[test]
+fn blank_line_inside_list_item_bracket_math_releases_state() {
+    // A blank line flushes the item's buffered chunk and must reset the open
+    // math state; the unclosed `\[` degrades to literal text and the heading
+    // still interrupts.
+    let input = "- item\n\n  \\[\n  x\n\n# Heading\n";
+    let tree = parse_blocks_with_config(input, &single_backslash_math_options());
+
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "a blank line must release the open bracket state so the heading survives"
+    );
+}
+
+#[test]
+fn sibling_list_marker_interrupts_open_dollar_math_in_list_item() {
+    // Pandoc splits items before scanning math: `- $$` / `- next` is two
+    // items with literal dollars, not one item swallowing the sibling.
+    let input = "- $$\n- next\n$$\n";
+    let tree = parse_blocks(input);
+
+    let items = find_all(&tree, SyntaxKind::LIST_ITEM);
+    assert_eq!(
+        items.len(),
+        2,
+        "a sibling list marker must interrupt open `$$` math in the previous item"
+    );
+}
+
+#[test]
+fn commonmark_list_item_bracket_line_does_not_hold_item_open() {
+    // In CommonMark `\[` is just an escaped bracket; a heading must still
+    // interrupt the list item content.
+    let input = "- text\n  \\[\n# Heading\n";
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let tree = parse_blocks_with_config(input, &config);
+
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "an escaped `\\[` line in a CommonMark list item must not suppress interruption"
+    );
+}
+
 // Indented code block tests
 
 #[test]

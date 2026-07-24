@@ -1864,7 +1864,7 @@ fn finish_list_item_with_optional_nested(
     let marker_only = text_to_buffer.trim().is_empty();
     let mut buffer = ListItemBuffer::new();
     if !text_to_buffer.is_empty() {
-        buffer.push_text(text_to_buffer);
+        buffer.push_text(text_to_buffer, config);
     }
     containers.push(Container::ListItem {
         content_col,

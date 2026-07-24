@@ -12,6 +12,9 @@ use crate::parser::blocks::horizontal_rules::{emit_horizontal_rule, try_parse_ho
 use crate::parser::blocks::html_blocks::{
     HtmlBlockType, count_tag_balance, is_pandoc_matched_pair_tag, try_parse_html_block_start,
 };
+use crate::parser::blocks::paragraphs::update_display_math_state;
+use crate::parser::utils::container_stack::OpenDisplayMath;
+use crate::parser::utils::helpers::trim_end_newlines;
 use crate::parser::utils::inline_emission;
 use crate::parser::utils::text_buffer::ParagraphBuffer;
 use crate::syntax::{SyntaxKind, SyntaxNode};
@@ -40,6 +43,11 @@ pub(crate) enum ListItemContent {
 pub(crate) struct ListItemBuffer {
     /// Segments of content in order
     segments: Vec<ListItemContent>,
+    /// Display-math region (`$$ ... $$`, `\[ ... \]`, `\\[ ... \\]`) left
+    /// open by the buffered lines. Consulted by the parser's list-item hold
+    /// so block detection cannot split an open region into a `TEX_BLOCK`
+    /// (same failure mode the paragraph tracker fixes at top level).
+    open_display_math: Option<OpenDisplayMath>,
 }
 
 impl ListItemBuffer {
@@ -47,16 +55,26 @@ impl ListItemBuffer {
     pub(crate) fn new() -> Self {
         Self {
             segments: Vec::new(),
+            open_display_math: None,
         }
     }
 
-    /// Push text content to the buffer.
-    pub(crate) fn push_text(&mut self, text: impl Into<String>) {
+    /// Push text content to the buffer, tracking display-math delimiters
+    /// per line (the marker-line seed can carry multiple lines).
+    pub(crate) fn push_text(&mut self, text: impl Into<String>, config: &ParserOptions) {
         let text = text.into();
         if text.is_empty() {
             return;
         }
+        for line in text.split_inclusive('\n') {
+            update_display_math_state(trim_end_newlines(line), &mut self.open_display_math, config);
+        }
         self.segments.push(ListItemContent::Text(text));
+    }
+
+    /// Whether the buffered lines left a display-math region open.
+    pub(crate) fn has_open_display_math(&self) -> bool {
+        self.open_display_math.is_some()
     }
 
     pub(crate) fn push_blockquote_marker(
@@ -324,9 +342,13 @@ impl ListItemBuffer {
         builder.finish_node(); // Close PLAIN or PARAGRAPH
     }
 
-    /// Clear the buffer for reuse.
+    /// Clear the buffer for reuse. Also drops any open display-math state:
+    /// every clear site starts a fresh paragraph-like chunk (blank-line
+    /// flush, first-line conversion, setext fold), and a blank line ends
+    /// the math region just like it ends a paragraph.
     pub(crate) fn clear(&mut self) {
         self.segments.clear();
+        self.open_display_math = None;
     }
 }
 
@@ -644,7 +666,7 @@ mod tests {
     #[test]
     fn test_push_single_text() {
         let mut buffer = ListItemBuffer::new();
-        buffer.push_text("Hello, world!");
+        buffer.push_text("Hello, world!", &ParserOptions::default());
         assert!(!buffer.is_empty());
         assert!(!buffer.has_blank_lines_between_content());
         assert_eq!(buffer.get_text_for_parsing(), "Hello, world!");
@@ -653,16 +675,17 @@ mod tests {
     #[test]
     fn test_push_multiple_text_segments() {
         let mut buffer = ListItemBuffer::new();
-        buffer.push_text("Line 1\n");
-        buffer.push_text("Line 2\n");
-        buffer.push_text("Line 3");
+        let config = ParserOptions::default();
+        buffer.push_text("Line 1\n", &config);
+        buffer.push_text("Line 2\n", &config);
+        buffer.push_text("Line 3", &config);
         assert_eq!(buffer.get_text_for_parsing(), "Line 1\nLine 2\nLine 3");
     }
 
     #[test]
     fn test_clear_buffer() {
         let mut buffer = ListItemBuffer::new();
-        buffer.push_text("Some text");
+        buffer.push_text("Some text", &ParserOptions::default());
         assert!(!buffer.is_empty());
 
         buffer.clear();
@@ -673,7 +696,24 @@ mod tests {
     #[test]
     fn test_empty_text_ignored() {
         let mut buffer = ListItemBuffer::new();
-        buffer.push_text("");
+        buffer.push_text("", &ParserOptions::default());
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_display_math_state_tracks_and_resets_on_clear() {
+        let mut config = ParserOptions::default();
+        config.extensions.tex_math_single_backslash = true;
+
+        let mut buffer = ListItemBuffer::new();
+        buffer.push_text("\\[\n", &config);
+        assert!(buffer.has_open_display_math());
+        buffer.push_text("x = 1 \\]\n", &config);
+        assert!(!buffer.has_open_display_math());
+
+        buffer.push_text("$$\n", &config);
+        assert!(buffer.has_open_display_math());
+        buffer.clear();
+        assert!(!buffer.has_open_display_math());
     }
 }
