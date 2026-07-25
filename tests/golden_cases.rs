@@ -263,6 +263,7 @@ golden_test_cases!(
     hr_as_list_item_content,
     hr_closes_list_commonmark,
     headerless_table,
+    headerless_table_no_closer,
     horizontal_rule_div_fence,
     horizontal_rule_in_list_item,
     horizontal_rules,

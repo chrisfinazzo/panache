@@ -1,0 +1,6 @@
+before
+
+--- ---
+foo bar
+
+after

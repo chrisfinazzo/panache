@@ -853,8 +853,12 @@ pub(crate) fn try_parse_simple_table(
         (start_pos, end_pos)
     } else {
         let separator_pos = find_separator_line(window, start_pos)?;
-        // Find table end (blank line or end of input)
-        (separator_pos, find_table_end(window, separator_pos + 1))
+        // Headerless (separator on the dispatch line): pandoc demands the
+        // closing dash line, same as the single-column path above. With a
+        // header the table may end at a blank line or EOF instead.
+        let headerless = separator_pos == start_pos;
+        let end_pos = find_table_end(window, separator_pos + 1, headerless)?;
+        (separator_pos, end_pos)
     };
     log::trace!("  found separator at line {}", separator_pos + 1);
 
@@ -986,21 +990,34 @@ fn find_separator_line(lines: &(impl LineView + ?Sized), start_pos: usize) -> Op
     None
 }
 
-/// Find where the table ends (first blank line or end of input).
-fn find_table_end(lines: &(impl LineView + ?Sized), start_pos: usize) -> usize {
+/// Find where the table ends: a closing separator line, or (unless
+/// `require_closer`) the first blank line or end of input. Headerless tables
+/// pass `require_closer` because pandoc rejects them without the closing
+/// dash line (the opener is a horizontal rule instead).
+fn find_table_end(
+    lines: &(impl LineView + ?Sized),
+    start_pos: usize,
+    require_closer: bool,
+) -> Option<usize> {
+    let mut saw_row = false;
     for i in start_pos..lines.line_count() {
         if lines.line(i).trim().is_empty() {
-            return i;
+            return (!require_closer).then_some(i);
         }
-        // Check if this could be a closing separator
-        if try_parse_table_separator(lines.line(i)).is_some() {
-            // Check if next line is blank or end
-            if i + 1 >= lines.line_count() || lines.line(i + 1).trim().is_empty() {
-                return i + 1;
+        // Check if this could be a closing separator (next line blank or EOF)
+        if try_parse_table_separator(lines.line(i)).is_some()
+            && (i + 1 >= lines.line_count() || lines.line(i + 1).trim().is_empty())
+        {
+            // Headerless: two adjacent separator lines are two horizontal
+            // rules, not an empty table.
+            if require_closer && !saw_row {
+                return None;
             }
+            return Some(i + 1);
         }
+        saw_row = true;
     }
-    lines.line_count()
+    (!require_closer).then_some(lines.line_count())
 }
 
 /// Emit a table row (header or data row) with inline-parsed cells for simple tables.
@@ -1600,6 +1617,7 @@ mod tests {
             "-------     ------ ----------   -------",
             "     12     12        12            12",
             "    123     123       123          123",
+            "-------     ------ ----------   -------",
             "",
         ];
 
@@ -1609,7 +1627,63 @@ mod tests {
         let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
 
         assert!(result.is_some());
-        assert_eq!(result.unwrap(), 3); // sep + 2 rows
+        assert_eq!(result.unwrap(), 4); // sep + 2 rows + closer
+    }
+
+    #[test]
+    fn headerless_multi_column_requires_closer() {
+        // Pandoc requires headerless simple tables to end with a line of
+        // dashes; without one the opener is a horizontal rule and the rows
+        // are a paragraph.
+        let input = vec!["--- ---", "foo bar", "", "after"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn headerless_multi_column_requires_closer_at_eof() {
+        // The closer is required even when the table would run to EOF.
+        let input = vec!["--- ---", "foo bar"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn headerless_multi_column_requires_rows() {
+        // Two adjacent separator lines are two horizontal rules, not an
+        // empty table.
+        let input = vec!["--- ---", "--- ---", ""];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn headerless_multi_column_with_closer_at_eof() {
+        // A closing dash line at EOF (no trailing blank) still closes the
+        // table, matching pandoc.
+        let input = vec!["--- ---", "foo bar", "--- ---"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert_eq!(result, Some(3)); // sep + row + closer
     }
 
     #[test]
