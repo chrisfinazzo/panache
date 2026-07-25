@@ -562,9 +562,12 @@ setext marker, so compact rules add no new risk there.
   later thematic break close the "table" across containers. Last multiline
   column now runs to end-of-line like simple tables (pandoc takes the
   remainder), so overrun text lands in the cell instead of a bogus
-  whitespace token. Pandoc also accepts 2-dash runs (`--`) for this shape;
-  panache's multiline opener gate still requires >= 3 dashes (unhandled
-  edge).
+  whitespace token. Follow-up: `try_parse_multiline_separator` now accepts
+  2-dash runs (pandoc parity for `--` full-width borders, headered and
+  headerless alike); a lone `-` still reads as a list marker or setext
+  underline, so panache keeps the >= 2 floor even though pandoc accepts
+  1-dash borders in the fully headered shape (deliberate divergence,
+  `multiline_table_one_dash_not_a_table` fixture locks it).
 
 - [ ] **Headerless simple table accepted without a closing dash line.** Pandoc
   requires headerless simple tables (multi-column too) to end with a line of

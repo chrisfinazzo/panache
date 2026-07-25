@@ -1,0 +1,17 @@
+before
+
+--
+foo
+
+bar
+--
+
+--
+h1    h2
+-- ---
+a     b
+
+c     d
+--
+
+after

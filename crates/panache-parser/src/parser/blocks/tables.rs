@@ -2762,8 +2762,11 @@ fn try_parse_multiline_separator(line: &str) -> Option<Vec<Column>> {
         return None;
     }
 
-    // Must have at least 3 dashes
-    if trimmed.len() < 3 {
+    // Must have at least 2 dashes. Pandoc accepts even a single dash as a
+    // full-width border, but a lone `-` reads as a bullet list marker or
+    // setext underline first, so panache stops at 2 (`--` is neither a rule
+    // nor a list marker).
+    if trimmed.len() < 2 {
         return None;
     }
 
@@ -3283,7 +3286,8 @@ mod multiline_table_tests {
         );
         assert!(try_parse_multiline_separator("---").is_some());
         assert!(try_parse_multiline_separator("  -----").is_some()); // with leading spaces
-        assert!(try_parse_multiline_separator("--").is_none()); // too short
+        assert!(try_parse_multiline_separator("--").is_some()); // pandoc accepts 2 dashes
+        assert!(try_parse_multiline_separator("-").is_none()); // list marker/setext territory
         assert!(try_parse_multiline_separator("--- ---").is_none()); // has spaces
         assert!(try_parse_multiline_separator("+---+").is_none()); // grid separator
     }

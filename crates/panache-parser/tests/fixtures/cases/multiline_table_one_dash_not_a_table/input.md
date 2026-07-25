@@ -1,0 +1,9 @@
+before
+
+-
+foo
+
+bar
+-
+
+after

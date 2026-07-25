@@ -379,6 +379,7 @@ golden_test_cases!(
     multiline_table_headerless_single_column,
     multiline_table_inline_formatting,
     multiline_table_reflow,
+    multiline_table_two_dash_borders,
     mmd_title_block,
     mmd_link_attributes,
     mmd_link_attributes_disabled,
