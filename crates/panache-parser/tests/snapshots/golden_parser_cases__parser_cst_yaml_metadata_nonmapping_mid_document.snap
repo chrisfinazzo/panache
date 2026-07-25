@@ -16,9 +16,8 @@ DOCUMENT@0..43
       TABLE_CELL@16..32
         TEXT@16..32 "plain prose here"
       NEWLINE@32..33 "\n"
-    TABLE_ROW@33..37
-      TABLE_CELL@33..36
-        TEXT@33..36 "---"
+    TABLE_SEPARATOR@33..37
+      TABLE_SEP_DASHES@33..36 "---"
       NEWLINE@36..37 "\n"
   BLANK_LINE@37..38
     BLANK_LINE@37..38 "\n"

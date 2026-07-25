@@ -569,12 +569,17 @@ setext marker, so compact rules add no new risk there.
   1-dash borders in the fully headered shape (deliberate divergence,
   `multiline_table_one_dash_not_a_table` fixture locks it).
 
-- [ ] **Headerless simple table closer emitted as `TABLE_ROW`.** With a closing
+- [x] **Headerless simple table closer emitted as `TABLE_ROW`.** With a closing
   dash line present (`--- ---`, `foo bar`, `--- ---`), the closer is emitted
   as a `TABLE_ROW` whose cells contain `---` instead of a separator-shaped
   node. The formatter still round-trips the border correctly, so this is
   CST-shape only, but typed wrappers and downstream consumers see a phantom
-  data row.
+  data row. Fixed: `find_table_end` reports whether it consumed a closer and
+  the emitter shapes that line as a `TABLE_SEPARATOR` (same path as the
+  opener), for headerless tables and for headered tables with an optional
+  trailing dash line alike; the headered case previously also projected a
+  phantom body row into pandoc-native output. Downstream all-dash-row
+  workarounds in the formatter and pandoc-AST projector removed.
 
 - [x] **GFM flavor enables mid-document YAML metadata blocks.** Pandoc's `gfm`
   reader has no mid-document YAML: it parses `---`, `key: value`, `---` in

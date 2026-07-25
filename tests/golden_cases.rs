@@ -411,6 +411,7 @@ golden_test_cases!(
     unresolved_reference_intraword_underscore_pandoc,
     rmarkdown_math,
     simple_table,
+    simple_table_header_closer,
     simple_table_headerless_single_column,
     simple_table_wide_cell,
     standardize_bullets,

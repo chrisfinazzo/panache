@@ -25,10 +25,8 @@ DOCUMENT@0..68
       TABLE_CELL@46..49
         TEXT@46..49 "123"
       NEWLINE@49..51 "\r\n"
-    TABLE_ROW@51..68
-      TABLE_CELL@51..58
-        TEXT@51..58 "-------"
-      WHITESPACE@58..59 " "
-      TABLE_CELL@59..66
-        TEXT@59..66 "-------"
+    TABLE_SEPARATOR@51..68
+      TABLE_SEP_DASHES@51..58 "-------"
+      TABLE_SEP_WHITESPACE@58..59 " "
+      TABLE_SEP_DASHES@59..66 "-------"
       NEWLINE@66..68 "\r\n"

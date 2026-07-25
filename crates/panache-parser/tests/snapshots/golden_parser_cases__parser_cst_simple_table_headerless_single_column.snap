@@ -20,9 +20,8 @@ DOCUMENT@0..58
       TABLE_CELL@29..39
         TEXT@29..39 "second row"
       NEWLINE@39..40 "\n"
-    TABLE_ROW@40..51
-      TABLE_CELL@40..50
-        TEXT@40..50 "----------"
+    TABLE_SEPARATOR@40..51
+      TABLE_SEP_DASHES@40..50 "----------"
       NEWLINE@50..51 "\n"
   BLANK_LINE@51..52
     BLANK_LINE@51..52 "\n"

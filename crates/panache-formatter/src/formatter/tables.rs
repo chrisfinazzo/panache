@@ -1764,10 +1764,15 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                 }
             }
             SyntaxKind::TABLE_SEPARATOR => {
-                separator_line = child.text().to_string();
+                // Only the opening separator defines the column geometry; the
+                // closing dash line of a table with a closer is a second
+                // TABLE_SEPARATOR child and must not clobber it.
+                if columns.is_empty() {
+                    separator_line = child.text().to_string();
 
-                // Extract column positions
-                columns = extract_simple_table_columns(&child);
+                    // Extract column positions
+                    columns = extract_simple_table_columns(&child);
+                }
             }
             SyntaxKind::TABLE_HEADER => {
                 // Always preserve RAW text for alignment detection
@@ -1785,45 +1790,22 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
             SyntaxKind::TABLE_ROW => {
                 // Data rows come after separator
                 if !columns.is_empty() {
-                    // Remember the first real data row's raw text for headerless
-                    // alignment detection. Skip the closing dash separator that a
-                    // headerless table emits as an all-dashes TABLE_ROW.
-                    let raw_row = child.text().to_string();
-                    let row_is_separator = raw_row
-                        .trim()
-                        .chars()
-                        .all(|c| c == '-' || c.is_whitespace());
-                    if !row_is_separator && first_data_row_line.is_none() {
-                        first_data_row_line = Some(raw_row);
+                    // Remember the first data row's raw text for headerless
+                    // alignment detection.
+                    if first_data_row_line.is_none() {
+                        first_data_row_line = Some(child.text().to_string());
                     }
 
                     // Try to extract from TABLE_CELL nodes first
                     let cells = extract_row_cells(&child, config);
 
                     if !cells.is_empty() {
-                        // Check if this is actually a separator line (all cells are dashes/whitespace)
-                        let is_separator = cells
-                            .iter()
-                            .all(|cell| cell.trim().chars().all(|c| c == '-'));
-
-                        if !is_separator {
-                            // Successfully extracted from TABLE_CELL nodes
-                            rows.push(cells);
-                        }
+                        rows.push(cells);
                     } else {
                         // Fall back to old approach (for backwards compatibility)
                         let row_content = format_cell_content(&child, config);
-
-                        // Skip rows that are actually separator lines (for headerless tables)
-                        let is_separator = row_content
-                            .trim()
-                            .chars()
-                            .all(|c| c == '-' || c.is_whitespace());
-
-                        if !is_separator {
-                            let cells = split_simple_table_row(&row_content, &columns);
-                            rows.push(cells);
-                        }
+                        let cells = split_simple_table_row(&row_content, &columns);
+                        rows.push(cells);
                     }
                 }
             }

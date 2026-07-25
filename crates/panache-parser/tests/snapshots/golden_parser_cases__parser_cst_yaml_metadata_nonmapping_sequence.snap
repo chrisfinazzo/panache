@@ -15,9 +15,8 @@ DOCUMENT@0..22
       TABLE_CELL@8..11
         TEXT@8..11 "- b"
       NEWLINE@11..12 "\n"
-    TABLE_ROW@12..16
-      TABLE_CELL@12..15
-        TEXT@12..15 "---"
+    TABLE_SEPARATOR@12..16
+      TABLE_SEP_DASHES@12..15 "---"
       NEWLINE@15..16 "\n"
   BLANK_LINE@16..17
     BLANK_LINE@16..17 "\n"

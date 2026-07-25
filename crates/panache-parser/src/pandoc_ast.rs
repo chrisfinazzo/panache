@@ -2823,21 +2823,12 @@ fn simple_table(node: &SyntaxNode) -> Option<TableData> {
     let header = node
         .children()
         .find(|c| c.kind() == SyntaxKind::TABLE_HEADER);
-    // Body rows: every TABLE_ROW. Drop a trailing all-dashes row — that is
-    // the closing `---` separator of a headerless table that the parser
-    // currently emits as a TABLE_ROW of dash cells.
-    let mut body_rows_nodes: Vec<SyntaxNode> = node
+    // Body rows: every TABLE_ROW. The closing dash line of a table with a
+    // closer is a second TABLE_SEPARATOR child, so no filtering is needed.
+    let body_rows_nodes: Vec<SyntaxNode> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::TABLE_ROW)
         .collect();
-    if header.is_none()
-        && body_rows_nodes
-            .last()
-            .map(simple_table_row_is_all_dashes)
-            .unwrap_or(false)
-    {
-        body_rows_nodes.pop();
-    }
     // Alignment: from header if present, else from the first data row.
     let aligns = if let Some(h) = &header {
         simple_table_aligns(h, &cols)
@@ -2897,25 +2888,6 @@ fn simple_table_row_cells(row: &SyntaxNode) -> Vec<Vec<Inline>> {
         .filter(|c| c.kind() == SyntaxKind::TABLE_CELL)
         .map(|cell| coalesce_inlines(inlines_from(&cell)))
         .collect()
-}
-
-fn simple_table_row_is_all_dashes(row: &SyntaxNode) -> bool {
-    let mut had_cell = false;
-    for cell in row
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::TABLE_CELL)
-    {
-        let text = cell.text().to_string();
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        had_cell = true;
-        if !trimmed.chars().all(|c| c == '-') {
-            return false;
-        }
-    }
-    had_cell
 }
 
 /// Derive alignments for a simple-table header (or first data row) by

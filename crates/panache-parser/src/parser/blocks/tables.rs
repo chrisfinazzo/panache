@@ -203,8 +203,8 @@ fn parse_single_dash_run(line: &str) -> Option<Vec<Column>> {
 /// at `start - 1`: rows run until a closing line of dashes (single run or
 /// column separator), which pandoc requires before the first blank line —
 /// without it the opener is a horizontal rule, not a table. Returns the
-/// position just past the closer, which the caller emits as the final row
-/// (the all-dashes `TABLE_ROW` convention headerless tables already use).
+/// position just past the closer, which the caller emits as a closing
+/// `TABLE_SEPARATOR`.
 fn find_single_column_table_end(lines: &(impl LineView + ?Sized), start: usize) -> Option<usize> {
     let mut saw_row = false;
     for i in start..lines.line_count() {
@@ -848,17 +848,17 @@ pub(crate) fn try_parse_simple_table(
     // Look for a separator line. The single-column shape is ambiguous with a
     // horizontal rule, so unlike the multi-column paths it also demands the
     // closing dash line up front (pandoc rejects the table without one).
-    let (separator_pos, end_pos) = if single_column_here {
+    let (separator_pos, end_pos, has_closer) = if single_column_here {
         let end_pos = find_single_column_table_end(window, start_pos + 1)?;
-        (start_pos, end_pos)
+        (start_pos, end_pos, true)
     } else {
         let separator_pos = find_separator_line(window, start_pos)?;
         // Headerless (separator on the dispatch line): pandoc demands the
         // closing dash line, same as the single-column path above. With a
         // header the table may end at a blank line or EOF instead.
         let headerless = separator_pos == start_pos;
-        let end_pos = find_table_end(window, separator_pos + 1, headerless)?;
-        (separator_pos, end_pos)
+        let (end_pos, has_closer) = find_table_end(window, separator_pos + 1, headerless)?;
+        (separator_pos, end_pos, has_closer)
     };
     log::trace!("  found separator at line {}", separator_pos + 1);
 
@@ -928,8 +928,10 @@ pub(crate) fn try_parse_simple_table(
     emit_separator_tokens(builder, separator_tail);
     builder.finish_node();
 
-    // Emit data rows (always continuation lines)
-    for idx in (separator_pos + 1)..end_pos {
+    // Emit data rows (always continuation lines); the closing dash line, when
+    // present, is a separator, not a row.
+    let rows_end = if has_closer { end_pos - 1 } else { end_pos };
+    for idx in (separator_pos + 1)..rows_end {
         emit_table_row(
             builder,
             window,
@@ -938,6 +940,13 @@ pub(crate) fn try_parse_simple_table(
             SyntaxKind::TABLE_ROW,
             config,
         );
+    }
+
+    if has_closer {
+        builder.start_node(SyntaxKind::TABLE_SEPARATOR.into());
+        let closer_tail = window.emit_or_dispatch_tail(builder, end_pos - 1);
+        emit_separator_tokens(builder, closer_tail);
+        builder.finish_node();
     }
 
     // Emit caption after if present
@@ -993,16 +1002,18 @@ fn find_separator_line(lines: &(impl LineView + ?Sized), start_pos: usize) -> Op
 /// Find where the table ends: a closing separator line, or (unless
 /// `require_closer`) the first blank line or end of input. Headerless tables
 /// pass `require_closer` because pandoc rejects them without the closing
-/// dash line (the opener is a horizontal rule instead).
+/// dash line (the opener is a horizontal rule instead). Returns
+/// `(end_pos, has_closer)` where `has_closer` marks that `end_pos - 1` is a
+/// closing dash line the caller must emit as a `TABLE_SEPARATOR`.
 fn find_table_end(
     lines: &(impl LineView + ?Sized),
     start_pos: usize,
     require_closer: bool,
-) -> Option<usize> {
+) -> Option<(usize, bool)> {
     let mut saw_row = false;
     for i in start_pos..lines.line_count() {
         if lines.line(i).trim().is_empty() {
-            return (!require_closer).then_some(i);
+            return (!require_closer).then_some((i, false));
         }
         // Check if this could be a closing separator (next line blank or EOF)
         if try_parse_table_separator(lines.line(i)).is_some()
@@ -1013,11 +1024,11 @@ fn find_table_end(
             if require_closer && !saw_row {
                 return None;
             }
-            return Some(i + 1);
+            return Some((i + 1, true));
         }
         saw_row = true;
     }
-    (!require_closer).then_some(lines.line_count())
+    (!require_closer).then_some((lines.line_count(), false))
 }
 
 /// Emit a table row (header or data row) with inline-parsed cells for simple tables.
@@ -1628,6 +1639,48 @@ mod tests {
 
         assert!(result.is_some());
         assert_eq!(result.unwrap(), 4); // sep + 2 rows + closer
+    }
+
+    /// Asserts a `SIMPLE_TABLE` closing dash line is shaped as a
+    /// `TABLE_SEPARATOR`, not a phantom all-dash `TABLE_ROW`.
+    fn assert_closer_is_separator(input: &str, expected_rows: usize) {
+        let tree = crate::parser::parse(input, None);
+        let table = tree
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::SIMPLE_TABLE)
+            .expect("input should parse as a simple table");
+        let separators = table
+            .children()
+            .filter(|n| n.kind() == SyntaxKind::TABLE_SEPARATOR)
+            .count();
+        assert_eq!(separators, 2, "opener and closer should both be separators");
+        let rows: Vec<_> = table
+            .children()
+            .filter(|n| n.kind() == SyntaxKind::TABLE_ROW)
+            .map(|n| n.text().to_string())
+            .collect();
+        assert_eq!(rows.len(), expected_rows, "rows: {rows:?}");
+        for row in &rows {
+            assert!(
+                !row.trim().chars().all(|c| c == '-' || c.is_whitespace()),
+                "all-dash closer emitted as TABLE_ROW: {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn headerless_multi_column_closer_is_separator() {
+        assert_closer_is_separator("--- ---\nfoo bar\n--- ---\n", 1);
+    }
+
+    #[test]
+    fn header_with_closer_is_separator() {
+        assert_closer_is_separator("foo bar\n--- ---\n1   2\n--- ---\n", 1);
+    }
+
+    #[test]
+    fn headerless_single_column_closer_is_separator() {
+        assert_closer_is_separator("----------\nfirst row\nsecond row\n----------\n", 2);
     }
 
     #[test]

@@ -55,16 +55,12 @@ DOCUMENT@0..200
       TABLE_CELL@158..159
         TEXT@158..159 "1"
       NEWLINE@159..160 "\n"
-    TABLE_ROW@160..200
-      TABLE_CELL@160..167
-        TEXT@160..167 "-------"
-      WHITESPACE@167..172 "     "
-      TABLE_CELL@172..178
-        TEXT@172..178 "------"
-      WHITESPACE@178..179 " "
-      TABLE_CELL@179..189
-        TEXT@179..189 "----------"
-      WHITESPACE@189..192 "   "
-      TABLE_CELL@192..199
-        TEXT@192..199 "-------"
+    TABLE_SEPARATOR@160..200
+      TABLE_SEP_DASHES@160..167 "-------"
+      TABLE_SEP_WHITESPACE@167..172 "     "
+      TABLE_SEP_DASHES@172..178 "------"
+      TABLE_SEP_WHITESPACE@178..179 " "
+      TABLE_SEP_DASHES@179..189 "----------"
+      TABLE_SEP_WHITESPACE@189..192 "   "
+      TABLE_SEP_DASHES@192..199 "-------"
       NEWLINE@199..200 "\n"

@@ -693,6 +693,7 @@ golden_test_cases!(
     bug_2_emphasis_crosses_brackets_pandoc,
     rmarkdown_math,
     simple_table,
+    simple_table_header_with_closer,
     simple_table_headerless_multi_column_no_closer,
     simple_table_headerless_single_column,
     simple_table_headerless_single_column_no_closer,
