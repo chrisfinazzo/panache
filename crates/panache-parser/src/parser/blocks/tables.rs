@@ -880,8 +880,10 @@ pub(crate) fn try_parse_simple_table(
     // Determine alignments
     determine_alignments(&mut columns, separator_line, header_line);
 
-    // Must have at least one data row (or it's just a separator)
-    let data_rows = end_pos - separator_pos - 1;
+    // Must have at least one data row (excluding the closing dash line):
+    // pandoc reads header + separator + closer as a paragraph, not an
+    // empty table.
+    let data_rows = end_pos - separator_pos - 1 - usize::from(has_closer);
 
     if data_rows == 0 {
         return None;
@@ -1702,6 +1704,20 @@ mod tests {
     fn headerless_multi_column_requires_closer_at_eof() {
         // The closer is required even when the table would run to EOF.
         let input = vec!["--- ---", "foo bar"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn header_with_closer_requires_rows() {
+        // Header + separator + closer with no data rows is a paragraph in
+        // pandoc, not an empty table.
+        let input = vec!["foo bar", "--- ---", "--- ---", ""];
 
         let mut builder = GreenNodeBuilder::new();
         let prefix = ContainerPrefix::default();
