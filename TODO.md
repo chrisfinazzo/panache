@@ -547,12 +547,24 @@ setext marker, so compact rules add no new risk there.
   (without a closer the run stays an HR). Registry order (setext before
   tables, tables before HR) gives pandoc's precedence for free.
 
-- [ ] **Headerless single-column *multiline* table not detected.** With
+- [x] **Headerless single-column *multiline* table not detected.** With
   blank-separated rows (`---`, `foo`, blank, `bar`, `---`) pandoc parses a
   headerless multiline table; panache's multiline path rejects
   single-dash-run openers (`is_column_separator` requires >= 2 dash groups),
   so the span falls back to HR + paragraphs. Rarer sibling of the
-  simple-table case above.
+  simple-table case above. Fixed: when the full-width-opener scan finds no
+  column separator but did see blank-separated rows and a closing dash run,
+  the opener doubles as the single-column definition (columns via
+  `parse_single_dash_run`). Gated on the first row sitting directly under
+  the opener (pandoc keeps HR + blocks otherwise) and on the scan not
+  crossing a scope boundary before the closer (a truly blank line under a
+  blockquote prefix, or a `:::` div fence), which would otherwise let a
+  later thematic break close the "table" across containers. Last multiline
+  column now runs to end-of-line like simple tables (pandoc takes the
+  remainder), so overrun text lands in the cell instead of a bogus
+  whitespace token. Pandoc also accepts 2-dash runs (`--`) for this shape;
+  panache's multiline opener gate still requires >= 3 dashes (unhandled
+  edge).
 
 - [ ] **Headerless simple table accepted without a closing dash line.** Pandoc
   requires headerless simple tables (multi-column too) to end with a line of

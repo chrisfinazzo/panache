@@ -1,0 +1,8 @@
+before
+
+---
+foo
+
+bar
+
+tail

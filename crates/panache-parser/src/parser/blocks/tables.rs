@@ -2872,9 +2872,22 @@ pub(crate) fn try_parse_multiline_table(
     let mut found_closing_sep = false;
     let mut content_line_count = 0usize;
 
+    // A bare `---` opener is also a plain horizontal rule, so the
+    // single-column reinterpretation below must not let the scan cross the
+    // enclosing container's end looking for a closer: a truly blank line ends
+    // a blockquote (a quoted blank still carries `>`), and a `:::` fence
+    // closes the enclosing div (the convention the simple-table scans already
+    // follow). Multi-group shapes keep their historical scan behavior.
+    let bq_prefixed = window.prefix().bq_depth() > 0;
+    let mut crossed_scope_boundary = false;
+
     // Scan for header section and column separator
     while pos < lines.len() {
         let line = window.line(pos);
+
+        if line_is_fenced_div_fence(line) || (bq_prefixed && lines[pos].trim().is_empty()) {
+            crossed_scope_boundary = true;
+        }
 
         // Check for column separator (defines columns) - only if we started with full-width
         if is_full_width_start && is_column_separator(line) && !found_column_sep {
@@ -2934,6 +2947,27 @@ pub(crate) fn try_parse_multiline_table(
         pos += 1;
     }
 
+    // A headerless *single-column* table has no multi-group column separator:
+    // its bare dash-run opener doubles as the column definition (`---`, rows
+    // with blank separators, `---`). Pandoc parses this shape as a table, so
+    // accept it when the scan saw blank-separated content and a closing dash
+    // run. Without a blank line the span stays with the headerless simple
+    // table path (one row per line, no soft-break joining), and a blank line
+    // directly after the opener disqualifies the table (pandoc keeps the
+    // rule-plus-blocks reading there), both matching pandoc.
+    let first_row_adjacent =
+        start_pos + 1 < lines.len() && !window.line(start_pos + 1).trim().is_empty();
+    let headerless_single_column = !found_column_sep
+        && is_full_width_start
+        && first_row_adjacent
+        && found_blank_line
+        && found_closing_sep
+        && !crossed_scope_boundary;
+    if headerless_single_column {
+        found_column_sep = true;
+        column_sep_pos = start_pos;
+    }
+
     // Must have found a column separator to be a valid multiline table
     if !found_column_sep {
         return None;
@@ -2966,9 +3000,12 @@ pub(crate) fn try_parse_multiline_table(
 
     let end_pos = pos;
 
-    // Extract column boundaries from the separator line
+    // Extract column boundaries from the separator line. A single-column
+    // headerless table's separator is a bare dash run, which
+    // `try_parse_table_separator` rejects (one dash group reads as a rule),
+    // so fall back to the single-run parser.
     let columns = try_parse_table_separator(window.line(column_sep_pos))
-        .expect("Column separator must be valid");
+        .or_else(|| parse_single_dash_run(window.line(column_sep_pos)))?;
 
     // Check for caption before table
     let caption_before = find_caption_before_table(window, start_pos);
@@ -3131,9 +3168,16 @@ fn extract_first_line_cell_contents(line: &str, columns: &[Column]) -> Vec<Strin
     let (line_content, _) = strip_newline(line);
     let mut cells = Vec::new();
 
-    for column in columns.iter() {
+    for (i, column) in columns.iter().enumerate() {
         let column_start = column_offset_to_byte_index(line_content, column.start);
-        let column_end = column_offset_to_byte_index(line_content, column.end);
+        // The last column runs to end-of-line (pandoc takes the remainder);
+        // stopping at the dash-run end would split cell text that overruns a
+        // short run into the cell plus a bogus WHITESPACE token.
+        let column_end = if i + 1 == columns.len() {
+            line_content.len().max(column_start)
+        } else {
+            column_offset_to_byte_index(line_content, column.end)
+        };
 
         // Extract FULL text for this column (including whitespace)
         let cell_text = if column_start < column_end {
@@ -3181,7 +3225,13 @@ fn emit_multiline_table_row(
     for (col_idx, column) in columns.iter().enumerate() {
         let cell_text = &cell_contents[col_idx];
         let cell_start = column_offset_to_byte_index(trimmed, column.start);
-        let cell_end = column_offset_to_byte_index(trimmed, column.end);
+        // Keep in sync with `extract_first_line_cell_contents`: the last
+        // column runs to end-of-line.
+        let cell_end = if col_idx + 1 == columns.len() {
+            trimmed.len().max(cell_start)
+        } else {
+            column_offset_to_byte_index(trimmed, column.end)
+        };
 
         // Emit whitespace before cell
         if current_pos < cell_start {

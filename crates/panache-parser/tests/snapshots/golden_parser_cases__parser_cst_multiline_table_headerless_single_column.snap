@@ -1,0 +1,34 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..50
+  PARAGRAPH@0..7
+    TEXT@0..6 "before"
+    NEWLINE@6..7 "\n"
+  BLANK_LINE@7..8
+    BLANK_LINE@7..8 "\n"
+  MULTILINE_TABLE@8..43
+    TABLE_SEPARATOR@8..12
+      TABLE_SEP_DASHES@8..11 "---"
+      NEWLINE@11..12 "\n"
+    TABLE_ROW@12..30
+      TABLE_CELL@12..19
+        TEXT@12..19 "foo one"
+      NEWLINE@19..20 "\n"
+      TEXT@20..29 "continued"
+      NEWLINE@29..30 "\n"
+    BLANK_LINE@30..31
+      BLANK_LINE@30..31 "\n"
+    TABLE_ROW@31..39
+      TABLE_CELL@31..38
+        TEXT@31..38 "bar two"
+      NEWLINE@38..39 "\n"
+    TABLE_SEPARATOR@39..43
+      TABLE_SEP_DASHES@39..42 "---"
+      NEWLINE@42..43 "\n"
+  BLANK_LINE@43..44
+    BLANK_LINE@43..44 "\n"
+  PARAGRAPH@44..50
+    TEXT@44..49 "after"
+    NEWLINE@49..50 "\n"
