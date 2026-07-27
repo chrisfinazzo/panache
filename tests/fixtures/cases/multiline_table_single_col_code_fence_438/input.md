@@ -1,0 +1,13 @@
+Intro paragraph.
+
+---
+## Problem 1.8
+
+```{r}
+rm(F12)
+```
+
+```{r}
+environment(myHist) environment(myHist) <- new.env() assign("F12", x)
+```
+---

@@ -11,7 +11,7 @@ use crate::parser::utils::attributes::{
 use crate::parser::utils::helpers::{emit_line_tokens, emit_separator_tokens, strip_newline};
 use crate::parser::utils::inline_emission;
 
-use super::container_prefix::StrippedLines;
+use super::container_prefix::{ContainerPrefix, StrippedLines};
 
 /// Read-only indexed view over lines for table detection scans. Two
 /// backings:
@@ -3340,6 +3340,14 @@ fn extract_first_line_cell_contents(line: &str, columns: &[Column]) -> Vec<Strin
     cells
 }
 
+/// Whether the window's container prefix contributes no bytes to continuation
+/// lines (top-level, i.e. not nested in a blockquote or list). Used to gate the
+/// single-column multiline-cell inline join, which reads raw continuation lines
+/// and would otherwise fold `>`/list-marker bytes into cell content.
+fn prefix_is_empty(prefix: &ContainerPrefix) -> bool {
+    prefix.bq_depth() == 0 && prefix.list_content_col() == 0 && prefix.content_indent() == 0
+}
+
 /// Emit a multiline table row with inline parsing (Phase 7.1).
 ///
 /// `indices` are ABSOLUTE line indices into the window's raw buffer; each
@@ -3359,6 +3367,41 @@ fn emit_multiline_table_row(
     }
 
     builder.start_node(kind.into());
+
+    // Single-column, top-level multi-line rows: pandoc joins a cell's physical
+    // lines and parses the result as inline content, so a fenced code block
+    // inside the cell flattens to an inline code span. Emitting continuation
+    // lines as raw TEXT (the general path below) skips that inline pass, leaving
+    // un-normalized markup (```` ```{r} rm(F12) ``` ````) that reparses as a
+    // normalized inline code span on the next format pass — an idempotency break
+    // (issue #438). Feed the joined cell text through the inline emitter,
+    // preserving interior newlines for losslessness. Gated on an empty container
+    // prefix so continuation-line `>`/list markers never leak into cell content;
+    // nested and multi-column rows keep the verbatim path.
+    if columns.len() == 1 && indices.len() > 1 && prefix_is_empty(window.prefix()) {
+        let first = window.strip_at(indices[0]);
+        let (first_trimmed, _) = strip_newline(first);
+        let cell_start = column_offset_to_byte_index(first_trimmed, columns[0].start);
+        if cell_start > 0 {
+            builder.token(SyntaxKind::WHITESPACE.into(), &first_trimmed[..cell_start]);
+        }
+
+        let mut joined = String::from(&first[cell_start..]);
+        for &idx in &indices[1..] {
+            joined.push_str(window.strip_at(idx));
+        }
+
+        // Split the trailing newline off so it sits beside the cell as a sibling
+        // NEWLINE, matching the single-line row shape.
+        let (cell_text, trailing_nl) = strip_newline(&joined);
+        emit_table_cell(builder, cell_text, config);
+        if !trailing_nl.is_empty() {
+            builder.token(SyntaxKind::NEWLINE.into(), trailing_nl);
+        }
+
+        builder.finish_node();
+        return;
+    }
 
     // Emit the first line's container prefix as tokens, then slice cells from
     // the prefix-stripped tail (for CST losslessness, only the first physical

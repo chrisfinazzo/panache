@@ -13,10 +13,10 @@ DOCUMENT@0..50
       TABLE_SEP_DASHES@8..11 "---"
       NEWLINE@11..12 "\n"
     TABLE_ROW@12..30
-      TABLE_CELL@12..19
+      TABLE_CELL@12..29
         TEXT@12..19 "foo one"
-      NEWLINE@19..20 "\n"
-      TEXT@20..29 "continued"
+        NEWLINE@19..20 "\n"
+        TEXT@20..29 "continued"
       NEWLINE@29..30 "\n"
     BLANK_LINE@30..31
       BLANK_LINE@30..31 "\n"

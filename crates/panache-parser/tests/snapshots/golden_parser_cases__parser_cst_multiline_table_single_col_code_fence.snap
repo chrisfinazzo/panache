@@ -1,0 +1,30 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..61
+  PARAGRAPH@0..17
+    TEXT@0..16 "Intro paragraph."
+    NEWLINE@16..17 "\n"
+  BLANK_LINE@17..18
+    BLANK_LINE@17..18 "\n"
+  MULTILINE_TABLE@18..61
+    TABLE_SEPARATOR@18..22
+      TABLE_SEP_DASHES@18..21 "---"
+      NEWLINE@21..22 "\n"
+    TABLE_ROW@22..37
+      TABLE_CELL@22..36
+        TEXT@22..36 "## Problem 1.8"
+      NEWLINE@36..37 "\n"
+    BLANK_LINE@37..38
+      BLANK_LINE@37..38 "\n"
+    TABLE_ROW@38..57
+      TABLE_CELL@38..56
+        INLINE_CODE@38..56
+          INLINE_CODE_MARKER@38..41 "```"
+          INLINE_CODE_CONTENT@41..53 "{r}\nrm(F12)\n"
+          INLINE_CODE_MARKER@53..56 "```"
+      NEWLINE@56..57 "\n"
+    TABLE_SEPARATOR@57..61
+      TABLE_SEP_DASHES@57..60 "---"
+      NEWLINE@60..61 "\n"

@@ -315,6 +315,7 @@ golden_test_cases!(
     thematic_break_interrupts_paragraph_commonmark,
     thematic_break_interrupts_paragraph_pandoc,
     headerless_table,
+    multiline_table_single_col_code_fence,
     horizontal_rules,
     html_block,
     html_block_button_inline_block_commonmark,
