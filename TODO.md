@@ -618,6 +618,15 @@ implemented.
 - [x] Nested fenced divs
 - [x] Colon count normalization based on nesting
 - [x] Proper formatting with attribute preservation
+- [ ] Top-level indented lone `:::` diverges from pandoc. Panache accepts up to
+  3 leading spaces on a closing fence, so `::: outer\ntext\n  :::` closes
+  the div; pandoc instead treats the indented `:::` as paragraph text and
+  leaves the div implicitly closed at EOF (`Str ":::"`). Only affects a
+  `:::` more indented than its opener *outside* any list --- the in-list
+  case is handled correctly (a fence at the list content column is list
+  content, not the wrapping div's closer; see #439). Decide whether to
+  tighten the top-level closer to pandoc's rule. Surfaced 2026-07-28 while
+  fixing #439.
 
 ### Tables
 
