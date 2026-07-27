@@ -1,0 +1,10 @@
+::: {.list-table}
+- - ::: light-content
+    ![](light.png){width="340"}
+    :::
+
+    ::: dark-content
+    ![](dark.png){width="340"}
+    :::
+  - ![](pdf.png)
+:::

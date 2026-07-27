@@ -697,6 +697,123 @@ impl Formatter {
             return;
         }
 
+        // Same-line leading-block case: a LIST_ITEM whose first non-blank child
+        // is a FENCED_DIV or CODE_BLOCK (no preceding PLAIN/PARAGRAPH).
+        // Examples: `- ::: note`, ``- ```rust``. Without this the item has no
+        // content node, so the generic path below never emits the marker and
+        // the block swallows it (issue #439). Emit the outer marker, then format
+        // the block at indent=0 so its opening fence abuts the marker; splice
+        // the outer item's hanging indent into subsequent lines. Mirrors the
+        // leading-BQ path.
+        if let Some(leading_block) = first_non_blank_child.as_ref()
+            && matches!(
+                leading_block.kind(),
+                SyntaxKind::FENCED_DIV | SyntaxKind::CODE_BLOCK
+            )
+            && Self::find_content_node(node).is_none()
+        {
+            self.output.push_str(&" ".repeat(total_indent));
+            self.output
+                .push_str(&" ".repeat(list_indent.marker_padding));
+            self.output.push_str(&marker);
+            self.output.push_str(&" ".repeat(list_indent.spaces_after));
+            if let Some(ref cb) = checkbox {
+                self.output.push_str(cb);
+                self.output.push(' ');
+            }
+            let block_start = self.output.len();
+            if leading_block.kind() == SyntaxKind::CODE_BLOCK {
+                // A code block on the marker line carries no fence-indent token
+                // (its indent was consumed as the marker's trailing space), so
+                // the shared renderer leaves the list indent embedded in the
+                // content. Render it bare, abut the opening fence to the marker,
+                // then re-indent: dedent the content by its own common indent
+                // and re-apply the hanging column. The closing fence renders at
+                // column 0 and just takes the hanging prefix.
+                let raw = self.format_code_block_to_string(leading_block);
+                let raw = raw.strip_suffix('\n').unwrap_or(&raw);
+                let block_lines: Vec<&str> = raw.split('\n').collect();
+                let prefix = " ".repeat(hanging);
+                let last = block_lines.len().saturating_sub(1);
+                let content_indent = block_lines
+                    .get(1..last)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| l.len() - l.trim_start().len())
+                    .min()
+                    .unwrap_or(0);
+                for (i, line) in block_lines.iter().enumerate() {
+                    if i == 0 {
+                        // Opening fence abuts the marker already emitted above.
+                        self.output.push_str(line.trim_start());
+                    } else if line.trim().is_empty() {
+                        // Leave blank content lines bare (no trailing spaces).
+                    } else if i == last {
+                        // Closing fence renders at column 0; just add hanging.
+                        self.output.push_str(&prefix);
+                        self.output.push_str(line);
+                    } else {
+                        // Content line: dedent its embedded list indent, re-indent.
+                        self.output.push_str(&prefix);
+                        let cut = content_indent.min(line.len());
+                        self.output.push_str(&line[cut..]);
+                    }
+                    self.output.push('\n');
+                }
+            } else {
+                // A fenced div's body is re-formatted from child blocks, so
+                // format it at indent 0 and splice the hanging indent into
+                // every subsequent non-blank line.
+                self.format_node_sync(leading_block, 0);
+                if self.output.as_bytes().get(block_start) == Some(&b'\n') {
+                    self.output.remove(block_start);
+                }
+                if hanging > 0 {
+                    let block_text = self.output.split_off(block_start);
+                    let prefix = " ".repeat(hanging);
+                    let mut first = true;
+                    for line in block_text.split_inclusive('\n') {
+                        let is_blank = line.trim_end_matches('\n').is_empty();
+                        if !first && !is_blank {
+                            self.output.push_str(&prefix);
+                        }
+                        self.output.push_str(line);
+                        first = false;
+                    }
+                }
+            }
+
+            // Emit trailing children (further blocks after the leading block) at
+            // hanging indent, preserving a single blank-line separator between
+            // loose blocks. Dropping the blank would glue two sibling divs
+            // (`:::` immediately followed by `:::  other`), which re-parses into
+            // a different shape and breaks idempotency (issue #439).
+            let mut reached_leading = false;
+            let mut pending_blank = false;
+            for child in node.children() {
+                if &child == leading_block {
+                    reached_leading = true;
+                    continue;
+                }
+                if !reached_leading {
+                    continue;
+                }
+                if child.kind() == SyntaxKind::BLANK_LINE {
+                    pending_blank = true;
+                    continue;
+                }
+                if pending_blank {
+                    if !self.output.ends_with("\n\n") {
+                        self.output.push('\n');
+                    }
+                    pending_blank = false;
+                }
+                self.format_node_sync(&child, hanging);
+            }
+            return;
+        }
+
         // Same-line nested-marker case: a LIST_ITEM whose first non-blank
         // child is a non-empty nested LIST (no preceding PLAIN/PARAGRAPH).
         // Examples: `- - foo`, `1. - 2. foo`. Emit the outer marker without

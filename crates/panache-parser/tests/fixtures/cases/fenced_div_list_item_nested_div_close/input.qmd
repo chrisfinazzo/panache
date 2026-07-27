@@ -1,0 +1,6 @@
+::: {.list-table}
+- - ::: light-content
+    inner
+    :::
+  - cell2
+:::

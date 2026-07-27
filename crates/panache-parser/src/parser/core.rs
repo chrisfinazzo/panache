@@ -2406,6 +2406,7 @@ impl<'a> Parser<'a> {
                 has_blank_before_strict: has_blank_before,
                 at_document_start: self.pos == 0,
                 in_fenced_div: self.in_fenced_div(),
+                fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
                 myst_directive_closer: self.innermost_myst_directive_closer(),
                 blockquote_depth: current_bq_depth,
                 config: self.config,
@@ -3569,6 +3570,7 @@ impl<'a> Parser<'a> {
                             || is_blank_line(self.lines[self.pos - 1]),
                         at_document_start: self.pos == 0 && self.current_blockquote_depth() == 0,
                         in_fenced_div: self.in_fenced_div(),
+                        fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
                         myst_directive_closer: self.innermost_myst_directive_closer(),
                         blockquote_depth: self.current_blockquote_depth(),
                         config: self.config,
@@ -3826,6 +3828,7 @@ impl<'a> Parser<'a> {
             has_blank_before_strict: false, // filled in later
             at_document_start: false,       // filled in later
             in_fenced_div: self.in_fenced_div(),
+            fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
             myst_directive_closer: self.innermost_myst_directive_closer(),
             blockquote_depth: current_bq_depth,
             config: self.config,
@@ -4366,6 +4369,28 @@ impl<'a> Parser<'a> {
             .stack
             .iter()
             .rposition(|c| matches!(c, Container::FencedDiv { .. }))
+    }
+
+    /// True when the innermost open fenced div wraps the innermost open list
+    /// (the div is outer to the list on the container stack). In that case a
+    /// `:::` indented to the list's content column is list content, not the
+    /// div's closer — pandoc only closes a div on a fence at the div's own
+    /// indentation. When instead the innermost div was opened *inside* a list
+    /// item (as a continuation block, so it is inner to the list), a fence at
+    /// the content column does close it. See issue #439.
+    fn fenced_div_wraps_innermost_list(&self) -> bool {
+        let Some(div_idx) = self.fenced_div_container_index() else {
+            return false;
+        };
+        match self
+            .containers
+            .stack
+            .iter()
+            .rposition(|c| matches!(c, Container::List { .. }))
+        {
+            Some(list_idx) => div_idx < list_idx,
+            None => false,
+        }
     }
 
     fn close_containers_to_fenced_div(&mut self) {

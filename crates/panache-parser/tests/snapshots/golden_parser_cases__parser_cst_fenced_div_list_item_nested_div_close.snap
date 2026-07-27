@@ -1,0 +1,47 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..72
+  FENCED_DIV@0..72
+    DIV_FENCE_OPEN@0..18
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..17
+        TEXT@4..5 "{"
+        ATTR_CLASS@5..16 ".list-table"
+        TEXT@16..17 "}"
+      NEWLINE@17..18 "\n"
+    LIST@18..68
+      LIST_ITEM@18..68
+        LIST_MARKER@18..19 "-"
+        WHITESPACE@19..20 " "
+        LIST@20..68
+          LIST_ITEM@20..58
+            LIST_MARKER@20..21 "-"
+            WHITESPACE@21..22 " "
+            FENCED_DIV@22..58
+              DIV_FENCE_OPEN@22..40
+                TEXT@22..25 ":::"
+                WHITESPACE@25..26 " "
+                DIV_INFO@26..39
+                  TEXT@26..39 "light-content"
+                NEWLINE@39..40 "\n"
+              PARAGRAPH@40..50
+                WHITESPACE@40..44 "    "
+                TEXT@44..49 "inner"
+                NEWLINE@49..50 "\n"
+              DIV_FENCE_CLOSE@50..58
+                WHITESPACE@50..54 "    "
+                TEXT@54..57 ":::"
+                NEWLINE@57..58 "\n"
+          LIST_ITEM@58..68
+            WHITESPACE@58..60 "  "
+            LIST_MARKER@60..61 "-"
+            WHITESPACE@61..62 " "
+            PLAIN@62..68
+              TEXT@62..67 "cell2"
+              NEWLINE@67..68 "\n"
+    DIV_FENCE_CLOSE@68..72
+      TEXT@68..71 ":::"
+      NEWLINE@71..72 "\n"

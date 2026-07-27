@@ -278,7 +278,7 @@ impl Formatter {
         code_blocks::format_code_block(node, &self.config, &self.formatted_code, &mut self.output);
     }
 
-    fn format_code_block_to_string(&mut self, node: &SyntaxNode) -> String {
+    pub(super) fn format_code_block_to_string(&mut self, node: &SyntaxNode) -> String {
         let saved_output = self.output.clone();
         self.output.clear();
         self.format_code_block(node);

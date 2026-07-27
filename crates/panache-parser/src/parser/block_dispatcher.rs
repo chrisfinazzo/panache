@@ -135,6 +135,12 @@ pub(crate) struct BlockContext<'a> {
     /// Whether we're currently inside any list
     pub in_list: bool,
 
+    /// Whether the innermost open fenced div wraps the innermost open list (the
+    /// div is outer to the list). When true, a `:::` at the list content column
+    /// is list content rather than the div's closer. See issue #439 and
+    /// `FencedDivCloseParser::detect_prepared`.
+    pub fenced_div_wraps_list: bool,
+
     /// Whether the immediate enclosing container is a list item that has so
     /// far seen only its marker (no content yet). Equivalent to the
     /// `marker_only` flag on `Container::ListItem`. Used by indented code
@@ -2527,7 +2533,27 @@ impl BlockParser for FencedDivCloseParser {
             return None;
         }
 
-        if !is_div_closing_fence(content_for_fenced_div_detection(ctx, lines.first())) {
+        // When the innermost open div *wraps* the current list, a `:::` at or
+        // beyond the list's content column is list content, not this div's
+        // closer: pandoc only closes a div on a fence at the div's own
+        // indentation, so an outer (col-0) div is not closed by an indented
+        // fence buried in a list item — it closes a div opened *inside* the item
+        // (handled by list buffering + re-parse) or is literal text. Without
+        // this guard the outer div steals the inner fence, dropping the nested
+        // div's close and breaking idempotency (issue #439). The guard is scoped
+        // to wrapping divs so a div opened as a list *continuation* block still
+        // closes on a fence at its own (content-column) indentation.
+        let first = lines.first();
+        if ctx.fenced_div_wraps_list
+            && let Some(list_info) = ctx.list_indent_info
+        {
+            let (indent_cols, _) = leading_indent(first);
+            if indent_cols >= list_info.content_col {
+                return None;
+            }
+        }
+
+        if !is_div_closing_fence(content_for_fenced_div_detection(ctx, first)) {
             return None;
         }
 
