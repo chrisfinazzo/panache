@@ -1021,7 +1021,7 @@ four gaps worth tracking; none is a defect.
   losslessness/idempotency checks. *Severity medium, risk higher, effort
   large --- do last.*
 
-- [ ] **Doc drift:** `AGENTS.md`'s LSP section (`tower_lsp_server`,
-  `tokio::sync::Mutex`-guarded state) is stale --- the server is sync
-  `lsp-server` 0.10 + crossbeam with a single-writer `GlobalState`. Update
-  it so future readers don't build the wrong concurrency model.
+- [x] **Doc drift:** `AGENTS.md`'s LSP section previously claimed
+  `tower_lsp_server` + `tokio::sync::Mutex`-guarded state. Corrected to the
+  actual sync `lsp-server` + crossbeam design with a single-writer
+  `GlobalState` and copy-on-write `Arc` state.

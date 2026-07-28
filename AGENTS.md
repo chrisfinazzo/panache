@@ -282,12 +282,23 @@ CST expectations are reviewed via `insta` snapshots under
 
 ### Architecture
 
-- Implements `tower_lsp_server::LanguageServer` trait
-- Uses `tokio::sync::Mutex`-guarded shared state (`Arc<Mutex<...>>`) for
-  `document_map`, `workspace_root`, and `salsa_db`
+- Synchronous `lsp-server` (`Connection::stdio`) with a crossbeam `select!` main
+  loop (`src/lsp.rs`) --- no tokio, no async runtime. This mirrors
+  rust-analyzer's threading model.
+- Single-writer `GlobalState` (`src/lsp/global_state.rs`) owns the only mutable
+  `SalsaDb` handle; all salsa input mutation happens on the main thread. Worker
+  threads (a `TaskPool`, plus a dedicated single-thread format pool) run
+  read-only requests against cloned salsa handles carried in `StateSnapshot`.
+- Shared state uses copy-on-write `Arc` (`Arc::make_mut`), not a coarse `Mutex`:
+  `document_map` is `Arc<DocumentMap>` and diagnostics live in
+  `DiagnosticCollection`. Salsa's `Cancelled` unwind (`catch_cancelled` in
+  `src/lsp/helpers.rs`) is the concurrency fence --- a main-thread write cancels
+  in-flight worker reads.
 - Per-document state is represented by `DocumentState` (path, salsa inputs, CST
-  `GreenNode`)
+  `GreenNode` --- stored as `GreenNode` because it is `Send + Sync`, unlike the
+  cursor-carrying `SyntaxNode`, which workers materialize per request).
 - Incremental sync mode with UTF-16/UTF-8 position conversion
+  (`src/lsp/conversions.rs`).
 
 Uses typed AST wrappers for cleaner code:
 
