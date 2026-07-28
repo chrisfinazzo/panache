@@ -32,7 +32,7 @@ pub(crate) fn hover(snap: &StateSnapshot, params: HoverParams) -> Option<Hover> 
 
     let doc_path = doc_path?;
     let content_for_offset = ctx.content.clone();
-    let offset = conversions::position_to_offset(&content_for_offset, position)?;
+    let offset = conversions::position_to_offset(&ctx.line_index, position)?;
     let in_frontmatter_region = helpers::is_offset_in_yaml_frontmatter(parsed_yaml_regions, offset);
     if in_frontmatter_region {
         return None;

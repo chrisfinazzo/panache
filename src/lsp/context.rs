@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use lsp_types::Uri;
 
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::syntax::SyntaxNode;
 
 #[derive(Clone)]
@@ -12,6 +14,8 @@ pub(crate) struct OpenDocumentContext {
     pub(crate) path: Option<PathBuf>,
     pub(crate) tree: rowan::GreenNode,
     pub(crate) content: String,
+    /// Salsa-cached line index for O(log n) position <-> offset conversion.
+    pub(crate) line_index: Arc<LineIndex>,
 }
 
 impl OpenDocumentContext {
@@ -26,6 +30,7 @@ pub(crate) fn get_open_document_context(
 ) -> Option<OpenDocumentContext> {
     let state = snap.document_map.get(&uri.to_string())?.clone();
     let content = state.salsa_file.content_or_empty(snap.db()).to_string();
+    let line_index = crate::lsp::line_index::line_index(snap.db(), state.salsa_file).clone();
 
     Some(OpenDocumentContext {
         salsa_file: state.salsa_file,
@@ -33,5 +38,6 @@ pub(crate) fn get_open_document_context(
         path: state.path,
         tree: state.tree,
         content,
+        line_index,
     })
 }

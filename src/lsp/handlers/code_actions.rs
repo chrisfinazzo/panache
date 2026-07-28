@@ -17,10 +17,11 @@ pub(crate) fn code_action(
 ) -> Option<CodeActionResponse> {
     let uri = params.text_document.uri;
     let (text, config) = snap.document_and_config(&uri)?;
+    let line_index = snap.line_index(&uri)?;
     let request_range = params.range;
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
-    let request_start_offset = position_to_offset(&text, request_range.start);
-    let request_end_offset = position_to_offset(&text, request_range.end)
+    let request_start_offset = position_to_offset(&line_index, request_range.start);
+    let request_end_offset = position_to_offset(&line_index, request_range.end)
         .or_else(|| request_start_offset.map(|start| start.saturating_add(1)));
     let in_frontmatter_region =
         if let (Some(start), Some(end)) = (request_start_offset, request_end_offset) {
@@ -107,7 +108,7 @@ pub(crate) fn code_action(
     // Add lint fix code actions
     for diag in &diagnostics {
         if let Some(ref fix) = diag.fix {
-            let lsp_diag = convert_diagnostic(diag, &text);
+            let lsp_diag = convert_diagnostic(diag, &line_index);
             if !should_offer_quickfix(request_range, lsp_diag.range) {
                 continue;
             }
@@ -122,8 +123,8 @@ pub(crate) fn code_action(
                 .map(|edit| {
                     let start_offset: usize = edit.range.start().into();
                     let end_offset: usize = edit.range.end().into();
-                    let start = offset_to_position(&text, start_offset);
-                    let end = offset_to_position(&text, end_offset);
+                    let start = offset_to_position(&line_index, start_offset);
+                    let end = offset_to_position(&line_index, end_offset);
                     if !is_unsafe {
                         fix_all_edits.push((start_offset, end_offset, edit.replacement.clone()));
                     }
@@ -175,8 +176,8 @@ pub(crate) fn code_action(
                 .into_iter()
                 .map(|(start_offset, end_offset, replacement)| TextEdit {
                     range: Range {
-                        start: offset_to_position(&text, start_offset),
-                        end: offset_to_position(&text, end_offset),
+                        start: offset_to_position(&line_index, start_offset),
+                        end: offset_to_position(&line_index, end_offset),
                     },
                     new_text: replacement,
                 })
@@ -202,7 +203,7 @@ pub(crate) fn code_action(
     // Add list conversion code actions (refactoring)
     // Parse tree synchronously (SyntaxNode is not Send, can't use spawn_blocking)
     if !in_frontmatter_region
-        && let Some(offset) = position_to_offset(&text, request_range.start)
+        && let Some(offset) = position_to_offset(&line_index, request_range.start)
         && let Some(list_node) = list_conversion::find_list_at_position(&tree, offset)
         && let Some(list) = List::cast(list_node.clone())
     {
@@ -371,7 +372,9 @@ pub(crate) fn code_action(
     }
 
     // Add footnote conversion code actions (refactoring)
-    if !in_frontmatter_region && let Some(offset) = position_to_offset(&text, request_range.start) {
+    if !in_frontmatter_region
+        && let Some(offset) = position_to_offset(&line_index, request_range.start)
+    {
         // Check for reference footnote at cursor
         if let Some(ref_node) =
             footnote_conversion::find_footnote_reference_at_position(&tree, offset)
@@ -426,7 +429,7 @@ pub(crate) fn code_action(
 
     // Add link inline/reference conversion code actions (refactoring)
     if !in_frontmatter_region
-        && let Some(offset) = position_to_offset(&text, request_range.start)
+        && let Some(offset) = position_to_offset(&line_index, request_range.start)
         && let Some(link) = link_conversion::find_link_at_position(&tree, offset)
     {
         if link_conversion::can_convert_to_inline(&link, &tree) {
@@ -474,7 +477,7 @@ pub(crate) fn code_action(
 
     // Add heading link conversion code actions (refactoring)
     if !in_frontmatter_region
-        && let Some(offset) = position_to_offset(&text, request_range.start)
+        && let Some(offset) = position_to_offset(&line_index, request_range.start)
         && let Some(link_node) =
             heading_link_conversion::find_implicit_heading_link_at_position(&tree, offset)
     {

@@ -5,6 +5,7 @@ use crate::lsp::uri_ext::UriExt;
 use lsp_types::{DocumentLink, DocumentLinkParams, Range, Uri};
 
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::syntax::{AstNode, AutoLink, ImageLink, Link, Shortcode};
 use crate::utils::normalize_label;
 use serde_json::json;
@@ -40,7 +41,7 @@ pub(crate) fn document_links(
                     resolve_link_target(raw_target, doc_path.as_deref(), Some(&uri))
                 {
                     links.push(build_document_link(
-                        text_range_to_lsp_range(&content, dest.syntax().text_range()),
+                        text_range_to_lsp_range(&ctx.line_index, dest.syntax().text_range()),
                         target,
                         "link",
                         "Open link target",
@@ -65,7 +66,7 @@ pub(crate) fn document_links(
                     )
                 {
                     links.push(build_document_link(
-                        text_range_to_lsp_range(&content, link_ref.syntax().text_range()),
+                        text_range_to_lsp_range(&ctx.line_index, link_ref.syntax().text_range()),
                         target,
                         "reference",
                         "Open reference target",
@@ -84,7 +85,7 @@ pub(crate) fn document_links(
                     )
                 {
                     links.push(build_document_link(
-                        text_range_to_lsp_range(&content, text.syntax().text_range()),
+                        text_range_to_lsp_range(&ctx.line_index, text.syntax().text_range()),
                         target,
                         "reference",
                         "Open reference target",
@@ -103,7 +104,7 @@ pub(crate) fn document_links(
                     resolve_link_target(raw_target, doc_path.as_deref(), Some(&uri))
                 {
                     links.push(build_document_link(
-                        text_range_to_lsp_range(&content, dest.syntax().text_range()),
+                        text_range_to_lsp_range(&ctx.line_index, dest.syntax().text_range()),
                         target,
                         "image",
                         "Open image target",
@@ -119,7 +120,7 @@ pub(crate) fn document_links(
             if let Some(target) = resolve_link_target(&target_text, doc_path.as_deref(), Some(&uri))
             {
                 links.push(build_document_link(
-                    text_range_to_lsp_range(&content, autolink.syntax().text_range()),
+                    text_range_to_lsp_range(&ctx.line_index, autolink.syntax().text_range()),
                     target,
                     "link",
                     "Open link target",
@@ -152,7 +153,7 @@ pub(crate) fn document_links(
 
             if let Some(target) = Uri::from_file_path(&resolved) {
                 links.push(build_document_link(
-                    text_range_to_lsp_range(&content, shortcode.syntax().text_range()),
+                    text_range_to_lsp_range(&ctx.line_index, shortcode.syntax().text_range()),
                     target,
                     "include",
                     "Open included file",
@@ -207,9 +208,9 @@ pub(crate) fn document_link_resolve(_snap: &StateSnapshot, mut link: DocumentLin
     link
 }
 
-fn text_range_to_lsp_range(content: &str, range: rowan::TextRange) -> Range {
-    let start = conversions::offset_to_position(content, range.start().into());
-    let end = conversions::offset_to_position(content, range.end().into());
+fn text_range_to_lsp_range(index: &LineIndex, range: rowan::TextRange) -> Range {
+    let start = conversions::offset_to_position(index, range.start().into());
+    let end = conversions::offset_to_position(index, range.end().into());
     Range { start, end }
 }
 

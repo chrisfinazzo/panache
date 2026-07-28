@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use super::super::conversions::{convert_diagnostic, offset_to_position};
 use crate::lsp::global_state::{GlobalState, StateSnapshot};
+use crate::lsp::line_index::LineIndex;
 use crate::lsp::uri_ext::UriExt;
 
 /// A single `publishDiagnostics` payload: target URI, optional version, diags.
@@ -135,9 +136,10 @@ pub(crate) fn manifest_publishes(snap: &StateSnapshot, uri: &Uri) -> (Vec<Publis
         let Some(manifest_text) = file_text.text(snap.db()).as_deref() else {
             continue;
         };
+        let manifest_index = LineIndex::new(manifest_text);
         let converted = diags
             .iter()
-            .map(|d| convert_diagnostic(d, manifest_text))
+            .map(|d| convert_diagnostic(d, &manifest_index))
             .collect();
         publishes.push((target_uri.clone(), None, converted));
         manifest_uris.insert(target_uri);
@@ -168,10 +170,11 @@ pub(crate) fn config_publishes(snap: &StateSnapshot, uri: &Uri) -> Vec<Publish> 
     let Ok(text) = std::fs::read_to_string(&err.path) else {
         return Vec::new();
     };
+    let index = LineIndex::new(&text);
     let range = match err.span {
         Some(span) => Range {
-            start: offset_to_position(&text, span.start),
-            end: offset_to_position(&text, span.end.min(text.len())),
+            start: offset_to_position(&index, span.start),
+            end: offset_to_position(&index, span.end.min(text.len())),
         },
         // No span: anchor at the file's start so the diagnostic still lands.
         None => Range::default(),
@@ -267,9 +270,10 @@ pub(crate) fn compute_publishes(
         panache_diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
     }
 
+    let line_index = crate::lsp::line_index::line_index(snap.db(), doc_state.salsa_file).clone();
     let own_diagnostics: Vec<Diagnostic> = panache_diagnostics
         .iter()
-        .map(|d| convert_diagnostic(d, &text))
+        .map(|d| convert_diagnostic(d, &line_index))
         .collect();
 
     // The document's own path, if it has one (an in-memory buffer does not, so
@@ -308,9 +312,10 @@ pub(crate) fn compute_publishes(
                 .to_string()
         };
 
+        let target_index = LineIndex::new(&target_text);
         let mapped: Vec<Diagnostic> = diags
             .iter()
-            .map(|d| convert_diagnostic(d, &target_text))
+            .map(|d| convert_diagnostic(d, &target_index))
             .collect();
 
         if target_uri == *uri {

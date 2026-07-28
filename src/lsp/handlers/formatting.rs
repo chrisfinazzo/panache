@@ -57,7 +57,8 @@ pub(crate) fn format_document(
     }
 
     // Replace the entire document; use text.len() to include trailing newlines.
-    let end_position = offset_to_position(&text, text.len());
+    let line_index = snap.line_index(&uri)?;
+    let end_position = offset_to_position(&line_index, text.len());
     let range = Range {
         start: Position {
             line: 0,
@@ -97,7 +98,8 @@ pub(crate) fn format_on_type(
     // *previous* line's marker (below) keeps us off the unstable new line.
     let tree = snap.parsed_tree(&uri)?;
 
-    let cursor = position_to_offset(&text, position)?;
+    let line_index = snap.line_index(&uri)?;
+    let cursor = position_to_offset(&line_index, position)?;
     let line_start = text[..cursor].rfind('\n').map_or(0, |i| i + 1);
     // An offset on the line the newline was typed after.
     let probe = line_start.saturating_sub(1);
@@ -113,8 +115,8 @@ pub(crate) fn format_on_type(
     }
 
     let range = Range {
-        start: offset_to_position(&text, line_start),
-        end: offset_to_position(&text, line_start + ws_len),
+        start: offset_to_position(&line_index, line_start),
+        end: offset_to_position(&line_index, line_start + ws_len),
     };
     Some(vec![TextEdit { range, new_text }])
 }
@@ -155,9 +157,10 @@ pub(crate) fn format_range(
         end_line = range.end.line as usize;
     }
 
+    let line_index = snap.line_index(&uri)?;
     let _ = (
-        position_to_offset(&text, range.start),
-        position_to_offset(&text, range.end),
+        position_to_offset(&line_index, range.start),
+        position_to_offset(&line_index, range.end),
     );
 
     // Reuse the salsa-cached parse for both range expansion and formatting,
@@ -176,8 +179,8 @@ pub(crate) fn format_range(
     let (start_offset, end_offset) = expanded_range?;
 
     let edit_range = Range {
-        start: offset_to_position(&text, start_offset),
-        end: offset_to_position(&text, end_offset.min(text.len())),
+        start: offset_to_position(&line_index, start_offset),
+        end: offset_to_position(&line_index, end_offset.min(text.len())),
     };
 
     Some(vec![TextEdit {

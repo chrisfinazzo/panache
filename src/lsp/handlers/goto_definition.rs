@@ -44,8 +44,7 @@ pub(crate) fn goto_definition(
     };
 
     let this_path = ctx.path.clone();
-    let content_for_offset = ctx.content.clone();
-    let offset = conversions::position_to_offset(&content_for_offset, position)?;
+    let offset = conversions::position_to_offset(&ctx.line_index, position)?;
     if helpers::is_offset_in_yaml_frontmatter(parsed_yaml_regions, offset) {
         return None;
     }
@@ -272,8 +271,9 @@ pub(crate) fn goto_definition(
             .map(|file| file.content_or_empty(snap.db()).to_string())
             .unwrap_or_default()
     };
-    let start = conversions::offset_to_position(&target_text, definition.range().start().into());
-    let end = conversions::offset_to_position(&target_text, definition.range().end().into());
+    let target_index = crate::lsp::line_index::LineIndex::new(&target_text);
+    let start = conversions::offset_to_position(&target_index, definition.range().start().into());
+    let end = conversions::offset_to_position(&target_index, definition.range().end().into());
     let location = Location {
         uri: target_uri,
         range: Range { start, end },

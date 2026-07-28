@@ -6,6 +6,7 @@ use crate::syntax::{AstNode, FootnoteDefinition, FootnoteReference, InlineFootno
 use lsp_types::{Range, TextEdit};
 
 use super::super::conversions::offset_to_position;
+use crate::lsp::line_index::LineIndex;
 
 /// Find the innermost FOOTNOTE_REFERENCE node at the given position.
 pub fn find_footnote_reference_at_position(tree: &SyntaxNode, offset: usize) -> Option<SyntaxNode> {
@@ -45,6 +46,7 @@ pub fn convert_to_inline(
     tree: &SyntaxNode,
     text: &str,
 ) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let reference = match FootnoteReference::cast(reference_node.clone()) {
         Some(r) => r,
         None => return vec![],
@@ -69,8 +71,8 @@ pub fn convert_to_inline(
 
     // Edit 1: Replace [^id] with ^[content]
     let content = definition.content().trim().to_string();
-    let ref_start = offset_to_position(text, reference_node.text_range().start().into());
-    let ref_end = offset_to_position(text, reference_node.text_range().end().into());
+    let ref_start = offset_to_position(&index, reference_node.text_range().start().into());
+    let ref_end = offset_to_position(&index, reference_node.text_range().end().into());
     edits.push(TextEdit {
         range: Range {
             start: ref_start,
@@ -93,8 +95,8 @@ pub fn convert_to_inline(
 
     edits.push(TextEdit {
         range: Range {
-            start: offset_to_position(text, def_start),
-            end: offset_to_position(text, extended_end),
+            start: offset_to_position(&index, def_start),
+            end: offset_to_position(&index, extended_end),
         },
         new_text: String::new(),
     });
@@ -124,6 +126,7 @@ pub fn convert_to_reference(
     tree: &SyntaxNode,
     text: &str,
 ) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let inline = match InlineFootnote::cast(inline_node.clone()) {
         Some(i) => i,
         None => return vec![],
@@ -135,8 +138,8 @@ pub fn convert_to_reference(
     let mut edits = Vec::new();
 
     // Edit 1: Replace ^[content] with [^id]
-    let inline_start = offset_to_position(text, inline_node.text_range().start().into());
-    let inline_end = offset_to_position(text, inline_node.text_range().end().into());
+    let inline_start = offset_to_position(&index, inline_node.text_range().start().into());
+    let inline_end = offset_to_position(&index, inline_node.text_range().end().into());
     edits.push(TextEdit {
         range: Range {
             start: inline_start,
@@ -153,11 +156,11 @@ pub fn convert_to_reference(
         .last()
         .map(|def| {
             let end: usize = def.syntax().text_range().end().into();
-            offset_to_position(text, end)
+            offset_to_position(&index, end)
         })
         .unwrap_or_else(|| {
             // No existing definitions, insert at end of document
-            offset_to_position(text, text.len())
+            offset_to_position(&index, text.len())
         });
 
     // Determine if we need leading newlines

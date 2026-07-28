@@ -20,6 +20,7 @@ mod documents;
 pub(crate) mod global_state;
 mod handlers;
 mod helpers;
+pub(crate) mod line_index;
 mod navigation;
 mod symbols;
 mod task_pool;

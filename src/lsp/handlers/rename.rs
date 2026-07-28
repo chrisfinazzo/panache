@@ -36,7 +36,7 @@ pub(crate) fn rename(snap: &StateSnapshot, params: RenameParams) -> Option<Works
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
 
     let doc_path = doc_path.clone()?;
-    let Some(offset) = position_to_offset(&content, position) else {
+    let Some(offset) = position_to_offset(&ctx.line_index, position) else {
         log::debug!(
             "rename: position_to_offset failed uri={:?} line={} char={}",
             uri,
@@ -234,8 +234,9 @@ pub(crate) fn rename(snap: &StateSnapshot, params: RenameParams) -> Option<Works
                     .map(|file| file.content_or_empty(db).to_string())
                     .unwrap_or_default()
             };
-            let bib_start = offset_to_position(&bib_text, entry.span.start);
-            let bib_end = offset_to_position(&bib_text, entry.span.end);
+            let bib_index = crate::lsp::line_index::LineIndex::new(&bib_text);
+            let bib_start = offset_to_position(&bib_index, entry.span.start);
+            let bib_end = offset_to_position(&bib_index, entry.span.end);
             let bib_uri = Uri::from_file_path(&bib_path).unwrap_or_else(|| uri.clone());
             changes.entry(bib_uri).or_default().push(TextEdit {
                 range: Range {
@@ -274,8 +275,9 @@ pub(crate) fn rename(snap: &StateSnapshot, params: RenameParams) -> Option<Works
                     .map(|file| file.content_or_empty(db).to_string())
                     .unwrap_or_default()
             };
-            let start = offset_to_position(&text, entry.range.start().into());
-            let end = offset_to_position(&text, entry.range.end().into());
+            let entry_index = crate::lsp::line_index::LineIndex::new(&text);
+            let start = offset_to_position(&entry_index, entry.range.start().into());
+            let end = offset_to_position(&entry_index, entry.range.end().into());
             let entry_uri = Uri::from_file_path(&entry.path).unwrap_or_else(|| uri.clone());
             inline_edits.push((
                 entry_uri,
@@ -340,10 +342,11 @@ fn text_edits_from_ranges(
     text: &str,
     new_text: &str,
 ) -> Vec<TextEdit> {
+    let index = crate::lsp::line_index::LineIndex::new(text);
     let mut edits = Vec::new();
     for range in ranges {
-        let start = offset_to_position(text, range.start().into());
-        let end = offset_to_position(text, range.end().into());
+        let start = offset_to_position(&index, range.start().into());
+        let end = offset_to_position(&index, range.end().into());
         edits.push(TextEdit {
             range: Range { start, end },
             new_text: new_text.to_string(),

@@ -22,7 +22,7 @@ pub(crate) fn references(snap: &StateSnapshot, params: ReferenceParams) -> Optio
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
 
     let doc_path = doc_path.clone()?;
-    let offset = position_to_offset(&content, position)?;
+    let offset = position_to_offset(&ctx.line_index, position)?;
     if helpers::is_offset_in_yaml_frontmatter(parsed_yaml_regions, offset) {
         return None;
     }
@@ -203,12 +203,13 @@ pub(crate) fn references(snap: &StateSnapshot, params: ReferenceParams) -> Optio
 }
 
 fn add_locations(out: &mut Vec<Location>, uri: &Uri, text: &str, ranges: &[rowan::TextRange]) {
+    let index = crate::lsp::line_index::LineIndex::new(text);
     for range in ranges {
         out.push(Location {
             uri: uri.clone(),
             range: Range {
-                start: offset_to_position(text, range.start().into()),
-                end: offset_to_position(text, range.end().into()),
+                start: offset_to_position(&index, range.start().into()),
+                end: offset_to_position(&index, range.end().into()),
             },
         });
     }

@@ -70,8 +70,9 @@ pub fn convert_to_explicit_heading_link(
     }
 
     let replacement = format!("{}(#{})", link_raw, entry.id);
-    let start = offset_to_position(text, link_node.text_range().start().into());
-    let end = offset_to_position(text, link_node.text_range().end().into());
+    let index = crate::lsp::line_index::LineIndex::new(text);
+    let start = offset_to_position(&index, link_node.text_range().start().into());
+    let end = offset_to_position(&index, link_node.text_range().end().into());
     vec![TextEdit {
         range: Range { start, end },
         new_text: replacement,

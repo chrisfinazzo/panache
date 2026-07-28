@@ -33,10 +33,10 @@ pub(crate) fn document_highlight(
     let config = snap.config(&uri);
 
     let ctx = crate::lsp::context::get_open_document_context(snap, &uri)?;
-    let content = ctx.content.clone();
+    let line_index = ctx.line_index.clone();
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
 
-    let offset = position_to_offset(&content, position)?;
+    let offset = position_to_offset(&line_index, position)?;
     if helpers::is_offset_in_yaml_frontmatter(parsed_yaml_regions, offset) {
         return None;
     }
@@ -56,8 +56,8 @@ pub(crate) fn document_highlight(
         .into_iter()
         .map(|r| DocumentHighlight {
             range: Range {
-                start: offset_to_position(&content, r.start().into()),
-                end: offset_to_position(&content, r.end().into()),
+                start: offset_to_position(&line_index, r.start().into()),
+                end: offset_to_position(&line_index, r.end().into()),
             },
             kind: Some(DocumentHighlightKind::TEXT),
         })

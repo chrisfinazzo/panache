@@ -6,6 +6,7 @@ use crate::syntax::{AstNode, List, ListKind, SyntaxKind, SyntaxNode, SyntaxToken
 use lsp_types::{Range, TextEdit};
 
 use super::super::conversions::offset_to_position;
+use crate::lsp::line_index::LineIndex;
 
 /// Find the innermost LIST node at the given position.
 pub fn find_list_at_position(tree: &SyntaxNode, offset: usize) -> Option<SyntaxNode> {
@@ -30,6 +31,7 @@ pub fn detect_list_type(list_node: &SyntaxNode) -> Option<ListKind> {
 /// Returns a list of TextEdits that insert blank lines after each list item
 /// (except the last one, to avoid adding trailing blank lines).
 pub fn convert_to_loose(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let list = match List::cast(list_node.clone()) {
         Some(l) => l,
         None => return vec![],
@@ -54,7 +56,7 @@ pub fn convert_to_loose(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
         let item_end = item.syntax().text_range().end().into();
 
         // Insert a blank line
-        let position = offset_to_position(text, item_end);
+        let position = offset_to_position(&index, item_end);
         edits.push(TextEdit {
             range: Range {
                 start: position,
@@ -71,6 +73,7 @@ pub fn convert_to_loose(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 ///
 /// Returns a list of TextEdits that remove blank lines between list items.
 pub fn convert_to_compact(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let list = match List::cast(list_node.clone()) {
         Some(l) => l,
         None => return vec![],
@@ -106,8 +109,8 @@ pub fn convert_to_compact(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 
                 if has_next_item {
                     // Remove this blank line
-                    let start = offset_to_position(text, node.text_range().start().into());
-                    let end = offset_to_position(text, node.text_range().end().into());
+                    let start = offset_to_position(&index, node.text_range().start().into());
+                    let end = offset_to_position(&index, node.text_range().end().into());
                     edits.push(TextEdit {
                         range: Range { start, end },
                         new_text: String::new(),
@@ -136,8 +139,8 @@ pub fn convert_to_compact(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 
             if has_next_item {
                 // Remove this blank line token
-                let start = offset_to_position(text, token.text_range().start().into());
-                let end = offset_to_position(text, token.text_range().end().into());
+                let start = offset_to_position(&index, token.text_range().start().into());
+                let end = offset_to_position(&index, token.text_range().end().into());
                 edits.push(TextEdit {
                     range: Range { start, end },
                     new_text: String::new(),
@@ -151,6 +154,7 @@ pub fn convert_to_compact(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 
 /// Convert a bullet list to an ordered list by replacing markers with 1., 2., ...
 pub fn convert_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     if detect_list_type(list_node) != Some(ListKind::Bullet) {
         return vec![];
     }
@@ -163,8 +167,8 @@ pub fn convert_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
         .enumerate()
         .filter_map(|(idx, item)| {
             let marker = first_item_marker_token(item.syntax())?;
-            let start = offset_to_position(text, marker.text_range().start().into());
-            let end = offset_to_position(text, marker.text_range().end().into());
+            let start = offset_to_position(&index, marker.text_range().start().into());
+            let end = offset_to_position(&index, marker.text_range().end().into());
             Some(TextEdit {
                 range: Range { start, end },
                 new_text: format!("{}.", idx + 1),
@@ -175,6 +179,7 @@ pub fn convert_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 
 /// Convert an ordered list to a bullet list by replacing markers with "-".
 pub fn convert_to_bullet(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     if !matches!(
         detect_list_type(list_node),
         Some(ListKind::Ordered | ListKind::Task)
@@ -192,17 +197,18 @@ pub fn convert_to_bullet(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
             let Some(marker) = first_item_marker_token(item.syntax()) else {
                 return edits;
             };
-            let start = offset_to_position(text, marker.text_range().start().into());
-            let end = offset_to_position(text, marker.text_range().end().into());
+            let start = offset_to_position(&index, marker.text_range().start().into());
+            let end = offset_to_position(&index, marker.text_range().end().into());
             edits.push(TextEdit {
                 range: Range { start, end },
                 new_text: "-".to_string(),
             });
 
             if let Some(checkbox) = task_checkbox_token(item.syntax()) {
-                let checkbox_start = offset_to_position(text, checkbox.text_range().start().into());
+                let checkbox_start =
+                    offset_to_position(&index, checkbox.text_range().start().into());
                 let checkbox_end = offset_to_position(
-                    text,
+                    &index,
                     checkbox_removal_end_offset(text, checkbox.text_range().end().into()),
                 );
                 edits.push(TextEdit {
@@ -224,6 +230,7 @@ pub fn convert_to_bullet(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 /// Ordered lists are converted to bullet task lists (`- [ ]`) to match canonical
 /// Pandoc/GFM task-list form.
 pub fn convert_to_task(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let list_type = detect_list_type(list_node);
     if !matches!(list_type, Some(ListKind::Bullet | ListKind::Ordered)) {
         return vec![];
@@ -239,8 +246,8 @@ pub fn convert_to_task(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
             let marker = first_item_marker_token(item.syntax())?;
 
             if list_type == Some(ListKind::Ordered) {
-                let marker_start = offset_to_position(text, marker.text_range().start().into());
-                let marker_end = offset_to_position(text, marker.text_range().end().into());
+                let marker_start = offset_to_position(&index, marker.text_range().start().into());
+                let marker_end = offset_to_position(&index, marker.text_range().end().into());
                 edits.push(TextEdit {
                     range: Range {
                         start: marker_start,
@@ -250,7 +257,7 @@ pub fn convert_to_task(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
                 });
             }
 
-            let insert_at = offset_to_position(text, marker.text_range().end().into());
+            let insert_at = offset_to_position(&index, marker.text_range().end().into());
             edits.push(TextEdit {
                 range: Range {
                     start: insert_at,
@@ -267,6 +274,7 @@ pub fn convert_to_task(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
 
 /// Convert a task list to an ordered list by replacing markers and removing checkboxes.
 pub fn convert_task_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     if detect_list_type(list_node) != Some(ListKind::Task) {
         return vec![];
     }
@@ -283,8 +291,8 @@ pub fn convert_task_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEd
                 return edits;
             };
 
-            let marker_start = offset_to_position(text, marker.text_range().start().into());
-            let marker_end = offset_to_position(text, marker.text_range().end().into());
+            let marker_start = offset_to_position(&index, marker.text_range().start().into());
+            let marker_end = offset_to_position(&index, marker.text_range().end().into());
             edits.push(TextEdit {
                 range: Range {
                     start: marker_start,
@@ -294,9 +302,10 @@ pub fn convert_task_to_ordered(list_node: &SyntaxNode, text: &str) -> Vec<TextEd
             });
 
             if let Some(checkbox) = task_checkbox_token(item.syntax()) {
-                let checkbox_start = offset_to_position(text, checkbox.text_range().start().into());
+                let checkbox_start =
+                    offset_to_position(&index, checkbox.text_range().start().into());
                 let checkbox_end = offset_to_position(
-                    text,
+                    &index,
                     checkbox_removal_end_offset(text, checkbox.text_range().end().into()),
                 );
                 edits.push(TextEdit {

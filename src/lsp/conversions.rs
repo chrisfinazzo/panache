@@ -2,104 +2,25 @@ use lsp_types::*;
 
 use crate::linter;
 use crate::linter::Severity as PanacheSeverity;
+use crate::lsp::line_index::LineIndex;
 
 pub(crate) type ByteEditRange = (usize, usize);
 pub(crate) type AppliedEditChange = (String, ByteEditRange, ByteEditRange);
 
-/// Helper to convert LSP UTF-16 position to byte offset in UTF-8 string
-pub(crate) fn position_to_offset(text: &str, position: Position) -> Option<usize> {
-    let mut offset = 0;
-    let mut current_line = 0;
-
-    let bytes = text.as_bytes();
-
-    for line in text.lines() {
-        if current_line == position.line {
-            // LSP uses UTF-16 code units, Rust uses UTF-8 bytes
-            let mut utf16_offset = 0;
-            for (byte_idx, ch) in line.char_indices() {
-                if utf16_offset >= position.character as usize {
-                    return Some(offset + byte_idx);
-                }
-                utf16_offset += ch.len_utf16();
-            }
-            // Position is at or past end of line
-            return Some(offset + line.len());
-        }
-
-        // Account for line ending: check if it's CRLF or LF
-        let line_end_offset = offset + line.len();
-        let line_ending_len = if line_end_offset + 1 < text.len()
-            && bytes[line_end_offset] == b'\r'
-            && bytes[line_end_offset + 1] == b'\n'
-        {
-            2 // CRLF
-        } else if line_end_offset < text.len() && bytes[line_end_offset] == b'\n' {
-            1 // LF
-        } else {
-            0 // No line ending (last line)
-        };
-
-        offset += line.len() + line_ending_len;
-        current_line += 1;
-    }
-
-    // Position is beyond document end
-    if current_line == position.line {
-        // Empty last line or position at very end
-        return Some(offset);
-    }
-
-    None
+/// Convert an LSP UTF-16 position to a byte offset via the cached [`LineIndex`].
+pub(crate) fn position_to_offset(index: &LineIndex, position: Position) -> Option<usize> {
+    index.position_to_offset(position)
 }
 
-/// Convert byte offset to LSP Position (line/character in UTF-16)
-pub(crate) fn offset_to_position(text: &str, offset: usize) -> Position {
-    let mut line = 0;
-    let mut character = 0;
-    let mut current_offset = 0;
-
-    let bytes = text.as_bytes();
-
-    for text_line in text.lines() {
-        if current_offset + text_line.len() >= offset {
-            // Offset is in this line
-            let line_offset = offset - current_offset;
-            character = text_line
-                .char_indices()
-                .take_while(|(byte_idx, _)| *byte_idx < line_offset)
-                .map(|(_, c)| c.len_utf16())
-                .sum::<usize>() as u32;
-            break;
-        }
-
-        // Account for line ending: check if it's CRLF or LF
-        let line_end_offset = current_offset + text_line.len();
-        let line_ending_len = if line_end_offset + 1 < text.len()
-            && bytes[line_end_offset] == b'\r'
-            && bytes[line_end_offset + 1] == b'\n'
-        {
-            2 // CRLF
-        } else if line_end_offset < text.len() && bytes[line_end_offset] == b'\n' {
-            1 // LF
-        } else {
-            0 // No line ending (last line)
-        };
-
-        current_offset += text_line.len() + line_ending_len;
-        line += 1;
-    }
-
-    Position {
-        line: line as u32,
-        character,
-    }
+/// Convert a byte offset to an LSP position via the cached [`LineIndex`].
+pub(crate) fn offset_to_position(index: &LineIndex, offset: usize) -> Position {
+    index.offset_to_position(offset)
 }
 
 /// Convert panache Diagnostic to LSP Diagnostic
-pub(crate) fn convert_diagnostic(diag: &linter::Diagnostic, text: &str) -> Diagnostic {
-    let start = offset_to_position(text, diag.location.range.start().into());
-    let end = offset_to_position(text, diag.location.range.end().into());
+pub(crate) fn convert_diagnostic(diag: &linter::Diagnostic, index: &LineIndex) -> Diagnostic {
+    let start = offset_to_position(index, diag.location.range.start().into());
+    let end = offset_to_position(index, diag.location.range.end().into());
 
     let severity = match diag.severity {
         PanacheSeverity::Error => DiagnosticSeverity::ERROR,
@@ -134,9 +55,11 @@ pub(crate) fn convert_diagnostic(diag: &linter::Diagnostic, text: &str) -> Diagn
 pub(crate) fn apply_content_change(text: &str, change: &TextDocumentContentChangeEvent) -> String {
     match &change.range {
         Some(range) => {
-            // Incremental edit with range
-            let start_offset = position_to_offset(text, range.start).unwrap_or(0);
-            let end_offset = position_to_offset(text, range.end).unwrap_or(text.len());
+            // Incremental edit with range. Build one index for the pre-change
+            // text and convert both endpoints from it.
+            let index = LineIndex::new(text);
+            let start_offset = position_to_offset(&index, range.start).unwrap_or(0);
+            let end_offset = position_to_offset(&index, range.end).unwrap_or(text.len());
 
             let mut result =
                 String::with_capacity(text.len() - (end_offset - start_offset) + change.text.len());
@@ -157,8 +80,9 @@ pub(crate) fn apply_content_change_with_edit_ranges(
     change: &TextDocumentContentChangeEvent,
 ) -> Option<AppliedEditChange> {
     let range = change.range?;
-    let start_offset = position_to_offset(text, range.start)?;
-    let end_offset = position_to_offset(text, range.end)?;
+    let index = LineIndex::new(text);
+    let start_offset = position_to_offset(&index, range.start)?;
+    let end_offset = position_to_offset(&index, range.end)?;
     if start_offset > end_offset || end_offset > text.len() {
         return None;
     }
@@ -176,56 +100,7 @@ pub(crate) fn apply_content_change_with_edit_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_offset_to_position_simple() {
-        let text = "hello\nworld\n";
-
-        let pos = offset_to_position(text, 0);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position(text, 3);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 3);
-
-        let pos = offset_to_position(text, 6);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position(text, 9);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 3);
-    }
-
-    #[test]
-    fn test_offset_to_position_utf16() {
-        // "café" = 5 UTF-8 bytes, 4 UTF-16 code units
-        let text = "café\n";
-
-        let pos = offset_to_position(text, 0);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position(text, 3);
-        assert_eq!(pos.character, 3);
-
-        // After é (2 UTF-8 bytes, but 1 UTF-16 code unit)
-        let pos = offset_to_position(text, 5);
-        assert_eq!(pos.character, 4);
-    }
-
-    #[test]
-    fn test_offset_to_position_emoji() {
-        // "👋" = 4 UTF-8 bytes, 2 UTF-16 code units (surrogate pair)
-        let text = "hi👋\n";
-
-        let pos = offset_to_position(text, 2);
-        assert_eq!(pos.character, 2);
-
-        // After emoji (6 bytes total, 4 UTF-16 code units)
-        let pos = offset_to_position(text, 6);
-        assert_eq!(pos.character, 4);
-    }
+    use crate::lsp::line_index::LineIndex;
 
     #[test]
     fn test_convert_diagnostic_basic() {
@@ -235,6 +110,7 @@ mod tests {
         use rowan::TextRange;
 
         let text = "# H1\n\n### H3\n";
+        let index = LineIndex::new(text);
 
         let diag = PanacheDiagnostic {
             severity: Severity::Warning,
@@ -250,7 +126,7 @@ mod tests {
             fix: None,
         };
 
-        let lsp_diag = convert_diagnostic(&diag, text);
+        let lsp_diag = convert_diagnostic(&diag, &index);
 
         assert_eq!(lsp_diag.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(
@@ -272,6 +148,7 @@ mod tests {
         use rowan::TextRange;
 
         let text = "test\n";
+        let index = LineIndex::new(text);
 
         let error_diag = PanacheDiagnostic {
             severity: Severity::Error,
@@ -287,7 +164,7 @@ mod tests {
             fix: None,
         };
 
-        let lsp_diag = convert_diagnostic(&error_diag, text);
+        let lsp_diag = convert_diagnostic(&error_diag, &index);
         assert_eq!(lsp_diag.severity, Some(DiagnosticSeverity::ERROR));
 
         let info_diag = PanacheDiagnostic {
@@ -304,169 +181,8 @@ mod tests {
             fix: None,
         };
 
-        let lsp_diag = convert_diagnostic(&info_diag, text);
+        let lsp_diag = convert_diagnostic(&info_diag, &index);
         assert_eq!(lsp_diag.severity, Some(DiagnosticSeverity::INFORMATION));
-    }
-
-    #[test]
-    fn test_position_to_offset_simple() {
-        let text = "hello\nworld\n";
-
-        // Start of first line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 0
-                }
-            ),
-            Some(0)
-        );
-
-        // Middle of first line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 3
-                }
-            ),
-            Some(3)
-        );
-
-        // End of first line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 5
-                }
-            ),
-            Some(5)
-        );
-
-        // Start of second line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 1,
-                    character: 0
-                }
-            ),
-            Some(6)
-        );
-
-        // Middle of second line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 1,
-                    character: 3
-                }
-            ),
-            Some(9)
-        );
-    }
-
-    #[test]
-    fn test_position_to_offset_utf8() {
-        // "café" = 5 UTF-8 bytes, 4 UTF-16 code units (é = 2 bytes, 1 code unit)
-        let text = "café\nworld\n";
-
-        // Start of line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 0
-                }
-            ),
-            Some(0)
-        );
-
-        // After 'c' (1 byte, 1 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 1
-                }
-            ),
-            Some(1)
-        );
-
-        // After 'ca' (2 bytes, 2 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 2
-                }
-            ),
-            Some(2)
-        );
-
-        // After 'caf' (3 bytes, 3 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 3
-                }
-            ),
-            Some(3)
-        );
-
-        // After 'café' (5 bytes, 4 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 4
-                }
-            ),
-            Some(5)
-        );
-    }
-
-    #[test]
-    fn test_position_to_offset_emoji() {
-        // "👋" = 4 UTF-8 bytes, 2 UTF-16 code units (surrogate pair)
-        let text = "hi👋\n";
-
-        // After "hi" (2 bytes, 2 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 2
-                }
-            ),
-            Some(2)
-        );
-
-        // After "hi👋" (6 bytes, 4 UTF-16)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 4
-                }
-            ),
-            Some(6)
-        );
     }
 
     #[test]
@@ -563,105 +279,5 @@ mod tests {
         };
 
         assert_eq!(apply_content_change(text, &change), "line1\nliNEW\nLINEne3");
-    }
-
-    #[test]
-    fn test_position_to_offset_crlf() {
-        let text = "hello\r\nworld\r\n";
-
-        // Start of first line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 0
-                }
-            ),
-            Some(0)
-        );
-
-        // Middle of first line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 0,
-                    character: 3
-                }
-            ),
-            Some(3)
-        );
-
-        // Start of second line (after CRLF)
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 1,
-                    character: 0
-                }
-            ),
-            Some(7)
-        );
-
-        // Middle of second line
-        assert_eq!(
-            position_to_offset(
-                text,
-                Position {
-                    line: 1,
-                    character: 3
-                }
-            ),
-            Some(10)
-        );
-    }
-
-    #[test]
-    fn test_offset_to_position_crlf() {
-        let text = "hello\r\nworld\r\n";
-
-        let pos = offset_to_position(text, 0);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position(text, 3);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 3);
-
-        // Offset 7 is start of second line (after \r\n which is treated as single line ending)
-        let pos = offset_to_position(text, 7);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position(text, 10);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 3);
-    }
-
-    #[test]
-    fn test_offset_to_position_inside_multibyte_char() {
-        let text = "ä\n";
-        let pos = offset_to_position(text, 1);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 1);
-    }
-
-    #[test]
-    fn test_offset_to_position_inside_multibyte_char_crlf() {
-        let text = "åäö\r\nnext\r\n";
-
-        let pos = offset_to_position(text, 1);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 1);
-
-        let pos = offset_to_position(text, 5);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 3);
-
-        let pos = offset_to_position(text, 8);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
     }
 }

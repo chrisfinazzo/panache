@@ -36,7 +36,7 @@ pub(crate) fn linked_editing_range(
     let content = ctx.content.clone();
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
 
-    let offset = position_to_offset(&content, position)?;
+    let offset = position_to_offset(&ctx.line_index, position)?;
     if helpers::is_offset_in_yaml_frontmatter(parsed_yaml_regions, offset) {
         return None;
     }
@@ -70,8 +70,8 @@ pub(crate) fn linked_editing_range(
     let lsp_ranges = ranges
         .into_iter()
         .map(|r| Range {
-            start: offset_to_position(&content, r.start().into()),
-            end: offset_to_position(&content, r.end().into()),
+            start: offset_to_position(&ctx.line_index, r.start().into()),
+            end: offset_to_position(&ctx.line_index, r.end().into()),
         })
         .collect();
 

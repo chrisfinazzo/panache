@@ -240,6 +240,20 @@ impl StateSnapshot {
         Some(state.salsa_file.content_or_empty(self.db()).to_string())
     }
 
+    /// The salsa-cached [`LineIndex`] for `uri`, for O(log n) position <->
+    /// offset conversion. Keyed on the text input only, so it is shared across
+    /// configs and revisions with unchanged text. Returns `None` if the
+    /// document isn't open.
+    ///
+    /// [`LineIndex`]: crate::lsp::line_index::LineIndex
+    pub(crate) fn line_index(
+        &self,
+        uri: &Uri,
+    ) -> Option<std::sync::Arc<crate::lsp::line_index::LineIndex>> {
+        let state = self.document_map.get(&uri.to_string())?;
+        Some(crate::lsp::line_index::line_index(self.db(), state.salsa_file).clone())
+    }
+
     /// The current text and a freshly-rooted syntax tree for `uri`.
     pub(crate) fn document_content_and_tree(&self, uri: &Uri) -> Option<(String, SyntaxNode)> {
         let state = self.document_map.get(&uri.to_string())?;

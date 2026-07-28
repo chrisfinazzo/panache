@@ -3,6 +3,7 @@ use rowan::ast::AstNode;
 
 use crate::lsp::conversions::offset_to_position;
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::syntax::{CodeBlock, Document, FencedDiv, SyntaxKind, SyntaxNode, YamlMetadata};
 
 pub(crate) fn folding_range(
@@ -11,10 +12,11 @@ pub(crate) fn folding_range(
 ) -> Option<Vec<FoldingRange>> {
     let uri = params.text_document.uri;
 
-    let (content, syntax_tree) = snap.document_content_and_tree(&uri)?;
+    let syntax_tree = snap.parsed_tree(&uri)?;
+    let line_index = snap.line_index(&uri)?;
 
     // Build folding ranges synchronously (SyntaxNode is not Send).
-    let ranges = build_folding_ranges(&syntax_tree, &content);
+    let ranges = build_folding_ranges(&syntax_tree, &line_index);
 
     if ranges.is_empty() {
         None
@@ -23,7 +25,7 @@ pub(crate) fn folding_range(
     }
 }
 
-fn build_folding_ranges(root: &SyntaxNode, content: &str) -> Vec<FoldingRange> {
+fn build_folding_ranges(root: &SyntaxNode, index: &LineIndex) -> Vec<FoldingRange> {
     let mut ranges = Vec::new();
     let db = crate::salsa::SalsaDb::default();
     let extensions = crate::config::Extensions::default();
@@ -47,29 +49,29 @@ fn build_folding_ranges(root: &SyntaxNode, content: &str) -> Vec<FoldingRange> {
             }
             SyntaxKind::CODE_BLOCK => {
                 if let Some(code_block) = CodeBlock::cast(node.clone())
-                    && let Some(range) = extract_code_block_range(&code_block, content)
+                    && let Some(range) = extract_code_block_range(&code_block, index)
                 {
                     ranges.push(range);
                 }
             }
             SyntaxKind::FENCED_DIV => {
                 if let Some(fenced_div) = FencedDiv::cast(node.clone())
-                    && let Some(range) = extract_fenced_div_range(&fenced_div, content)
+                    && let Some(range) = extract_fenced_div_range(&fenced_div, index)
                 {
                     ranges.push(range);
                 }
             }
             SyntaxKind::YAML_METADATA => {
                 if let Some(metadata) = YamlMetadata::cast(node.clone())
-                    && let Some(range) = extract_yaml_metadata_range(metadata.syntax(), content)
+                    && let Some(range) = extract_yaml_metadata_range(metadata.syntax(), index)
                 {
                     ranges.push(range);
-                } else if let Some(range) = extract_yaml_metadata_range(&node, content) {
+                } else if let Some(range) = extract_yaml_metadata_range(&node, index) {
                     ranges.push(range);
                 }
             }
             SyntaxKind::HTML_BLOCK | SyntaxKind::HTML_BLOCK_RAW | SyntaxKind::HTML_BLOCK_DIV => {
-                if let Some(range) = extract_html_block_range(&node, content) {
+                if let Some(range) = extract_html_block_range(&node, index) {
                     ranges.push(range);
                 }
             }
@@ -88,13 +90,13 @@ fn build_folding_ranges(root: &SyntaxNode, content: &str) -> Vec<FoldingRange> {
             next_offset
         } else {
             // No next heading at same/higher level, fold to end of document
-            content.len()
+            index.len()
         };
 
         // Only create fold if there's content after the heading
         if end_offset > start_offset {
-            let start_pos = offset_to_position(content, start_offset);
-            let end_pos = offset_to_position(content, end_offset.saturating_sub(1));
+            let start_pos = offset_to_position(index, start_offset);
+            let end_pos = offset_to_position(index, end_offset.saturating_sub(1));
 
             // Fold from the line after the heading to the last line before next heading
             if start_pos.line < end_pos.line {
@@ -113,12 +115,12 @@ fn build_folding_ranges(root: &SyntaxNode, content: &str) -> Vec<FoldingRange> {
     ranges
 }
 
-fn extract_code_block_range(code_block: &CodeBlock, content: &str) -> Option<FoldingRange> {
+fn extract_code_block_range(code_block: &CodeBlock, index: &LineIndex) -> Option<FoldingRange> {
     let start_offset: usize = code_block.syntax().text_range().start().into();
     let end_offset: usize = code_block.syntax().text_range().end().into();
 
-    let start_pos = offset_to_position(content, start_offset);
-    let end_pos = offset_to_position(content, end_offset.saturating_sub(1));
+    let start_pos = offset_to_position(index, start_offset);
+    let end_pos = offset_to_position(index, end_offset.saturating_sub(1));
 
     // Only fold if block spans multiple lines
     if start_pos.line < end_pos.line {
@@ -135,12 +137,12 @@ fn extract_code_block_range(code_block: &CodeBlock, content: &str) -> Option<Fol
     }
 }
 
-fn extract_fenced_div_range(fenced_div: &FencedDiv, content: &str) -> Option<FoldingRange> {
+fn extract_fenced_div_range(fenced_div: &FencedDiv, index: &LineIndex) -> Option<FoldingRange> {
     let start_offset: usize = fenced_div.syntax().text_range().start().into();
     let end_offset: usize = fenced_div.syntax().text_range().end().into();
 
-    let start_pos = offset_to_position(content, start_offset);
-    let end_pos = offset_to_position(content, end_offset.saturating_sub(1));
+    let start_pos = offset_to_position(index, start_offset);
+    let end_pos = offset_to_position(index, end_offset.saturating_sub(1));
 
     // Only fold if div spans multiple lines
     if start_pos.line < end_pos.line {
@@ -157,12 +159,12 @@ fn extract_fenced_div_range(fenced_div: &FencedDiv, content: &str) -> Option<Fol
     }
 }
 
-fn extract_html_block_range(node: &SyntaxNode, content: &str) -> Option<FoldingRange> {
+fn extract_html_block_range(node: &SyntaxNode, index: &LineIndex) -> Option<FoldingRange> {
     let start_offset: usize = node.text_range().start().into();
     let end_offset: usize = node.text_range().end().into();
 
-    let start_pos = offset_to_position(content, start_offset);
-    let end_pos = offset_to_position(content, end_offset.saturating_sub(1));
+    let start_pos = offset_to_position(index, start_offset);
+    let end_pos = offset_to_position(index, end_offset.saturating_sub(1));
 
     if start_pos.line < end_pos.line {
         Some(FoldingRange {
@@ -178,12 +180,12 @@ fn extract_html_block_range(node: &SyntaxNode, content: &str) -> Option<FoldingR
     }
 }
 
-fn extract_yaml_metadata_range(node: &SyntaxNode, content: &str) -> Option<FoldingRange> {
+fn extract_yaml_metadata_range(node: &SyntaxNode, index: &LineIndex) -> Option<FoldingRange> {
     let start_offset: usize = node.text_range().start().into();
     let end_offset: usize = node.text_range().end().into();
 
-    let start_pos = offset_to_position(content, start_offset);
-    let end_pos = offset_to_position(content, end_offset.saturating_sub(1));
+    let start_pos = offset_to_position(index, start_offset);
+    let end_pos = offset_to_position(index, end_offset.saturating_sub(1));
 
     // Only fold if metadata spans multiple lines
     if start_pos.line < end_pos.line {
@@ -224,7 +226,7 @@ Final content.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Should have 4 folding ranges: h1, h2, h3, h2
         assert!(!ranges.is_empty(), "Should have folding ranges");
@@ -251,7 +253,7 @@ More text.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Should have at least the code block fold
         let code_folds: Vec<_> = ranges
@@ -274,7 +276,7 @@ Text after.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Should have at least the fenced div fold
         assert!(!ranges.is_empty(), "Should have folding ranges");
@@ -294,7 +296,7 @@ Content here.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Should have frontmatter fold + heading fold
         assert!(
@@ -321,7 +323,7 @@ More content.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Should have: h1 fold, code block fold, h2 fold
         assert!(ranges.len() >= 3, "Should have at least 3 folds");
@@ -332,7 +334,7 @@ More content.
         let content = "";
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(ranges.is_empty(), "Empty document should have no folds");
     }
@@ -342,7 +344,7 @@ More content.
         let content = "# Heading\n";
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         // Single heading with no content should not create fold
         assert!(
@@ -363,7 +365,7 @@ Trailing paragraph.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(
             !ranges.is_empty(),
@@ -381,7 +383,7 @@ Body paragraph.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(
             !ranges.is_empty(),
@@ -401,7 +403,7 @@ Outside.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(
             !ranges.is_empty(),
@@ -415,7 +417,7 @@ Outside.
         let content = "Hello <span>world</span>.\n";
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(
             ranges.is_empty(),
@@ -433,7 +435,7 @@ And one more.
 "#;
         let config = crate::config::Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let ranges = build_folding_ranges(&tree, content);
+        let ranges = build_folding_ranges(&tree, &LineIndex::new(content));
 
         assert!(ranges.is_empty(), "Plain paragraphs should have no folds");
     }

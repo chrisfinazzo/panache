@@ -756,8 +756,9 @@ fn candidate_edit_for_destination(
         return None;
     }
 
-    let start = offset_to_position(doc_text, range.start().into());
-    let end = offset_to_position(doc_text, range.end().into());
+    let index = crate::lsp::line_index::LineIndex::new(doc_text);
+    let start = offset_to_position(&index, range.start().into());
+    let end = offset_to_position(&index, range.end().into());
 
     let replaced_full = raw_destination.replacen(raw_target, &replacement, 1);
     Some(TextEdit {

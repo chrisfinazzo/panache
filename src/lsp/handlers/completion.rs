@@ -58,7 +58,8 @@ pub(crate) fn completion(
     let config = snap.config(uri);
 
     let (text, root) = snap.document_content_and_tree(uri)?;
-    let offset = super::super::conversions::position_to_offset(&text, position)?;
+    let line_index = snap.line_index(uri)?;
+    let offset = super::super::conversions::position_to_offset(&line_index, position)?;
     let link_ctx_opt = link_dest_context(&root, &text, offset);
     let shortcode_ctx_opt = if link_ctx_opt.is_none() && config.extensions.quarto_shortcodes {
         shortcode_arg_context(&root, &text, offset)
@@ -502,9 +503,10 @@ fn path_completion_items(
     let entries = read_dir_entries(&target_dir, &name_prefix, accept.as_ref());
 
     let name_start = offset.saturating_sub(name_prefix.len());
+    let index = crate::lsp::line_index::LineIndex::new(text);
     let range = Range::new(
-        offset_to_position(text, name_start),
-        offset_to_position(text, offset),
+        offset_to_position(&index, name_start),
+        offset_to_position(&index, offset),
     );
 
     let mut items: Vec<CompletionItem> = entries

@@ -15,6 +15,7 @@ use crate::syntax::{AstNode, Link, ReferenceDefinition, SyntaxNode};
 use crate::utils::normalize_label;
 
 use super::super::conversions::offset_to_position;
+use crate::lsp::line_index::LineIndex;
 
 /// Find the innermost `LINK` node at the given offset.
 pub fn find_link_at_position(tree: &SyntaxNode, offset: usize) -> Option<Link> {
@@ -43,6 +44,7 @@ pub fn can_convert_to_reference(link: &Link) -> bool {
 /// 2. Delete the reference definition line if the converted occurrence was
 ///    its only consumer.
 pub fn convert_to_inline(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let Some(reference) = link.reference() else {
         return vec![];
     };
@@ -64,8 +66,8 @@ pub fn convert_to_inline(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<Text
     let link_range = link.syntax().text_range();
     let mut edits = vec![TextEdit {
         range: Range {
-            start: offset_to_position(text, link_range.start().into()),
-            end: offset_to_position(text, link_range.end().into()),
+            start: offset_to_position(&index, link_range.start().into()),
+            end: offset_to_position(&index, link_range.end().into()),
         },
         new_text: new_inline,
     }];
@@ -81,8 +83,8 @@ pub fn convert_to_inline(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<Text
         };
         edits.push(TextEdit {
             range: Range {
-                start: offset_to_position(text, def_start),
-                end: offset_to_position(text, extended_end),
+                start: offset_to_position(&index, def_start),
+                end: offset_to_position(&index, extended_end),
             },
             new_text: String::new(),
         });
@@ -98,6 +100,7 @@ pub fn convert_to_inline(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<Text
 /// generate a slugged label and append a new definition after the last
 /// existing one (or at end-of-document if none exists).
 pub fn convert_to_reference(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<TextEdit> {
+    let index = LineIndex::new(text);
     let Some(dest_node) = link.dest() else {
         return vec![];
     };
@@ -135,8 +138,8 @@ pub fn convert_to_reference(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<T
     let link_range = link.syntax().text_range();
     let mut edits = vec![TextEdit {
         range: Range {
-            start: offset_to_position(text, link_range.start().into()),
-            end: offset_to_position(text, link_range.end().into()),
+            start: offset_to_position(&index, link_range.start().into()),
+            end: offset_to_position(&index, link_range.end().into()),
         },
         new_text: format!("[{}][{}]", link_text_content, label),
     }];
@@ -157,9 +160,9 @@ pub fn convert_to_reference(link: &Link, tree: &SyntaxNode, text: &str) -> Vec<T
     let (insert_pos, prefix) = match defs.last() {
         Some(last_def) => {
             let end: usize = last_def.syntax().text_range().end().into();
-            (offset_to_position(text, end), "\n")
+            (offset_to_position(&index, end), "\n")
         }
-        None => (offset_to_position(text, text.len()), "\n\n"),
+        None => (offset_to_position(&index, text.len()), "\n\n"),
     };
     edits.push(TextEdit {
         range: Range {

@@ -94,15 +94,16 @@ pub(crate) fn citation_definition_locations(
                     .map(|file| file.content_or_empty(db).to_string())
                     .unwrap_or_default()
             };
+            let line_index = crate::lsp::line_index::LineIndex::new(&text);
             out.push(Location {
                 uri: entry_uri,
                 range: Range {
                     start: crate::lsp::conversions::offset_to_position(
-                        &text,
+                        &line_index,
                         entry.range.start().into(),
                     ),
                     end: crate::lsp::conversions::offset_to_position(
-                        &text,
+                        &line_index,
                         entry.range.end().into(),
                     ),
                 },

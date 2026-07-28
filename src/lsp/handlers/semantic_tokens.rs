@@ -34,6 +34,7 @@ use rowan::TextRange;
 use crate::config::Flavor;
 use crate::lsp::conversions::offset_to_position;
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// Custom token-type legend. Index = `token_type` emitted in the delta stream.
@@ -93,10 +94,11 @@ pub(crate) fn semantic_tokens_full(
 
     // A genuinely missing document is `None` → `ContentModified` (the doc moved
     // on under us); an empty token list is a real, successful answer.
-    let (text, root) = snap.document_content_and_tree(uri)?;
+    let root = snap.parsed_tree(uri)?;
+    let line_index = snap.line_index(uri)?;
 
     let tokens = collect_tokens(&root);
-    let data = encode(&text, tokens);
+    let data = encode(&line_index, tokens);
     Some(SemanticTokensResult::Tokens(SemanticTokens {
         result_id: None,
         data,
@@ -129,14 +131,14 @@ fn collect_tokens(root: &SyntaxNode) -> Vec<(TextRange, u32)> {
 /// Tokens must be sorted by start offset (they are, from preorder). Cross-line
 /// tokens are skipped in step 1: the classic encoding has no multi-line token,
 /// and every kind we collect is single-line in practice.
-fn encode(text: &str, tokens: Vec<(TextRange, u32)>) -> Vec<SemanticToken> {
+fn encode(index: &LineIndex, tokens: Vec<(TextRange, u32)>) -> Vec<SemanticToken> {
     let mut data = Vec::with_capacity(tokens.len());
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
 
     for (range, token_type) in tokens {
-        let start = offset_to_position(text, range.start().into());
-        let end = offset_to_position(text, range.end().into());
+        let start = offset_to_position(index, range.start().into());
+        let end = offset_to_position(index, range.end().into());
 
         // Single-line guard: defer any token that spans a line boundary.
         if start.line != end.line {
@@ -217,7 +219,7 @@ mod tests {
         // Two citations on the same line; deltas are relative to the previous.
         let content = "see [@a] and [@bb] here\n";
         let root = parse(content, Flavor::Pandoc);
-        let data = encode(content, collect_tokens(&root));
+        let data = encode(&LineIndex::new(content), collect_tokens(&root));
         let decoded = decode(&data);
         // `a` at col 6 len 1, `bb` at col 15 len 2 (keys only, no `[@`/`]`).
         assert_eq!(decoded, vec![(0, 6, 1, 0), (0, 15, 2, 0)]);
@@ -228,7 +230,7 @@ mod tests {
         // A multi-byte char before the citation shifts UTF-16 columns by 1 each.
         let content = "é [@kä] x\n";
         let root = parse(content, Flavor::Pandoc);
-        let data = encode(content, collect_tokens(&root));
+        let data = encode(&LineIndex::new(content), collect_tokens(&root));
         let decoded = decode(&data);
         // "é " = 2 UTF-16 units, then "[@" = 2 → key starts at col 4; "kä" = 2 units.
         assert_eq!(decoded, vec![(0, 4, 2, 0)]);
@@ -239,7 +241,7 @@ mod tests {
         // A synthetic range spanning a newline must be dropped by the guard.
         let text = "ab\ncd\n";
         let range = TextRange::new(1.into(), 4.into()); // 'b\nc'
-        let data = encode(text, vec![(range, 0)]);
+        let data = encode(&LineIndex::new(text), vec![(range, 0)]);
         assert!(data.is_empty(), "cross-line token should be skipped");
     }
 
@@ -247,7 +249,7 @@ mod tests {
     fn crlf_line_deltas() {
         let content = "[@a]\r\n[@b]\r\n";
         let root = parse(content, Flavor::Pandoc);
-        let data = encode(content, collect_tokens(&root));
+        let data = encode(&LineIndex::new(content), collect_tokens(&root));
         let decoded = decode(&data);
         assert_eq!(decoded, vec![(0, 2, 1, 0), (1, 2, 1, 0)]);
     }

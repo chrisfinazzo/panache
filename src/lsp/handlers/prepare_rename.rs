@@ -17,7 +17,7 @@ pub(crate) fn prepare_rename(
     let content = ctx.content.clone();
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
 
-    let Some(offset) = position_to_offset(&content, position) else {
+    let Some(offset) = position_to_offset(&ctx.line_index, position) else {
         log::debug!(
             "prepare_rename: position_to_offset failed uri={:?} line={} char={}",
             uri,
@@ -56,8 +56,8 @@ pub(crate) fn prepare_rename(
         return None;
     };
 
-    let start = offset_to_position(&content, range.start().into());
-    let end = offset_to_position(&content, range.end().into());
+    let start = offset_to_position(&ctx.line_index, range.start().into());
+    let end = offset_to_position(&ctx.line_index, range.end().into());
     Some(PrepareRenameResponse::RangeWithPlaceholder {
         range: Range { start, end },
         placeholder: placeholder.to_string(),

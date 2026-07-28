@@ -3,6 +3,7 @@ use serde_json::json;
 
 use crate::lsp::conversions::offset_to_position;
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::syntax::{AstNode, Document, Heading, ImageLink, SyntaxKind, SyntaxNode, Table};
 
 pub(crate) fn document_symbol(
@@ -12,20 +13,21 @@ pub(crate) fn document_symbol(
     let uri = params.text_document.uri;
     log::debug!("document_symbol request for: {}", uri.as_str());
     let parsed_yaml_regions = snap.parsed_yaml_regions(&uri);
-    let (content, syntax_tree) = match snap.document_content_and_tree(&uri) {
+    let syntax_tree = match snap.parsed_tree(&uri) {
         Some(result) => result,
         None => {
             log::warn!("Document not found in document_map: {}", uri.as_str());
             return None;
         }
     };
-    log::debug!("Document content length: {} bytes", content.len());
+    let index = snap.line_index(&uri)?;
+    log::debug!("Document content length: {} bytes", index.len());
     let yaml_frontmatter_region = parsed_yaml_regions
         .iter()
         .find(|region| region.is_frontmatter());
 
     // Build symbols synchronously (SyntaxNode is not Send).
-    let symbols = build_document_symbols(&syntax_tree, &content, yaml_frontmatter_region);
+    let symbols = build_document_symbols(&syntax_tree, &index, yaml_frontmatter_region);
 
     log::debug!("Found {} top-level symbols", symbols.len());
     if symbols.is_empty() {
@@ -37,7 +39,7 @@ pub(crate) fn document_symbol(
 
 fn build_document_symbols(
     root: &SyntaxNode,
-    content: &str,
+    index: &LineIndex,
     yaml_frontmatter_region: Option<&crate::syntax::ParsedYamlRegionSnapshot>,
 ) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
@@ -54,13 +56,13 @@ fn build_document_symbols(
         return symbols;
     };
     symbols.extend(
-        yaml_frontmatter_region.and_then(|region| extract_yaml_region_symbol(region, content)),
+        yaml_frontmatter_region.and_then(|region| extract_yaml_region_symbol(region, index)),
     );
 
     for node in document.blocks() {
         match node.kind() {
             SyntaxKind::HEADING => {
-                if let Some(symbol) = extract_heading_symbol(&node, content) {
+                if let Some(symbol) = extract_heading_symbol(&node, index) {
                     let level = heading_levels.get(&node.text_range()).copied().unwrap_or(1);
 
                     // Pop stack until we find a parent with lower level
@@ -86,7 +88,7 @@ fn build_document_symbols(
             | SyntaxKind::GRID_TABLE
             | SyntaxKind::MULTILINE_TABLE => {
                 if let Some(table) = Table::cast(node.clone())
-                    && let Some(symbol) = extract_table_symbol(&table, content)
+                    && let Some(symbol) = extract_table_symbol(&table, index)
                 {
                     // Add to current heading section or root
                     if let Some((_, heading)) = heading_stack.last_mut() {
@@ -99,7 +101,7 @@ fn build_document_symbols(
             SyntaxKind::FIGURE => {
                 if let Some(figure) = crate::syntax::Figure::cast(node.clone())
                     && let Some(image) = figure.image()
-                    && let Some(symbol) = extract_figure_symbol(image.syntax(), content)
+                    && let Some(symbol) = extract_figure_symbol(image.syntax(), index)
                 {
                     // Add to current heading section or root
                     if let Some((_, heading)) = heading_stack.last_mut() {
@@ -127,12 +129,12 @@ fn build_document_symbols(
 
 fn extract_yaml_region_symbol(
     region: &crate::syntax::ParsedYamlRegionSnapshot,
-    content: &str,
+    index: &LineIndex,
 ) -> Option<DocumentSymbol> {
     let host_range = region.host_range();
     let range = Range {
-        start: offset_to_position(content, host_range.start),
-        end: offset_to_position(content, host_range.end),
+        start: offset_to_position(index, host_range.start),
+        end: offset_to_position(index, host_range.end),
     };
     Some(make_document_symbol(
         "YAML Frontmatter".to_string(),
@@ -147,12 +149,12 @@ fn extract_yaml_region_symbol(
     ))
 }
 
-fn extract_heading_symbol(node: &SyntaxNode, content: &str) -> Option<DocumentSymbol> {
+fn extract_heading_symbol(node: &SyntaxNode, index: &LineIndex) -> Option<DocumentSymbol> {
     // Use typed wrapper
     let heading = Heading::cast(node.clone())?;
     let text = heading.title_or("(empty)");
 
-    let range = node_to_range(node, content)?;
+    let range = node_to_range(node, index)?;
 
     Some(make_document_symbol(
         text,
@@ -164,7 +166,7 @@ fn extract_heading_symbol(node: &SyntaxNode, content: &str) -> Option<DocumentSy
     ))
 }
 
-fn extract_table_symbol(table: &Table, content: &str) -> Option<DocumentSymbol> {
+fn extract_table_symbol(table: &Table, index: &LineIndex) -> Option<DocumentSymbol> {
     let caption = table.caption().map(|caption| caption.text());
 
     let name = if let Some(cap) = caption {
@@ -173,8 +175,8 @@ fn extract_table_symbol(table: &Table, content: &str) -> Option<DocumentSymbol> 
         "Table".to_string()
     };
 
-    let range = node_to_range(table.syntax(), content)?;
-    let selection_range = node_to_range(table.syntax(), content)?;
+    let range = node_to_range(table.syntax(), index)?;
+    let selection_range = node_to_range(table.syntax(), index)?;
 
     Some(make_document_symbol(
         name,
@@ -186,7 +188,7 @@ fn extract_table_symbol(table: &Table, content: &str) -> Option<DocumentSymbol> 
     ))
 }
 
-fn extract_figure_symbol(node: &SyntaxNode, content: &str) -> Option<DocumentSymbol> {
+fn extract_figure_symbol(node: &SyntaxNode, index: &LineIndex) -> Option<DocumentSymbol> {
     // Use typed wrapper for cleaner access
     let alt_text = ImageLink::cast(node.clone())
         .and_then(|img| img.alt())
@@ -199,8 +201,8 @@ fn extract_figure_symbol(node: &SyntaxNode, content: &str) -> Option<DocumentSym
         "Figure".to_string()
     };
 
-    let range = node_to_range(node, content)?;
-    let selection_range = node_to_range(node, content)?;
+    let range = node_to_range(node, index)?;
+    let selection_range = node_to_range(node, index)?;
 
     Some(make_document_symbol(
         name,
@@ -232,10 +234,10 @@ fn make_document_symbol(
     .expect("failed to build DocumentSymbol")
 }
 
-fn node_to_range(node: &SyntaxNode, content: &str) -> Option<Range> {
+fn node_to_range(node: &SyntaxNode, index: &LineIndex) -> Option<Range> {
     let range = node.text_range();
-    let start_pos = offset_to_position(content, range.start().into());
-    let end_pos = offset_to_position(content, range.end().into());
+    let start_pos = offset_to_position(index, range.start().into());
+    let end_pos = offset_to_position(index, range.end().into());
 
     Some(Range {
         start: start_pos,
@@ -253,7 +255,7 @@ mod tests {
         let content = "# H1\n\n## H2\n\n### H3\n\n## H2 Again\n\n# H1 Again";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 2); // Two H1 headings
 
@@ -281,7 +283,7 @@ mod tests {
         let content = "# Heading\n\n| col1 | col2 |\n|------|------|\n| a    | b    |\n";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         let heading = &symbols[0];
@@ -298,7 +300,7 @@ mod tests {
         let content = "# Heading\n\n| col1 | col2 |\n|------|------|\n| a    | b    |\n: Results\n";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         let children = symbols[0].children.as_ref().unwrap();
@@ -311,7 +313,7 @@ mod tests {
         let content = "# Heading\n\n![Figure caption](image.png)\n";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         let children = symbols[0].children.as_ref().unwrap();
@@ -325,7 +327,7 @@ mod tests {
         let content = "# Heading\n\n![](image.png)\n";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         let children = symbols[0].children.as_ref().unwrap();
@@ -338,7 +340,7 @@ mod tests {
         let content = "# \n\n## Subtitle";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "(empty)");
@@ -353,7 +355,7 @@ mod tests {
         let content = "| col1 | col2 |\n|------|------|\n| a    | b    |\n\n![Figure](image.png)";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         // Tables and figures at root level when no headings
         assert_eq!(symbols.len(), 2);
@@ -386,7 +388,7 @@ Another table:
 "#;
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1); // One H1
         let h1 = &symbols[0];
@@ -412,7 +414,8 @@ Another table:
         let tree = crate::parser::parse(content, Some(config));
         let parsed = crate::syntax::collect_parsed_yaml_region_snapshots(&tree);
         let yaml_frontmatter_region = parsed.iter().find(|region| region.is_frontmatter());
-        let symbols = build_document_symbols(&tree, content, yaml_frontmatter_region);
+        let symbols =
+            build_document_symbols(&tree, &LineIndex::new(content), yaml_frontmatter_region);
         let yaml_symbol = symbols
             .iter()
             .find(|symbol| symbol.name == "YAML Frontmatter")
@@ -429,7 +432,8 @@ Another table:
         let tree = crate::parser::parse(content, Some(config));
         let parsed = crate::syntax::collect_parsed_yaml_region_snapshots(&tree);
         let yaml_frontmatter_region = parsed.iter().find(|region| region.is_frontmatter());
-        let symbols = build_document_symbols(&tree, content, yaml_frontmatter_region);
+        let symbols =
+            build_document_symbols(&tree, &LineIndex::new(content), yaml_frontmatter_region);
         let yaml_symbol = symbols
             .iter()
             .find(|symbol| symbol.name == "YAML Frontmatter")
@@ -443,7 +447,7 @@ Another table:
         let content = "# Top\n\n- # Item Heading\n\nTerm\n: # Definition Heading\n\n> # Quote Heading\n\n## Child\n";
         let config = Config::default();
         let tree = crate::parser::parse(content, Some(config));
-        let symbols = build_document_symbols(&tree, content, None);
+        let symbols = build_document_symbols(&tree, &LineIndex::new(content), None);
 
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Top");

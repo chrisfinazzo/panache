@@ -10,6 +10,7 @@ use rowan::GreenNode;
 use crate::lsp::DocumentState;
 use crate::lsp::conversions::offset_to_position;
 use crate::lsp::global_state::StateSnapshot;
+use crate::lsp::line_index::LineIndex;
 use crate::lsp::uri_ext::UriExt;
 use crate::salsa::HeadingOutlineEntry;
 use crate::syntax::{AstNode, Document, Heading, SyntaxNode};
@@ -139,6 +140,7 @@ fn symbols_for_document(
 ) -> Vec<WorkspaceSymbol> {
     let mut symbols = Vec::new();
     let mut heading_stack: Vec<(usize, String)> = Vec::new();
+    let index = LineIndex::new(content);
 
     for entry in outline {
         while let Some((stack_level, _)) = heading_stack.last() {
@@ -160,7 +162,7 @@ fn symbols_for_document(
             SymbolKind::NAMESPACE,
             Location {
                 uri: uri.clone(),
-                range: range_from_text_range(content, entry.range),
+                range: range_from_text_range(&index, entry.range),
             },
             container_name,
         ));
@@ -185,10 +187,10 @@ fn make_workspace_symbol(
     }
 }
 
-fn range_from_text_range(content: &str, range: rowan::TextRange) -> Range {
+fn range_from_text_range(index: &LineIndex, range: rowan::TextRange) -> Range {
     Range {
-        start: offset_to_position(content, range.start().into()),
-        end: offset_to_position(content, range.end().into()),
+        start: offset_to_position(index, range.start().into()),
+        end: offset_to_position(index, range.end().into()),
     }
 }
 

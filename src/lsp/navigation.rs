@@ -148,11 +148,12 @@ pub(crate) fn indexed_documents_from_inputs(
 }
 
 pub(crate) fn location_from_range(uri: &Uri, text: &str, range: rowan::TextRange) -> Location {
+    let index = crate::lsp::line_index::LineIndex::new(text);
     Location {
         uri: uri.clone(),
         range: Range {
-            start: conversions::offset_to_position(text, range.start().into()),
-            end: conversions::offset_to_position(text, range.end().into()),
+            start: conversions::offset_to_position(&index, range.start().into()),
+            end: conversions::offset_to_position(&index, range.end().into()),
         },
     }
 }

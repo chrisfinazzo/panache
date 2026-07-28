@@ -973,7 +973,7 @@ Sync) for cross-thread tree storage. It also goes *beyond* RA with a dedicated
 single-thread format pool and `FileConfig` interning. The items below are the
 four gaps worth tracking; none is a defect.
 
-- [ ] **Cache a `LineIndex` (position conversion is O(n) per call).**
+- [x] **Cache a `LineIndex` (position conversion is O(n) per call).**
   `position_to_offset`/`offset_to_position` re-scan the document line by
   line on every call (`src/lsp/conversions.rs:10-97`); `offset_to_line`
   (`src/utils.rs:177`) does the same. RA caches a per-file `LineIndex`,
