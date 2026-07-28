@@ -959,3 +959,69 @@ design decisions, and per-session workflow. Parser invariants:
   `crates/panache-formatter/src/formatter/math/`. Standalone `\begin{env}`
   TeX blocks stay opaque (parser keeps them as `TEX_BLOCK`) --- a possible
   follow-up.
+
+## rust-analyzer parity audit
+
+Audit of `123c8e29` (2026-07-28) against rust-analyzer (RA), the design
+reference for Panache. Focus: concurrency model, salsa handling, rowan tree
+handling. **Finding: Panache is already a faithful RA clone with no structural
+red flags** --- sync `lsp-server` + crossbeam `select!` main loop (not
+tower-lsp), single-writer `GlobalState` owning the only `&mut SalsaDb`, cloned
+read-only salsa handles for workers, salsa cancellation as the sole concurrency
+fence, copy-on-write `Arc` structures (no coarse mutex), and `GreenNode` (Send +
+Sync) for cross-thread tree storage. It also goes *beyond* RA with a dedicated
+single-thread format pool and `FileConfig` interning. The items below are the
+four gaps worth tracking; none is a defect.
+
+- [ ] **Cache a `LineIndex` (position conversion is O(n) per call).**
+  `position_to_offset`/`offset_to_position` re-scan the document line by
+  line on every call (`src/lsp/conversions.rs:10-97`); `offset_to_line`
+  (`src/utils.rs:177`) does the same. RA caches a per-file `LineIndex`,
+  usually as a salsa query keyed on the text input, so line-start offsets
+  and UTF-16 mapping are computed once per revision. Hot handlers (semantic
+  tokens, document symbols, diagnostics) convert many positions per request,
+  so the cost compounds. Fix: add an RA-style `LineIndex` as a
+  `#[salsa::tracked]` query over `FileText` and route the conversion helpers
+  through it. *Severity medium, risk low, effort small --- do this first.*
+
+- [ ] **Quick cleanup: AST-wrapper allocations.** Typed accessors collect into a
+  `Vec` before joining or indexing: `CodeSpan::content` does
+  `.collect::<Vec<_>>().join("")`
+  (`crates/panache-parser/src/syntax/inlines.rs:96-104`) and
+  `FootnoteReference` collects all `TEXT` tokens then indexes `[0]`/`[1]`
+  (`crates/panache-parser/src/syntax/references.rs:153-159`). Build the
+  `String` directly / use `.next()`/`.nth()`. *Severity trivial --- easy
+  follow-up.*
+
+- [ ] **Consolidate the VFS; reduce the path-lookup lock.** `Vfs` funnels every
+  path lookup through one `Arc<Mutex<VfsInner>>` (`src/salsa.rs:2226-2311`),
+  and path/id/input state is spread across `Vfs`, the `FileSet` input, and
+  the LSP `DocumentMap`. RA centralizes this in a dedicated `vfs` crate with
+  a single path interner. Contention is low today (fine-grained lock), but
+  `project_graph` hits the VFS per include and per bibliography, so a large
+  book is a plausible hot path, and the fragmentation hurts reasoning about
+  path identity. Fix: one VFS-style abstraction, possibly
+  read-mostly/lock-free lookup. *Severity low--medium, refactor not a bug.*
+
+- [ ] **Incremental reparse should share green subtrees, not rebuild.**
+  `parse_incremental_suffix_inner`
+  (`crates/panache-parser/src/parser.rs:164-231`) reparses the suffix and
+  then reconstructs the whole `DOCUMENT` by collecting old prefix + new
+  suffix children into a `Vec` and calling `GreenNode::new(...)`;
+  `element_to_green` (`parser.rs:281-286`) clones each retained child via
+  `.green().into_owned()` instead of reusing rowan's structural sharing /
+  `reparse()`. Every edit thus copies the full prefix and preserves no
+  subtree identity across the edit boundary, defeating the identity reuse
+  the downstream `no_eq` salsa tree query could exploit (so an edit tends to
+  force full re-analysis anyway). Incremental reparse is runtime opt-in and
+  still falls back to `full_reparse_result` (`parser.rs:237-245`) on many
+  shapes, so the upside is latent --- do the reuse right before enabling it
+  broadly. Needs paired golden fixtures under
+  `crates/panache-parser/tests/fixtures/cases/` plus
+  losslessness/idempotency checks. *Severity medium, risk higher, effort
+  large --- do last.*
+
+- [ ] **Doc drift:** `AGENTS.md`'s LSP section (`tower_lsp_server`,
+  `tokio::sync::Mutex`-guarded state) is stale --- the server is sync
+  `lsp-server` 0.10 + crossbeam with a single-writer `GlobalState`. Update
+  it so future readers don't build the wrong concurrency model.
