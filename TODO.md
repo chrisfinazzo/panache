@@ -984,14 +984,12 @@ four gaps worth tracking; none is a defect.
   `#[salsa::tracked]` query over `FileText` and route the conversion helpers
   through it. *Severity medium, risk low, effort small --- do this first.*
 
-- [ ] **Quick cleanup: AST-wrapper allocations.** Typed accessors collect into a
-  `Vec` before joining or indexing: `CodeSpan::content` does
-  `.collect::<Vec<_>>().join("")`
-  (`crates/panache-parser/src/syntax/inlines.rs:96-104`) and
-  `FootnoteReference` collects all `TEXT` tokens then indexes `[0]`/`[1]`
-  (`crates/panache-parser/src/syntax/references.rs:153-159`). Build the
-  `String` directly / use `.next()`/`.nth()`. *Severity trivial --- easy
-  follow-up.*
+- [x] **Quick cleanup: AST-wrapper allocations.** `CodeSpan::content` now
+  collects `INLINE_CODE_CONTENT` tokens straight into a `String` (dropped
+  the `Vec<_>` + `join("")`), and `FootnoteReference::id` takes the first
+  two `TEXT` tokens lazily via `.next()`/`.next()` instead of collecting all
+  of them into a `Vec` and indexing `[0]`/`[1]`. Behavior-preserving; full
+  workspace suite green.
 
 - [ ] **Consolidate the VFS; reduce the path-lookup lock.** `Vfs` funnels every
   path lookup through one `Arc<Mutex<VfsInner>>` (`src/salsa.rs:2226-2311`),

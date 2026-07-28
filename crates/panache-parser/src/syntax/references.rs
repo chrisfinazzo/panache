@@ -150,18 +150,15 @@ impl FootnoteReference {
             return id.text().to_string();
         }
 
-        let tokens: Vec<_> = self
+        let mut text_tokens = self
             .0
             .children_with_tokens()
             .filter_map(|child| child.into_token())
-            .filter(|token| token.kind() == SyntaxKind::TEXT)
-            .map(|token| token.text().to_string())
-            .collect();
+            .filter(|token| token.kind() == SyntaxKind::TEXT);
 
-        if tokens.len() >= 2 && tokens[0] == "[^" {
-            tokens[1].clone()
-        } else {
-            String::new()
+        match (text_tokens.next(), text_tokens.next()) {
+            (Some(first), Some(second)) if first.text() == "[^" => second.text().to_string(),
+            _ => String::new(),
         }
     }
 

@@ -99,8 +99,7 @@ impl CodeSpan {
             .filter_map(|child| child.into_token())
             .filter(|token| token.kind() == SyntaxKind::INLINE_CODE_CONTENT)
             .map(|token| token.text().to_string())
-            .collect::<Vec<_>>()
-            .join("")
+            .collect()
     }
 
     pub fn content_range(&self) -> Option<rowan::TextRange> {
