@@ -18,6 +18,7 @@ pub mod range_utils;
 pub mod salsa;
 pub mod syntax;
 mod utils;
+pub(crate) mod vfs;
 mod yaml_engine;
 #[cfg(test)]
 mod yaml_regions;
