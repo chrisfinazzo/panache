@@ -621,6 +621,109 @@ pub(crate) fn is_structural_heading_node(node: &SyntaxNode) -> bool {
 }
 
 impl SymbolUsageIndex {
+    /// Merge `other`'s block-relative ranges into `self`, shifting every range
+    /// by `offset` (the block's absolute start in the document).
+    ///
+    /// Append-only and order-preserving: because blocks are merged in document
+    /// order and each block's buckets are already in intra-block document order,
+    /// every bucket ends up byte-identical to a single whole-tree walk. The two
+    /// implicit-heading buckets are left untouched here — the merge fills them
+    /// separately from the one cross-block pass.
+    fn merge_offset(&mut self, other: &SymbolUsageIndex, offset: rowan::TextSize) {
+        fn merge_map(
+            dst: &mut HashMap<String, Vec<rowan::TextRange>>,
+            src: &HashMap<String, Vec<rowan::TextRange>>,
+            offset: rowan::TextSize,
+        ) {
+            for (key, ranges) in src {
+                dst.entry(key.clone())
+                    .or_default()
+                    .extend(ranges.iter().map(|range| *range + offset));
+            }
+        }
+
+        merge_map(&mut self.citation_usages, &other.citation_usages, offset);
+        merge_map(
+            &mut self.citation_references,
+            &other.citation_references,
+            offset,
+        );
+        merge_map(&mut self.crossref_usages, &other.crossref_usages, offset);
+        merge_map(
+            &mut self.example_label_usages,
+            &other.example_label_usages,
+            offset,
+        );
+        merge_map(
+            &mut self.crossref_declarations,
+            &other.crossref_declarations,
+            offset,
+        );
+        merge_map(
+            &mut self.crossref_declaration_value_ranges,
+            &other.crossref_declaration_value_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.chunk_label_declaration_ranges,
+            &other.chunk_label_declaration_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.chunk_label_value_ranges,
+            &other.chunk_label_value_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.heading_id_value_ranges,
+            &other.heading_id_value_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.heading_link_usages,
+            &other.heading_link_usages,
+            offset,
+        );
+        merge_map(
+            &mut self.heading_explicit_definition_ranges,
+            &other.heading_explicit_definition_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.reference_definitions,
+            &other.reference_definitions,
+            offset,
+        );
+        merge_map(
+            &mut self.footnote_definitions,
+            &other.footnote_definitions,
+            offset,
+        );
+        merge_map(
+            &mut self.footnote_references,
+            &other.footnote_references,
+            offset,
+        );
+        merge_map(
+            &mut self.footnote_definition_id_ranges,
+            &other.footnote_definition_id_ranges,
+            offset,
+        );
+        merge_map(
+            &mut self.example_label_definitions,
+            &other.example_label_definitions,
+            offset,
+        );
+        merge_map(&mut self.heading_labels, &other.heading_labels, offset);
+
+        self.heading_sequence.extend(
+            other
+                .heading_sequence
+                .iter()
+                .map(|(range, level)| (*range + offset, *level)),
+        );
+    }
+
     pub fn citation_usages(&self, key: &str) -> Option<&Vec<rowan::TextRange>> {
         self.citation_usages.get(&normalize_label(key))
     }
@@ -765,10 +868,68 @@ impl SymbolUsageIndex {
     }
 }
 
+/// Ordered top-level blocks (`DOCUMENT` children) as owned green subtrees.
+///
+/// Content-addressed: an edit that changes one block leaves the other blocks'
+/// `GreenNode`s structurally equal (locked in by the parser's
+/// `incremental_identity` tests), so per-block queries keyed on these values
+/// memo-hit for every unchanged block — even when the parse fell back to a full
+/// reparse. `no_eq` because the `Vec` itself changes on every edit; the gating
+/// happens at the per-block layer.
+///
+/// `unsafe(non_salsa_values)`: `GreenNode` is not a salsa value. It is an
+/// immutable Arc-backed tree carrying no salsa ids, so it is sound to return.
+#[salsa::tracked(returns(ref), lru = 512, no_eq, unsafe(non_salsa_values))]
+pub fn document_blocks(db: &dyn Db, file: FileText, config: FileConfig) -> Vec<rowan::GreenNode> {
+    parsed_tree(db, file, config)
+        .children()
+        .filter_map(|child| child.into_node().map(|node| node.to_owned()))
+        .collect()
+}
+
+/// Block-relative symbol index for a single top-level block.
+///
+/// Ranges are relative to the block start (the walk runs on a fresh root), so
+/// the result is position-independent: an edit that merely shifts a block's
+/// absolute offset still memo-hits here. [`symbol_usage_index`] offsets these
+/// back to absolute ranges when merging. Only the node-local buckets are
+/// populated; the cross-block implicit-heading pass runs once in the merge.
+///
+/// `unsafe(non_salsa_values)`: the interned `GreenNode` argument is not a salsa
+/// value. It is an immutable Arc-backed tree carrying no salsa ids, so the
+/// interning contract holds. The output backdates on `SymbolUsageIndex`
+/// equality (no `no_eq`), giving a second memoization layer.
+#[salsa::tracked(returns(ref), unsafe(non_salsa_values))]
+pub fn symbol_usage_index_block(
+    db: &dyn Db,
+    block: rowan::GreenNode,
+    config: FileConfig,
+) -> SymbolUsageIndex {
+    let tree = SyntaxNode::new_root(block);
+    let mut index = SymbolUsageIndex::default();
+    collect_block_local_symbols(db, &tree, &config.config(db).extensions, &mut index);
+    index
+}
+
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn symbol_usage_index(db: &dyn Db, file: FileText, config: FileConfig) -> SymbolUsageIndex {
+    // Merge the memoized per-block node-local indexes, shifting each block's
+    // relative ranges to absolute by prefix-summing block lengths. Unchanged
+    // blocks are cache hits, so only edited blocks are re-walked.
+    let mut index = SymbolUsageIndex::default();
+    let mut offset = rowan::TextSize::from(0);
+    for block in document_blocks(db, file, config) {
+        let block_index = symbol_usage_index_block(db, block.clone(), config);
+        index.merge_offset(block_index, offset);
+        offset += block.text_len();
+    }
+
+    // Implicit heading ids dedup slugs across the whole document, so they cannot
+    // be computed per block. Run that one cross-block pass over the full tree;
+    // its ranges are already absolute.
     let tree = parsed_tree_root(db, file, config);
-    symbol_usage_index_from_tree(db, &tree, &config.config(db).extensions)
+    collect_implicit_heading_symbols(db, &tree, &config.config(db).extensions, &mut index);
+    index
 }
 
 #[salsa::tracked(returns(ref), lru = 512)]
@@ -807,7 +968,24 @@ pub fn symbol_usage_index_from_tree(
     extensions: &crate::config::Extensions,
 ) -> SymbolUsageIndex {
     let mut index = SymbolUsageIndex::default();
+    collect_block_local_symbols(db, tree, extensions, &mut index);
+    collect_implicit_heading_symbols(db, tree, extensions, &mut index);
+    index
+}
 
+/// Collect every node-local symbol bucket for `tree` into `index`.
+///
+/// "Node-local" means each range derives from a single node or token with no
+/// cross-node state, so this is safe to run per top-level block and merge with
+/// offsets — the basis of the salsa per-block memoization in
+/// [`symbol_usage_index`]. The one cross-block pass (implicit heading ids, which
+/// dedups slugs document-wide) lives in [`collect_implicit_heading_symbols`].
+fn collect_block_local_symbols(
+    db: &dyn Db,
+    tree: &SyntaxNode,
+    extensions: &crate::config::Extensions,
+    index: &mut SymbolUsageIndex,
+) {
     // Single pre-order walk buckets every node/token kind the passes below
     // consume, replacing the ~12 separate `tree.descendants()` traversals that
     // used to dominate this query. The replay loops are otherwise unchanged and
@@ -1051,14 +1229,14 @@ pub fn symbol_usage_index_from_tree(
         db.unwind_if_revision_cancelled();
         match token.kind() {
             SyntaxKind::TEXT => {
-                collect_bookdown_declarations_from_text_token(&token, &mut index, extensions);
-                collect_example_label_usages_from_text_token(&token, &mut index);
+                collect_bookdown_declarations_from_text_token(&token, index, extensions);
+                collect_example_label_usages_from_text_token(&token, index);
             }
             // Bookdown equation labels `(\#eq:label)` inside math are parsed
             // into a dedicated token; its text is exactly one declaration, so
             // the same scanner registers it (with full + value ranges).
             SyntaxKind::MATH_EQUATION_LABEL => {
-                collect_bookdown_declarations_from_text_token(&token, &mut index, extensions);
+                collect_bookdown_declarations_from_text_token(&token, index, extensions);
             }
             _ => {}
         }
@@ -1161,7 +1339,18 @@ pub fn symbol_usage_index_from_tree(
                 .push(label.value_range());
         }
     }
+}
 
+/// Cross-block pass: implicit heading ids dedup slugs document-wide (pandoc's
+/// `id`, `id-1`, `id-2` suffixing), so this must run once over the whole tree,
+/// never per block. Ranges are absolute; [`symbol_usage_index`] runs it after
+/// merging the per-block node-local buckets.
+fn collect_implicit_heading_symbols(
+    db: &dyn Db,
+    tree: &SyntaxNode,
+    extensions: &crate::config::Extensions,
+    index: &mut SymbolUsageIndex,
+) {
     for entry in implicit_heading_ids(tree, extensions) {
         db.unwind_if_revision_cancelled();
         index
@@ -1187,8 +1376,6 @@ pub fn symbol_usage_index_from_tree(
             .or_default()
             .push(range);
     }
-
-    index
 }
 
 fn heading_has_explicit_id(heading: &SyntaxNode) -> bool {
@@ -2989,6 +3176,97 @@ mod tests {
             .map(|(_, level)| *level)
             .collect();
         assert_eq!(levels, vec![1, 2]);
+    }
+
+    #[test]
+    fn symbol_usage_index_block_memoizes_unchanged_blocks() {
+        // The perf win: editing one top-level block re-walks only that block.
+        // Every other block's `symbol_usage_index_block` memo is reused because
+        // its `GreenNode` is structurally equal across the reparse.
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/tmp/block_memo.qmd");
+        let source = "# Alpha\n\n# Beta\n\n# Gamma\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string();
+        let file = db.update_file_text(path.clone(), source);
+        let config = FileConfig::new(&db, crate::Config::default());
+
+        // Prime the per-block memos, then clear the log.
+        let before = symbol_usage_index(&db, file, config).clone();
+        let primed_blocks = executed(&log, "symbol_usage_index_block");
+        assert!(
+            primed_blocks >= 5,
+            "priming should walk every block, walked {primed_blocks}"
+        );
+        log.lock().unwrap().clear();
+
+        // Edit exactly one heading block (changing its length shifts later
+        // blocks' absolute offsets, which must not force them to re-walk).
+        db.update_file_text(
+            path,
+            "# Alpha\n\n# Beta\n\n# GammaX\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string(),
+        );
+        let after = symbol_usage_index(&db, file, config).clone();
+
+        assert_eq!(
+            executed(&log, "symbol_usage_index_block"),
+            1,
+            "only the edited block should be re-walked; every other block memo-hits"
+        );
+        // Sanity: the merged index still equals a full whole-tree walk.
+        let tree = parsed_tree_root(&db, file, config);
+        let reference =
+            symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+        assert_eq!(after, reference);
+        assert_ne!(before, after, "the edit should change the index");
+    }
+
+    #[test]
+    fn folded_index_matches_reference() {
+        // The decomposed, per-block `symbol_usage_index` must be byte-identical
+        // to the whole-tree `symbol_usage_index_from_tree` reference across a
+        // corpus. The corpus deliberately spans every cross-block hazard:
+        // duplicate heading slugs (implicit-id dedup runs document-wide), and
+        // symbols spread across multiple top-level sections so the offset merge
+        // is exercised.
+        let corpus = [
+            "# Intro\n\nSee @fig-plot and [@cite] and [ref].\n\n# Intro\n\nDuplicate slug.\n\n[ref]: https://example.com\n[^a]: footnote\n\n```{r}\n#| label: fig-plot\n1 + 1\n```\n",
+            "# A\n\nalpha [text](#b)\n\n## B {#b}\n\nbody\n\n# A\n\nsecond A section\n\n# A\n\nthird A section\n",
+            "para one [^n]\n\npara two\n\n[^n]: note\n\n[link][r]\n\n[r]: https://example.org\n",
+            "---\ntitle: Demo\n---\n\n# H1\n\ntext\n\n# H1\n\nmore\n\n# H1\n\neven more\n",
+            "no headings here\n\njust paragraphs\n\nand [ref] uses\n\n[ref]: https://x.test\n",
+        ];
+
+        for (flavor, exts) in [
+            (crate::config::Flavor::Quarto, {
+                let mut e = crate::config::Extensions::for_flavor(crate::config::Flavor::Quarto);
+                e.quarto_crossrefs = true;
+                e
+            }),
+            (
+                crate::config::Flavor::Pandoc,
+                crate::config::Extensions::for_flavor(crate::config::Flavor::Pandoc),
+            ),
+        ] {
+            for (i, source) in corpus.iter().enumerate() {
+                let mut db = SalsaDb::default();
+                let path = PathBuf::from(format!("/tmp/folded_{i}.qmd"));
+                let file = db.update_file_text(path, source.to_string());
+                let cfg = crate::Config {
+                    flavor,
+                    extensions: exts.clone(),
+                    ..Default::default()
+                };
+                let config = FileConfig::new(&db, cfg);
+
+                let decomposed = symbol_usage_index(&db, file, config).clone();
+                let tree = parsed_tree_root(&db, file, config);
+                let reference = symbol_usage_index_from_tree(&db, &tree, &exts);
+
+                assert_eq!(
+                    decomposed, reference,
+                    "decomposed index diverged from whole-tree reference for corpus case {i} ({flavor:?})"
+                );
+            }
+        }
     }
 
     #[test]
