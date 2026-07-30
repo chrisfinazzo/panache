@@ -931,6 +931,16 @@ pub fn symbol_usage_index(db: &dyn Db, file: FileText, config: FileConfig) -> Sy
         offset += block.text_len();
     }
 
+    // The per-block offset math assumes `document_blocks` (which keeps only node
+    // children) drops nothing, i.e. `DOCUMENT` has no direct token children. If a
+    // future parser change breaks that invariant, `offset` undercounts and every
+    // range past the stray token silently desyncs — assert it loudly in debug.
+    debug_assert_eq!(
+        offset,
+        parsed_tree(db, file, config).text_len(),
+        "document_blocks dropped a top-level token child; per-block offsets desynced"
+    );
+
     // Implicit heading ids dedup slugs across the whole document, so they cannot
     // be computed per block. Run that one cross-block pass over the full tree;
     // its ranges are already absolute.
@@ -960,6 +970,14 @@ pub fn heading_outline(
         }
         offset += block.text_len();
     }
+    // Guard the same invariant as `symbol_usage_index`: summed block lengths must
+    // equal the full document length, else `document_blocks` dropped a top-level
+    // token child and the absolute ranges above are desynced.
+    debug_assert_eq!(
+        offset,
+        parsed_tree(db, file, config).text_len(),
+        "document_blocks dropped a top-level token child; per-block offsets desynced"
+    );
     outline
 }
 
