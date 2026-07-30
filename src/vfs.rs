@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::salsa::{Db, FileSet, FileText};
 
@@ -29,15 +29,17 @@ pub struct FileId(u32);
 /// Per-id metadata: the (immutable) backing path and its salsa text input.
 /// `path` is `None` for an in-memory buffer with no file on disk (retires the
 /// `<memory>` sentinel).
+#[derive(Clone)]
 struct FileMeta {
     path: Option<PathBuf>,
     input: FileText,
 }
 
 /// The interior of [`Vfs`]: the dense id->meta table plus the two reverse
-/// indices. Only the writer mutates it (`register`/`remove`); cloned worker
-/// handles share the same `Arc<Mutex<_>>` and only read.
-#[derive(Default)]
+/// indices. Held behind a copy-on-write `Arc`: the writer rebuilds a fresh
+/// `VfsInner` and swaps the `Arc`, so a reader that has cloned the current `Arc`
+/// keeps reading a consistent snapshot with no further locking.
+#[derive(Clone, Default)]
 struct VfsInner {
     /// Dense id->meta table indexed by `FileId.0`. A `None` slot is a tombstone
     /// (an evicted id); the vector only grows, so ids are never recycled.
@@ -62,9 +64,16 @@ impl VfsInner {
 /// table *and* the structural [`FileSet`] input handle. Owned by
 /// [`crate::salsa::SalsaDb`]; both fields are shared behind `Arc`, so cloned
 /// worker handles observe the same table and the same `FileSet` input.
+///
+/// Reads are near-lock-free: a reader takes the read lock only long enough to
+/// clone the current snapshot `Arc`, then does its lookups against that owned
+/// snapshot with no lock held. The single writer rebuilds a fresh [`VfsInner`]
+/// and swaps the `Arc` under the write lock, so an in-flight reader keeps
+/// observing a consistent prior snapshot. This is a dependency-free stand-in
+/// for `arc-swap` (the critical section is a pointer clone, not a lookup).
 #[derive(Clone, Default)]
 pub(crate) struct Vfs {
-    inner: Arc<Mutex<VfsInner>>,
+    inner: Arc<RwLock<Arc<VfsInner>>>,
     /// The single [`FileSet`] input, minted lazily on the writer and shared
     /// across cloned handles. Co-located with the interner because the set's
     /// membership *is* the interner's live id set: interning adds an id and
@@ -74,8 +83,20 @@ pub(crate) struct Vfs {
 }
 
 impl Vfs {
-    fn lock(&self) -> std::sync::MutexGuard<'_, VfsInner> {
-        self.inner.lock().expect("vfs lock poisoned")
+    /// Clone the current snapshot `Arc` (read lock held only for the clone).
+    fn snapshot(&self) -> Arc<VfsInner> {
+        self.inner.read().expect("vfs lock poisoned").clone()
+    }
+
+    /// Copy-on-write mutation: clone the current snapshot, apply `f`, and swap
+    /// the fresh `Arc` in under the write lock. Writer-only; readers holding an
+    /// older snapshot are unaffected.
+    fn with_mut<R>(&self, f: impl FnOnce(&mut VfsInner) -> R) -> R {
+        let mut guard = self.inner.write().expect("vfs lock poisoned");
+        let mut next = (**guard).clone();
+        let out = f(&mut next);
+        *guard = Arc::new(next);
+        out
     }
 
     /// The shared [`FileSet`] input handle, minted once on the writer. Cloned
@@ -88,62 +109,64 @@ impl Vfs {
     }
 
     pub(crate) fn id_for_path(&self, path: &Path) -> Option<FileId> {
-        self.lock().path_to_id.get(path).copied()
+        self.snapshot().path_to_id.get(path).copied()
     }
 
     pub(crate) fn input_for_id(&self, id: FileId) -> Option<FileText> {
-        self.lock().meta(id).map(|meta| meta.input)
+        self.snapshot().meta(id).map(|meta| meta.input)
     }
 
     pub(crate) fn input_for_path(&self, path: &Path) -> Option<FileText> {
-        let inner = self.lock();
-        let id = *inner.path_to_id.get(path)?;
-        inner.meta(id).map(|meta| meta.input)
+        let snap = self.snapshot();
+        let id = *snap.path_to_id.get(path)?;
+        snap.meta(id).map(|meta| meta.input)
     }
 
     pub(crate) fn path_for_id(&self, id: FileId) -> Option<PathBuf> {
-        self.lock().meta(id).and_then(|meta| meta.path.clone())
+        self.snapshot().meta(id).and_then(|meta| meta.path.clone())
     }
 
     /// The immutable backing path for a [`FileText`] input, or `None` for an
     /// in-memory buffer / unregistered / evicted input.
     pub(crate) fn path_for_input(&self, input: FileText) -> Option<PathBuf> {
-        let inner = self.lock();
-        let id = *inner.input_to_id.get(&input)?;
-        inner.meta(id).and_then(|meta| meta.path.clone())
+        let snap = self.snapshot();
+        let id = *snap.input_to_id.get(&input)?;
+        snap.meta(id).and_then(|meta| meta.path.clone())
     }
 
     pub(crate) fn cached_paths(&self) -> Vec<PathBuf> {
-        self.lock().path_to_id.keys().cloned().collect()
+        self.snapshot().path_to_id.keys().cloned().collect()
     }
 
     /// Register a fresh id for `path`/`input` and return it. Called only by the
     /// single writer. The id is `files.len()` (dense, append-only).
     pub(crate) fn register(&self, path: Option<PathBuf>, input: FileText) -> FileId {
-        let mut inner = self.lock();
-        let id = FileId(inner.files.len() as u32);
-        if let Some(path) = path.clone() {
-            inner.path_to_id.insert(path, id);
-        }
-        inner.input_to_id.insert(input, id);
-        inner.files.push(Some(FileMeta { path, input }));
-        id
+        self.with_mut(|inner| {
+            let id = FileId(inner.files.len() as u32);
+            if let Some(path) = path.clone() {
+                inner.path_to_id.insert(path, id);
+            }
+            inner.input_to_id.insert(input, id);
+            inner.files.push(Some(FileMeta { path, input }));
+            id
+        })
     }
 
     /// Forget a path's id/input mapping, tombstoning its slot. Returns the
     /// removed [`FileId`], if any. The id is not recycled, so a later
     /// re-intern of the same path mints a fresh id.
     pub(crate) fn remove_path(&self, path: &Path) -> Option<FileId> {
-        let mut inner = self.lock();
-        let id = inner.path_to_id.remove(path)?;
-        let removed = inner
-            .files
-            .get_mut(id.0 as usize)
-            .and_then(|slot| slot.take());
-        if let Some(meta) = removed {
-            inner.input_to_id.remove(&meta.input);
-        }
-        Some(id)
+        self.with_mut(|inner| {
+            let id = inner.path_to_id.remove(path)?;
+            let removed = inner
+                .files
+                .get_mut(id.0 as usize)
+                .and_then(|slot| slot.take());
+            if let Some(meta) = removed {
+                inner.input_to_id.remove(&meta.input);
+            }
+            Some(id)
+        })
     }
 }
 
