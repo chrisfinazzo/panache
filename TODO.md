@@ -991,15 +991,19 @@ four gaps worth tracking; none is a defect.
   of them into a `Vec` and indexing `[0]`/`[1]`. Behavior-preserving; full
   workspace suite green.
 
-- [ ] **Consolidate the VFS; reduce the path-lookup lock.** `Vfs` funnels every
-  path lookup through one `Arc<Mutex<VfsInner>>` (`src/salsa.rs:2226-2311`),
-  and path/id/input state is spread across `Vfs`, the `FileSet` input, and
-  the LSP `DocumentMap`. RA centralizes this in a dedicated `vfs` crate with
-  a single path interner. Contention is low today (fine-grained lock), but
-  `project_graph` hits the VFS per include and per bibliography, so a large
-  book is a plausible hot path, and the fragmentation hurts reasoning about
-  path identity. Fix: one VFS-style abstraction, possibly
-  read-mostly/lock-free lookup. *Severity low--medium, refactor not a bug.*
+- [x] **Consolidate the VFS; reduce the path-lookup lock.** `Vfs` funnelled
+  every path lookup through one `Arc<Mutex<VfsInner>>`, and path/id/input
+  state was spread across `Vfs`, the `FileSet` input, and the LSP
+  `DocumentMap`. RA centralizes this in a dedicated `vfs` crate with a
+  single path interner. Contention was low (fine-grained lock), but
+  `project_graph` hit the VFS per include and per bibliography, and the
+  fragmentation hurt reasoning about path identity. *Done:* extracted a
+  `src/vfs.rs` module owning a single append-only path interner (dense
+  id-indexed `Vec`) plus the `FileSet` handle; reads are now near-lock-free
+  (copy-on-write `RwLock<Arc<VfsInner>>` snapshot, readers clone the `Arc`
+  and look up with no lock held); `DocumentState` is keyed on the stable
+  `FileId` and derives its path on demand via `Db::path_of_id`, removing the
+  last duplicated copy of path identity.
 
 - [ ] **Incremental reparse should share green subtrees, not rebuild.**
   `parse_incremental_suffix_inner`
