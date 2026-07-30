@@ -44,7 +44,8 @@ impl Rule for UndefinedReferencesRule {
         let (tree, input, config, metadata) = (cx.tree, cx.input, cx.config, cx.metadata);
         let mut diagnostics = Vec::new();
 
-        let labels = collect_definition_labels(tree, config, metadata);
+        let doc_symbols = cx.symbol_index();
+        let labels = collect_definition_labels(tree, config, metadata, &doc_symbols);
 
         for link in cx
             .nodes(SyntaxKind::LINK)
@@ -180,9 +181,12 @@ fn collect_definition_labels(
     tree: &SyntaxNode,
     config: &Config,
     metadata: Option<&crate::metadata::DocumentMetadata>,
+    doc_symbols: &crate::salsa::SymbolUsageIndex,
 ) -> DefinitionLabels {
     let mut labels = DefinitionLabels::default();
-    extend_labels_from_tree(&mut labels, tree, config);
+    // The current document's symbol index is memoized upstream; sibling project
+    // files have no memo, so they are built fresh below.
+    extend_labels_from_tree(&mut labels, tree, config, doc_symbols);
 
     let Some(metadata) = metadata else {
         return labels;
@@ -206,17 +210,22 @@ fn collect_definition_labels(
         }
         if let Ok(other_input) = std::fs::read_to_string(&path) {
             let other_tree = crate::parser::parse(&other_input, Some(config.clone()));
-            extend_labels_from_tree(&mut labels, &other_tree, config);
+            let db = crate::salsa::SalsaDb::default();
+            let other_index =
+                crate::salsa::symbol_usage_index_from_tree(&db, &other_tree, &config.extensions);
+            extend_labels_from_tree(&mut labels, &other_tree, config, &other_index);
         }
     }
 
     labels
 }
 
-fn extend_labels_from_tree(labels: &mut DefinitionLabels, tree: &SyntaxNode, config: &Config) {
-    let db = crate::salsa::SalsaDb::default();
-    let symbol_index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &config.extensions);
-
+fn extend_labels_from_tree(
+    labels: &mut DefinitionLabels,
+    tree: &SyntaxNode,
+    config: &Config,
+    symbol_index: &crate::salsa::SymbolUsageIndex,
+) {
     labels.reference_labels.extend(
         symbol_index
             .reference_definition_entries()

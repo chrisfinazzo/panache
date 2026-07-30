@@ -186,6 +186,7 @@ pub trait Rule {
             config,
             metadata,
             index: &index,
+            symbols: None,
         };
         self.check(&cx)
     }
@@ -200,6 +201,12 @@ pub struct LintContext<'a> {
     pub config: &'a Config,
     pub metadata: Option<&'a crate::metadata::DocumentMetadata>,
     pub index: &'a LintIndex,
+    /// A salsa-memoized [`SymbolUsageIndex`](crate::salsa::SymbolUsageIndex) for
+    /// `tree`, when the caller has one (the `built_in_lint_plan` query does).
+    /// Rules read it via [`LintContext::symbol_index`] instead of rebuilding it
+    /// per rule off a throwaway database, so unchanged blocks stay memoized
+    /// across edits.
+    pub symbols: Option<&'a crate::salsa::SymbolUsageIndex>,
 }
 
 impl LintContext<'_> {
@@ -212,6 +219,27 @@ impl LintContext<'_> {
     /// [`Rule::wants_text_tokens`]).
     pub fn text_tokens(&self) -> &[SyntaxToken] {
         self.index.text_tokens()
+    }
+
+    /// The document's [`SymbolUsageIndex`](crate::salsa::SymbolUsageIndex).
+    ///
+    /// Returns the caller-provided memoized index when present, else builds one
+    /// from `tree` on a throwaway database (the path used by standalone
+    /// `check_tree` callers and tests). The buckets every rule consumes are
+    /// either extension-independent or the caller's memoized index was built
+    /// with the real config extensions, so the two paths are equivalent.
+    pub fn symbol_index(&self) -> std::borrow::Cow<'_, crate::salsa::SymbolUsageIndex> {
+        match self.symbols {
+            Some(symbols) => std::borrow::Cow::Borrowed(symbols),
+            None => {
+                let db = crate::salsa::SalsaDb::default();
+                std::borrow::Cow::Owned(crate::salsa::symbol_usage_index_from_tree(
+                    &db,
+                    self.tree,
+                    &self.config.extensions,
+                ))
+            }
+        }
     }
 }
 

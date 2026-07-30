@@ -1,6 +1,5 @@
 use crate::linter::diagnostics::{Diagnostic, Location};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
-use crate::syntax::SyntaxNode;
 
 pub struct DuplicateReferencesRule;
 
@@ -20,25 +19,26 @@ impl Rule for DuplicateReferencesRule {
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
-        let (tree, input) = (cx.tree, cx.input);
+        let input = cx.input;
+        let index = cx.symbol_index();
         let mut diagnostics = Vec::new();
 
         // Check for duplicate reference definitions
-        diagnostics.extend(check_duplicate_references(tree, input));
-        diagnostics.extend(check_duplicate_crossref_labels(tree, input));
+        diagnostics.extend(check_duplicate_references(&index, input));
+        diagnostics.extend(check_duplicate_crossref_labels(&index, input));
 
         // Check for duplicate footnote definitions
-        diagnostics.extend(check_duplicate_footnotes(tree, input));
+        diagnostics.extend(check_duplicate_footnotes(&index, input));
 
         diagnostics
     }
 }
 
-fn check_duplicate_references(tree: &SyntaxNode, input: &str) -> Vec<Diagnostic> {
+fn check_duplicate_references(
+    index: &crate::salsa::SymbolUsageIndex,
+    input: &str,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let db = crate::salsa::SalsaDb::default();
-    let extensions = crate::config::Extensions::default();
-    let index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &extensions);
 
     for (label, ranges) in index.reference_definition_entries() {
         if ranges.len() < 2 {
@@ -61,11 +61,11 @@ fn check_duplicate_references(tree: &SyntaxNode, input: &str) -> Vec<Diagnostic>
     diagnostics
 }
 
-fn check_duplicate_footnotes(tree: &SyntaxNode, input: &str) -> Vec<Diagnostic> {
+fn check_duplicate_footnotes(
+    index: &crate::salsa::SymbolUsageIndex,
+    input: &str,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let db = crate::salsa::SalsaDb::default();
-    let extensions = crate::config::Extensions::default();
-    let index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &extensions);
 
     for (id, ranges) in index.footnote_definition_entries() {
         if ranges.len() < 2 {
@@ -104,11 +104,11 @@ fn extract_definition_label(input: &str, range: rowan::TextRange) -> Option<Stri
     }
 }
 
-fn check_duplicate_crossref_labels(tree: &SyntaxNode, input: &str) -> Vec<Diagnostic> {
+fn check_duplicate_crossref_labels(
+    index: &crate::salsa::SymbolUsageIndex,
+    input: &str,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let db = crate::salsa::SalsaDb::default();
-    let extensions = crate::config::Extensions::default();
-    let index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &extensions);
 
     for (label, ranges) in index.crossref_declaration_entries() {
         if ranges.len() < 2 {

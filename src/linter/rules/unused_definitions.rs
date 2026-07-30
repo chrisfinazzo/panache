@@ -41,9 +41,8 @@ impl Rule for UnusedDefinitionsRule {
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
-        let (tree, input, config, metadata) = (cx.tree, cx.input, cx.config, cx.metadata);
-        let db = crate::salsa::SalsaDb::default();
-        let index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &config.extensions);
+        let (input, config, metadata) = (cx.input, cx.config, cx.metadata);
+        let index = cx.symbol_index();
         let mut used = collect_usage_labels(
             cx.nodes(SyntaxKind::LINK)
                 .iter()

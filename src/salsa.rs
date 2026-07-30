@@ -525,11 +525,18 @@ pub fn built_in_lint_plan(db: &dyn Db, file: FileText, config: FileConfig) -> Bu
         diagnostics.push(diag);
     }
 
-    diagnostics.extend(crate::linter::lint_with_metadata(
+    // Thread the per-block-memoized symbol index into the rules so
+    // symbol-index-backed rules (duplicate/undefined references, undefined
+    // anchors, unused definitions, citation keys, heading hierarchy) reuse it
+    // instead of each rebuilding one off a throwaway database. Unchanged blocks
+    // stay memoized across edits.
+    let symbols = symbol_usage_index(db, file, config);
+    diagnostics.extend(crate::linter::lint_with_metadata_and_symbols(
         &tree,
         text,
         &cfg,
         metadata.as_ref(),
+        Some(symbols),
     ));
     diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
 
@@ -3248,6 +3255,35 @@ mod tests {
             symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
         assert_eq!(after, reference);
         assert_ne!(before, after, "the edit should change the index");
+    }
+
+    #[test]
+    fn built_in_lint_plan_reuses_block_symbol_memos_after_edit() {
+        // End to end: the lint pass now consumes the per-block-memoized symbol
+        // index, so a single-block edit re-walks only the edited block's symbols
+        // instead of rebuilding the whole index for every symbol-backed rule.
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/tmp/lint_block_memo.qmd");
+        let source = "# Alpha\n\n# Beta\n\n# Gamma\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string();
+        let file = db.update_file_text(path.clone(), source);
+        let config = FileConfig::new(&db, crate::Config::default());
+
+        // Prime the lint plan (builds every block's symbol memo once).
+        let _ = built_in_lint_plan(&db, file, config);
+        assert!(executed(&log, "symbol_usage_index_block") >= 5);
+        log.lock().unwrap().clear();
+
+        db.update_file_text(
+            path,
+            "# Alpha\n\n# Beta\n\n# GammaX\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string(),
+        );
+        let _ = built_in_lint_plan(&db, file, config);
+
+        assert_eq!(
+            executed(&log, "symbol_usage_index_block"),
+            1,
+            "relint should re-walk only the edited block's symbols"
+        );
     }
 
     #[test]

@@ -37,9 +37,7 @@ impl Rule for CitationKeysRule {
         }
 
         let mut diagnostics = Vec::new();
-        let db = crate::salsa::SalsaDb::default();
-        let symbol_index =
-            crate::salsa::symbol_usage_index_from_tree(&db, tree, &config.extensions);
+        let symbol_index = cx.symbol_index();
 
         let Some(metadata) = metadata else {
             return diagnostics;

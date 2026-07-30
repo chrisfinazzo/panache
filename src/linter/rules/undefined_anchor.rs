@@ -29,7 +29,8 @@ impl Rule for UndefinedAnchorRule {
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
         let (tree, input, config, metadata) = (cx.tree, cx.input, cx.config, cx.metadata);
-        let anchors = collect_anchors(tree, config, metadata);
+        let doc_symbols = cx.symbol_index();
+        let anchors = collect_anchors(tree, config, metadata, &doc_symbols);
         let mut diagnostics = Vec::new();
 
         for link in cx
@@ -70,9 +71,12 @@ fn collect_anchors(
     tree: &SyntaxNode,
     config: &Config,
     metadata: Option<&crate::metadata::DocumentMetadata>,
+    doc_symbols: &crate::salsa::SymbolUsageIndex,
 ) -> HashSet<String> {
     let mut anchors = HashSet::new();
-    extend_anchors(&mut anchors, tree, config);
+    // The current document's symbol index is memoized upstream; sibling project
+    // files have no memo, so they are built fresh below.
+    extend_anchors(&mut anchors, tree, config, doc_symbols);
 
     let Some(metadata) = metadata else {
         return anchors;
@@ -93,17 +97,22 @@ fn collect_anchors(
         }
         if let Ok(other_input) = std::fs::read_to_string(&path) {
             let other_tree = crate::parser::parse(&other_input, Some(config.clone()));
-            extend_anchors(&mut anchors, &other_tree, config);
+            let db = crate::salsa::SalsaDb::default();
+            let other_index =
+                crate::salsa::symbol_usage_index_from_tree(&db, &other_tree, &config.extensions);
+            extend_anchors(&mut anchors, &other_tree, config, &other_index);
         }
     }
 
     anchors
 }
 
-fn extend_anchors(anchors: &mut HashSet<String>, tree: &SyntaxNode, config: &Config) {
-    let db = crate::salsa::SalsaDb::default();
-    let symbol_index = crate::salsa::symbol_usage_index_from_tree(&db, tree, &config.extensions);
-
+fn extend_anchors(
+    anchors: &mut HashSet<String>,
+    tree: &SyntaxNode,
+    config: &Config,
+    symbol_index: &crate::salsa::SymbolUsageIndex,
+) {
     anchors.extend(
         symbol_index
             .crossref_declaration_entries()

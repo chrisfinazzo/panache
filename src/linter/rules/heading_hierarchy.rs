@@ -21,9 +21,9 @@ impl Rule for HeadingHierarchyRule {
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
-        let (tree, input, config) = (cx.tree, cx.input, cx.config);
+        let (tree, input) = (cx.tree, cx.input);
         let mut diagnostics = Vec::new();
-        let headings = collect_headings(tree, &config.extensions);
+        let headings = cx.symbol_index().heading_sequence().to_vec();
 
         let mut prev_level: Option<usize> = None;
 
@@ -58,16 +58,6 @@ impl Rule for HeadingHierarchyRule {
 
         diagnostics
     }
-}
-
-fn collect_headings(
-    tree: &SyntaxNode,
-    extensions: &crate::config::Extensions,
-) -> Vec<(rowan::TextRange, usize)> {
-    let db = crate::salsa::SalsaDb::default();
-    crate::salsa::symbol_usage_index_from_tree(&db, tree, extensions)
-        .heading_sequence()
-        .to_vec()
 }
 
 fn heading_node_at_range(tree: &SyntaxNode, range: rowan::TextRange) -> Option<SyntaxNode> {

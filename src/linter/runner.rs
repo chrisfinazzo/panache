@@ -41,6 +41,21 @@ impl LintRunner {
         config: &Config,
         metadata: Option<&crate::metadata::DocumentMetadata>,
     ) -> Vec<Diagnostic> {
+        self.run_with_metadata_and_symbols(tree, input, config, metadata, None)
+    }
+
+    /// Like [`run_with_metadata`](Self::run_with_metadata) but accepts a
+    /// caller-memoized [`SymbolUsageIndex`](crate::salsa::SymbolUsageIndex) so
+    /// symbol-index-backed rules reuse it instead of each rebuilding one off a
+    /// throwaway database.
+    pub fn run_with_metadata_and_symbols(
+        &self,
+        tree: &SyntaxNode,
+        input: &str,
+        config: &Config,
+        metadata: Option<&crate::metadata::DocumentMetadata>,
+        symbols: Option<&crate::salsa::SymbolUsageIndex>,
+    ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         // One shared walk for every registered rule: bucket the nodes/tokens
@@ -61,6 +76,7 @@ impl LintRunner {
             config,
             metadata,
             index: &index,
+            symbols,
         };
 
         // Run built-in rules

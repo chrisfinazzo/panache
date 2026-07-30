@@ -49,6 +49,22 @@ pub fn lint_with_metadata(
     runner.run_with_metadata(tree, input, config, metadata)
 }
 
+/// Like [`lint_with_metadata`] but threads a caller-memoized
+/// [`SymbolUsageIndex`](crate::salsa::SymbolUsageIndex) to the rules so
+/// symbol-index-backed rules reuse it (the `built_in_lint_plan` salsa query
+/// passes its per-block-memoized index here).
+pub fn lint_with_metadata_and_symbols(
+    tree: &SyntaxNode,
+    input: &str,
+    config: &Config,
+    metadata: Option<&crate::metadata::DocumentMetadata>,
+    symbols: Option<&crate::salsa::SymbolUsageIndex>,
+) -> Vec<Diagnostic> {
+    let registry = default_registry(config);
+    let runner = LintRunner::new(registry);
+    runner.run_with_metadata_and_symbols(tree, input, config, metadata, symbols)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn lint_with_external_sync_and_metadata(
     tree: &SyntaxNode,
