@@ -7,7 +7,6 @@ use crate::options::ParserOptions;
 use crate::parser::inlines::refdef_map::{RefdefMap, collect_refdef_labels};
 use crate::range_utils::find_incremental_restart_offset;
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use rowan::{GreenNode, GreenToken, NodeOrToken};
 
 pub mod blocks;
 pub mod diagnostics;
@@ -206,21 +205,18 @@ fn parse_incremental_suffix_inner(
     let suffix_text = &input[new_restart..];
     let suffix_tree = Parser::new(suffix_text, &config).parse();
 
-    let mut children: Vec<NodeOrToken<GreenNode, GreenToken>> = old_tree
-        .children_with_tokens()
-        .filter_map(|element| {
-            let range = element.text_range();
-            let end: usize = range.end().into();
-            if end <= old_restart {
-                Some(element_to_green(element))
-            } else {
-                None
-            }
-        })
-        .collect();
-    children.extend(suffix_tree.children_with_tokens().map(element_to_green));
+    // Splice on the green tree directly: retain the prefix children verbatim
+    // (rowan's structural sharing keeps their `Arc` identity) and replace
+    // everything from the restart boundary onward with the reparsed suffix.
+    let old_green = old_tree.green();
+    let split = first_child_ending_after(&old_green, old_restart);
+    let suffix_green = suffix_tree.green();
+    let new_green = old_green.splice_children(
+        split..,
+        suffix_green.children().map(|child| child.to_owned()),
+    );
 
-    let tree = SyntaxNode::new_root(GreenNode::new(SyntaxKind::DOCUMENT.into(), children));
+    let tree = SyntaxNode::new_root(new_green);
     let len: usize = tree.text_range().end().into();
 
     IncrementalParseResult {
@@ -278,11 +274,37 @@ fn map_old_offset_to_new(
     new_edit.1.min(new_len)
 }
 
-fn element_to_green(element: crate::syntax::SyntaxElement) -> NodeOrToken<GreenNode, GreenToken> {
-    match element {
-        NodeOrToken::Node(node) => NodeOrToken::Node(node.green().into_owned()),
-        NodeOrToken::Token(token) => NodeOrToken::Token(token.green().to_owned()),
+/// Index of the first top-level child whose end offset exceeds `pos`.
+///
+/// Every child before this index ends at or before `pos`, so those children can
+/// be retained verbatim (by `Arc` identity) when splicing.
+fn first_child_ending_after(green: &rowan::GreenNodeData, pos: usize) -> usize {
+    let mut offset = 0usize;
+    for (index, child) in green.children().enumerate() {
+        let len: usize = child.text_len().into();
+        offset += len;
+        if offset > pos {
+            return index;
+        }
     }
+    green.children().count()
+}
+
+/// Index of the first top-level child that starts at or after `pos`.
+///
+/// Together with [`first_child_ending_after`] this bounds the child range a
+/// section-window reparse replaces, so the surrounding children keep their
+/// `Arc` identity across the splice.
+fn first_child_starting_at_or_after(green: &rowan::GreenNodeData, pos: usize) -> usize {
+    let mut offset = 0usize;
+    for (index, child) in green.children().enumerate() {
+        if offset >= pos {
+            return index;
+        }
+        let len: usize = child.text_len().into();
+        offset += len;
+    }
+    green.children().count()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -371,36 +393,18 @@ fn reparse_section_window(
     )
     .parse();
 
-    let mut children: Vec<NodeOrToken<GreenNode, GreenToken>> = Vec::new();
-    let mut inserted_window = false;
+    // Replace exactly the children overlapping the section window with the
+    // reparsed window, keeping the surrounding children by `Arc` identity.
+    let old_green = old_tree.green();
+    let start_idx = first_child_ending_after(&old_green, section_window.old_start);
+    let end_idx = first_child_starting_at_or_after(&old_green, section_window.old_end);
+    let window_green = reparsed_window.green();
+    let new_green = old_green.splice_children(
+        start_idx..end_idx,
+        window_green.children().map(|child| child.to_owned()),
+    );
 
-    for element in old_tree.children_with_tokens() {
-        let range = element.text_range();
-        let start: usize = range.start().into();
-        let end: usize = range.end().into();
-
-        if end <= section_window.old_start {
-            children.push(element_to_green(element));
-            continue;
-        }
-
-        if start >= section_window.old_end {
-            if !inserted_window {
-                children.extend(reparsed_window.children_with_tokens().map(element_to_green));
-                inserted_window = true;
-            }
-            children.push(element_to_green(element));
-            continue;
-        }
-
-        // Overlapping element is replaced by the reparsed section window.
-    }
-
-    if !inserted_window {
-        children.extend(reparsed_window.children_with_tokens().map(element_to_green));
-    }
-
-    let tree = SyntaxNode::new_root(GreenNode::new(SyntaxKind::DOCUMENT.into(), children));
+    let tree = SyntaxNode::new_root(new_green);
     Some(IncrementalParseResult {
         tree,
         reparse_range: (section_window.new_start, section_window.new_end),
