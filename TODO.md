@@ -1005,23 +1005,29 @@ four gaps worth tracking; none is a defect.
   `FileId` and derives its path on demand via `Db::path_of_id`, removing the
   last duplicated copy of path identity.
 
-- [ ] **Incremental reparse should share green subtrees, not rebuild.**
-  `parse_incremental_suffix_inner`
-  (`crates/panache-parser/src/parser.rs:164-231`) reparses the suffix and
-  then reconstructs the whole `DOCUMENT` by collecting old prefix + new
-  suffix children into a `Vec` and calling `GreenNode::new(...)`;
-  `element_to_green` (`parser.rs:281-286`) clones each retained child via
-  `.green().into_owned()` instead of reusing rowan's structural sharing /
-  `reparse()`. Every edit thus copies the full prefix and preserves no
-  subtree identity across the edit boundary, defeating the identity reuse
-  the downstream `no_eq` salsa tree query could exploit (so an edit tends to
-  force full re-analysis anyway). Incremental reparse is runtime opt-in and
-  still falls back to `full_reparse_result` (`parser.rs:237-245`) on many
-  shapes, so the upside is latent --- do the reuse right before enabling it
-  broadly. Needs paired golden fixtures under
-  `crates/panache-parser/tests/fixtures/cases/` plus
-  losslessness/idempotency checks. *Severity medium, risk higher, effort
-  large --- do last.*
+- [x] **Incremental reparse should share green subtrees, not rebuild.** Done,
+  but the original framing was wrong. `.green().into_owned()` is a rowan
+  `Arc` refcount bump reconstructed from the *same* allocation, not a deep
+  copy, so retained subtrees already kept pointer identity across an edit
+  (verified: `suffix_window` 8/9, `section_window` 7/11 prefix blocks
+  pointer-shared). The real reason edits forced full re-analysis was
+  salsa-side: every analysis query was keyed on the whole-file `FileText`
+  and re-ran fully on every keystroke. Fixed by decomposing the salsa
+  pipeline per top-level block. `document_blocks` exposes the `DOCUMENT`
+  children as content-addressed `GreenNode`s; `symbol_usage_index` and
+  `heading_outline` now merge memoized per-block queries
+  (`symbol_usage_index_block`, `heading_outline_block`) that emit
+  block-relative ranges, so an edit re-walks only the changed block
+  (unchanged blocks stay structurally equal even under a full reparse).
+  `built_in_lint_plan` threads that memoized index into the lint rules
+  instead of each rebuilding it off a throwaway `SalsaDb`. The parser
+  reconstruction was also rewritten to splice `old_tree.green()` directly
+  (`GreenNodeData::splice_children`), dropping the red-cursor round-trip.
+  Covered by `crates/panache-parser/tests/incremental_identity.rs` and salsa
+  `folded_index_matches_reference` / `*_memoizes_unchanged_blocks` tests.
+  Deferred (optional): feeding the LSP's incremental tree into salsa to skip
+  the full reparse in `parsed_document` --- parsing is cheap relative to
+  analysis, so revisit only if profiling shows it material.
 
 - [x] **Doc drift:** `AGENTS.md`'s LSP section previously claimed
   `tower_lsp_server` + `tokio::sync::Mutex`-guarded state. Corrected to the
