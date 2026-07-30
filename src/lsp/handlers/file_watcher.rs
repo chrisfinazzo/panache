@@ -106,7 +106,7 @@ pub(crate) fn did_change_watched_files(gs: &mut GlobalState, params: DidChangeWa
         let mut affected_documents: Vec<Uri> = Vec::new();
         for (uri_str, state) in states {
             // Only saved documents reference files on disk.
-            let Some(doc_path) = state.path.clone() else {
+            let Some(doc_path) = crate::salsa::Db::path_of_id(&gs.salsa, state.file_id) else {
                 continue;
             };
             let Ok(uri) = uri_str.parse::<Uri>() else {

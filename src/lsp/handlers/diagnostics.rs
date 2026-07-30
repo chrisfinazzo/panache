@@ -205,12 +205,12 @@ pub(crate) fn compute_publishes_with_dependents(
 
     // Find documents that include `uri`; lint each built-in-only first.
     if let Some(state) = snap.document_state(uri)
-        && let Some(path) = state.path.as_ref()
+        && let Some(path) = crate::salsa::Db::path_of_id(snap.db(), state.file_id)
     {
         let graph =
             crate::salsa::project_structure(snap.db(), state.salsa_file, state.salsa_config)
                 .clone();
-        for dependent in graph.dependents(path, None) {
+        for dependent in graph.dependents(&path, None) {
             if let Some(dep_uri) = Uri::from_file_path(&dependent) {
                 publishes.extend(compute_publishes(snap, &dep_uri, false));
             }

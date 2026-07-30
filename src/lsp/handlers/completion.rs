@@ -71,7 +71,9 @@ pub(crate) fn completion(
     // Path-completion branches: cursor inside `[text](…)` / `![alt](…)` destination,
     // or inside a path-bearing Quarto shortcode argument.
     if link_ctx_opt.is_some() || shortcode_ctx_opt.is_some() {
-        let doc_path = snap.document_state(uri).and_then(|s| s.path);
+        let doc_path = snap
+            .document_state(uri)
+            .and_then(|s| crate::salsa::Db::path_of_id(snap.db(), s.file_id));
         let ws_root = snap.workspace_root_for(uri);
 
         let request = if let Some(ctx) = link_ctx_opt {
@@ -94,7 +96,11 @@ pub(crate) fn completion(
     let query = citation_query_prefix(&text, offset)?;
 
     let (salsa_file, salsa_config, doc_path) = match snap.document_state(uri) {
-        Some(state) => (state.salsa_file, state.salsa_config, state.path.clone()),
+        Some(state) => (
+            state.salsa_file,
+            state.salsa_config,
+            crate::salsa::Db::path_of_id(snap.db(), state.file_id),
+        ),
         None => return None,
     };
     let parsed_yaml_regions = snap.parsed_yaml_regions(uri);

@@ -2212,6 +2212,12 @@ pub trait Db: salsa::Database {
     /// into analysis and the `<memory>` sentinel is retired (audit §3.3 / G3).
     fn path_of(&self, file: FileText) -> Option<PathBuf>;
 
+    /// The immutable backing path for a [`FileId`], or `None` for an in-memory
+    /// buffer / evicted id. The [`FileId`]-keyed counterpart of [`Db::path_of`],
+    /// so the LSP can key a document on its stable id and still recover the path
+    /// on demand (from a worker's `&dyn Db` snapshot).
+    fn path_of_id(&self, id: FileId) -> Option<PathBuf>;
+
     /// The shared [`FileSet`] input. `project_graph` reads it to depend on the
     /// set of interned files; the writer adds ids as it discovers references.
     fn file_set(&self) -> FileSet;
@@ -2242,6 +2248,12 @@ impl Default for SalsaDb {
 impl SalsaDb {
     pub fn file_text_if_cached(&self, path: &Path) -> Option<FileText> {
         self.vfs.input_for_path(path)
+    }
+
+    /// The stable [`FileId`] backing a [`FileText`] input, if it is registered.
+    /// The LSP keys an open document on this id instead of duplicating its path.
+    pub fn file_id_for_input(&self, input: FileText) -> Option<FileId> {
+        self.vfs.id_for_input(input)
     }
 
     /// Register a brand-new file: allocate a [`FileId`], store its input, and
@@ -2559,6 +2571,10 @@ impl Db for SalsaDb {
 
     fn path_of(&self, file: FileText) -> Option<PathBuf> {
         self.vfs.path_for_input(file)
+    }
+
+    fn path_of_id(&self, id: FileId) -> Option<PathBuf> {
+        self.vfs.path_for_id(id)
     }
 
     fn file_set(&self) -> FileSet {

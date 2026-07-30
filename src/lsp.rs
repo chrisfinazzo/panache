@@ -3,7 +3,6 @@
 // `WorkspaceEdit.changes` mandates `HashMap<Uri, _>`. Allow it module-wide.
 #![allow(clippy::mutable_key_type)]
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::select;
@@ -37,8 +36,10 @@ pub use uri_ext::UriExt;
 /// State for a single document in the LSP.
 #[derive(Clone)]
 pub struct DocumentState {
-    /// Canonical file path for this document (if it exists on disk).
-    pub path: Option<PathBuf>,
+    /// Stable VFS identity for this document. The backing path (if any) is
+    /// derived on demand via [`crate::salsa::Db::path_of_id`] rather than
+    /// duplicated here.
+    pub file_id: crate::salsa::FileId,
     /// Salsa input for this document's text.
     pub salsa_file: crate::salsa::FileText,
     /// Salsa input for this document's config.

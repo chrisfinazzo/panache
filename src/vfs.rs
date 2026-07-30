@@ -116,6 +116,12 @@ impl Vfs {
         self.snapshot().meta(id).map(|meta| meta.input)
     }
 
+    /// The [`FileId`] backing a [`FileText`] input, or `None` if the input is
+    /// unregistered or evicted. Lets the LSP key a document on its stable id.
+    pub(crate) fn id_for_input(&self, input: FileText) -> Option<FileId> {
+        self.snapshot().input_to_id.get(&input).copied()
+    }
+
     pub(crate) fn input_for_path(&self, path: &Path) -> Option<FileText> {
         let snap = self.snapshot();
         let id = *snap.path_to_id.get(path)?;

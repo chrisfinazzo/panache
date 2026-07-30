@@ -36,7 +36,7 @@ pub(crate) fn workspace_symbol(
     let mut memory_docs: Vec<(Uri, String, GreenNode)> = Vec::new();
 
     for (uri_str, state) in &open_documents {
-        if let Some(path) = &state.path {
+        if let Some(path) = crate::salsa::Db::path_of_id(snap.db(), state.file_id) {
             candidate_paths.insert(path.clone());
             path_configs
                 .entry(path.clone())
@@ -49,7 +49,7 @@ pub(crate) fn workspace_symbol(
                 snap.db(),
                 state.salsa_file,
                 state.salsa_config,
-                path,
+                &path,
             );
 
             for graph_path in graph_paths {

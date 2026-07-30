@@ -99,14 +99,17 @@ pub(crate) fn reload_open_documents_referenced_files(gs: &mut GlobalState) {
     let open_docs: Vec<(crate::salsa::FileText, crate::salsa::FileConfig, PathBuf)> = gs
         .document_map
         .values()
-        .filter_map(|state| Some((state.salsa_file, state.salsa_config, state.path.clone()?)))
+        .filter_map(|state| {
+            let path = crate::salsa::Db::path_of_id(&gs.salsa, state.file_id)?;
+            Some((state.salsa_file, state.salsa_config, path))
+        })
         .collect();
     // A path open as a document has buffer-authoritative content; it must never
     // be re-read from disk below or an unsaved edit would be clobbered.
     let open_paths: HashSet<PathBuf> = gs
         .document_map
         .values()
-        .filter_map(|state| state.path.clone())
+        .filter_map(|state| crate::salsa::Db::path_of_id(&gs.salsa, state.file_id))
         .collect();
     let mut referenced: HashSet<PathBuf> = HashSet::new();
     for (salsa_file, salsa_config, path) in open_docs {
@@ -194,10 +197,17 @@ pub(crate) fn did_open(gs: &mut GlobalState, params: DidOpenTextDocumentParams) 
     // project rather than per document (see `GlobalState::intern_config`).
     let salsa_config = gs.intern_config(config.clone());
 
+    // The freshly-registered input always has a `FileId`; key the document on
+    // that stable identity instead of duplicating its path.
+    let file_id = gs
+        .salsa
+        .file_id_for_input(salsa_file)
+        .expect("just-registered document input has a FileId");
+
     gs.document_map_mut().insert(
         uri_string.clone(),
         DocumentState {
-            path: doc_path.clone(),
+            file_id,
             salsa_file,
             salsa_config,
             tree,
@@ -328,7 +338,9 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     let interned_config = gs.intern_config(config.clone());
     if let Some(doc_state) = gs.document_map_mut().get_mut(&uri_string) {
         doc_state.tree = green;
-        doc_state.path = doc_path_for_salsa.clone();
+        // `file_id`/`salsa_file` are invariant across a content edit (the same
+        // path resolves to the same interned input), so only the tree and the
+        // (possibly re-interned) config handle need refreshing.
         doc_state.salsa_config = interned_config;
     } else {
         return;
@@ -356,10 +368,14 @@ pub(crate) fn did_save(gs: &mut GlobalState, params: DidSaveTextDocumentParams) 
     // was opened; load them on the writer so the debounced pass's snapshot sees
     // them. (The dispatch write phase reloads too, but doing it here keeps
     // interactive reads in the debounce window consistent.)
-    if let Some((salsa_file, salsa_config, Some(path))) = gs
-        .document_map
-        .get(&uri.to_string())
-        .map(|doc| (doc.salsa_file, doc.salsa_config, doc.path.clone()))
+    if let Some((salsa_file, salsa_config, Some(path))) =
+        gs.document_map.get(&uri.to_string()).map(|doc| {
+            (
+                doc.salsa_file,
+                doc.salsa_config,
+                crate::salsa::Db::path_of_id(&gs.salsa, doc.file_id),
+            )
+        })
     {
         load_project_files(gs, salsa_file, salsa_config, path);
     }
@@ -385,7 +401,7 @@ pub(crate) fn did_close(gs: &mut GlobalState, params: DidCloseTextDocumentParams
     let states: Vec<DocumentState> = gs.document_map.values().cloned().collect();
     let mut retained = HashSet::new();
     for state in states {
-        let Some(path) = state.path.clone() else {
+        let Some(path) = crate::salsa::Db::path_of_id(&gs.salsa, state.file_id) else {
             continue;
         };
         let tracked = load_project_files(gs, state.salsa_file, state.salsa_config, path);

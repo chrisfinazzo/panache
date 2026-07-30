@@ -35,7 +35,7 @@ pub(crate) fn get_open_document_context(
     Some(OpenDocumentContext {
         salsa_file: state.salsa_file,
         salsa_config: state.salsa_config,
-        path: state.path,
+        path: crate::salsa::Db::path_of_id(snap.db(), state.file_id),
         tree: state.tree,
         content,
         line_index,

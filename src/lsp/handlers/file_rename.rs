@@ -125,7 +125,7 @@ fn candidate_documents_for_scan(snap: &StateSnapshot) -> Vec<DocInput> {
 
     let states = snap.document_map.values().cloned().collect::<Vec<_>>();
     for state in states {
-        let Some(path) = state.path.clone() else {
+        let Some(path) = crate::salsa::Db::path_of_id(snap.db(), state.file_id) else {
             continue;
         };
         let text = state.salsa_file.content_or_empty(snap.db()).to_string();
