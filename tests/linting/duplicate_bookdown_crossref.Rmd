@@ -1,0 +1,6 @@
+\begin{align}
+  a (\#eq:dup)  \\
+  b (\#eq:dup)
+\end{align}
+
+\@ref(eq:dup)

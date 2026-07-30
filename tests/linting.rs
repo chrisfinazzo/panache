@@ -193,6 +193,36 @@ flavor = "rmarkdown"
 }
 
 #[test]
+fn test_duplicate_bookdown_crossref_labels() {
+    // Regression: `duplicate_references` now consumes the document's real config
+    // extensions (via the memoized symbol index) instead of a hardcoded
+    // `Extensions::default()`. Bookdown text declarations `(\#eq:...)` are gated
+    // on `bookdown_equation_references`, which RMarkdown enables, so a duplicated
+    // bookdown crossref label is now flagged where it previously slipped through.
+    let diagnostics = lint_file_with_config(
+        "duplicate_bookdown_crossref.Rmd",
+        r#"
+flavor = "rmarkdown"
+"#,
+    );
+    let dup: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "duplicate-reference-labels")
+        .collect();
+
+    assert_eq!(
+        dup.len(),
+        1,
+        "duplicated bookdown `(\\#eq:dup)` should be flagged once under rmarkdown",
+    );
+    assert!(
+        dup[0].message.contains("eq:dup"),
+        "diagnostic should name the duplicated label, got: {}",
+        dup[0].message,
+    );
+}
+
+#[test]
 fn test_whitespace_normalization() {
     let diagnostics = lint_file("whitespace_normalization.md");
     let dup: Vec<_> = diagnostics

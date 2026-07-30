@@ -380,7 +380,8 @@ Description
 
 ### `duplicate-reference-labels` {#duplicate-reference-labels}
 
-Detects duplicate reference link and footnote definitions.
+Detects duplicate reference link, footnote, and cross-reference label
+definitions.
 
 Severity
 :   Warning
@@ -392,9 +393,11 @@ Diagnostic codes
 :   [`duplicate-reference-labels`](#duplicate-reference-labels)
 
 Description
-:   Each reference label and footnote ID must be unique within a document.
-    Duplicate definitions cause ambiguity. Only the first definition is used,
-    making the others ineffective.
+:   Each reference label, footnote ID, and cross-reference label must be unique
+    within a document. Duplicate definitions cause ambiguity. Only the first
+    definition is used, making the others ineffective. Cross-reference detection
+    follows the active flavor's extensions, so flavor-specific declaration
+    syntax (for example bookdown `(\#eq:label)` under RMarkdown) is included.
 
 **Example violation:**
 
