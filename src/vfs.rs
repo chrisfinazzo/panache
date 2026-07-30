@@ -2,9 +2,15 @@
 //!
 //! Owns the single source of truth for file *identity*: the path<->[`FileId`]
 //! bimap and the id->[`FileText`] input table. Only the writer mutates it
-//! (`alloc_id`/`insert`/`remove_path`); cloned worker handles share the same
+//! (`register`/`remove_path`); cloned worker handles share the same
 //! `Arc<Mutex<_>>` and only read. The salsa [`crate::salsa::SalsaDb`] holds one
 //! [`Vfs`] and delegates all path/id lookups to it.
+//!
+//! Ids are dense and append-only: a fresh id is `files.len()` and slots are
+//! never recycled. Eviction tombstones a slot (`None`) and drops its path/input
+//! reverse entries, so re-interning an evicted path mints a *fresh* id (matching
+//! the pre-consolidation `HashMap` behavior) while every id a stale worker
+//! snapshot still names stays index-addressable.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,22 +26,35 @@ use crate::salsa::FileText;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub struct FileId(u32);
 
-/// The interior of [`Vfs`]: the path<->id bimap plus the id->input table. Only
-/// the writer mutates it (`alloc_id`/`insert`/`remove`); cloned worker handles
-/// share the same `Arc<Mutex<_>>` and only read.
+/// Per-id metadata: the (immutable) backing path and its salsa text input.
+/// `path` is `None` for an in-memory buffer with no file on disk (retires the
+/// `<memory>` sentinel).
+struct FileMeta {
+    path: Option<PathBuf>,
+    input: FileText,
+}
+
+/// The interior of [`Vfs`]: the dense id->meta table plus the two reverse
+/// indices. Only the writer mutates it (`register`/`remove`); cloned worker
+/// handles share the same `Arc<Mutex<_>>` and only read.
 #[derive(Default)]
 struct VfsInner {
-    next_id: u32,
+    /// Dense id->meta table indexed by `FileId.0`. A `None` slot is a tombstone
+    /// (an evicted id); the vector only grows, so ids are never recycled.
+    files: Vec<Option<FileMeta>>,
+    /// Live path -> id. Eviction removes the entry, so a re-interned path mints
+    /// a fresh id.
     path_to_id: HashMap<PathBuf, FileId>,
-    /// Backing path for each id; `None` for an in-memory buffer with no file on
-    /// disk (retires the `<memory>` sentinel).
-    id_to_path: HashMap<FileId, Option<PathBuf>>,
-    id_to_input: HashMap<FileId, FileText>,
-    /// Reverse map: a [`FileText`] input back to its (immutable) backing path.
-    /// Lets path-keyed queries resolve a document's path from its `FileText`
-    /// identity rather than threading a `PathBuf` parameter (audit §3.3 / G3).
-    /// `None` for an in-memory buffer.
-    input_to_path: HashMap<FileText, Option<PathBuf>>,
+    /// Reverse map: a [`FileText`] input back to its id, so path-keyed queries
+    /// can resolve a document's path from its `FileText` identity rather than
+    /// threading a `PathBuf` parameter (audit §3.3 / G3).
+    input_to_id: HashMap<FileText, FileId>,
+}
+
+impl VfsInner {
+    fn meta(&self, id: FileId) -> Option<&FileMeta> {
+        self.files.get(id.0 as usize).and_then(|slot| slot.as_ref())
+    }
 }
 
 /// A `vfs`-style path<->id map that subsumes the former `file_cache`
@@ -56,56 +75,122 @@ impl Vfs {
     }
 
     pub(crate) fn input_for_id(&self, id: FileId) -> Option<FileText> {
-        self.lock().id_to_input.get(&id).copied()
+        self.lock().meta(id).map(|meta| meta.input)
     }
 
     pub(crate) fn input_for_path(&self, path: &Path) -> Option<FileText> {
         let inner = self.lock();
-        let id = inner.path_to_id.get(path)?;
-        inner.id_to_input.get(id).copied()
+        let id = *inner.path_to_id.get(path)?;
+        inner.meta(id).map(|meta| meta.input)
     }
 
     pub(crate) fn path_for_id(&self, id: FileId) -> Option<PathBuf> {
-        self.lock().id_to_path.get(&id).cloned().flatten()
+        self.lock().meta(id).and_then(|meta| meta.path.clone())
     }
 
     /// The immutable backing path for a [`FileText`] input, or `None` for an
-    /// in-memory buffer / unregistered input.
+    /// in-memory buffer / unregistered / evicted input.
     pub(crate) fn path_for_input(&self, input: FileText) -> Option<PathBuf> {
-        self.lock().input_to_path.get(&input).cloned().flatten()
+        let inner = self.lock();
+        let id = *inner.input_to_id.get(&input)?;
+        inner.meta(id).and_then(|meta| meta.path.clone())
     }
 
     pub(crate) fn cached_paths(&self) -> Vec<PathBuf> {
         self.lock().path_to_id.keys().cloned().collect()
     }
 
-    /// Allocate a fresh id. Called only by the single writer.
-    pub(crate) fn alloc_id(&self) -> FileId {
+    /// Register a fresh id for `path`/`input` and return it. Called only by the
+    /// single writer. The id is `files.len()` (dense, append-only).
+    pub(crate) fn register(&self, path: Option<PathBuf>, input: FileText) -> FileId {
         let mut inner = self.lock();
-        let id = FileId(inner.next_id);
-        inner.next_id += 1;
-        id
-    }
-
-    /// Register an id's path and salsa input. Called only by the writer.
-    pub(crate) fn insert(&self, id: FileId, path: Option<PathBuf>, input: FileText) {
-        let mut inner = self.lock();
+        let id = FileId(inner.files.len() as u32);
         if let Some(path) = path.clone() {
             inner.path_to_id.insert(path, id);
         }
-        inner.id_to_path.insert(id, path.clone());
-        inner.id_to_input.insert(id, input);
-        inner.input_to_path.insert(input, path);
+        inner.input_to_id.insert(input, id);
+        inner.files.push(Some(FileMeta { path, input }));
+        id
     }
 
-    /// Forget a path's id/input mapping. Returns the removed [`FileId`], if any.
+    /// Forget a path's id/input mapping, tombstoning its slot. Returns the
+    /// removed [`FileId`], if any. The id is not recycled, so a later
+    /// re-intern of the same path mints a fresh id.
     pub(crate) fn remove_path(&self, path: &Path) -> Option<FileId> {
         let mut inner = self.lock();
         let id = inner.path_to_id.remove(path)?;
-        inner.id_to_path.remove(&id);
-        if let Some(input) = inner.id_to_input.remove(&id) {
-            inner.input_to_path.remove(&input);
+        let removed = inner
+            .files
+            .get_mut(id.0 as usize)
+            .and_then(|slot| slot.take());
+        if let Some(meta) = removed {
+            inner.input_to_id.remove(&meta.input);
         }
         Some(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::salsa::SalsaDb;
+
+    #[test]
+    fn register_assigns_distinct_ids_and_round_trips_lookups() {
+        let db = SalsaDb::default();
+        let vfs = Vfs::default();
+        let a = FileText::new(&db, None);
+        let b = FileText::new(&db, None);
+
+        let id_a = vfs.register(Some(PathBuf::from("/a.qmd")), a);
+        let id_b = vfs.register(Some(PathBuf::from("/b.qmd")), b);
+        assert_ne!(id_a, id_b);
+
+        assert_eq!(vfs.id_for_path(Path::new("/a.qmd")), Some(id_a));
+        assert!(vfs.input_for_id(id_a) == Some(a));
+        assert!(vfs.input_for_path(Path::new("/a.qmd")) == Some(a));
+        assert_eq!(vfs.path_for_id(id_a), Some(PathBuf::from("/a.qmd")));
+        assert_eq!(vfs.path_for_input(a), Some(PathBuf::from("/a.qmd")));
+    }
+
+    #[test]
+    fn evict_clears_lookups_and_reintern_mints_fresh_id() {
+        let db = SalsaDb::default();
+        let vfs = Vfs::default();
+        let a = FileText::new(&db, None);
+
+        let id1 = vfs.register(Some(PathBuf::from("/a.qmd")), a);
+        assert_eq!(vfs.remove_path(Path::new("/a.qmd")), Some(id1));
+
+        // Every view of the evicted id clears (matches the pre-consolidation
+        // `HashMap` removal behavior).
+        assert_eq!(vfs.id_for_path(Path::new("/a.qmd")), None);
+        assert!(vfs.input_for_id(id1).is_none());
+        assert_eq!(vfs.path_for_id(id1), None);
+        assert_eq!(vfs.path_for_input(a), None);
+        assert!(vfs.cached_paths().is_empty());
+
+        // Re-interning the same path mints a fresh, distinct id: tombstoned
+        // slots are never recycled.
+        let b = FileText::new(&db, None);
+        let id2 = vfs.register(Some(PathBuf::from("/a.qmd")), b);
+        assert_ne!(id1, id2);
+        assert_eq!(vfs.id_for_path(Path::new("/a.qmd")), Some(id2));
+    }
+
+    #[test]
+    fn in_memory_buffers_get_distinct_pathless_ids() {
+        let db = SalsaDb::default();
+        let vfs = Vfs::default();
+        let a = FileText::new(&db, None);
+        let b = FileText::new(&db, None);
+
+        let id_a = vfs.register(None, a);
+        let id_b = vfs.register(None, b);
+        assert_ne!(id_a, id_b);
+        assert_eq!(vfs.path_for_id(id_a), None);
+        assert_eq!(vfs.path_for_input(a), None);
+        // A pathless buffer is still input-addressable by its id.
+        assert!(vfs.input_for_id(id_a) == Some(a));
     }
 }

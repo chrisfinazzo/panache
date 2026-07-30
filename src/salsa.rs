@@ -2251,8 +2251,7 @@ impl SalsaDb {
     /// add the id to the [`FileSet`] so `project_graph` (which depends on the
     /// set) re-runs and can resolve the new path. Writer-only.
     fn register_new(&mut self, path: Option<PathBuf>, input: FileText) -> FileId {
-        let id = self.vfs.alloc_id();
-        self.vfs.insert(id, path, input);
+        let id = self.vfs.register(path, input);
         self.add_file_to_set(id);
         id
     }
