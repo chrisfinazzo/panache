@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::config::Config;
 use crate::linter::diagnostics::Diagnostic;
@@ -2221,11 +2221,9 @@ pub trait Db: salsa::Database {
 #[derive(Clone)]
 pub struct SalsaDb {
     storage: salsa::Storage<Self>,
+    /// The single owner of file identity: the path<->id<->input interner and the
+    /// structural [`FileSet`] input handle (see [`crate::vfs::Vfs`]).
     vfs: Vfs,
-    /// The single [`FileSet`] input, shared across cloned handles. Created once
-    /// at construction (below) on the writer, so worker reads only ever observe
-    /// it, never mint it.
-    file_set: Arc<OnceLock<FileSet>>,
 }
 
 impl Default for SalsaDb {
@@ -2233,10 +2231,9 @@ impl Default for SalsaDb {
         let db = Self {
             storage: salsa::Storage::default(),
             vfs: Vfs::default(),
-            file_set: Arc::new(OnceLock::new()),
         };
-        // Mint the input now (on the constructing thread) so the `OnceLock` is
-        // populated before any cloned worker handle reads it.
+        // Mint the `FileSet` input now (on the constructing thread) so the VFS's
+        // `OnceLock` is populated before any cloned worker handle reads it.
         db.file_set();
         db
     }
@@ -2565,11 +2562,9 @@ impl Db for SalsaDb {
     }
 
     fn file_set(&self) -> FileSet {
-        // Created once on the writer (in `Default`); cloned worker handles
-        // share the same `OnceLock` and only ever read it back.
-        *self
-            .file_set
-            .get_or_init(|| FileSet::new(self, Arc::new(HashSet::new())))
+        // Owned by the VFS: created once on the writer (in `Default`); cloned
+        // worker handles share the same `OnceLock` and only ever read it back.
+        self.vfs.file_set(self)
     }
 }
 
@@ -3599,7 +3594,6 @@ mod tests {
         let db = SalsaDb {
             storage,
             vfs: Vfs::default(),
-            file_set: Arc::new(OnceLock::new()),
         };
         db.file_set();
         (db, log)

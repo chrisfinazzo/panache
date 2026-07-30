@@ -12,11 +12,11 @@
 //! the pre-consolidation `HashMap` behavior) while every id a stale worker
 //! snapshot still names stays index-addressable.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::salsa::FileText;
+use crate::salsa::{Db, FileSet, FileText};
 
 /// Opaque, process-stable identity for a file (mirrors rust-analyzer's
 /// `vfs::FileId`). A plain newtype --- not a salsa interned struct --- because
@@ -58,16 +58,33 @@ impl VfsInner {
 }
 
 /// A `vfs`-style path<->id map that subsumes the former `file_cache`
-/// (audit §3.3 / G3). Owned by [`crate::salsa::SalsaDb`] behind an
-/// `Arc<Mutex<_>>` so cloned worker handles observe the same table.
+/// (audit §3.3 / G3). The single owner of file identity: the path<->id<->input
+/// table *and* the structural [`FileSet`] input handle. Owned by
+/// [`crate::salsa::SalsaDb`]; both fields are shared behind `Arc`, so cloned
+/// worker handles observe the same table and the same `FileSet` input.
 #[derive(Clone, Default)]
 pub(crate) struct Vfs {
     inner: Arc<Mutex<VfsInner>>,
+    /// The single [`FileSet`] input, minted lazily on the writer and shared
+    /// across cloned handles. Co-located with the interner because the set's
+    /// membership *is* the interner's live id set: interning adds an id and
+    /// eviction removes it. The actual `Arc<HashSet<FileId>>` value lives in
+    /// salsa (mutated via `&mut SalsaDb` setters); this holds only the handle.
+    file_set: Arc<OnceLock<FileSet>>,
 }
 
 impl Vfs {
     fn lock(&self) -> std::sync::MutexGuard<'_, VfsInner> {
         self.inner.lock().expect("vfs lock poisoned")
+    }
+
+    /// The shared [`FileSet`] input handle, minted once on the writer. Cloned
+    /// worker handles share the same `OnceLock` and only ever read it back, so
+    /// they observe the writer's set, never mint their own.
+    pub(crate) fn file_set(&self, db: &dyn Db) -> FileSet {
+        *self
+            .file_set
+            .get_or_init(|| FileSet::new(db, Arc::new(HashSet::new())))
     }
 
     pub(crate) fn id_for_path(&self, path: &Path) -> Option<FileId> {
