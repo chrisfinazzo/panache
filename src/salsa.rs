@@ -938,7 +938,38 @@ pub fn heading_outline(
     file: FileText,
     config: FileConfig,
 ) -> Vec<HeadingOutlineEntry> {
-    let tree = parsed_tree_root(db, file, config);
+    // Merge the memoized per-block outlines, shifting each block's relative
+    // heading ranges to absolute by prefix-summing block lengths. The outline is
+    // config-independent, so per-block memos hit for every unchanged block.
+    let mut outline = Vec::new();
+    let mut offset = rowan::TextSize::from(0);
+    for block in document_blocks(db, file, config) {
+        for entry in heading_outline_block(db, block.clone(), config) {
+            outline.push(HeadingOutlineEntry {
+                title: entry.title.clone(),
+                level: entry.level,
+                range: entry.range + offset,
+            });
+        }
+        offset += block.text_len();
+    }
+    outline
+}
+
+/// Block-relative structural-heading outline for a single top-level block.
+///
+/// The outline is config-independent; `config` only rides along to give salsa a
+/// third argument to intern (a non-salsa `GreenNode` alone can't be a query
+/// key). `unsafe(non_salsa_values)`: the interned `GreenNode` argument is an
+/// immutable Arc-backed tree carrying no salsa ids.
+#[salsa::tracked(returns(ref), unsafe(non_salsa_values))]
+pub fn heading_outline_block(
+    db: &dyn Db,
+    block: rowan::GreenNode,
+    config: FileConfig,
+) -> Vec<HeadingOutlineEntry> {
+    let _ = (db, config);
+    let tree = SyntaxNode::new_root(block);
     tree.descendants()
         .filter_map(crate::syntax::Heading::cast)
         .filter(|heading| is_structural_heading_node(heading.syntax()))
@@ -3217,6 +3248,35 @@ mod tests {
             symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
         assert_eq!(after, reference);
         assert_ne!(before, after, "the edit should change the index");
+    }
+
+    #[test]
+    fn heading_outline_block_memoizes_unchanged_blocks() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/tmp/outline_memo.qmd");
+        let source = "# Alpha\n\n# Beta\n\n# Gamma\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string();
+        let file = db.update_file_text(path.clone(), source);
+        let config = FileConfig::new(&db, crate::Config::default());
+
+        let before = heading_outline(&db, file, config).clone();
+        assert!(executed(&log, "heading_outline_block") >= 5);
+        log.lock().unwrap().clear();
+
+        db.update_file_text(
+            path,
+            "# Alpha\n\n# Beta\n\n# GammaX\n\n# Delta\n\n# Epsilon\n\n# Zeta\n".to_string(),
+        );
+        let after = heading_outline(&db, file, config).clone();
+
+        assert_eq!(
+            executed(&log, "heading_outline_block"),
+            1,
+            "only the edited heading block should be re-walked"
+        );
+        assert_ne!(before, after, "the edit should change the outline");
+        // Later blocks' absolute ranges must still shift correctly.
+        assert_eq!(after.len(), 6);
+        assert_eq!(after[2].title, "GammaX");
     }
 
     #[test]
