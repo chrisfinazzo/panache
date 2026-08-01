@@ -102,6 +102,12 @@ pub(crate) struct BlockContext<'a> {
     /// Whether we're currently inside a fenced div (container-owned state)
     pub in_fenced_div: bool,
 
+    /// Indent (columns) of the innermost open fenced div's opening fence, in the
+    /// container-prefix-stripped frame. `None` when not inside a fenced div. A
+    /// closer more indented than this is not the div's closer at the top level
+    /// (pandoc rule); see `FencedDivCloseParser::detect_prepared`.
+    pub fenced_div_open_indent: Option<usize>,
+
     /// Expected closer of the innermost open MyST directive, as
     /// `(fence_char, min_count)`. `None` when not inside a directive. Lets
     /// `MystDirectiveCloseParser` match a closing fence against the opener.
@@ -2408,7 +2414,11 @@ impl BlockParser for FencedDivOpenParser {
                 return None;
             }
         }
-        let div_fence = try_parse_div_fence_open(content)?;
+        let mut div_fence = try_parse_div_fence_open(content)?;
+        // Record the opener's indent in the same frame the closer is measured
+        // in (`leading_indent(lines.first())`), so `FencedDivCloseParser` can
+        // reject a closer that is more indented than its opener.
+        div_fence.open_indent_cols = leading_indent(lines.first()).0;
         Some((BlockDetectionResult::Yes, Some(Box::new(div_fence))))
     }
 
@@ -2432,6 +2442,7 @@ impl BlockParser for FencedDivOpenParser {
             .unwrap_or(DivFenceInfo {
                 attributes: String::new(),
                 fence_count: 3,
+                open_indent_cols: 0,
             });
 
         // Start FENCED_DIV node (container push happens in core based on `effect`).
@@ -2549,6 +2560,20 @@ impl BlockParser for FencedDivCloseParser {
         {
             let (indent_cols, _) = leading_indent(first);
             if indent_cols >= list_info.content_col {
+                return None;
+            }
+        }
+
+        // Top-level (no-list frame): pandoc only closes a div on a fence at the
+        // div's own indentation, so a closer more indented than its opener is
+        // literal text, leaving the div implicitly open at EOF. The in-list case
+        // is handled by the wrapping guard above (issue #439), so scope this to
+        // `list_indent_info.is_none()` to avoid list-frame interference.
+        if ctx.list_indent_info.is_none()
+            && let Some(open_indent) = ctx.fenced_div_open_indent
+        {
+            let (closer_indent, _) = leading_indent(first);
+            if closer_indent > open_indent {
                 return None;
             }
         }

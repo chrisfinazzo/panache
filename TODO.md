@@ -658,15 +658,14 @@ implemented.
 - [x] Nested fenced divs
 - [x] Colon count normalization based on nesting
 - [x] Proper formatting with attribute preservation
-- [ ] Top-level indented lone `:::` diverges from pandoc. Panache accepts up to
-  3 leading spaces on a closing fence, so `::: outer\ntext\n  :::` closes
+- [x] Top-level indented lone `:::` diverges from pandoc. Panache accepted up to
+  3 leading spaces on a closing fence, so `::: outer\ntext\n  :::` closed
   the div; pandoc instead treats the indented `:::` as paragraph text and
-  leaves the div implicitly closed at EOF (`Str ":::"`). Only affects a
-  `:::` more indented than its opener *outside* any list --- the in-list
-  case is handled correctly (a fence at the list content column is list
-  content, not the wrapping div's closer; see #439). Decide whether to
-  tighten the top-level closer to pandoc's rule. Surfaced 2026-07-28 while
-  fixing #439.
+  leaves the div implicitly closed at EOF (`Str ":::"`). Fixed by tracking
+  the opener's indent on `Container::FencedDiv` and rejecting a closer more
+  indented than its opener in `FencedDivCloseParser` (scoped to the no-list
+  frame so the #439 in-list handling is untouched). Surfaced 2026-07-28
+  while fixing #439.
 - [ ] Nested fenced divs inside a list item are mis-parsed: the outer div is
   left unclosed and its trailing `:::` becomes stray text, which surfaces as
   a `stray-fenced-div-markers` lint false positive (e.g.

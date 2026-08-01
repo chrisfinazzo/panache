@@ -215,6 +215,7 @@ golden_test_cases!(
     fenced_code_quarto,
     fenced_code_unclosed_commonmark,
     fenced_divs,
+    fenced_div_indented_close_top_level,
     fenced_div_list_idempotency_setup,
     fenced_div_close_grid_table,
     fenced_div_trim_blank_lines,

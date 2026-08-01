@@ -1,0 +1,17 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..21
+  FENCED_DIV@0..21
+    DIV_FENCE_OPEN@0..10
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..9
+        TEXT@4..9 "outer"
+      NEWLINE@9..10 "\n"
+    PARAGRAPH@10..21
+      TEXT@10..14 "text"
+      NEWLINE@14..15 "\n"
+      TEXT@15..20 "  :::"
+      NEWLINE@20..21 "\n"

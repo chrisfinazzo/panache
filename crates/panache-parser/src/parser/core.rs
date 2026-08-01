@@ -2406,6 +2406,7 @@ impl<'a> Parser<'a> {
                 has_blank_before_strict: has_blank_before,
                 at_document_start: self.pos == 0,
                 in_fenced_div: self.in_fenced_div(),
+                fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
                 fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
                 myst_directive_closer: self.innermost_myst_directive_closer(),
                 blockquote_depth: current_bq_depth,
@@ -3570,6 +3571,7 @@ impl<'a> Parser<'a> {
                             || is_blank_line(self.lines[self.pos - 1]),
                         at_document_start: self.pos == 0 && self.current_blockquote_depth() == 0,
                         in_fenced_div: self.in_fenced_div(),
+                        fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
                         fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
                         myst_directive_closer: self.innermost_myst_directive_closer(),
                         blockquote_depth: self.current_blockquote_depth(),
@@ -3828,6 +3830,7 @@ impl<'a> Parser<'a> {
             has_blank_before_strict: false, // filled in later
             at_document_start: false,       // filled in later
             in_fenced_div: self.in_fenced_div(),
+            fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
             fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
             myst_directive_closer: self.innermost_myst_directive_closer(),
             blockquote_depth: current_bq_depth,
@@ -3997,7 +4000,7 @@ impl<'a> Parser<'a> {
                 let extras = match block_match.effect {
                     BlockEffect::None => 0,
                     BlockEffect::OpenFencedDiv => {
-                        self.containers.push(Container::FencedDiv {});
+                        self.push_fenced_div_container(block_match);
                         0
                     }
                     BlockEffect::CloseFencedDiv => {
@@ -4246,7 +4249,7 @@ impl<'a> Parser<'a> {
                 let extras = match block_match.effect {
                     BlockEffect::None => 0,
                     BlockEffect::OpenFencedDiv => {
-                        self.containers.push(Container::FencedDiv {});
+                        self.push_fenced_div_container(block_match);
                         0
                     }
                     BlockEffect::CloseFencedDiv => {
@@ -4410,6 +4413,30 @@ impl<'a> Parser<'a> {
             .stack
             .iter()
             .any(|c| matches!(c, Container::FencedDiv { .. }))
+    }
+
+    /// Push a `Container::FencedDiv`, recovering the opener's indent from the
+    /// prepared payload so `FencedDivCloseParser` can reject a closer more
+    /// indented than the opener.
+    fn push_fenced_div_container(&mut self, block_match: &PreparedBlockMatch) {
+        use crate::parser::blocks::fenced_divs::DivFenceInfo;
+        let open_indent_cols = block_match
+            .payload
+            .as_ref()
+            .and_then(|p| p.downcast_ref::<DivFenceInfo>())
+            .map(|info| info.open_indent_cols)
+            .unwrap_or(0);
+        self.containers
+            .push(Container::FencedDiv { open_indent_cols });
+    }
+
+    /// Indent (columns) of the innermost open fenced div's opening fence, or
+    /// `None` when not inside a fenced div. Consulted by `FencedDivCloseParser`.
+    fn innermost_fenced_div_open_indent(&self) -> Option<usize> {
+        self.containers.stack.iter().rev().find_map(|c| match c {
+            Container::FencedDiv { open_indent_cols } => Some(*open_indent_cols),
+            _ => None,
+        })
     }
 
     fn myst_directive_container_index(&self) -> Option<usize> {

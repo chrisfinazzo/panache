@@ -7,6 +7,10 @@ use crate::parser::utils::helpers::strip_leading_spaces;
 pub(crate) struct DivFenceInfo {
     pub attributes: String,
     pub fence_count: usize,
+    /// Indentation (in columns) of the opening fence, measured in the
+    /// container-prefix-stripped frame. A closing fence more indented than
+    /// this is not a closer (pandoc rule); see `FencedDivCloseParser`.
+    pub open_indent_cols: usize,
 }
 
 /// Try to detect a fenced div opening from content.
@@ -86,6 +90,9 @@ pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
     Some(DivFenceInfo {
         attributes,
         fence_count: colon_count,
+        // Filled in by the caller, which measures the opener's indent in the
+        // container-prefix-stripped frame (see `FencedDivOpenParser`).
+        open_indent_cols: 0,
     })
 }
 
