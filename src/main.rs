@@ -1681,104 +1681,320 @@ fn main() -> io::Result<()> {
             let cache_shared: Option<Arc<Mutex<CliCache>>> =
                 cache.take().map(|c| Arc::new(Mutex::new(c)));
 
-            // Lint one file against a shared, batch-scoped database. Every salsa
-            // write (registering the file, eagerly loading its project's
-            // referenced siblings) happens here on the calling thread; callers
-            // guarantee one thread per database by grouping files per project.
-            let process_one = |file_path: &PathBuf| -> io::Result<LintOutcome> {
-                let mut db = panache::salsa::SalsaDb::default();
-                let start_dir = file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-                let (mut cfg, cfg_source) = load_config_for_cli(
-                    cli.config.as_deref(),
-                    cli.isolated,
-                    cli.cache_dir.as_deref(),
-                    &start_dir,
-                    Some(file_path),
-                    cli.flavor.map(Flavor::from),
-                )?;
-                // Size the shared external-tool budget from the user-configured
-                // value, then split that ceiling across the files processed
-                // concurrently so a few files can saturate it while a large
-                // batch stays at ~1-per-file.
-                panache::init_external_tool_budget(cfg.external_max_parallel);
-                if parallel {
-                    cfg.external_max_parallel =
-                        per_file_external_parallel(cfg.external_max_parallel, workers);
-                }
+            // Prepared work for one file: a cache hit (ready outcome), a failure,
+            // or a job whose document + project were loaded into the group's
+            // shared database in the writer phase, ready to lint read-only in the
+            // parallel reader phase.
+            struct PreparedJob {
+                idx: usize,
+                file_path: PathBuf,
+                input: String,
+                cfg: panache::Config,
+                file_config: panache::salsa::FileConfig,
+                file_text: panache::salsa::FileText,
+                cache_store: Option<(String, String, String)>,
+            }
+            enum Prepared {
+                Cached(usize, Box<LintOutcome>),
+                Failed(usize, io::Error),
+                Job(Box<PreparedJob>),
+            }
 
-                if let Some(path) = cfg_source.path() {
-                    log::debug!("Using config from: {}", path.display());
-                } else {
-                    log::debug!("Using default config");
-                }
+            // Writer phase for one file (sequential per group): load config, read
+            // input, consult the cache, and on a miss register the file and eagerly
+            // load its project's referenced files into the shared `db`. All salsa
+            // writes for a group happen here, on one thread.
+            let prepare = |idx: usize,
+                           file_path: &Path,
+                           db: &mut panache::salsa::SalsaDb,
+                           intern: &mut Vec<(panache::Config, panache::salsa::FileConfig)>|
+             -> Prepared {
+                let mut load = || -> io::Result<Prepared> {
+                    let start_dir = file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                    let (mut cfg, cfg_source) = load_config_for_cli(
+                        cli.config.as_deref(),
+                        cli.isolated,
+                        cli.cache_dir.as_deref(),
+                        &start_dir,
+                        Some(file_path),
+                        cli.flavor.map(Flavor::from),
+                    )?;
+                    // Size the shared external-tool budget from the user-configured
+                    // value, then split it across the files processed concurrently.
+                    panache::init_external_tool_budget(cfg.external_max_parallel);
+                    if parallel {
+                        cfg.external_max_parallel =
+                            per_file_external_parallel(cfg.external_max_parallel, workers);
+                    }
+                    if let Some(path) = cfg_source.path() {
+                        log::debug!("Using config from: {}", path.display());
+                    } else {
+                        log::debug!("Using default config");
+                    }
 
-                let root_input = fs::read_to_string(file_path)?;
+                    let input = fs::read_to_string(file_path)?;
 
-                let documents = if let Some(cache_handle) = cache_shared.as_ref() {
-                    let file_fingerprint = CliCache::file_fingerprint(&root_input);
-                    let config_fingerprint = CliCache::config_fingerprint(&cfg);
-                    let tool_fingerprint = CliCache::tool_fingerprint();
-
-                    let cached_lookup = {
-                        let guard = cache_handle.lock().unwrap();
-                        if guard.supports_lint(&cfg) {
-                            guard
-                                .get_lint(
-                                    file_path,
-                                    &file_fingerprint,
-                                    &config_fingerprint,
-                                    &tool_fingerprint,
-                                )
-                                .filter(|docs| cached_lint_documents_are_fresh(docs))
+                    let (supports, fingerprints, cached_docs) =
+                        if let Some(cache_handle) = cache_shared.as_ref() {
+                            let ff = CliCache::file_fingerprint(&input);
+                            let cf = CliCache::config_fingerprint(&cfg);
+                            let tf = CliCache::tool_fingerprint();
+                            let guard = cache_handle.lock().unwrap();
+                            let supports = guard.supports_lint(&cfg);
+                            let hit = if supports {
+                                guard
+                                    .get_lint(file_path, &ff, &cf, &tf)
+                                    .filter(|docs| cached_lint_documents_are_fresh(docs))
+                            } else {
+                                None
+                            };
+                            (supports, Some((ff, cf, tf)), hit)
                         } else {
-                            None
-                        }
-                    };
-                    if let Some(cached_documents) = cached_lookup {
-                        cached_documents
+                            (false, None, None)
+                        };
+
+                    if let Some(docs) = cached_docs {
+                        let documents = docs
                             .iter()
                             .map(linted_document_from_cached)
-                            .collect::<Vec<_>>()
-                    } else {
-                        let file_config = panache::salsa::FileConfig::new(&db, cfg.clone());
-                        let documents = lint_documents_on_db(
-                            file_path,
-                            &root_input,
-                            &cfg,
-                            &mut db,
-                            file_config,
-                        )?;
-                        let mut guard = cache_handle.lock().unwrap();
-                        if guard.supports_lint(&cfg) {
-                            let cached_docs = documents
-                                .iter()
-                                .map(cached_lint_document_from_linted)
-                                .collect::<Vec<_>>();
-                            guard.put_lint(
-                                file_path,
-                                file_fingerprint,
-                                config_fingerprint,
-                                tool_fingerprint,
-                                cached_docs,
-                            );
-                        }
-                        documents
+                            .collect::<Vec<_>>();
+                        return Ok(Prepared::Cached(
+                            idx,
+                            Box::new(build_lint_outcome(file_path, documents)),
+                        ));
                     }
-                } else {
-                    let file_config = panache::salsa::FileConfig::new(&db, cfg.clone());
-                    lint_documents_on_db(file_path, &root_input, &cfg, &mut db, file_config)?
+
+                    // Miss: reuse a value-equal `FileConfig` handle so per-project
+                    // salsa memos (project_graph, project_symbol_index) hit across
+                    // files, then register + eagerly load the project.
+                    let file_config = match intern.iter().find(|(c, _)| c == &cfg) {
+                        Some((_, handle)) => *handle,
+                        None => {
+                            let handle = panache::salsa::FileConfig::new(db, cfg.clone());
+                            intern.push((cfg.clone(), handle));
+                            handle
+                        }
+                    };
+                    // Register the file; the project's referenced files are loaded
+                    // once per group (below), not per file.
+                    let file_text = db.update_file_text(file_path.to_path_buf(), input.clone());
+                    Ok(Prepared::Job(Box::new(PreparedJob {
+                        idx,
+                        file_path: file_path.to_path_buf(),
+                        input,
+                        cfg,
+                        file_config,
+                        file_text,
+                        cache_store: if supports { fingerprints } else { None },
+                    })))
+                };
+                match load() {
+                    Ok(prepared) => prepared,
+                    Err(err) => Prepared::Failed(idx, err),
+                }
+            };
+
+            // Lint every file in one project group. The writer phase loads the
+            // whole project once into a shared database; the cross-document graph
+            // is then computed once (it is keyed on the root file, so a per-file
+            // call would recompute it N times — the O(n^2) hot spot); finally the
+            // reader phase lints each file in parallel on cloned, read-only
+            // handles (every referenced file is already loaded, so no salsa write
+            // happens to cancel a concurrent read).
+            let process_group =
+                |files: &[(usize, PathBuf)]| -> Vec<(usize, io::Result<LintOutcome>)> {
+                    use rayon::prelude::*;
+
+                    let mut db = panache::salsa::SalsaDb::default();
+                    let mut intern: Vec<(panache::Config, panache::salsa::FileConfig)> = Vec::new();
+                    let mut results: Vec<(usize, io::Result<LintOutcome>)> = Vec::new();
+                    let mut jobs: Vec<PreparedJob> = Vec::new();
+
+                    for (idx, file_path) in files {
+                        match prepare(*idx, file_path, &mut db, &mut intern) {
+                            Prepared::Cached(i, outcome) => results.push((i, Ok(*outcome))),
+                            Prepared::Failed(i, err) => results.push((i, Err(err))),
+                            Prepared::Job(job) => jobs.push(*job),
+                        }
+                    }
+
+                    let is_project = files.first().is_some_and(|(_, p)| {
+                        let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
+                        panache::includes::find_project_roots(&canonical)
+                            .quarto_first()
+                            .is_some()
+                    });
+
+                    // Load the project's referenced files once per distinct config
+                    // (projects are almost always single-config), rather than once per
+                    // file. `load_referenced_files` enumerates + loads every project
+                    // document and include, and `project_structure` memoizes on the
+                    // root file, so a single call covers the whole project — the O(n^2)
+                    // fix. Any file not covered (e.g. a non-render-target sibling with
+                    // its own includes) is loaded individually so the parallel reader
+                    // never has to mint a `FileText` (a write) for an unloaded include.
+                    {
+                        let mut loaded_by_config: Vec<(
+                            panache::salsa::FileConfig,
+                            std::collections::HashSet<PathBuf>,
+                        )> = Vec::new();
+                        for job in &jobs {
+                            let covered = loaded_by_config
+                                .iter()
+                                .find(|(c, _)| *c == job.file_config)
+                                .is_some_and(|(_, set)| set.contains(&job.file_path));
+                            if covered {
+                                continue;
+                            }
+                            let loaded = db.load_referenced_files(
+                                job.file_text,
+                                job.file_config,
+                                job.file_path.clone(),
+                            );
+                            match loaded_by_config
+                                .iter_mut()
+                                .find(|(c, _)| *c == job.file_config)
+                            {
+                                Some((_, set)) => set.extend(loaded),
+                                None => loaded_by_config.push((job.file_config, loaded)),
+                            }
+                        }
+                    }
+
+                    // Precompute the project's cross-document diagnostics once per
+                    // distinct config (projects are almost always single-config).
+                    let mut graph_by_config: Vec<(
+                        panache::salsa::FileConfig,
+                        ProjectGraphDiagnostics,
+                    )> = Vec::new();
+                    if is_project {
+                        for job in &jobs {
+                            if graph_by_config.iter().any(|(c, _)| *c == job.file_config) {
+                                continue;
+                            }
+                            let mut map: ProjectGraphDiagnostics = std::collections::HashMap::new();
+                            for entry in panache::salsa::project_graph::accumulated::<
+                                panache::salsa::GraphDiagnostic,
+                            >(
+                                &db, job.file_text, job.file_config
+                            ) {
+                                map.entry(entry.0.path.clone())
+                                    .or_default()
+                                    .push(entry.0.diagnostic.clone());
+                            }
+                            graph_by_config.push((job.file_config, map));
+                        }
+                    }
+
+                    let graph_ref = &graph_by_config;
+                    // `SalsaDb` is `!Sync` (its query stack is a `RefCell`), so each
+                    // reader task gets its own cloned handle (cheap: the storage is
+                    // `Arc`-shared, so all the writer-phase memos are visible). This
+                    // mirrors the LSP's per-worker `db.clone()` snapshot model.
+                    let lint_job = |job: &PreparedJob,
+                                    db: panache::salsa::SalsaDb|
+                     -> (usize, io::Result<LintOutcome>) {
+                        let graph_diags = if is_project {
+                            graph_ref
+                                .iter()
+                                .find(|(c, _)| *c == job.file_config)
+                                .map(|(_, map)| map)
+                        } else {
+                            None
+                        };
+                        let mut documents = Vec::new();
+                        let mut visited = std::collections::HashSet::new();
+                        let mut active = std::collections::HashSet::new();
+                        match lint_loaded_document_with_includes(
+                            &job.file_path,
+                            &job.input,
+                            Some(job.file_text),
+                            &job.cfg,
+                            job.file_config,
+                            &mut documents,
+                            &mut visited,
+                            &mut active,
+                            &db,
+                            graph_diags,
+                        ) {
+                            Ok(()) => {
+                                if let (Some(cache_handle), Some((ff, cf, tf))) =
+                                    (cache_shared.as_ref(), job.cache_store.as_ref())
+                                {
+                                    let mut guard = cache_handle.lock().unwrap();
+                                    if guard.supports_lint(&job.cfg) {
+                                        let cached_docs = documents
+                                            .iter()
+                                            .map(cached_lint_document_from_linted)
+                                            .collect::<Vec<_>>();
+                                        guard.put_lint(
+                                            &job.file_path,
+                                            ff.clone(),
+                                            cf.clone(),
+                                            tf.clone(),
+                                            cached_docs,
+                                        );
+                                    }
+                                }
+                                (job.idx, Ok(build_lint_outcome(&job.file_path, documents)))
+                            }
+                            Err(err) => (job.idx, Err(err)),
+                        }
+                    };
+
+                    let job_dbs: Vec<panache::salsa::SalsaDb> =
+                        jobs.iter().map(|_| db.clone()).collect();
+                    let job_results: Vec<(usize, io::Result<LintOutcome>)> = if parallel {
+                        jobs.par_iter()
+                            .zip(job_dbs.into_par_iter())
+                            .map(|(job, job_db)| lint_job(job, job_db))
+                            .collect()
+                    } else {
+                        jobs.iter()
+                            .zip(job_dbs)
+                            .map(|(job, job_db)| lint_job(job, job_db))
+                            .collect()
+                    };
+                    results.extend(job_results);
+                    results
                 };
 
-                Ok(build_lint_outcome(file_path, documents))
+            // Group files by the project they belong to. One shared database per
+            // project lets `project_structure`, `project_graph`, and
+            // `project_symbol_index` (plus every document's parse) be computed
+            // once for the whole project instead of once per file — the fix for
+            // the O(n^2) whole-project reparse. Files with no project become
+            // singleton groups, preserving per-file parallelism for flat
+            // directories. Distinct projects (and singleton files) run in
+            // parallel; within a project the reader phase parallelizes too.
+            let group_key = |file_path: &Path| -> PathBuf {
+                let canonical = file_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| file_path.to_path_buf());
+                panache::includes::find_project_roots(&canonical)
+                    .quarto_first()
+                    .unwrap_or(canonical)
             };
+            let mut group_map: std::collections::HashMap<PathBuf, Vec<(usize, PathBuf)>> =
+                std::collections::HashMap::new();
+            for (idx, file_path) in expanded_files.iter().enumerate() {
+                group_map
+                    .entry(group_key(file_path))
+                    .or_default()
+                    .push((idx, file_path.clone()));
+            }
+            let groups: Vec<Vec<(usize, PathBuf)>> = group_map.into_values().collect();
 
-            let outcomes: Vec<io::Result<LintOutcome>> = if parallel {
+            let mut indexed: Vec<(usize, io::Result<LintOutcome>)> = if parallel {
                 use rayon::prelude::*;
                 let pool = build_pool(workers);
-                pool.install(|| expanded_files.par_iter().map(&process_one).collect())
+                pool.install(|| groups.par_iter().flat_map(|g| process_group(g)).collect())
             } else {
-                expanded_files.iter().map(&process_one).collect()
+                groups.iter().flat_map(|g| process_group(g)).collect()
             };
+            indexed.sort_by_key(|(idx, _)| *idx);
+            let outcomes: Vec<io::Result<LintOutcome>> =
+                indexed.into_iter().map(|(_, outcome)| outcome).collect();
 
             if let Some(handle) = cache_shared {
                 cache = Some(
@@ -2130,44 +2346,11 @@ fn build_lint_outcome(file_path: &Path, documents: Vec<LintedDocument>) -> LintO
     }
 }
 
-/// Lint a root document and its includes against a freshly-constructed salsa
-/// database, eagerly loading the project's referenced files so cross-document
-/// queries (`project_graph`, `project_symbol_index`, `metadata`) see them.
-fn lint_documents_on_db(
-    root_path: &Path,
-    root_input: &str,
-    cfg: &panache::Config,
-    db: &mut panache::salsa::SalsaDb,
-    file_config: panache::salsa::FileConfig,
-) -> io::Result<Vec<LintedDocument>> {
-    use std::collections::HashSet;
-
-    let mut results = Vec::new();
-    let mut visited = HashSet::new();
-    let mut active = HashSet::new();
-    // Register the root in the VFS (assigning it a FileId + FileSet entry) so the
-    // discovery loop's `intern_file(root_path)` resolves to this same input
-    // rather than minting a duplicate and re-reading the root from disk.
-    let root_file_text = db.update_file_text(root_path.to_path_buf(), root_input.to_string());
-    // `Db::file_text` is a pure lookup (audit §3.2/§3.3): it no longer lazy-loads
-    // includes/bibliography from disk inside queries. Load the project's
-    // referenced files onto the writer up front so `project_graph`,
-    // `project_symbol_index`, and `metadata` see them — and so the read path
-    // below never has to mint a `FileText` (a write) for an include.
-    db.load_referenced_files(root_file_text, file_config, root_path.to_path_buf());
-    lint_loaded_document_with_includes(
-        root_path,
-        root_input,
-        Some(root_file_text),
-        cfg,
-        file_config,
-        &mut results,
-        &mut visited,
-        &mut active,
-        db,
-    )?;
-    Ok(results)
-}
+/// Cross-document (`project_graph`) diagnostics for a whole project, indexed by
+/// the document they apply to. Computed once per project (see the `Commands::Lint`
+/// handler) and shared by every file's lint so the O(project) accumulator does
+/// not re-run per file.
+type ProjectGraphDiagnostics = std::collections::HashMap<PathBuf, Vec<panache::linter::Diagnostic>>;
 
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn lint_loaded_document_with_includes(
@@ -2180,6 +2363,7 @@ fn lint_loaded_document_with_includes(
     visited: &mut std::collections::HashSet<PathBuf>,
     active: &mut std::collections::HashSet<PathBuf>,
     db: &panache::salsa::SalsaDb,
+    graph_diags: Option<&ProjectGraphDiagnostics>,
 ) -> io::Result<()> {
     if !visited.insert(doc_path.to_path_buf()) {
         return Ok(());
@@ -2225,7 +2409,16 @@ fn lint_loaded_document_with_includes(
     // overwhelmingly common flat-directory case (e.g. linting a folder of
     // standalone .md files) skip the salsa accumulator entirely; this is the
     // dominant per-file cost on large many-file batches.
-    if roots.quarto.is_some() || roots.bookdown.is_some() || !resolution.includes.is_empty() {
+    if let Some(graph_diags) = graph_diags {
+        // Project batch: the accumulator was run once for the whole project (it
+        // is keyed on the root file, so a per-file call would recompute the
+        // same cross-document graph N times — the O(n^2) hot spot). Look up this
+        // document's precomputed cross-file diagnostics.
+        if let Some(entries) = graph_diags.get(doc_path) {
+            diagnostics.extend(entries.iter().cloned());
+        }
+    } else if roots.quarto.is_some() || roots.bookdown.is_some() || !resolution.includes.is_empty()
+    {
         let graph_diags = panache::salsa::project_graph::accumulated::<
             panache::salsa::GraphDiagnostic,
         >(db, file_text, file_config);
@@ -2260,6 +2453,7 @@ fn lint_loaded_document_with_includes(
                     visited,
                     active,
                     db,
+                    graph_diags,
                 )?;
             }
             Err(err) => {
