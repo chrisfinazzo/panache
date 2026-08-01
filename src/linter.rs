@@ -8,6 +8,7 @@ pub(crate) mod fuzzy;
 pub mod index;
 pub mod metadata_diagnostics;
 pub(crate) mod offsets;
+pub mod project_index;
 pub mod quarto_schema;
 pub mod rules;
 pub mod runner;
@@ -59,10 +60,11 @@ pub fn lint_with_metadata_and_symbols(
     config: &Config,
     metadata: Option<&crate::metadata::DocumentMetadata>,
     symbols: Option<&crate::salsa::SymbolUsageIndex>,
+    project_symbols: Option<&crate::linter::project_index::ProjectSymbolIndex>,
 ) -> Vec<Diagnostic> {
     let registry = default_registry(config);
     let runner = LintRunner::new(registry);
-    runner.run_with_metadata_and_symbols(tree, input, config, metadata, symbols)
+    runner.run_with_metadata_and_symbols(tree, input, config, metadata, symbols, project_symbols)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

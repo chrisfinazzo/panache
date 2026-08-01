@@ -1,8 +1,7 @@
-use crate::config::Config;
 use crate::linter::diagnostics::{Diagnostic, Location};
+use crate::linter::project_index::extend_anchors;
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
-use crate::syntax::{AttributeNode, Citation, Link, SyntaxKind, SyntaxNode};
-use crate::utils::implicit_heading_ids;
+use crate::syntax::{Link, SyntaxKind};
 use rowan::ast::AstNode;
 use std::collections::HashSet;
 
@@ -28,9 +27,17 @@ impl Rule for UndefinedAnchorRule {
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
-        let (tree, input, config, metadata) = (cx.tree, cx.input, cx.config, cx.metadata);
+        let input = cx.input;
+        // Build only the current document's anchors (cheap); resolve cross-file
+        // against the shared project aggregate by membership rather than copying
+        // it into a local set per file (that copy was an O(n^2) hot spot).
         let doc_symbols = cx.symbol_index();
-        let anchors = collect_anchors(tree, config, metadata, &doc_symbols);
+        let mut local = HashSet::new();
+        extend_anchors(&mut local, cx.tree, cx.config, &doc_symbols);
+        let project = cx.project_symbol_index();
+        let project = project.as_deref();
+        let anchor_defined =
+            |id: &str| local.contains(id) || project.is_some_and(|p| p.anchors.contains(id));
         let mut diagnostics = Vec::new();
 
         for link in cx
@@ -50,7 +57,7 @@ impl Rule for UndefinedAnchorRule {
             let Some(id) = dest.hash_anchor_id() else {
                 continue;
             };
-            if id.is_empty() || anchors.contains(&id) {
+            if id.is_empty() || anchor_defined(&id) {
                 continue;
             }
             let range = dest
@@ -67,94 +74,10 @@ impl Rule for UndefinedAnchorRule {
     }
 }
 
-fn collect_anchors(
-    tree: &SyntaxNode,
-    config: &Config,
-    metadata: Option<&crate::metadata::DocumentMetadata>,
-    doc_symbols: &crate::salsa::SymbolUsageIndex,
-) -> HashSet<String> {
-    let mut anchors = HashSet::new();
-    // The current document's symbol index is memoized upstream; sibling project
-    // files have no memo, so they are built fresh below.
-    extend_anchors(&mut anchors, tree, config, doc_symbols);
-
-    let Some(metadata) = metadata else {
-        return anchors;
-    };
-
-    let doc_path = metadata
-        .source_path
-        .canonicalize()
-        .unwrap_or_else(|_| metadata.source_path.clone());
-    let roots = crate::includes::find_project_roots(&doc_path);
-    let Some(bookdown_root) = roots.bookdown else {
-        return anchors;
-    };
-
-    for path in crate::includes::find_project_documents(&bookdown_root, config, true) {
-        if path == doc_path {
-            continue;
-        }
-        if let Ok(other_input) = std::fs::read_to_string(&path) {
-            let other_tree = crate::parser::parse(&other_input, Some(config.clone()));
-            let db = crate::salsa::SalsaDb::default();
-            let other_index =
-                crate::salsa::symbol_usage_index_from_tree(&db, &other_tree, &config.extensions);
-            extend_anchors(&mut anchors, &other_tree, config, &other_index);
-        }
-    }
-
-    anchors
-}
-
-fn extend_anchors(
-    anchors: &mut HashSet<String>,
-    tree: &SyntaxNode,
-    config: &Config,
-    symbol_index: &crate::salsa::SymbolUsageIndex,
-) {
-    anchors.extend(
-        symbol_index
-            .crossref_declaration_entries()
-            .map(|(label, _)| label.clone())
-            .filter(|label| !label.is_empty()),
-    );
-
-    if config.extensions.auto_identifiers {
-        for entry in implicit_heading_ids(tree, &config.extensions) {
-            if heading_has_explicit_id(&entry.heading) {
-                continue;
-            }
-            if entry.id.is_empty() {
-                continue;
-            }
-            anchors.insert(entry.id);
-        }
-    }
-
-    if config.extensions.citations {
-        for citation in tree.descendants().filter_map(Citation::cast) {
-            for key in citation.key_texts() {
-                if key.is_empty() {
-                    continue;
-                }
-                anchors.insert(format!("ref-{key}"));
-            }
-        }
-    }
-}
-
-fn heading_has_explicit_id(heading: &SyntaxNode) -> bool {
-    heading
-        .children()
-        .filter_map(AttributeNode::cast)
-        .any(|attribute| attribute.id().is_some())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Flavor;
+    use crate::config::{Config, Flavor};
     use std::fs;
     use tempfile::TempDir;
 
@@ -428,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_file_anchor_does_not_resolve_in_quarto_book() {
+    fn cross_file_anchor_resolves_in_quarto_book() {
         let temp = TempDir::new().expect("tempdir");
         let root = temp.path();
         fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").expect("write _quarto.yml");
@@ -450,7 +373,10 @@ mod tests {
         let metadata = crate::metadata::extract_project_metadata(&tree, &path).expect("metadata");
         let rule = UndefinedAnchorRule;
         let diagnostics = rule.check_tree(&tree, &input, &config, Some(&metadata));
-        assert_eq!(diagnostics.len(), 1, "got {:?}", diagnostics);
-        assert_eq!(diagnostics[0].code, "undefined-anchor");
+        assert!(
+            diagnostics.iter().all(|d| d.code != "undefined-anchor"),
+            "cross-file anchor should resolve in Quarto projects too: {:?}",
+            diagnostics
+        );
     }
 }

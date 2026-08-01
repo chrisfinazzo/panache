@@ -1,13 +1,10 @@
-use crate::config::Config;
 use crate::linter::diagnostics::{Diagnostic, Location};
+use crate::linter::project_index::{DefinitionLabels, extend_labels_from_tree};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
 use crate::syntax::{
     AstNode, Crossref, FootnoteReference, Link, SyntaxKind, SyntaxNode, UnresolvedReference,
 };
-use crate::utils::{
-    crossref_resolution_labels, implicit_heading_ids, normalize_anchor_label, normalize_label,
-};
-use std::collections::HashSet;
+use crate::utils::{crossref_resolution_labels, normalize_anchor_label, normalize_label};
 
 pub struct UndefinedReferencesRule;
 
@@ -41,11 +38,35 @@ impl Rule for UndefinedReferencesRule {
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
-        let (tree, input, config, metadata) = (cx.tree, cx.input, cx.config, cx.metadata);
+        let (input, config) = (cx.input, cx.config);
         let mut diagnostics = Vec::new();
 
+        // Build only the *current* document's definitions (cheap, O(doc)); check
+        // cross-file resolution against the shared project aggregate by
+        // membership rather than copying it into a local set per file (that copy
+        // was O(project) per file — an O(n^2) hot spot on large projects).
         let doc_symbols = cx.symbol_index();
-        let labels = collect_definition_labels(tree, config, metadata, &doc_symbols);
+        let mut labels = DefinitionLabels::default();
+        extend_labels_from_tree(&mut labels, cx.tree, config, &doc_symbols);
+        let project = cx.project_symbol_index();
+        let project = project.as_deref();
+
+        let reference_defined = |normalized: &str| {
+            labels.reference_labels.contains(normalized)
+                || labels.heading_text_labels.contains(normalized)
+                || project.is_some_and(|p| {
+                    p.definitions.reference_labels.contains(normalized)
+                        || p.definitions.heading_text_labels.contains(normalized)
+                })
+        };
+        let footnote_defined = |normalized: &str| {
+            labels.footnote_ids.contains(normalized)
+                || project.is_some_and(|p| p.definitions.footnote_ids.contains(normalized))
+        };
+        let crossref_defined = |candidate: &str| {
+            labels.crossref_labels.contains(candidate)
+                || project.is_some_and(|p| p.definitions.crossref_labels.contains(candidate))
+        };
 
         for link in cx
             .nodes(SyntaxKind::LINK)
@@ -61,10 +82,7 @@ impl Rule for UndefinedReferencesRule {
                 continue;
             };
             let normalized_label = normalize_label(&label_text);
-            if normalized_label.is_empty()
-                || labels.reference_labels.contains(&normalized_label)
-                || labels.heading_text_labels.contains(&normalized_label)
-            {
+            if normalized_label.is_empty() || reference_defined(&normalized_label) {
                 continue;
             }
 
@@ -91,10 +109,7 @@ impl Rule for UndefinedReferencesRule {
                 continue;
             };
             let normalized_label = normalize_label(&label_text);
-            if normalized_label.is_empty()
-                || labels.reference_labels.contains(&normalized_label)
-                || labels.heading_text_labels.contains(&normalized_label)
-            {
+            if normalized_label.is_empty() || reference_defined(&normalized_label) {
                 continue;
             }
             let prefix = if unresolved.is_image() { "![" } else { "[" };
@@ -113,7 +128,7 @@ impl Rule for UndefinedReferencesRule {
         {
             let id = footnote_ref.id();
             let normalized = normalize_label(&id);
-            if normalized.is_empty() || labels.footnote_ids.contains(&normalized) {
+            if normalized.is_empty() || footnote_defined(&normalized) {
                 continue;
             }
 
@@ -153,7 +168,7 @@ impl Rule for UndefinedReferencesRule {
                     crossref_resolution_labels(&normalized, config.extensions.bookdown_references);
                 if candidates
                     .iter()
-                    .any(|candidate| labels.crossref_labels.contains(candidate))
+                    .any(|candidate| crossref_defined(candidate))
                 {
                     continue;
                 }
@@ -167,108 +182,6 @@ impl Rule for UndefinedReferencesRule {
 
         diagnostics
     }
-}
-
-#[derive(Default)]
-struct DefinitionLabels {
-    reference_labels: HashSet<String>,
-    footnote_ids: HashSet<String>,
-    crossref_labels: HashSet<String>,
-    heading_text_labels: HashSet<String>,
-}
-
-fn collect_definition_labels(
-    tree: &SyntaxNode,
-    config: &Config,
-    metadata: Option<&crate::metadata::DocumentMetadata>,
-    doc_symbols: &crate::salsa::SymbolUsageIndex,
-) -> DefinitionLabels {
-    let mut labels = DefinitionLabels::default();
-    // The current document's symbol index is memoized upstream; sibling project
-    // files have no memo, so they are built fresh below.
-    extend_labels_from_tree(&mut labels, tree, config, doc_symbols);
-
-    let Some(metadata) = metadata else {
-        return labels;
-    };
-
-    // Canonicalize to absolute path so project root discovery and path comparisons work
-    // correctly regardless of whether the path was given as relative or absolute.
-    let doc_path = metadata
-        .source_path
-        .canonicalize()
-        .unwrap_or_else(|_| metadata.source_path.clone());
-    let roots = crate::includes::find_project_roots(&doc_path);
-    let Some(project_root) = roots.bookdown_first() else {
-        return labels;
-    };
-    let is_bookdown = roots.bookdown.is_some();
-
-    for path in crate::includes::find_project_documents(&project_root, config, is_bookdown) {
-        if path == doc_path {
-            continue;
-        }
-        if let Ok(other_input) = std::fs::read_to_string(&path) {
-            let other_tree = crate::parser::parse(&other_input, Some(config.clone()));
-            let db = crate::salsa::SalsaDb::default();
-            let other_index =
-                crate::salsa::symbol_usage_index_from_tree(&db, &other_tree, &config.extensions);
-            extend_labels_from_tree(&mut labels, &other_tree, config, &other_index);
-        }
-    }
-
-    labels
-}
-
-fn extend_labels_from_tree(
-    labels: &mut DefinitionLabels,
-    tree: &SyntaxNode,
-    config: &Config,
-    symbol_index: &crate::salsa::SymbolUsageIndex,
-) {
-    labels.reference_labels.extend(
-        symbol_index
-            .reference_definition_entries()
-            .map(|(label, _)| label.clone())
-            .filter(|label| !label.is_empty()),
-    );
-    labels.footnote_ids.extend(
-        symbol_index
-            .footnote_definition_entries()
-            .map(|(id, _)| id.clone())
-            .filter(|id| !id.is_empty()),
-    );
-    labels.crossref_labels.extend(
-        symbol_index
-            .crossref_declaration_entries()
-            .map(|(label, _)| label.clone())
-            .filter(|label| !label.is_empty()),
-    );
-
-    if config.extensions.implicit_header_references && config.extensions.auto_identifiers {
-        labels.heading_text_labels.extend(
-            symbol_index
-                .heading_label_entries()
-                .map(|(label, _)| label.clone())
-                .filter(|label| !label.is_empty()),
-        );
-    }
-
-    if config.extensions.bookdown_references && config.extensions.auto_identifiers {
-        labels
-            .crossref_labels
-            .extend(collect_implicit_heading_ids(tree, &config.extensions));
-    }
-}
-
-fn collect_implicit_heading_ids(
-    tree: &SyntaxNode,
-    extensions: &crate::config::Extensions,
-) -> HashSet<String> {
-    implicit_heading_ids(tree, extensions)
-        .into_iter()
-        .map(|entry| entry.id)
-        .collect()
 }
 
 fn extract_reference_label_and_node(link: &Link) -> Option<(String, SyntaxNode)> {
@@ -311,7 +224,7 @@ fn extract_unresolved_label_and_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Flavor;
+    use crate::config::{Config, Flavor};
     use std::fs;
     use tempfile::TempDir;
 
@@ -580,6 +493,37 @@ mod tests {
                 .iter()
                 .all(|diag| diag.code != "undefined-reference-label"),
             "empty _bookdown.yml should auto-discover .Rmd files in the project"
+        );
+    }
+
+    #[test]
+    fn resolves_reference_defined_in_quarto_project_document() {
+        // A shortcut reference whose definition lives in a sibling Quarto
+        // project document should resolve cross-file, mirroring bookdown.
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path();
+        fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").expect("write _quarto.yml");
+        fs::write(root.join("defs.qmd"), "[shared]: https://example.com\n")
+            .expect("write defs.qmd");
+        fs::write(root.join("body.qmd"), "See [shared].\n").expect("write body.qmd");
+
+        let path = root.join("body.qmd");
+        let input = fs::read_to_string(&path).expect("read body.qmd");
+        let config = Config {
+            flavor: Flavor::Quarto,
+            extensions: crate::config::Extensions::for_flavor(Flavor::Quarto),
+            ..Default::default()
+        };
+        let tree = crate::parser::parse(&input, Some(config.clone()));
+        let metadata = crate::metadata::extract_project_metadata(&tree, &path).expect("metadata");
+        let rule = UndefinedReferencesRule;
+        let diagnostics = rule.check_tree(&tree, &input, &config, Some(&metadata));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diag| diag.code != "undefined-reference-label"),
+            "reference defined in a sibling Quarto document should resolve: {:?}",
+            diagnostics
         );
     }
 }

@@ -259,6 +259,29 @@ fn test_lint_directory() {
 }
 
 #[test]
+fn test_lint_directory_resolves_cross_file_quarto_anchor() {
+    // Linting a whole Quarto project must resolve anchors/references defined in
+    // sibling documents (the batch shares one database per project). An anchor
+    // defined in intro.qmd is referenced from body.qmd; neither
+    // `undefined-anchor` nor `undefined-reference-label` should fire.
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").unwrap();
+    fs::write(root.join("intro.qmd"), "# Intro {#shared}\n").unwrap();
+    fs::write(
+        root.join("body.qmd"),
+        "# Body\n\nSee [the intro](#shared).\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["lint", "--flavor", "quarto", root.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("undefined-anchor").not());
+}
+
+#[test]
 fn test_lint_directory_with_no_supported_files_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("note.txt");

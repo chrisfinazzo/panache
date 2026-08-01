@@ -187,6 +187,7 @@ pub trait Rule {
             metadata,
             index: &index,
             symbols: None,
+            project_symbols: None,
         };
         self.check(&cx)
     }
@@ -207,6 +208,12 @@ pub struct LintContext<'a> {
     /// per rule off a throwaway database, so unchanged blocks stay memoized
     /// across edits.
     pub symbols: Option<&'a crate::salsa::SymbolUsageIndex>,
+    /// The salsa-memoized project-wide symbol aggregate for cross-file rules,
+    /// when the document participates in a Quarto/bookdown project and the
+    /// caller has one (the `built_in_lint_plan` query does). Rules read it via
+    /// [`LintContext::project_symbol_index`]; standalone callers get a
+    /// filesystem-built fallback instead.
+    pub project_symbols: Option<&'a crate::linter::project_index::ProjectSymbolIndex>,
 }
 
 impl LintContext<'_> {
@@ -240,6 +247,38 @@ impl LintContext<'_> {
                 ))
             }
         }
+    }
+
+    /// The project-wide symbol aggregate for cross-file resolution, or `None`
+    /// when the document is standalone (not part of a Quarto/bookdown project).
+    ///
+    /// Returns the caller-provided salsa-memoized aggregate when present (the
+    /// `built_in_lint_plan` path). Otherwise, for standalone `check_tree`
+    /// callers and tests, it resolves the project from the document's metadata
+    /// and folds the sibling documents off disk — the same fold as the salsa
+    /// path, just without cross-file memoization.
+    pub fn project_symbol_index(
+        &self,
+    ) -> Option<std::borrow::Cow<'_, crate::linter::project_index::ProjectSymbolIndex>> {
+        if let Some(project_symbols) = self.project_symbols {
+            return Some(std::borrow::Cow::Borrowed(project_symbols));
+        }
+        let metadata = self.metadata?;
+        let doc_path = metadata
+            .source_path
+            .canonicalize()
+            .unwrap_or_else(|_| metadata.source_path.clone());
+        let roots = crate::includes::find_project_roots(&doc_path);
+        let project_root = roots.bookdown_first()?;
+        let is_bookdown = roots.bookdown.is_some();
+        Some(std::borrow::Cow::Owned(
+            crate::linter::project_index::build_from_fs(
+                &project_root,
+                &doc_path,
+                self.config,
+                is_bookdown,
+            ),
+        ))
     }
 }
 

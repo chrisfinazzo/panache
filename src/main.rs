@@ -1678,16 +1678,15 @@ fn main() -> io::Result<()> {
             let workers = effective_parallelism(cli.jobs, expanded_files.len());
             let parallel = workers > 1;
 
-            struct LintOutcome {
-                file_path: PathBuf,
-                root_doc: Option<LintedDocument>,
-                included_docs: Vec<LintedDocument>,
-            }
-
             let cache_shared: Option<Arc<Mutex<CliCache>>> =
                 cache.take().map(|c| Arc::new(Mutex::new(c)));
 
-            let process_file = |file_path: &PathBuf| -> io::Result<LintOutcome> {
+            // Lint one file against a shared, batch-scoped database. Every salsa
+            // write (registering the file, eagerly loading its project's
+            // referenced siblings) happens here on the calling thread; callers
+            // guarantee one thread per database by grouping files per project.
+            let process_one = |file_path: &PathBuf| -> io::Result<LintOutcome> {
+                let mut db = panache::salsa::SalsaDb::default();
                 let start_dir = file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
                 let (mut cfg, cfg_source) = load_config_for_cli(
                     cli.config.as_deref(),
@@ -1741,7 +1740,14 @@ fn main() -> io::Result<()> {
                             .map(linted_document_from_cached)
                             .collect::<Vec<_>>()
                     } else {
-                        let documents = lint_documents_with_includes(file_path, &root_input, &cfg)?;
+                        let file_config = panache::salsa::FileConfig::new(&db, cfg.clone());
+                        let documents = lint_documents_on_db(
+                            file_path,
+                            &root_input,
+                            &cfg,
+                            &mut db,
+                            file_config,
+                        )?;
                         let mut guard = cache_handle.lock().unwrap();
                         if guard.supports_lint(&cfg) {
                             let cached_docs = documents
@@ -1759,29 +1765,19 @@ fn main() -> io::Result<()> {
                         documents
                     }
                 } else {
-                    lint_documents_with_includes(file_path, &root_input, &cfg)?
+                    let file_config = panache::salsa::FileConfig::new(&db, cfg.clone());
+                    lint_documents_on_db(file_path, &root_input, &cfg, &mut db, file_config)?
                 };
 
-                let root_doc = documents.iter().find(|doc| &doc.path == file_path).cloned();
-                let mut included_docs: Vec<LintedDocument> = documents
-                    .into_iter()
-                    .filter(|doc| &doc.path != file_path)
-                    .collect();
-                included_docs.sort_by(|a, b| a.path.cmp(&b.path));
-
-                Ok(LintOutcome {
-                    file_path: file_path.clone(),
-                    root_doc,
-                    included_docs,
-                })
+                Ok(build_lint_outcome(file_path, documents))
             };
 
             let outcomes: Vec<io::Result<LintOutcome>> = if parallel {
                 use rayon::prelude::*;
                 let pool = build_pool(workers);
-                pool.install(|| expanded_files.par_iter().map(&process_file).collect())
+                pool.install(|| expanded_files.par_iter().map(&process_one).collect())
             } else {
-                expanded_files.iter().map(&process_file).collect()
+                expanded_files.iter().map(&process_one).collect()
             };
 
             if let Some(handle) = cache_shared {
@@ -2108,37 +2104,57 @@ fn lint_manifest_bibliography(
     })
 }
 
-fn lint_documents_with_includes(
-    root_path: &PathBuf,
+/// A linted root document plus the included documents discovered underneath it.
+struct LintOutcome {
+    file_path: PathBuf,
+    root_doc: Option<LintedDocument>,
+    included_docs: Vec<LintedDocument>,
+}
+
+/// Split the flat list of linted documents into the root (matching `file_path`)
+/// and its includes, sorting includes by path for deterministic reporting.
+fn build_lint_outcome(file_path: &Path, documents: Vec<LintedDocument>) -> LintOutcome {
+    let root_doc = documents
+        .iter()
+        .find(|doc| doc.path.as_path() == file_path)
+        .cloned();
+    let mut included_docs: Vec<LintedDocument> = documents
+        .into_iter()
+        .filter(|doc| doc.path.as_path() != file_path)
+        .collect();
+    included_docs.sort_by(|a, b| a.path.cmp(&b.path));
+    LintOutcome {
+        file_path: file_path.to_path_buf(),
+        root_doc,
+        included_docs,
+    }
+}
+
+/// Lint a root document and its includes against a freshly-constructed salsa
+/// database, eagerly loading the project's referenced files so cross-document
+/// queries (`project_graph`, `project_symbol_index`, `metadata`) see them.
+fn lint_documents_on_db(
+    root_path: &Path,
     root_input: &str,
     cfg: &panache::Config,
+    db: &mut panache::salsa::SalsaDb,
+    file_config: panache::salsa::FileConfig,
 ) -> io::Result<Vec<LintedDocument>> {
     use std::collections::HashSet;
 
     let mut results = Vec::new();
     let mut visited = HashSet::new();
     let mut active = HashSet::new();
-    let mut db = panache::salsa::SalsaDb::default();
-    // Construct one FileConfig handle per batch and one FileText per file.
-    // Salsa cache keys are handle identity, not value equality, so reusing
-    // these across built_in_lint_plan / project_graph::accumulated within a
-    // single file's lint is the only way to get cache hits.
-    //
-    // The eager project_graph call was removed: project_graph is salsa-tracked
-    // and computed on demand by project_graph::accumulated when (and only when)
-    // we determine the document participates in a project. For flat directories
-    // of standalone files this avoids 1+ parse per file.
-    let file_config = panache::salsa::FileConfig::new(&db, cfg.clone());
     // Register the root in the VFS (assigning it a FileId + FileSet entry) so the
     // discovery loop's `intern_file(root_path)` resolves to this same input
-    // rather than minting a duplicate and re-reading the root from disk. The
-    // returned handle is reused below for cache hits across queries.
-    let root_file_text = db.update_file_text(root_path.clone(), root_input.to_string());
+    // rather than minting a duplicate and re-reading the root from disk.
+    let root_file_text = db.update_file_text(root_path.to_path_buf(), root_input.to_string());
     // `Db::file_text` is a pure lookup (audit §3.2/§3.3): it no longer lazy-loads
     // includes/bibliography from disk inside queries. Load the project's
-    // referenced files onto the writer up front so `project_graph` and
-    // `metadata` (cross-doc diagnostics, bibliography parse) see them.
-    db.load_referenced_files(root_file_text, file_config, root_path.clone());
+    // referenced files onto the writer up front so `project_graph`,
+    // `project_symbol_index`, and `metadata` see them — and so the read path
+    // below never has to mint a `FileText` (a write) for an include.
+    db.load_referenced_files(root_file_text, file_config, root_path.to_path_buf());
     lint_loaded_document_with_includes(
         root_path,
         root_input,
@@ -2148,14 +2164,14 @@ fn lint_documents_with_includes(
         &mut results,
         &mut visited,
         &mut active,
-        &db,
+        db,
     )?;
     Ok(results)
 }
 
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn lint_loaded_document_with_includes(
-    doc_path: &PathBuf,
+    doc_path: &Path,
     input: &str,
     file_text: Option<panache::salsa::FileText>,
     cfg: &panache::Config,
@@ -2165,11 +2181,11 @@ fn lint_loaded_document_with_includes(
     active: &mut std::collections::HashSet<PathBuf>,
     db: &panache::salsa::SalsaDb,
 ) -> io::Result<()> {
-    if !visited.insert(doc_path.clone()) {
+    if !visited.insert(doc_path.to_path_buf()) {
         return Ok(());
     }
 
-    active.insert(doc_path.clone());
+    active.insert(doc_path.to_path_buf());
 
     // Reuse the root file's FileText handle (constructed in
     // lint_documents_with_includes) so the salsa cache hits across
@@ -2214,7 +2230,7 @@ fn lint_loaded_document_with_includes(
             panache::salsa::GraphDiagnostic,
         >(db, file_text, file_config);
         for entry in graph_diags {
-            if entry.0.path == *doc_path {
+            if entry.0.path.as_path() == doc_path {
                 diagnostics.push(entry.0.diagnostic.clone());
             }
         }
@@ -2259,7 +2275,7 @@ fn lint_loaded_document_with_includes(
 
     diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
     results.push(LintedDocument {
-        path: doc_path.clone(),
+        path: doc_path.to_path_buf(),
         input: input.to_string(),
         diagnostics,
     });

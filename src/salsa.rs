@@ -531,12 +531,19 @@ pub fn built_in_lint_plan(db: &dyn Db, file: FileText, config: FileConfig) -> Bu
     // instead of each rebuilding one off a throwaway database. Unchanged blocks
     // stay memoized across edits.
     let symbols = symbol_usage_index(db, file, config);
+    // Cross-file rules resolve labels/anchors against every document in the same
+    // Quarto/bookdown project. Compute the project-wide aggregate once per
+    // project (salsa memoizes it across every file in the batch) instead of
+    // letting each rule re-parse the siblings. Standalone documents get `None`
+    // and resolve locally.
+    let project_symbols = project_symbol_index(db, file, config);
     diagnostics.extend(crate::linter::lint_with_metadata_and_symbols(
         &tree,
         text,
         &cfg,
         metadata.as_ref(),
         Some(symbols),
+        project_symbols,
     ));
     diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
 
@@ -947,6 +954,80 @@ pub fn symbol_usage_index(db: &dyn Db, file: FileText, config: FileConfig) -> Sy
     let tree = parsed_tree_root(db, file, config);
     collect_implicit_heading_symbols(db, &tree, &config.config(db).extensions, &mut index);
     index
+}
+
+/// One document's contribution to its project's symbol aggregate: the
+/// definition labels, anchors, and usage labels the cross-file reference rules
+/// (`undefined-references`, `unused-definitions`, `undefined-anchor`) resolve
+/// against. Memoized per `(file, config)`, so each project document is folded
+/// once regardless of how many sibling documents aggregate it or how many
+/// times the batch re-lints.
+#[salsa::tracked(returns(ref), lru = 512)]
+pub fn project_document_contribution(
+    db: &dyn Db,
+    file: FileText,
+    config: FileConfig,
+) -> crate::linter::project_index::ProjectSymbolIndex {
+    let tree = parsed_tree_root(db, file, config);
+    let symbols = symbol_usage_index(db, file, config);
+    let mut contribution = crate::linter::project_index::ProjectSymbolIndex::default();
+    contribution.fold_document(&tree, symbols, config.config(db));
+    contribution
+}
+
+/// The project-wide symbol aggregate for the project rooted at `root`: the
+/// union of every project document's [`project_document_contribution`].
+///
+/// Keyed on the interned project *root* (not the current file), so every
+/// document in a project shares one memo — the project's files are enumerated
+/// and folded once for the whole batch, not once per file (the O(n^2) fix). The
+/// heavy per-document work lives in the memoized contribution query, so the
+/// aggregation itself is just cheap set unions.
+#[salsa::tracked(returns(ref), lru = 512)]
+pub fn project_symbol_index_for<'db>(
+    db: &'db dyn Db,
+    root: InternedPath<'db>,
+    is_bookdown: bool,
+    config: FileConfig,
+) -> crate::linter::project_index::ProjectSymbolIndex {
+    // Depend on the set of interned files so loading a newly-referenced project
+    // document re-runs this aggregate (mirrors `project_structure`).
+    let _ = db.file_set().ids(db);
+    let project_root = root.path(db);
+    let mut aggregate = crate::linter::project_index::ProjectSymbolIndex::default();
+    for path in
+        crate::includes::find_project_documents(project_root, config.config(db), is_bookdown)
+    {
+        db.unwind_if_revision_cancelled();
+        let Some(doc_file) = db.file_text(path.clone()) else {
+            continue;
+        };
+        if !file_is_present(db, doc_file) {
+            continue;
+        }
+        aggregate.extend(project_document_contribution(db, doc_file, config));
+    }
+    aggregate
+}
+
+/// The project-wide symbol aggregate for the project that `file` belongs to, or
+/// `None` when `file` is standalone (not under a Quarto/bookdown manifest).
+///
+/// A thin resolver over [`project_symbol_index_for`]: it maps the document to
+/// its project root and delegates to the project-keyed memo, so all files in one
+/// project hit the same cached aggregate.
+pub fn project_symbol_index(
+    db: &dyn Db,
+    file: FileText,
+    config: FileConfig,
+) -> Option<&crate::linter::project_index::ProjectSymbolIndex> {
+    let path = db.path_of(file)?;
+    let doc_path = path.canonicalize().unwrap_or(path);
+    let roots = crate::includes::find_project_roots(&doc_path);
+    let project_root = roots.quarto_first()?;
+    let is_bookdown = roots.bookdown.is_some();
+    let root = intern_path(db, &project_root);
+    Some(project_symbol_index_for(db, root, is_bookdown, config))
 }
 
 #[salsa::tracked(returns(ref), lru = 512)]
@@ -4143,5 +4224,83 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
+    }
+
+    fn quarto_config(db: &SalsaDb) -> FileConfig {
+        let cfg = Config {
+            flavor: crate::config::Flavor::Quarto,
+            extensions: crate::config::Extensions::for_flavor(crate::config::Flavor::Quarto),
+            ..Default::default()
+        };
+        FileConfig::new(db, cfg)
+    }
+
+    #[test]
+    fn project_symbol_index_aggregates_sibling_definitions() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").unwrap();
+        let defs_path = root.join("defs.qmd");
+        let body_path = root.join("body.qmd");
+        std::fs::write(
+            &defs_path,
+            "# Intro {#shared}\n\n[ref-def]: https://example.com\n",
+        )
+        .unwrap();
+        std::fs::write(&body_path, "See [ref-def] and [here](#shared).\n").unwrap();
+
+        let mut db = SalsaDb::default();
+        let config = quarto_config(&db);
+        let body_file = db.update_file_text(
+            body_path.clone(),
+            std::fs::read_to_string(&body_path).unwrap(),
+        );
+        db.load_referenced_files(body_file, config, body_path.clone());
+
+        let aggregate =
+            project_symbol_index(&db, body_file, config).expect("document is in a project");
+        assert!(
+            aggregate.definitions.reference_labels.contains("ref-def"),
+            "reference definition from a sibling must be aggregated: {:?}",
+            aggregate.definitions
+        );
+        assert!(
+            aggregate.anchors.contains("shared"),
+            "explicit anchor from a sibling must be aggregated: {:?}",
+            aggregate.anchors
+        );
+    }
+
+    #[test]
+    fn project_document_contribution_memoized_across_project_files() {
+        // The core O(n^2) fix: aggregating the project symbols for every file in
+        // a project must fold each project document exactly once, not once per
+        // aggregating file. `project_document_contribution` carries the per-doc
+        // parse + index work, so it must execute once per document total.
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").unwrap();
+        let a_path = root.join("a.qmd");
+        let b_path = root.join("b.qmd");
+        std::fs::write(&a_path, "# A {#anchor-a}\n\n[def-a]: https://a.example\n").unwrap();
+        std::fs::write(&b_path, "See [def-a] and [x](#anchor-a).\n").unwrap();
+
+        let (mut db, log) = db_with_exec_log();
+        let config = quarto_config(&db);
+        let a_file = db.update_file_text(a_path.clone(), std::fs::read_to_string(&a_path).unwrap());
+        db.load_referenced_files(a_file, config, a_path.clone());
+        let b_file = db
+            .file_text(b_path.clone())
+            .expect("sibling loaded by load_referenced_files");
+
+        // Aggregate the project symbols for BOTH project files.
+        let _ = project_symbol_index(&db, a_file, config);
+        let _ = project_symbol_index(&db, b_file, config);
+
+        assert_eq!(
+            executed(&log, "project_document_contribution"),
+            2,
+            "each project document's contribution must be folded once, not per aggregating file"
+        );
     }
 }
