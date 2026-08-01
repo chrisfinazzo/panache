@@ -149,6 +149,58 @@ default and `--flavor quarto`):
   Softer, lint-flavored; duplicate anchors (last-wins) and unused anchors.
   Lowest priority.
 
+### Linter bugs and performance (quarto-web triage, 2026-08)
+
+Surfaced while linting `quarto-dev/quarto-web` (\~580 `.qmd` + \~220 `.md`). Two
+correctness bugs from this triage are already fixed --- the inline-reference
+false-duplicate in `metadata/project.rs` (`duplicate-inline-reference-id` fired
+once per `references:` entry at 1:1) and include-partial diagnostics being
+reported once per includer in `main.rs`. The remaining findings:
+
+#### Performance: O(n^2) whole-project reparse on Quarto projects
+
+`panache lint .` on a project with a `_quarto.yml` pegs every core for minutes.
+Removing the root `_quarto.yml` drops the run from minutes to seconds --- the
+whole cost is project-graph work re-triggered per file.
+
+- [ ] **`project_graph` / `project_structure` reload the entire project per
+  file.** `lint_documents_with_includes` (`src/main.rs`) builds a *fresh*
+  `SalsaDb` per root file, and because any file under a `_quarto.yml` has
+  `roots.quarto.is_some()`, `project_graph::accumulated` runs each time (the
+  `roots.quarto.is_some() || ...` guard). `load_referenced_files` →
+  `project_structure` (`src/salsa.rs`) enumerates *all* project documents
+  via `find_project_documents` and loads+parses them. Net: O(files x
+  project-docs) parses per invocation, nothing memoized across the outer
+  per-file loop. Fix direction: share one `SalsaDb` / project graph across
+  the whole batch instead of rebuilding it per file.
+- [ ] **`undefined-references` and `unused-definitions` re-parse every project
+  doc per file.** Both rules (`src/linter/rules/undefined_references.rs`,
+  `unused_definitions.rs`) call `find_project_documents` via
+  `bookdown_first()` / quarto fallback and do `read_to_string` + `parse` +
+  build a fresh salsa index for every sibling, once per linted file, with no
+  memoization (the code comments acknowledge "sibling project files have no
+  memo"). Note `undefined_anchor.rs` gates the same pattern on
+  `roots.bookdown` and returns early for Quarto --- an inconsistency to
+  reconcile while fixing (also decide whether Quarto crossref/anchor
+  resolution should be cross-file at all).
+
+#### Noise: `missing-chunk-labels` is too aggressive by default
+
+- [ ] `missing-chunk-labels` (`default_on`) fires on *every* unlabeled
+  executable chunk, but Quarto only needs a label for crossref targets. On
+  quarto-web it produced 407 warnings (including `{ojs}` / `{mermaid}`
+  cells) --- the single dominant diagnostic. Reconsider default-on, or scope
+  it to chunks that are actually crossref-referenced.
+
+#### False positives: `undefined-anchor` on render-generated anchors
+
+- [ ] `undefined-anchor` flags anchors that only exist after render: Quarto
+  listing categories (`gallery/index.qmd` → `#articles-reports`, etc.) and
+  include-partials that link to a heading in their *parent*
+  (`_incremental-pause.md` → `#creating-slides`, linted standalone). Static
+  analysis can't see these targets; consider a heuristic or an opt-out for
+  known render-time / cross-document anchors.
+
 ### Configuration
 
 - [ ] Severity levels (error, warning, info)
@@ -627,6 +679,14 @@ implemented.
   content, not the wrapping div's closer; see #439). Decide whether to
   tighten the top-level closer to pandoc's rule. Surfaced 2026-07-28 while
   fixing #439.
+- [ ] Nested fenced divs inside a list item are mis-parsed: the outer div is
+  left unclosed and its trailing `:::` becomes stray text, which surfaces as
+  a `stray-fenced-div-markers` lint false positive (e.g.
+  `docs/authoring/markdown-basics.qmd`). Minimal repro: a `- -` nested list
+  whose inner item opens a `pad` div, contains a fully closed `light` div,
+  then a trailing `:::` to close `pad`. Pandoc closes both divs
+  (`Div .pad [ Div .light ]`); panache leaves `pad` open and strays the
+  closer. Surfaced 2026-08 in the quarto-web triage.
 
 ### Tables
 
