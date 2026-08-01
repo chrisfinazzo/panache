@@ -153,16 +153,26 @@ fn extract_project_metadata_impl(
     };
     let mut inline_references =
         extract_doc_inline_references(&doc_yaml, doc_yaml_offset, doc_path)?;
-    let project_references = merged
-        .references
+    // `merged.references` already contains the document's own reference ids (its
+    // frontmatter was merged into `merged`), so those were just extracted above
+    // with real byte ranges. Only add *project-inherited* ids as phantom (0..0)
+    // entries, and each at most once — a project id repeated across
+    // `_quarto.yml` and several `_metadata.yml` levels would otherwise
+    // reproduce the same false-positive duplicate. Matching is case-insensitive
+    // to mirror `inline_reference_map`.
+    let mut seen: std::collections::HashSet<String> = inline_references
         .iter()
-        .map(|id| InlineReference {
-            id: id.clone(),
-            range: TextRange::new(rowan::TextSize::from(0), rowan::TextSize::from(0)),
-            path: doc_path.to_path_buf(),
-        })
-        .collect::<Vec<_>>();
-    inline_references.extend(project_references);
+        .map(|entry| entry.id.to_lowercase())
+        .collect();
+    for id in &merged.references {
+        if seen.insert(id.to_lowercase()) {
+            inline_references.push(InlineReference {
+                id: id.clone(),
+                range: TextRange::new(rowan::TextSize::from(0), rowan::TextSize::from(0)),
+                path: doc_path.to_path_buf(),
+            });
+        }
+    }
 
     let metadata_files = collect_metadata_files(doc_path, &merged.metadata_files);
     let mut metadata = DocumentMetadata {

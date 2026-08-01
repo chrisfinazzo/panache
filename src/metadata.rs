@@ -259,6 +259,28 @@ mod tests {
             .collect();
         assert!(ids.contains(&"projref"));
         assert!(ids.contains(&"docref"));
+        // The document's own `docref` must appear exactly once (real range),
+        // and the project-inherited `projref` exactly once (phantom range):
+        // the merged project reference list must not re-add the document's own
+        // id as a phantom duplicate.
+        assert_eq!(metadata.inline_references.len(), 2, "got {ids:?}");
+    }
+
+    #[test]
+    fn test_extract_project_metadata_single_reference_not_duplicated() {
+        // Regression: a standalone document with a single inline `references:`
+        // entry (and no project manifest) must yield exactly one
+        // `inline_references` entry. The merged reference list already contains
+        // the document's own ids, so re-adding them as phantom `0..0` entries
+        // used to produce a spurious `duplicate-inline-reference-id` at 1:1.
+        let temp_dir = TempDir::new().unwrap();
+        let input = "---\nreferences:\n  - id: foo\n---\n\nText";
+        let tree = parse(input, None);
+        let doc_path = temp_dir.path().join("doc.qmd");
+        let metadata = extract_project_metadata(&tree, &doc_path).unwrap();
+
+        assert_eq!(metadata.inline_references.len(), 1);
+        assert_eq!(metadata.inline_references[0].id, "foo");
     }
 
     #[test]
