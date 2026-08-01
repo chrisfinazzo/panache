@@ -180,14 +180,6 @@ in the number of files (synthetic N=320 Quarto book: \~1878ms -> \~111ms).
   cross-file for Quarto too (was bookdown-only). See
   `fix(linter): resolve cross-file refs via project   aggregate`.
 
-#### Noise: `missing-chunk-labels` is too aggressive by default
-
-- [ ] `missing-chunk-labels` (`default_on`) fires on *every* unlabeled
-  executable chunk, but Quarto only needs a label for crossref targets. On
-  quarto-web it produced 407 warnings (including `{ojs}` / `{mermaid}`
-  cells) --- the single dominant diagnostic. Reconsider default-on, or scope
-  it to chunks that are actually crossref-referenced.
-
 #### False positives: `undefined-anchor` on render-generated anchors
 
 - [ ] `undefined-anchor` flags anchors that only exist after render: Quarto
