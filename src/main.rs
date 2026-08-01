@@ -1797,6 +1797,17 @@ fn main() -> io::Result<()> {
 
             let mut any_issues = false;
             let mut total_issues = 0;
+            // De-duplicate reported files by path. An include partial can be
+            // both an explicit walk target and a dependency of several parents;
+            // without this it would be reported once standalone plus once per
+            // includer. Seed with every explicit target so a target that is also
+            // an include is reported only from its own `root_doc`. Canonicalize
+            // because include resolution yields non-normalized paths
+            // (e.g. `.../revealjs/../_partial.md`) a raw compare would miss.
+            let canonical_path =
+                |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            let mut reported_paths: std::collections::HashSet<PathBuf> =
+                expanded_files.iter().map(|p| canonical_path(p)).collect();
             for outcome in outcomes {
                 let LintOutcome {
                     file_path,
@@ -1876,6 +1887,11 @@ fn main() -> io::Result<()> {
                 if !fix {
                     for doc in &included_docs {
                         if doc.diagnostics.is_empty() {
+                            continue;
+                        }
+                        // Report each included file at most once, and never a
+                        // file already covered as an explicit target.
+                        if !reported_paths.insert(canonical_path(&doc.path)) {
                             continue;
                         }
                         any_issues = true;

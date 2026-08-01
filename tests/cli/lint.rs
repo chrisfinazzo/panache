@@ -612,13 +612,69 @@ fn test_lint_inline_references_in_metadata() {
         .assert()
         .failure()
         .stdout(predicate::str::contains("missing-bibliography-key"))
-        .stdout(predicate::str::contains("missing"));
+        .stdout(predicate::str::contains("missing"))
+        // A single inline reference must not be flagged as a duplicate.
+        .stdout(predicate::str::contains("duplicate-inline-reference-id").not());
 
     cargo_bin_cmd!("panache")
         .args(["lint", dup_path.to_str().unwrap()])
         .assert()
         .failure()
         .stdout(predicate::str::contains("duplicate-inline-reference-id"));
+}
+
+#[test]
+fn test_lint_include_partial_diagnostics_reported_once() {
+    // Regression: an include partial that is also discovered by the directory
+    // walk (and is pulled in by multiple parents) must have its diagnostics
+    // reported exactly once, not once per includer plus once standalone.
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+
+    // A partial with a single heading-hierarchy violation (h1 -> h3).
+    fs::write(root.join("_partial.md"), "# A\n\n### B\n").unwrap();
+    fs::write(
+        root.join("index.qmd"),
+        "---\ntitle: One\n---\n\n{{< include _partial.md >}}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("index2.qmd"),
+        "---\ntitle: Two\n---\n\n{{< include _partial.md >}}\n",
+    )
+    .unwrap();
+
+    // Directory mode: the partial is a walk target *and* an include of two
+    // parents (3 files scanned). Its single issue must be reported once, not
+    // three times. The summary is emitted on stderr.
+    cargo_bin_cmd!("panache")
+        .current_dir(root)
+        .args(["lint", "--no-cache", "--color", "never", "."])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("heading-hierarchy"))
+        .stderr(predicate::str::contains(
+            "Found 1 issue(s) across 3 file(s)",
+        ));
+
+    // Explicit multi-file mode where the partial is not itself a target but is
+    // included by both parents: still reported once.
+    cargo_bin_cmd!("panache")
+        .current_dir(root)
+        .args([
+            "lint",
+            "--no-cache",
+            "--color",
+            "never",
+            "index.qmd",
+            "index2.qmd",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("heading-hierarchy"))
+        .stderr(predicate::str::contains(
+            "Found 1 issue(s) across 2 file(s)",
+        ));
 }
 
 #[test]
