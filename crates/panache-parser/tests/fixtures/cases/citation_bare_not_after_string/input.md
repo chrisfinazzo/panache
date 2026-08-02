@@ -17,5 +17,9 @@ citation because its `@` follows the `-`.
 
 A space before it is the classic in-text form: see @doe99 for details.
 
+A bare key glued to a resolved emphasis or strong closer is suppressed too, so
+*em*@key and **strong**@key are literal, but *@key* keeps the citation inside
+the emphasis and *em*-@key still cites via the suppress-author form.
+
 Bracketed citations are shielded by the brackets, so word[@doe99] is still a
 citation.

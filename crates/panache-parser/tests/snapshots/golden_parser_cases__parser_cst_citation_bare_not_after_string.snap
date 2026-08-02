@@ -2,7 +2,7 @@
 source: crates/panache-parser/tests/golden_parser_cases.rs
 expression: cst_output
 ---
-DOCUMENT@0..688
+DOCUMENT@0..915
   HEADING@0..31
     ATX_HEADING_MARKER@0..1
       ATX_HEADING_MARKER@0..1 "#"
@@ -89,14 +89,47 @@ DOCUMENT@0..688
     NEWLINE@599..600 "\n"
   BLANK_LINE@600..601
     BLANK_LINE@600..601 "\n"
-  PARAGRAPH@601..688
-    TEXT@601..658 "Bracketed citations a ..."
-    CITATION@658..666
-      LINK_START@658..659 "["
-      CITATION_MARKER@659..660 "@"
-      CITATION_KEY@660..665 "doe99"
-      LINK_DEST@665..666 "]"
-    TEXT@666..677 " is still a"
-    NEWLINE@677..678 "\n"
-    TEXT@678..687 "citation."
-    NEWLINE@687..688 "\n"
+  PARAGRAPH@601..827
+    TEXT@601..679 "A bare key glued to a ..."
+    NEWLINE@679..680 "\n"
+    EMPHASIS@680..684
+      EMPHASIS_MARKER@680..681 "*"
+      TEXT@681..683 "em"
+      EMPHASIS_MARKER@683..684 "*"
+    TEXT@684..693 "@key and "
+    STRONG@693..703
+      STRONG_MARKER@693..695 "**"
+      TEXT@695..701 "strong"
+      STRONG_MARKER@701..703 "**"
+    TEXT@703..725 "@key are literal, but "
+    EMPHASIS@725..731
+      EMPHASIS_MARKER@725..726 "*"
+      CITATION@726..730
+        CITATION_MARKER@726..727 "@"
+        CITATION_KEY@727..730 "key"
+      EMPHASIS_MARKER@730..731 "*"
+    TEXT@731..757 " keeps the citation i ..."
+    NEWLINE@757..758 "\n"
+    TEXT@758..775 "the emphasis and "
+    EMPHASIS@775..779
+      EMPHASIS_MARKER@775..776 "*"
+      TEXT@776..778 "em"
+      EMPHASIS_MARKER@778..779 "*"
+    CITATION@779..784
+      CITATION_MARKER@779..781 "-@"
+      CITATION_KEY@781..784 "key"
+    TEXT@784..826 " still cites via the  ..."
+    NEWLINE@826..827 "\n"
+  BLANK_LINE@827..828
+    BLANK_LINE@827..828 "\n"
+  PARAGRAPH@828..915
+    TEXT@828..885 "Bracketed citations a ..."
+    CITATION@885..893
+      LINK_START@885..886 "["
+      CITATION_MARKER@886..887 "@"
+      CITATION_KEY@887..892 "doe99"
+      LINK_DEST@892..893 "]"
+    TEXT@893..904 " is still a"
+    NEWLINE@904..905 "\n"
+    TEXT@905..914 "citation."
+    NEWLINE@914..915 "\n"

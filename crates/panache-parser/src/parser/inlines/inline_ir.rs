@@ -2527,6 +2527,75 @@ pub fn build_construct_plan(events: &[IrEvent]) -> ConstructPlan {
     ConstructPlan { by_pos }
 }
 
+/// Pandoc `notAfterString`, delimiter-adjacent case: demote a bare
+/// author-in-text `@key` whose `@` sits immediately after a *resolved*
+/// emphasis/strong closing marker to literal text. Pandoc parses
+/// `*em*@key` as `Emph [Str "em"]` followed by `Str "@key"` (the
+/// citation is suppressed), because its `notAfterString` guard keys off
+/// the parser's last-string position and the emphasis closer leaves that
+/// position glued to the `@`.
+///
+/// The scan-time guard [`prev_char_suppresses_bare_citation`] already
+/// handles the word / CJK / `.`-glued cases, but it can only inspect the
+/// raw preceding byte — at scan time a `*`/`_` before the `@` is just an
+/// unresolved delimiter. Whether that delimiter *resolves* into an
+/// emphasis/strong closer is only known after [`process_emphasis`], so
+/// this correction runs here, consuming the emphasis pass's result
+/// rather than re-classifying it (single scan preserved).
+///
+/// Only the plain `@key` form is affected. The suppress-author `-@key`
+/// form keys off the `-` (its `@` never abuts the delimiter), so its
+/// construct — whose first byte is `-`, not `@` — is left untouched,
+/// matching `*em*-@key` → `Emph` + `Str "-"` + `Cite`.
+fn demote_bare_citation_after_emphasis_closer(events: &mut [IrEvent], text: &str) {
+    let bytes = text.as_bytes();
+    // Cheap pre-check: skip building the closer set unless a bare
+    // `@`-form citation actually exists (the common prose case has none).
+    let has_bare_at = events.iter().any(|e| {
+        matches!(
+            e,
+            IrEvent::Construct {
+                kind: ConstructKind::BareCitation,
+                start,
+                ..
+            } if bytes.get(*start) == Some(&b'@')
+        )
+    });
+    if !has_bare_at {
+        return;
+    }
+
+    // One past the last byte of every resolved *closing* emphasis/strong
+    // marker. A citation whose `@` lands on one of these positions is
+    // glued to a closer and must be demoted.
+    let mut closer_ends: Vec<usize> = Vec::new();
+    for ev in events.iter() {
+        if let IrEvent::DelimRun { start, matches, .. } = ev {
+            for m in matches {
+                if !m.is_opener {
+                    closer_ends.push(*start + m.offset_in_run as usize + m.len as usize);
+                }
+            }
+        }
+    }
+    if closer_ends.is_empty() {
+        return;
+    }
+
+    for ev in events.iter_mut() {
+        if let IrEvent::Construct {
+            start,
+            end,
+            kind: ConstructKind::BareCitation,
+        } = *ev
+            && bytes.get(start) == Some(&b'@')
+            && closer_ends.contains(&start)
+        {
+            *ev = IrEvent::Text { start, end };
+        }
+    }
+}
+
 /// Build a [`BracketPlan`] from the resolved IR. Each `OpenBracket`
 /// resolution becomes an [`BracketDispo::Open`] keyed at the opener's
 /// start byte. Unresolved openers and unmatched closers become
@@ -2743,6 +2812,11 @@ pub fn build_full_plans(
             config.dialect,
         );
     }
+
+    // Pandoc `notAfterString`, delimiter-adjacent case: now that emphasis
+    // has resolved, demote any bare `@key` glued to a resolved closer
+    // (`*em*@key`) to literal text before the construct plan captures it.
+    demote_bare_citation_after_emphasis_closer(&mut bundle.events, text);
 
     InlinePlans {
         emphasis: build_emphasis_plan(&bundle.events),
@@ -3240,6 +3314,94 @@ mod tests {
             matches!(plans.emphasis.lookup(5), Some(DelimChar::Open { .. })),
             "emphasis opener at byte 5 must pair, got {:?}",
             plans.emphasis.lookup(5)
+        );
+    }
+
+    /// Pandoc `notAfterString`, delimiter-adjacent case: a bare `@key`
+    /// glued to a resolved emphasis closer (`*em*@key`) is demoted to
+    /// literal text — pandoc parses it as `Emph [Str "em"]` + `Str
+    /// "@key"`, not a citation.
+    #[test]
+    fn full_plans_bare_citation_after_emphasis_closer_demoted() {
+        let opts = pandoc_opts();
+        // `*em*@key`: emphasis `*em*` at [0,4), `@` at byte 4.
+        let plans = build_full_plans("*em*@key", 0, 8, &opts);
+        assert!(
+            plans.constructs.lookup(4).is_none(),
+            "bare `@key` after emphasis closer must be demoted, got {:?}",
+            plans.constructs.lookup(4)
+        );
+        assert!(
+            matches!(plans.emphasis.lookup(0), Some(DelimChar::Open { .. })),
+            "emphasis `*em*` must still pair, got {:?}",
+            plans.emphasis.lookup(0)
+        );
+    }
+
+    /// Strong closer variant: `**s**@key` demotes the citation too.
+    #[test]
+    fn full_plans_bare_citation_after_strong_closer_demoted() {
+        let opts = pandoc_opts();
+        // `**s**@key`: strong `**s**` at [0,5), `@` at byte 5.
+        let plans = build_full_plans("**s**@key", 0, 9, &opts);
+        assert!(
+            plans.constructs.lookup(5).is_none(),
+            "bare `@key` after strong closer must be demoted, got {:?}",
+            plans.constructs.lookup(5)
+        );
+    }
+
+    /// A bare `@key` after an emphasis *opener* (`*@key*`) is NOT
+    /// suppressed — pandoc parses it as `Emph [Cite ...]`. The demotion
+    /// must key off closers only.
+    #[test]
+    fn full_plans_bare_citation_after_emphasis_opener_kept() {
+        let opts = pandoc_opts();
+        // `*@key*`: `@` at byte 1, immediately after the opening `*`.
+        let plans = build_full_plans("*@key*", 0, 6, &opts);
+        assert!(
+            matches!(
+                plans.constructs.lookup(1),
+                Some(ConstructDispo::BareCitation { .. })
+            ),
+            "bare `@key` after emphasis opener must stay a citation, got {:?}",
+            plans.constructs.lookup(1)
+        );
+    }
+
+    /// The suppress-author `-@key` form is unaffected: `*em*-@key` keys
+    /// off the `-`, so pandoc keeps the citation (`Emph` + `Str "-"` +
+    /// `Cite`). The construct starts at the `-` (byte 4), not the `@`.
+    #[test]
+    fn full_plans_suppress_author_citation_after_emphasis_kept() {
+        let opts = pandoc_opts();
+        // `*em*-@key`: construct at byte 4 (`-@key`).
+        let plans = build_full_plans("*em*-@key", 0, 9, &opts);
+        assert!(
+            matches!(
+                plans.constructs.lookup(4),
+                Some(ConstructDispo::BareCitation { .. })
+            ),
+            "suppress-author `-@key` after emphasis must stay a citation, got {:?}",
+            plans.constructs.lookup(4)
+        );
+    }
+
+    /// A literal `_` between the emphasis closer and the `@` breaks the
+    /// gluing: `*em*_@key` keeps the citation because the `@`'s
+    /// predecessor is the unmatched `_`, not the resolved closer.
+    #[test]
+    fn full_plans_bare_citation_after_unmatched_delim_kept() {
+        let opts = pandoc_opts();
+        // `*em*_@key`: `@` at byte 5, preceded by an unmatched `_`.
+        let plans = build_full_plans("*em*_@key", 0, 9, &opts);
+        assert!(
+            matches!(
+                plans.constructs.lookup(5),
+                Some(ConstructDispo::BareCitation { .. })
+            ),
+            "bare `@key` after unmatched `_` must stay a citation, got {:?}",
+            plans.constructs.lookup(5)
         );
     }
 }

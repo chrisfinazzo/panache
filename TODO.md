@@ -763,13 +763,14 @@ implemented.
   site via a char-before-`@` check (alphanumeric or `.` suppresses); the
   `-@` suppress-author form is exempt. Backs the `unspaced-citation` lint
   rule. Closes #448.
-- [ ] Residual `notAfterString` corner: a bare `@key` glued to a *closing
-  emphasis/strong delimiter* still parses as a citation, diverging from
-  pandoc. `*em*@key` is `Emph + Str "@key"` in pandoc (citation suppressed)
-  but panache emits `Emph + CITATION`. Matching pandoc needs the
-  delimiter-run resolution result at citation-scan time, which is only known
-  after the emphasis pass --- a second pass, so deferred. Word/CJK/`.`-glued
-  cases are handled; this delimiter-adjacent case is not. Surfaced 2026-08.
+- [x] `notAfterString` delimiter-adjacent corner: a bare `@key` glued to a
+  *resolved closing emphasis/strong delimiter* is now suppressed to match
+  pandoc (`*em*@key` and `**strong**@key` are `Emph`/`Strong` +
+  `Str "@key"`). The IR consults the emphasis pass's result when building
+  the construct plan (`demote_bare_citation_after_emphasis_closer`), keying
+  off resolved closers only, so `*@key*` (opener) and `*em*-@key`
+  (suppress-author) keep the citation. No extra scan: the correction reads
+  already-computed delimiter state rather than re-classifying.
 - [ ] `unspaced-citation` covers citations only. A crossref glued to a word
   (`x@fig-plot`) is likewise left as text by the parser but not flagged by
   the rule; extend it to crossref keys (gated on `quarto_crossrefs`) as a
