@@ -757,6 +757,23 @@ implemented.
 
 - [x] Extension: `citations` - `[@cite]` and `@cite` syntax with complex key
   support
+- [x] Pandoc `notAfterString` for bare `@key`: a citation glued to a preceding
+  word character is literal text, not a citation (`word@key`,
+  `user@example.com`, `違法編訂@jzkhl`). Handled at the shared detection
+  site via a char-before-`@` check (alphanumeric or `.` suppresses); the
+  `-@` suppress-author form is exempt. Backs the `unspaced-citation` lint
+  rule. Closes #448.
+- [ ] Residual `notAfterString` corner: a bare `@key` glued to a *closing
+  emphasis/strong delimiter* still parses as a citation, diverging from
+  pandoc. `*em*@key` is `Emph + Str "@key"` in pandoc (citation suppressed)
+  but panache emits `Emph + CITATION`. Matching pandoc needs the
+  delimiter-run resolution result at citation-scan time, which is only known
+  after the emphasis pass --- a second pass, so deferred. Word/CJK/`.`-glued
+  cases are handled; this delimiter-adjacent case is not. Surfaced 2026-08.
+- [ ] `unspaced-citation` covers citations only. A crossref glued to a word
+  (`x@fig-plot`) is likewise left as text by the parser but not flagged by
+  the rule; extend it to crossref keys (gated on `quarto_crossrefs`) as a
+  follow-up.
 
 #### Spans
 
