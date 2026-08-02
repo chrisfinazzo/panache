@@ -798,6 +798,50 @@ Some important fact [@smith2020].
 Some important fact\ [@smith2020].
 ```
 
+### `unspaced-citation` {#unspaced-citation}
+
+Detects an in-text citation (`@key`) glued to the preceding word, where Pandoc
+leaves it as literal text rather than a citation --- but only when `key` names a
+reference the document actually knows about.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No
+
+Requirements
+:   Requires `extensions.citations = true` in configuration (default for the
+    Pandoc, Quarto, and R Markdown flavors).
+
+Diagnostic codes
+:   [`unspaced-citation`](#unspaced-citation)
+
+Description
+
+:   Pandoc's `notAfterString` rule means an author-in-text `@key` is only
+    recognized when its `@` does not directly follow a word character. So
+    `word@smith2004` (and, for the same reason, an email like
+    `user@example.com`) is parsed as ordinary text, and the intended citation
+    silently fails to render. The rule flags such a glued `@key` so the mistake
+    is caught at writing time.
+
+    To avoid false positives on email addresses, handles, and other incidental `@`
+    text, the rule fires **only** when the trailing key is a *defined* citation key:
+    an entry in a loaded bibliography or an inline YAML `references:` entry. A key
+    the document does not define is left alone.
+
+    There is no auto-fix because two distinct repairs are valid and the rule cannot
+    know which the author intends: insert a space (`word @smith2004`) or wrap the
+    key in brackets (`word[@smith2004]`). For a literal `@` that should never be a
+    citation, escape it as `\@`.
+
+**Example violation:**
+
+```markdown
+The result by work@smith2004 built on earlier findings in @smith2004.
+```
+
 ### `crossref-as-link-target` {#crossref-as-link-target}
 
 Detects link destinations that begin with `@`, which is almost always a typo for

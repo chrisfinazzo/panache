@@ -29,6 +29,7 @@ pub mod quarto_schema;
 pub mod stray_fenced_div_markers;
 pub mod undefined_anchor;
 pub mod undefined_references;
+pub mod unspaced_citation;
 pub mod unused_definitions;
 pub mod unused_yaml_anchor;
 

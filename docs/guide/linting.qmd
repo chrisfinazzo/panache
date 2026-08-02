@@ -294,6 +294,7 @@ duplicate-yaml-anchor = true
 unused-yaml-anchor = true
 citation-keys = true
 citation-nonbreaking-space = true
+unspaced-citation = true
 chunk-label-spaces = true
 missing-chunk-labels = true
 figure-crossref-captions = true

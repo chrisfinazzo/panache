@@ -138,6 +138,25 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
 /// can apply pandoc's `notAfterString` rule (see
 /// [`prev_char_suppresses_bare_citation`]) using the character before `pos`.
 pub(crate) fn try_parse_bare_citation(text: &str, pos: usize) -> Option<(usize, &str, bool)> {
+    let parsed @ (_, _, has_suppress) = parse_bare_citation_unchecked(text, pos)?;
+
+    // Pandoc's `notAfterString`: an author-in-text `@key` is not recognized
+    // when its `@` directly follows a word character, so `word@key` and
+    // `user@example.com` stay literal text. The rule keys off the character
+    // before the `@` itself, which is why the suppress-author `-@` form still
+    // cites after a word (`word-@key`) — there the `@` follows the `-`.
+    if !has_suppress && prev_char_suppresses_bare_citation(text, pos) {
+        return None;
+    }
+
+    Some(parsed)
+}
+
+/// Parse a bare citation at `pos` **without** pandoc's `notAfterString` guard.
+/// Shared by [`try_parse_bare_citation`] (which adds the guard) and
+/// [`suppressed_bare_citation`] (which reports exactly the citations the guard
+/// rejects).
+fn parse_bare_citation_unchecked(text: &str, pos: usize) -> Option<(usize, &str, bool)> {
     let cite = &text[pos..];
     let bytes = cite.as_bytes();
 
@@ -159,16 +178,6 @@ pub(crate) fn try_parse_bare_citation(text: &str, pos: usize) -> Option<(usize, 
     if bytes[p] != b'@' {
         return None;
     }
-
-    // Pandoc's `notAfterString`: an author-in-text `@key` is not recognized
-    // when its `@` directly follows a word character, so `word@key` and
-    // `user@example.com` stay literal text. The rule keys off the character
-    // before the `@` itself, which is why the suppress-author `-@` form still
-    // cites after a word (`word-@key`) — there the `@` follows the `-`.
-    if !has_suppress && prev_char_suppresses_bare_citation(text, pos) {
-        return None;
-    }
-
     p += 1;
 
     if p >= bytes.len() {
@@ -187,6 +196,23 @@ pub(crate) fn try_parse_bare_citation(text: &str, pos: usize) -> Option<(usize, 
     let key = &cite[key_start..total_len];
 
     Some((total_len, key, has_suppress))
+}
+
+/// The bare `@key` at `pos` that pandoc's `notAfterString` rule suppresses (so
+/// panache, like pandoc, leaves it as literal text rather than a citation).
+///
+/// Returns `Some((len, key, false))` when a well-formed author-in-text citation
+/// starts at `pos` but is glued to a preceding word character; `len` is measured
+/// from `pos` and spans `@key`. Returns `None` when there is no bare citation at
+/// `pos`, when it is the suppress-author `-@` form (never suppressed by
+/// context), or when the citation is actually recognized. The linter uses this
+/// to flag `@key` glued to a word when `key` resolves to a real reference.
+pub fn suppressed_bare_citation(text: &str, pos: usize) -> Option<(usize, &str, bool)> {
+    let parsed @ (_, _, has_suppress) = parse_bare_citation_unchecked(text, pos)?;
+    if has_suppress {
+        return None;
+    }
+    prev_char_suppresses_bare_citation(text, pos).then_some(parsed)
 }
 
 /// Pandoc's `notAfterString` guard for author-in-text citations: whether the
@@ -789,6 +815,33 @@ mod tests {
             try_parse_bare_citation("@doe99", 0),
             Some((6, "doe99", false))
         );
+    }
+
+    // `suppressed_bare_citation` is the linter's mirror of the parser guard: it
+    // returns exactly the bare citations `notAfterString` rejected.
+    #[test]
+    fn test_suppressed_bare_citation_after_word() {
+        assert_eq!(
+            suppressed_bare_citation("word@doe99", 4),
+            Some((6, "doe99", false))
+        );
+        let text = "違法編訂@jzkhl";
+        let at = text.find('@').unwrap();
+        assert_eq!(
+            suppressed_bare_citation(text, at),
+            Some((6, "jzkhl", false))
+        );
+    }
+
+    #[test]
+    fn test_suppressed_bare_citation_none_when_recognized() {
+        // A citation that actually parses is not "suppressed".
+        assert_eq!(suppressed_bare_citation("says @doe99", 5), None);
+        assert_eq!(suppressed_bare_citation("@doe99", 0), None);
+        // The `-@` form is never suppressed by context.
+        assert_eq!(suppressed_bare_citation("word-@key", 4), None);
+        // No citation at the position at all.
+        assert_eq!(suppressed_bare_citation("word key", 4), None);
     }
 
     // Bracketed citation parsing tests

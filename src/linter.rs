@@ -100,6 +100,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::undefined_references::UndefinedReferencesRule),
         Box::new(rules::undefined_anchor::UndefinedAnchorRule),
         Box::new(rules::unused_definitions::UnusedDefinitionsRule),
+        Box::new(rules::unspaced_citation::UnspacedCitationRule),
         Box::new(rules::duplicate_yaml_anchor::DuplicateYamlAnchorRule),
         Box::new(rules::unused_yaml_anchor::UnusedYamlAnchorRule),
         Box::new(rules::citation_keys::CitationKeysRule),
