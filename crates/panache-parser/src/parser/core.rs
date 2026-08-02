@@ -1566,6 +1566,7 @@ impl<'a> Parser<'a> {
             content_col,
             use_paragraph,
             "",
+            false,
         );
         if !lifted {
             return None;
@@ -1658,6 +1659,7 @@ impl<'a> Parser<'a> {
                 content_col,
                 use_paragraph,
                 line0_prefix,
+                true,
             );
             probe.finish_node();
             ok
@@ -1677,6 +1679,7 @@ impl<'a> Parser<'a> {
             content_col,
             use_paragraph,
             line0_prefix,
+            true,
         );
         Some(probe_consumed)
     }
@@ -1758,6 +1761,7 @@ impl<'a> Parser<'a> {
             content_col,
             use_paragraph,
             "",
+            false,
         );
         if !lifted {
             return None;

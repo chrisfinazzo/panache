@@ -301,7 +301,15 @@ impl ListItemBuffer {
                     .segments
                     .iter()
                     .all(|s| matches!(s, ListItemContent::Text(_)))
-                && try_emit_html_block_lift(builder, &text, config, content_col, use_paragraph, "")
+                && try_emit_html_block_lift(
+                    builder,
+                    &text,
+                    config,
+                    content_col,
+                    use_paragraph,
+                    "",
+                    false,
+                )
             {
                 return;
             }
@@ -387,6 +395,7 @@ pub(crate) fn try_emit_html_block_lift(
     content_col: usize,
     use_paragraph: bool,
     line0_prefix: &str,
+    allow_unclosed_div: bool,
 ) -> bool {
     let first_line = text.split_inclusive('\n').next().unwrap_or(text);
     let first_line_no_nl = first_line
@@ -464,7 +473,22 @@ pub(crate) fn try_emit_html_block_lift(
             .children()
             .filter(|c| c.kind() == SyntaxKind::HTML_BLOCK_TAG)
             .count();
-        if html_block_tag_count < 2 {
+        // A matched pair (open + close) always lifts. A single open tag
+        // (unclosed `<div>`, closed implicitly at EOF by pandoc) lifts
+        // only when the caller opts in AND the body was reparsed into
+        // structural children (no `HTML_BLOCK_CONTENT` opaque remainder)
+        // — this mirrors the projector's `div_has_structural_inner`,
+        // which renders such a shape as `Div` with an implicit close.
+        // The list-item / marker-line callers keep the strict `>= 2`
+        // gate: there a single open tag can be a partial matched pair
+        // whose close lands in a following sibling block.
+        let ok = html_block_tag_count >= 2
+            || (allow_unclosed_div
+                && html_block_tag_count == 1
+                && !first
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::HTML_BLOCK_CONTENT));
+        if !ok {
             return false;
         }
     }
