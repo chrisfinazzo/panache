@@ -174,6 +174,9 @@ pub(crate) fn validate_yaml_with_context(
     if let Some(diag) = check_tag_handle_scope(input, &tokens) {
         return Some(diag);
     }
+    if let Some(diag) = check_undeclared_alias(input, &tokens) {
+        return Some(diag);
+    }
     if let Some(diag) = check_unterminated_quoted(input) {
         return Some(diag);
     }
@@ -650,6 +653,47 @@ fn diag_at_token(tok: &Token, code: &'static str, message: &'static str) -> Yaml
         byte_start: tok.start.index,
         byte_end: tok.end.index,
     }
+}
+
+/// An alias `*name` must refer to an anchor `&name` that was declared
+/// *earlier in the same document* (YAML 1.2 §7.1: the alias resolves to
+/// the most recent preceding node bearing that anchor). An undeclared or
+/// forward-referencing alias is a hard error in libyaml, PyYAML, and
+/// js-yaml, so it is a 1.2 substrate rejection, not a consumer-only one.
+///
+/// A single forward pass over the token stream models this exactly: anchors
+/// seen so far live in `declared`, and any alias whose name is absent is
+/// rejected. The scanner only emits `Anchor`/`Alias` tokens in genuine
+/// indicator positions (never inside quoted or plain scalars), so this is
+/// robust against `&`/`*` characters that are literal scalar content.
+///
+/// Anchor scope is per-document: `declared` is reset at each `DocumentStart`
+/// so an anchor cannot be aliased across a `---` boundary. Redefinition
+/// (last-wins) is irrelevant here — only presence matters.
+fn check_undeclared_alias<'a>(input: &'a str, tokens: &[Token]) -> Option<YamlDiagnostic> {
+    let mut declared: HashSet<&'a str> = HashSet::new();
+    for tok in tokens {
+        match tok.kind {
+            TokenKind::DocumentStart => declared.clear(),
+            TokenKind::Anchor => {
+                let text = &input[tok.start.index..tok.end.index];
+                declared.insert(text.strip_prefix('&').unwrap_or(text));
+            }
+            TokenKind::Alias => {
+                let text = &input[tok.start.index..tok.end.index];
+                let name = text.strip_prefix('*').unwrap_or(text);
+                if !declared.contains(name) {
+                    return Some(diag_at_token(
+                        tok,
+                        diagnostic_codes::PARSE_UNDECLARED_ALIAS,
+                        "alias references an anchor that has not been defined",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Cluster A — trailing content after a structure close at document
@@ -3977,6 +4021,56 @@ categories:
         // is valid.
         let input = "- &a item\n- b\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
+    }
+
+    #[test]
+    fn undeclared_alias_errors() {
+        // `*missing` with no matching `&missing` is a hard error in
+        // libyaml/PyYAML/js-yaml (YAML 1.2 §7.1).
+        let input = "key: *missing\n";
+        let diag = run(input).expect("expected diagnostic");
+        assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
+    }
+
+    #[test]
+    fn declared_alias_passes() {
+        // Contract guard: an alias resolving to a prior anchor is valid.
+        let input = "a: &x 1\nb: *x\n";
+        assert!(run(input).is_none(), "got {:?}", run(input));
+    }
+
+    #[test]
+    fn forward_reference_alias_errors() {
+        // An anchor must be declared *before* it is aliased; a forward
+        // reference is rejected.
+        let input = "a: *x\nb: &x 1\n";
+        let diag = run(input).expect("expected diagnostic");
+        assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
+    }
+
+    #[test]
+    fn alias_across_document_boundary_errors() {
+        // Anchor scope is per-document: `&x` in the first document does
+        // not carry across `---` into the second.
+        let input = "---\na: &x 1\n---\nb: *x\n";
+        let diag = run(input).expect("expected diagnostic");
+        assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
+    }
+
+    #[test]
+    fn undeclared_alias_as_key_errors() {
+        // Aliases can appear as keys; an undeclared one is still rejected.
+        let input = "*x : v\n";
+        let diag = run(input).expect("expected diagnostic");
+        assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
+    }
+
+    #[test]
+    fn undeclared_alias_in_flow_errors() {
+        // Aliases inside a flow collection are checked too.
+        let input = "key: [*x]\n";
+        let diag = run(input).expect("expected diagnostic");
+        assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
     }
 
     #[test]

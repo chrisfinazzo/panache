@@ -139,11 +139,12 @@ linter. Syntax validity and `key-duplicates` are already covered by
 semantic-value footguns below; none are caught today (verified clean under both
 default and `--flavor quarto`):
 
-- [ ] **Undeclared alias (yamllint `anchors`, undeclared case).**
-  `ref: *missing` with no matching `&missing` emits nothing today, but an
-  undefined alias is a *hard error* in libyaml/js-yaml/PyYAML. This is
-  arguably a **validator gap** (belongs in `yaml-parse-error`, not a new
-  lint rule) --- requires resolving anchors/aliases during validation.
+- [x] **Undeclared alias (yamllint `anchors`, undeclared case).**
+  `ref: *missing` with no matching `&missing` emitted nothing; an undefined
+  alias is a *hard error* in libyaml/js-yaml/PyYAML (YAML 1.2 §7.1). Fixed
+  as a **validator gap** in `yaml-parse-error`: `check_undeclared_alias`
+  does a single per-document forward pass over the token stream
+  (`PARSE_UNDECLARED_ALIAS`), also rejecting forward references.
 
 - [ ] **Duplicate/unused anchors (yamllint `anchors`, remaining cases).**
   Softer, lint-flavored; duplicate anchors (last-wins) and unused anchors.

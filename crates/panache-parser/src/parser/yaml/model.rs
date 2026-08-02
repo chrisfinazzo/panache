@@ -53,6 +53,7 @@ pub mod diagnostic_codes {
     pub const PARSE_ANCHOR_BEFORE_BLOCK_INDICATOR: &str =
         "YAML_PARSE_ANCHOR_BEFORE_BLOCK_INDICATOR";
     pub const PARSE_ANCHOR_WITHOUT_TARGET: &str = "YAML_PARSE_ANCHOR_WITHOUT_TARGET";
+    pub const PARSE_UNDECLARED_ALIAS: &str = "YAML_PARSE_UNDECLARED_ALIAS";
     pub const PARSE_NODE_PROPERTY_UNDERINDENTED: &str = "YAML_PARSE_NODE_PROPERTY_UNDERINDENTED";
 
     // Consumer-only diagnostics: valid YAML 1.2 that a real consumer
