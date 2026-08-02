@@ -420,8 +420,49 @@ pub(crate) fn try_emit_html_block_lift(
         }
     }
 
+    let prefix_lines: Vec<ContainerPrefixLine> = prefixes
+        .into_iter()
+        .map(ContainerPrefixLine::list_only)
+        .collect();
+    emit_html_block_lift_from_stripped(
+        builder,
+        &parse_text,
+        config,
+        prefix_lines,
+        use_paragraph,
+        allow_unclosed_div,
+    )
+}
+
+/// Reparse-validate-graft core shared by [`try_emit_html_block_lift`] and
+/// the blockquote-nested content-container caller. `parse_text` is the
+/// already-dedented block text (all container prefixes stripped);
+/// `prefix_lines` re-injects the per-line prefix bytes (list indent
+/// and/or `> ` markers) at graft time for losslessness. Line 0's prefix
+/// is honored too — callers that already emitted the line-0 prefix (e.g.
+/// an enclosing blockquote marker) pass an empty entry there.
+pub(crate) fn emit_html_block_lift_from_stripped(
+    builder: &mut GreenNodeBuilder<'static>,
+    parse_text: &str,
+    config: &ParserOptions,
+    prefix_lines: Vec<ContainerPrefixLine>,
+    use_paragraph: bool,
+    allow_unclosed_div: bool,
+) -> bool {
+    let first_line = parse_text
+        .split_inclusive('\n')
+        .next()
+        .unwrap_or(parse_text);
+    let first_line_no_nl = first_line
+        .strip_suffix("\r\n")
+        .or_else(|| first_line.strip_suffix('\n'))
+        .unwrap_or(first_line);
+    if try_parse_html_block_start(first_line_no_nl, false).is_none() {
+        return false;
+    }
+
     let refdefs = config.refdef_labels.clone().unwrap_or_default();
-    let inner_root = crate::parser::parse_with_refdefs(&parse_text, Some(config.clone()), refdefs);
+    let inner_root = crate::parser::parse_with_refdefs(parse_text, Some(config.clone()), refdefs);
 
     let children: Vec<SyntaxNode> = inner_root.children().collect();
     if children.is_empty() {
@@ -435,7 +476,7 @@ pub(crate) fn try_emit_html_block_lift(
         return false;
     }
     let total_end = children.last().unwrap().text_range().end();
-    if total_end != TextSize::of(parse_text.as_str()) {
+    if total_end != TextSize::of(parse_text) {
         return false;
     }
 
@@ -494,10 +535,6 @@ pub(crate) fn try_emit_html_block_lift(
         }
     }
 
-    let prefix_lines: Vec<ContainerPrefixLine> = prefixes
-        .into_iter()
-        .map(ContainerPrefixLine::list_only)
-        .collect();
     let mut prefix_state = ContainerPrefixState::new(prefix_lines);
     if multi_child_trailing {
         graft_node(builder, first, &mut prefix_state);

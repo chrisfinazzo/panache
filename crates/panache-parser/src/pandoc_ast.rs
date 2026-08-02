@@ -5935,26 +5935,27 @@ mod tests {
     }
 
     #[test]
-    fn bq_def_later_line_div_projects_without_panicking() {
+    fn bq_def_later_line_div_lifts_structurally() {
         // A `<div>` opening on a later line of a definition body *inside* a
-        // blockquote cannot lift structurally on the general dispatch path
-        // (the body keeps its `> ` markers + content indent → `CODE_BLOCK`,
-        // and the close tag is "messy"). The parser therefore keeps the
-        // opaque `HTML_BLOCK` shape rather than retagging `HTML_BLOCK_DIV`,
-        // so the projector emits `RawBlock`s instead of tripping the
-        // `div_has_structural_inner` debug-assert. Regression guard for the
-        // former `HTML_BLOCK_DIV without structural inner shape` panic.
+        // blockquote now lifts structurally: the dispatcher pre-strips the
+        // `> ` markers + content indent from the body, reparses it, and
+        // re-injects the prefix bytes during graft (byte-lossless). The
+        // projector consumes the lifted `HTML_BLOCK_DIV` and emits a
+        // structural `Div` matching pandoc's block shape. (The surrounding
+        // `Para [Term]` / `Plain [text]` divergence is a pre-existing
+        // definition-list-in-blockquote gap, unrelated to the HTML lift.)
+        // Also a regression guard for the former `HTML_BLOCK_DIV without
+        // structural inner shape` debug-assert panic.
         let input = "> Term\n>\n> :   text\n>\n>     <div id=\"d\">\n>     x\n>     </div>\n";
         let tree = parse(input, Some(pandoc_options()));
-        // Must not panic; the `<div>` stays raw (no `Div` block is emitted).
         let native = to_pandoc_ast(&tree);
         assert!(
-            native.contains("RawBlock") && native.contains("<div"),
-            "expected an opaque RawBlock fallback, got: {native}"
+            native.contains("Div ( \"d\" , [] , [] ) [ Para [ Str \"x\" ] ]"),
+            "expected a structural `Div (\"d\") [Para [Str \"x\"]]`, got: {native}"
         );
         assert!(
-            !native.contains("Div ("),
-            "the unliftable bq-def div must not project as a structural Div, got: {native}"
+            !native.contains("RawBlock"),
+            "the lifted bq-def div must not leave any opaque RawBlock, got: {native}"
         );
     }
 

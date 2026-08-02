@@ -302,6 +302,7 @@ golden_test_cases!(
     html_block_div_definition_body,
     html_block_div_definition_body_multiline,
     html_block_div_definition_body_later_line,
+    html_block_div_definition_body_later_line_blockquote,
     html_block_div_definition_body_later_line_unclosed,
     html_block_div_footnote_body,
     html_block_div_multiline_open_trailing_idempotent,

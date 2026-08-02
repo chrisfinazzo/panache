@@ -1698,6 +1698,125 @@ impl<'a> Parser<'a> {
         Some(probe_consumed)
     }
 
+    /// Blockquote-nested variant of
+    /// [`Self::try_dispatch_content_indent_html_block`]. When the
+    /// content-container body sits inside one or more blockquotes
+    /// (`> :   text\n>\n>     <div>\n>     x\n>     </div>`), the later-line
+    /// HTML block's continuation lines carry both the `> ` markers and the
+    /// content indent. The `bq_depth == 0` path can't handle them (its lift
+    /// strips only spaces), so the general dispatcher used to fall through
+    /// and silently drop the line-0 content indent (a losslessness
+    /// violation) while reparsing the body as an indented `CodeBlock`.
+    ///
+    /// Here we pre-strip every continuation line with the full container
+    /// prefix (bq markers + content indent), reparse the dedented body, and
+    /// re-inject the captured `>     ` prefix bytes per line during graft so
+    /// the CST stays byte-equal to source and the body lifts to `Div [Para
+    /// x]`, matching pandoc's block structure. Line 0's outer `> ` marker was
+    /// already emitted upstream by the blockquote container, so only its
+    /// content indent is re-injected inside the lifted block.
+    ///
+    /// Gated to Pandoc. Returns the number of lines consumed on success.
+    fn try_dispatch_bq_content_indent_html_block(
+        &mut self,
+        stripped_content: &str,
+        content_col: usize,
+        indent_to_emit: Option<&str>,
+    ) -> Option<usize> {
+        use super::blocks::container_prefix::ContainerPrefixLine;
+
+        if self.config.dialect != crate::options::Dialect::Pandoc {
+            return None;
+        }
+        let bq_depth = self.current_blockquote_depth();
+        if bq_depth == 0 {
+            return None;
+        }
+
+        let (content_no_nl, _) = strip_newline(stripped_content);
+        let block_type = html_blocks::try_parse_html_block_start(content_no_nl, false)?;
+
+        // Strip the full container prefix (bq markers outermost, then the
+        // content indent) from continuation lines.
+        let content_prefix = ContainerPrefix::from_scalars(bq_depth, 0, true, content_col, false);
+
+        // Probe how many lines the block spans by reparsing a synthetic
+        // window (line 0 already dedented, continuation lines fully stripped).
+        let probe_consumed = {
+            let mut synthetic: Vec<&str> = Vec::with_capacity(self.lines.len() - self.pos);
+            synthetic.push(stripped_content);
+            for line in &self.lines[self.pos + 1..] {
+                synthetic.push(content_prefix.strip(line));
+            }
+            let mut probe = GreenNodeBuilder::new();
+            probe.start_node(SyntaxKind::DOCUMENT.into());
+            let consumed = html_blocks::parse_html_block_with_wrapper(
+                &mut probe,
+                &synthetic,
+                0,
+                block_type,
+                &ContainerPrefix::default(),
+                SyntaxKind::HTML_BLOCK,
+                html_blocks::SoftbreakFusion::None,
+                self.config,
+            );
+            probe.finish_node();
+            consumed
+        };
+        if probe_consumed == 0 {
+            return None;
+        }
+
+        // Build the dedented block text plus the per-line prefixes to
+        // re-inject during graft. Line 0 keeps its content indent (the outer
+        // `> ` was already emitted upstream); continuation lines re-inject
+        // their full stripped `>     ` prefix.
+        let mut parse_text = String::from(stripped_content);
+        let mut prefix_lines: Vec<ContainerPrefixLine> = vec![ContainerPrefixLine::list_only(
+            indent_to_emit.unwrap_or("").to_string(),
+        )];
+        for line in &self.lines[self.pos + 1..self.pos + probe_consumed] {
+            let stripped = content_prefix.strip(line);
+            let captured = &line[..line.len() - stripped.len()];
+            parse_text.push_str(stripped);
+            prefix_lines.push(ContainerPrefixLine::bq_only(captured.to_string()));
+        }
+        let use_paragraph = self.pos > 0 && is_blank_line(self.lines[self.pos - 1]);
+
+        // Probe the lift into a throwaway builder first — if it can't cleanly
+        // lift the shape, fall back to the general dispatch without mutating
+        // the real tree.
+        let lift_ok = {
+            let mut probe = GreenNodeBuilder::new();
+            probe.start_node(SyntaxKind::DOCUMENT.into());
+            let ok = super::utils::list_item_buffer::emit_html_block_lift_from_stripped(
+                &mut probe,
+                &parse_text,
+                self.config,
+                prefix_lines.clone(),
+                use_paragraph,
+                true,
+            );
+            probe.finish_node();
+            ok
+        };
+        if !lift_ok {
+            return None;
+        }
+
+        self.emit_buffered_plain_if_needed();
+        self.prepare_for_block_element();
+        super::utils::list_item_buffer::emit_html_block_lift_from_stripped(
+            &mut self.builder,
+            &parse_text,
+            self.config,
+            prefix_lines,
+            use_paragraph,
+            true,
+        );
+        Some(probe_consumed)
+    }
+
     /// Fuse a definition-body comment/PI close-line trailing text with its
     /// following non-blank continuation lines into one paragraph, matching
     /// pandoc (`:   <!-- --> t\n    more` -> `RawBlock, Para/Plain [t,
@@ -3744,6 +3863,30 @@ impl<'a> Parser<'a> {
                 )
             )
             && let Some(consumed) = self.try_dispatch_content_indent_html_block(
+                stripped_content,
+                content_indent,
+                indent_to_emit,
+            )
+        {
+            return LineDispatch::consumed(consumed);
+        }
+
+        // Blockquote-nested variant of the above: the content-container body
+        // sits inside one or more blockquotes, so continuation lines carry
+        // `> ` markers on top of the content indent. Handled separately
+        // because the plain lift strips only spaces.
+        if content_indent > 0
+            && self.config.dialect == crate::options::Dialect::Pandoc
+            && self.current_blockquote_depth() > 0
+            && matches!(
+                self.containers.last(),
+                Some(
+                    Container::Definition { .. }
+                        | Container::FootnoteDefinition { .. }
+                        | Container::Admonition { .. }
+                )
+            )
+            && let Some(consumed) = self.try_dispatch_bq_content_indent_html_block(
                 stripped_content,
                 content_indent,
                 indent_to_emit,

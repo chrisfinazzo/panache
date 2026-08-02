@@ -1,0 +1,59 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 99
+expression: cst_output
+---
+DOCUMENT@0..62
+  BLOCK_QUOTE@0..62
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    PARAGRAPH@2..7
+      TEXT@2..6 "Term"
+      NEWLINE@6..7 "\n"
+    BLOCK_QUOTE_MARKER@7..8 ">"
+    BLANK_LINE@8..9
+      BLANK_LINE@8..9 "\n"
+    BLOCK_QUOTE_MARKER@9..10 ">"
+    WHITESPACE@10..11 " "
+    DEFINITION_LIST@11..62
+      DEFINITION_ITEM@11..62
+        DEFINITION@11..62
+          DEFINITION_MARKER@11..12 ":"
+          WHITESPACE@12..15 "   "
+          PLAIN@15..20
+            TEXT@15..19 "text"
+            NEWLINE@19..20 "\n"
+          BLOCK_QUOTE_MARKER@20..21 ">"
+          BLANK_LINE@21..22
+            BLANK_LINE@21..22 "\n"
+          BLOCK_QUOTE_MARKER@22..23 ">"
+          WHITESPACE@23..24 " "
+          HTML_BLOCK_DIV@24..62
+            HTML_BLOCK_TAG@24..41
+              WHITESPACE@24..28 "    "
+              TEXT@28..32 "<div"
+              WHITESPACE@32..33 " "
+              HTML_ATTRS@33..39
+                TEXT@33..37 "id=\""
+                ATTR_ID@37..38 "d"
+                TEXT@38..39 "\""
+              TEXT@39..40 ">"
+              NEWLINE@40..41 "\n"
+            PARAGRAPH@41..49
+              BLOCK_QUOTE_MARKER@41..42 ">"
+              WHITESPACE@42..43 " "
+              WHITESPACE@43..44 " "
+              WHITESPACE@44..45 " "
+              WHITESPACE@45..46 " "
+              WHITESPACE@46..47 " "
+              TEXT@47..48 "x"
+              NEWLINE@48..49 "\n"
+            HTML_BLOCK_TAG@49..62
+              BLOCK_QUOTE_MARKER@49..50 ">"
+              WHITESPACE@50..51 " "
+              WHITESPACE@51..52 " "
+              WHITESPACE@52..53 " "
+              WHITESPACE@53..54 " "
+              WHITESPACE@54..55 " "
+              TEXT@55..61 "</div>"
+              NEWLINE@61..62 "\n"

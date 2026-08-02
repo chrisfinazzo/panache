@@ -174,6 +174,7 @@ golden_test_cases!(
     autolink_strict_validation_pandoc,
     bare_uri_autolink_gfm,
     blankline_concatenation,
+    blockquote_definition_later_line_html_div_pandoc,
     blockquote_depth_change,
     blockquote_fenced_html_blocks_commonmark,
     blockquote_indented_code_tabs_commonmark,
