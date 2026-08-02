@@ -213,6 +213,7 @@ impl ListItemBuffer {
         config: &ParserOptions,
         content_col: usize,
         suppress_footnote_refs: bool,
+        allow_unclosed_div: bool,
     ) {
         if self.is_empty() {
             return;
@@ -308,7 +309,7 @@ impl ListItemBuffer {
                     content_col,
                     use_paragraph,
                     "",
-                    false,
+                    allow_unclosed_div,
                 )
             {
                 return;

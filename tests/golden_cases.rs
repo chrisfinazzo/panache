@@ -244,6 +244,7 @@ golden_test_cases!(
     list_item_html_div_multiline_open,
     list_item_html_div_multiline_para,
     list_item_html_div_same_line,
+    list_item_html_div_unclosed,
     list_item_html_pre_multiline,
     list_item_html_section_multiline,
     list_item_leading_code_block,

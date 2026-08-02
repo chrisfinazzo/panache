@@ -560,6 +560,8 @@ golden_test_cases!(
     list_item_html_div_multiline_open_pandoc,
     list_item_html_div_multiline_para_commonmark,
     list_item_html_div_multiline_para_pandoc,
+    list_item_html_div_unclosed_commonmark,
+    list_item_html_div_unclosed_pandoc,
     list_item_html_div_same_line_commonmark,
     list_item_html_div_same_line_pandoc,
     list_item_html_div_same_line_trailing_commonmark,

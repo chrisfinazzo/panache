@@ -206,13 +206,21 @@ impl<'a> Parser<'a> {
                     let suppress_footnote_refs = self.in_footnote_definition();
                     // Pop container first
                     self.containers.stack.pop();
-                    // Emit buffered content as Plain or PARAGRAPH
+                    // Emit buffered content as Plain or PARAGRAPH. This is
+                    // the item-close site: the buffer is the item's complete
+                    // remaining content, and the close-form dispatcher gate
+                    // (`list_item_unclosed_html_block_tag`) has already
+                    // accumulated any matched `</div>` into it. So a buffer
+                    // ending on a lone `<div>` open is genuinely unclosed
+                    // (pandoc closes it implicitly at the item boundary) —
+                    // opt into the unclosed-`<div>` lift.
                     buffer_clone.emit_as_block(
                         &mut self.builder,
                         use_paragraph,
                         self.config,
                         item_content_col,
                         suppress_footnote_refs,
+                        true,
                     );
                     self.builder.finish_node(); // Close LIST_ITEM
                 }
@@ -415,12 +423,18 @@ impl<'a> Parser<'a> {
             buffer.clear();
             let use_paragraph = buffer_clone.has_blank_lines_between_content();
             let suppress_footnote_refs = self.in_footnote_definition();
+            // Mid-item partial flush before an interrupting block. The buffer
+            // is a partial chunk, so a trailing `<div>` open may still be
+            // closed by a `</div>` in a later chunk — do NOT lift it as an
+            // unclosed div here (would strand the close as a sibling
+            // RawBlock).
             buffer_clone.emit_as_block(
                 &mut self.builder,
                 use_paragraph,
                 self.config,
                 item_content_col,
                 suppress_footnote_refs,
+                false,
             );
         }
     }
