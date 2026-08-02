@@ -85,6 +85,35 @@ fn test_duplicate_case_insensitive() {
 }
 
 #[test]
+fn test_duplicate_yaml_anchor() {
+    let diagnostics = lint_file("duplicate_yaml_anchor.md");
+    let dup: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "duplicate-yaml-anchor")
+        .collect();
+
+    assert_eq!(dup.len(), 1, "Should find exactly 1 duplicate anchor");
+    assert!(dup[0].message.contains("`&defaults`"));
+    // Flags the second declaration (line 4), not the first (line 2).
+    assert_eq!(dup[0].location.line, 4);
+}
+
+#[test]
+fn test_unused_yaml_anchor() {
+    let quarto = "flavor = \"quarto\"\n";
+    let diagnostics = lint_file_with_config("unused_yaml_anchor.qmd", quarto);
+    let unused: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "unused-yaml-anchor")
+        .collect();
+
+    // Both the frontmatter `&brand` and the hashpipe `&unused-opts` are unused.
+    assert_eq!(unused.len(), 2, "Should find 2 unused anchors");
+    assert!(unused.iter().any(|d| d.message.contains("`&brand`")));
+    assert!(unused.iter().any(|d| d.message.contains("`&unused-opts`")));
+}
+
+#[test]
 fn test_duplicate_footnotes() {
     let diagnostics = lint_file("duplicate_footnotes.md");
     let dup: Vec<_> = diagnostics

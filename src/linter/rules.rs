@@ -12,6 +12,7 @@ pub mod citation_nonbreaking_space;
 pub mod consumer_divergence;
 pub mod crossref_as_link_target;
 pub mod duplicate_references;
+pub mod duplicate_yaml_anchor;
 pub mod emoji_aliases;
 pub mod empty_list_item;
 pub mod empty_values;
@@ -29,6 +30,7 @@ pub mod stray_fenced_div_markers;
 pub mod undefined_anchor;
 pub mod undefined_references;
 pub mod unused_definitions;
+pub mod unused_yaml_anchor;
 
 /// Config precondition for a rule's diagnostics to be able to fire.
 ///

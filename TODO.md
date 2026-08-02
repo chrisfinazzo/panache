@@ -146,9 +146,12 @@ default and `--flavor quarto`):
   does a single per-document forward pass over the token stream
   (`PARSE_UNDECLARED_ALIAS`), also rejecting forward references.
 
-- [ ] **Duplicate/unused anchors (yamllint `anchors`, remaining cases).**
-  Softer, lint-flavored; duplicate anchors (last-wins) and unused anchors.
-  Lowest priority.
+- [x] **Duplicate/unused anchors (yamllint `anchors`, remaining cases).**
+  Softer, lint-flavored; valid YAML that every consumer accepts, so these
+  landed as two **linter** rules (not validator checks):
+  `duplicate-yaml-anchor` (last-wins re-declaration) and
+  `unused-yaml-anchor` (declared but never aliased). Both default-on, scan
+  frontmatter + hashpipe `#|` regions, per-document scope.
 
 ### Linter bugs and performance (quarto-web triage, 2026-08)
 

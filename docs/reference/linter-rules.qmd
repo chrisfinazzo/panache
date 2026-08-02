@@ -575,6 +575,86 @@ available).
 Emitted when a footnote definition (`[^id]: ...`) is declared but never
 referenced.
 
+### `duplicate-yaml-anchor` {#duplicate-yaml-anchor}
+
+Detects a YAML anchor name declared more than once within a single embedded YAML
+document (frontmatter or a hashpipe `#|` cell-options block).
+
+Severity
+:   Warning
+
+Auto-fix
+:   No
+
+Diagnostic codes
+:   [`duplicate-yaml-anchor`](#duplicate-yaml-anchor)
+
+Description
+:   A repeated `&name` anchor is valid YAML 1.2 --- the last definition wins ---
+    but every real consumer (pandoc/libyaml, js-yaml, R `yaml`) accepts it, so
+    it is never a parse error. A duplicate is almost always an accident, so the
+    later declaration is flagged. Anchor scope is per document, so the same name
+    reused after a `---` document boundary is not a duplicate. Mirrors
+    yamllint's `anchors: forbid-duplicated-anchors`. No auto-fix is offered:
+    whether to rename or drop the duplicate depends on intent.
+
+**Example violation:**
+
+```markdown
+---
+base: &defaults
+  timeout: 30
+prod: &defaults
+  timeout: 60
+---
+```
+
+**Diagnostic:**
+
+```
+warning[duplicate-yaml-anchor]: YAML anchor `&defaults` is defined more than once
+  --> document.md:4:1
+```
+
+### `unused-yaml-anchor` {#unused-yaml-anchor}
+
+Detects a YAML anchor that is declared but never referenced by an alias within
+the same embedded YAML document (frontmatter or a hashpipe `#|` cell-options
+block).
+
+Severity
+:   Warning
+
+Auto-fix
+:   No
+
+Diagnostic codes
+:   [`unused-yaml-anchor`](#unused-yaml-anchor)
+
+Description
+:   An anchor (`&name`) with no matching `*name` alias in the same document is
+    valid YAML but dead weight. Usage is resolved per document (aliases in a
+    later document across a `---` boundary do not count, matching YAML's
+    per-document anchor scope). Mirrors yamllint's
+    `anchors:     forbid-unused-anchors`. No auto-fix is offered: removing the
+    anchor may not be the intended resolution.
+
+**Example violation:**
+
+```markdown
+---
+theme: &brand
+  primary: blue
+---
+```
+
+**Diagnostic:**
+
+```
+warning[unused-yaml-anchor]: YAML anchor `&brand` is never used
+  --> document.md:2:8
+```
+
 ### `citation-keys` {#citation-keys}
 
 Validates citation keys against loaded bibliographies and detects conflicts in

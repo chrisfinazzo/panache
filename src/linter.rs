@@ -12,6 +12,7 @@ pub mod project_index;
 pub mod quarto_schema;
 pub mod rules;
 pub mod runner;
+pub(crate) mod yaml_anchors;
 pub(crate) mod yaml_resolve;
 
 pub use diagnostics::{
@@ -99,6 +100,8 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::undefined_references::UndefinedReferencesRule),
         Box::new(rules::undefined_anchor::UndefinedAnchorRule),
         Box::new(rules::unused_definitions::UnusedDefinitionsRule),
+        Box::new(rules::duplicate_yaml_anchor::DuplicateYamlAnchorRule),
+        Box::new(rules::unused_yaml_anchor::UnusedYamlAnchorRule),
         Box::new(rules::citation_keys::CitationKeysRule),
         Box::new(rules::citation_nonbreaking_space::CitationNonbreakingSpaceRule),
         Box::new(rules::crossref_as_link_target::CrossrefAsLinkTargetRule),

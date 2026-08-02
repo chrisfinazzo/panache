@@ -1,0 +1,13 @@
+---
+title: Unused anchor
+theme: &brand
+  primary: blue
+---
+
+Body text.
+
+```{r}
+#| label: fig-plot
+#| opts: &unused-opts
+plot(1:10)
+```
