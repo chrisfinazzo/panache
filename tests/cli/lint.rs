@@ -904,6 +904,26 @@ fn test_lint_includes_duplicate_reference_definitions() {
 }
 
 #[test]
+fn test_lint_quarto_siblings_do_not_collide_on_footnote_ids() {
+    // Two independently-rendered Quarto documents each defining `[^1]` are not a
+    // conflict: Quarto renders each `.qmd` as its own Pandoc pass, so footnote
+    // labels are file-scoped. Only merged units (includes, bookdown) collide.
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    fs::write(root.join("_quarto.yml"), "project:\n  type: website\n").unwrap();
+    let first = root.join("first.qmd");
+    let second = root.join("second.qmd");
+    fs::write(&first, "Text.[^1]\n\n[^1]: First note.\n").unwrap();
+    fs::write(&second, "More.[^1]\n\n[^1]: Second note.\n").unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["lint", "--no-cache", second.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("duplicate-reference-labels").not());
+}
+
+#[test]
 fn test_lint_reports_unused_definitions() {
     let temp_dir = TempDir::new().unwrap();
     let doc_path = temp_dir.path().join("unused.qmd");

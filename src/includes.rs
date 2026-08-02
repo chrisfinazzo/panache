@@ -108,6 +108,14 @@ pub fn collect_cross_doc_duplicates(
     config: &Config,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    // Footnote and reference-link labels collide across files only when those
+    // files are merged into a single Pandoc pass. That happens for `{{< include
+    // >}}` edges (the child is spliced into the parent) and for bookdown, where
+    // `.Rmd` chapters are concatenated. Quarto's separate render targets each
+    // get their own `DefinitionIndex` (see `project_graph`), so the same `[^1]`
+    // or `[ref]:` in two independently-rendered `.qmd` files never reaches the
+    // same index and is not flagged. Cross-reference labels (`@fig-`, `#sec-`)
+    // resolve project-wide, so those are seeded into a shared index regardless.
     for def in tree.descendants().filter_map(ReferenceDefinition::cast) {
         let label = def.label();
         if label.is_empty() {
@@ -863,5 +871,70 @@ mod tests {
         );
         assert!(definitions.find_crossref("fig:plot").is_some());
         assert!(definitions.find_crossref("caption").is_some());
+    }
+
+    #[test]
+    fn separate_render_targets_do_not_share_footnote_namespace() {
+        // Quarto renders each document as its own Pandoc pass, modeled by a
+        // fresh `DefinitionIndex` per render target. The same footnote label in
+        // two independently-rendered files must not collide.
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        let first = root.join("first.qmd");
+        let second = root.join("second.qmd");
+        fs::write(&first, "Text.[^1]\n\n[^1]: First note.\n").unwrap();
+        fs::write(&second, "More.[^1]\n\n[^1]: Second note.\n").unwrap();
+
+        let config = Config::default();
+        let mut diagnostics = Vec::new();
+        for path in [&first, &second] {
+            let input = fs::read_to_string(path).unwrap();
+            let tree = crate::parse(&input, Some(config.clone()));
+            // Fresh index per render target (the Quarto scoping model).
+            let mut definitions = DefinitionIndex::default();
+            diagnostics.extend(collect_cross_doc_duplicates(
+                &mut definitions,
+                &tree,
+                &input,
+                path,
+                &config,
+            ));
+        }
+        assert!(
+            diagnostics.is_empty(),
+            "Quarto per-file footnotes should not collide: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn merged_documents_flag_cross_file_footnote_duplicates() {
+        // Bookdown concatenates chapters (and `{{< include >}}` splices a child
+        // into its parent) into one Pandoc pass, modeled by a shared
+        // `DefinitionIndex`. A repeated footnote label is then a real collision.
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        let first = root.join("01-first.Rmd");
+        let second = root.join("02-second.Rmd");
+        fs::write(&first, "Text.[^1]\n\n[^1]: First note.\n").unwrap();
+        fs::write(&second, "More.[^1]\n\n[^1]: Second note.\n").unwrap();
+
+        let config = Config::default();
+        // One shared index across the merged unit.
+        let mut definitions = DefinitionIndex::default();
+        let mut diagnostics = Vec::new();
+        for path in [&first, &second] {
+            let input = fs::read_to_string(path).unwrap();
+            let tree = crate::parse(&input, Some(config.clone()));
+            diagnostics.extend(collect_cross_doc_duplicates(
+                &mut definitions,
+                &tree,
+                &input,
+                path,
+                &config,
+            ));
+        }
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "duplicate-reference-labels");
+        assert!(diagnostics[0].message.contains("[^1]"));
     }
 }

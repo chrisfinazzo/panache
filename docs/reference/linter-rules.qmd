@@ -398,6 +398,15 @@ Description
     definition is used, making the others ineffective. Cross-reference detection
     follows the active flavor's extensions, so flavor-specific declaration
     syntax (for example bookdown `(\#eq:label)` under RMarkdown) is included.
+:   Reference-link and footnote labels collide across files only when those
+    files are merged into a single Pandoc pass. That happens for Quarto includes
+    (`include` shortcodes, which splice the child into its parent) and for
+    bookdown projects (`_bookdown.yml`), where chapters are concatenated. In
+    those cases a footnote or reference label repeated across files is reported.
+    Quarto renders each `.qmd` as its own document, so the same label in two
+    independently-rendered files is *not* a conflict and is not flagged.
+    Cross-reference labels (such as figure and section IDs) resolve across
+    documents and are checked project-wide regardless.
 
 **Example violation:**
 

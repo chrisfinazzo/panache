@@ -2222,7 +2222,21 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
         return graph.into_owned(db);
     };
     let mut visited = HashSet::new();
-    let mut definitions = crate::includes::DefinitionIndex::default();
+    let roots = crate::includes::find_project_roots(&root_path);
+    // Footnote and reference-link labels collide across files only within a
+    // single merged Pandoc pass. Bookdown concatenates all chapters into one
+    // such pass, so the whole project shares one `DefinitionIndex`. Quarto
+    // renders each document separately, so every render target gets its own
+    // index (its `{{< include >}}` children share it, but sibling render
+    // targets do not cross-contaminate). See `collect_cross_doc_duplicates`.
+    let is_bookdown = roots.bookdown.is_some();
+    let mut shared_definitions = crate::includes::DefinitionIndex::default();
+    let mut root_definitions = crate::includes::DefinitionIndex::default();
+    let root_index = if is_bookdown {
+        &mut shared_definitions
+    } else {
+        &mut root_definitions
+    };
     visit_document(
         db,
         &root_file,
@@ -2230,11 +2244,9 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
         &root_path,
         &mut graph,
         &mut visited,
-        &mut definitions,
+        root_index,
     );
-    let roots = crate::includes::find_project_roots(&root_path);
     if let Some(project_root) = roots.quarto_first() {
-        let is_bookdown = roots.bookdown.is_some();
         for path in
             crate::includes::find_project_documents(&project_root, config.config(db), is_bookdown)
         {
@@ -2256,6 +2268,15 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
                 .file_text(path.clone())
                 .filter(|include_file| include_file.text(db).is_some());
             if let Some(include_file) = loaded {
+                // Bookdown shares one index across the whole project; each Quarto
+                // render target starts from a fresh index so its labels are
+                // scoped to itself plus its own includes.
+                let mut sibling_definitions = crate::includes::DefinitionIndex::default();
+                let sibling_index = if is_bookdown {
+                    &mut shared_definitions
+                } else {
+                    &mut sibling_definitions
+                };
                 visit_document(
                     db,
                     &include_file,
@@ -2263,7 +2284,7 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
                     &path,
                     &mut graph,
                     &mut visited,
-                    &mut definitions,
+                    sibling_index,
                 );
             }
         }
