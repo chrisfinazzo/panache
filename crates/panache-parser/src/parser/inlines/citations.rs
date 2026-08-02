@@ -128,49 +128,80 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
     None
 }
 
-/// Try to parse a bare citation (author-in-text) starting at the current position.
-/// Returns Some((length, key, has_suppress)) if successful, None otherwise.
+/// Try to parse a bare citation (author-in-text) at byte offset `pos` in `text`.
+/// Returns Some((length, key, has_suppress)) if successful, None otherwise. The
+/// returned length is measured from `pos`.
 ///
 /// Bare citations have the syntax: @key or -@key
-pub(crate) fn try_parse_bare_citation(text: &str) -> Option<(usize, &str, bool)> {
-    let bytes = text.as_bytes();
+///
+/// `text` is the full inline buffer and `pos` the citation start, so the parser
+/// can apply pandoc's `notAfterString` rule (see
+/// [`prev_char_suppresses_bare_citation`]) using the character before `pos`.
+pub(crate) fn try_parse_bare_citation(text: &str, pos: usize) -> Option<(usize, &str, bool)> {
+    let cite = &text[pos..];
+    let bytes = cite.as_bytes();
 
     if bytes.is_empty() {
         return None;
     }
 
-    let mut pos = 0;
-    let has_suppress = bytes[pos] == b'-';
+    let mut p = 0;
+    let has_suppress = bytes[p] == b'-';
 
     if has_suppress {
-        pos += 1;
-        if pos >= bytes.len() {
+        p += 1;
+        if p >= bytes.len() {
             return None;
         }
     }
 
     // Must have @ next
-    if bytes[pos] != b'@' {
+    if bytes[p] != b'@' {
         return None;
     }
-    pos += 1;
 
-    if pos >= bytes.len() {
+    // Pandoc's `notAfterString`: an author-in-text `@key` is not recognized
+    // when its `@` directly follows a word character, so `word@key` and
+    // `user@example.com` stay literal text. The rule keys off the character
+    // before the `@` itself, which is why the suppress-author `-@` form still
+    // cites after a word (`word-@key`) — there the `@` follows the `-`.
+    if !has_suppress && prev_char_suppresses_bare_citation(text, pos) {
+        return None;
+    }
+
+    p += 1;
+
+    if p >= bytes.len() {
         return None;
     }
 
     // Parse the citation key
-    let key_start = pos;
-    let key_len = parse_citation_key(&text[pos..])?;
+    let key_start = p;
+    let key_len = parse_citation_key(&cite[p..])?;
 
     if key_len == 0 {
         return None;
     }
 
-    let total_len = pos + key_len;
-    let key = &text[key_start..total_len];
+    let total_len = p + key_len;
+    let key = &cite[key_start..total_len];
 
     Some((total_len, key, has_suppress))
+}
+
+/// Pandoc's `notAfterString` guard for author-in-text citations: whether the
+/// character immediately before `pos` suppresses a bare `@key` starting there.
+///
+/// Empirically (pandoc `-f markdown`) the suppressing set is Unicode
+/// alphanumerics plus `.`: `word@key`, `1@key`, `café@key`, `違法編訂@jzkhl`,
+/// and `x.@key` are all literal text, while other punctuation keeps the citation
+/// (`)@key`, `_@key`, and a leading `[` for bracketed citations). At the very
+/// start of the buffer there is no preceding character, so the citation stands.
+fn prev_char_suppresses_bare_citation(text: &str, pos: usize) -> bool {
+    match text[..pos].chars().next_back() {
+        Some(ch) => ch.is_alphanumeric() || ch == '.',
+        None => false,
+    }
 }
 
 /// Try to parse a Quarto cross-reference key (e.g., @fig-plot, @eq-energy).
@@ -668,32 +699,96 @@ mod tests {
     // Bare citation parsing tests
     #[test]
     fn test_parse_bare_citation_simple() {
-        let result = try_parse_bare_citation("@doe99");
+        let result = try_parse_bare_citation("@doe99", 0);
         assert_eq!(result, Some((6, "doe99", false)));
     }
 
     #[test]
     fn test_parse_bare_citation_with_suppress() {
-        let result = try_parse_bare_citation("-@smith04");
+        let result = try_parse_bare_citation("-@smith04", 0);
         assert_eq!(result, Some((9, "smith04", true)));
     }
 
     #[test]
     fn test_parse_bare_citation_with_trailing_text() {
-        let result = try_parse_bare_citation("@doe99 says");
+        let result = try_parse_bare_citation("@doe99 says", 0);
         assert_eq!(result, Some((6, "doe99", false)));
     }
 
     #[test]
     fn test_parse_bare_citation_braced_key() {
-        let result = try_parse_bare_citation("@{https://example.com}");
+        let result = try_parse_bare_citation("@{https://example.com}", 0);
         assert_eq!(result, Some((22, "{https://example.com}", false)));
     }
 
     #[test]
     fn test_parse_bare_citation_not_citation() {
-        assert_eq!(try_parse_bare_citation("not a citation"), None);
-        assert_eq!(try_parse_bare_citation("@"), None);
+        assert_eq!(try_parse_bare_citation("not a citation", 0), None);
+        assert_eq!(try_parse_bare_citation("@", 0), None);
+    }
+
+    // Pandoc `notAfterString`: a bare `@key` glued to a preceding word
+    // character is literal text, not a citation. These expectations match
+    // `pandoc -f markdown` (see issue #448).
+    #[test]
+    fn test_bare_citation_suppressed_after_word() {
+        // `@` directly after a letter/digit is not a citation.
+        assert_eq!(try_parse_bare_citation("word@key", 4), None);
+        assert_eq!(try_parse_bare_citation("1@key", 1), None);
+        // Email addresses stay literal.
+        assert_eq!(try_parse_bare_citation("user@example.com", 4), None);
+    }
+
+    #[test]
+    fn test_bare_citation_suppressed_after_cjk() {
+        // CJK ideographs are alphanumeric, so a glued citation is suppressed.
+        let text = "違法編訂@jzkhl";
+        let at = text.find('@').unwrap();
+        assert_eq!(try_parse_bare_citation(text, at), None);
+    }
+
+    #[test]
+    fn test_bare_citation_suppressed_after_period() {
+        // A trailing `.` also suppresses (matches pandoc's str handling).
+        assert_eq!(try_parse_bare_citation("x.@key", 2), None);
+    }
+
+    #[test]
+    fn test_bare_citation_allowed_after_non_word_punct() {
+        // Non-word punctuation before `@` keeps the citation.
+        assert_eq!(
+            try_parse_bare_citation("x)@key", 2),
+            Some((4, "key", false))
+        );
+        assert_eq!(try_parse_bare_citation("_@key", 1), Some((4, "key", false)));
+    }
+
+    #[test]
+    fn test_bare_citation_allowed_after_space() {
+        // The classic in-text form: a space before `@`.
+        assert_eq!(
+            try_parse_bare_citation("says @doe99", 5),
+            Some((6, "doe99", false))
+        );
+    }
+
+    #[test]
+    fn test_suppress_author_citation_allowed_after_word() {
+        // The `-@` form still cites after a word: its `@` follows the `-`,
+        // not the word (pandoc parses `word-@key` as a citation).
+        assert_eq!(
+            try_parse_bare_citation("word-@key", 4),
+            Some((5, "key", true))
+        );
+    }
+
+    #[test]
+    fn test_bare_citation_at_buffer_start() {
+        // No preceding character: the citation stands.
+        assert_eq!(
+            try_parse_bare_citation("@doe99", 0),
+            Some((6, "doe99", false))
+        );
     }
 
     // Bracketed citation parsing tests

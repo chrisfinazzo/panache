@@ -1,0 +1,102 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..688
+  HEADING@0..31
+    ATX_HEADING_MARKER@0..1
+      ATX_HEADING_MARKER@0..1 "#"
+    WHITESPACE@1..2 " "
+    HEADING_CONTENT@2..30
+      TEXT@2..30 "Bare citation notAfte ..."
+    NEWLINE@30..31 "\n"
+  BLANK_LINE@31..32
+    BLANK_LINE@31..32 "\n"
+  PARAGRAPH@32..169
+    TEXT@32..39 "A bare "
+    INLINE_CODE@39..45
+      INLINE_CODE_MARKER@39..40 "`"
+      INLINE_CODE_CONTENT@40..44 "@key"
+      INLINE_CODE_MARKER@44..45 "`"
+    TEXT@45..104 " glued to a preceding ..."
+    NEWLINE@104..105 "\n"
+    TEXT@105..133 "citation, matching pa ..."
+    INLINE_CODE@133..149
+      INLINE_CODE_MARKER@133..134 "`"
+      INLINE_CODE_CONTENT@134..148 "notAfterString"
+      INLINE_CODE_MARKER@148..149 "`"
+    TEXT@149..168 " rule (issue #448)."
+    NEWLINE@168..169 "\n"
+  BLANK_LINE@169..170
+    BLANK_LINE@169..170 "\n"
+  PARAGRAPH@170..192
+    TEXT@170..191 "違法編訂@jzkhl。"
+    NEWLINE@191..192 "\n"
+  BLANK_LINE@192..193
+    BLANK_LINE@192..193 "\n"
+  PARAGRAPH@193..246
+    TEXT@193..245 "An email such as user ..."
+    NEWLINE@245..246 "\n"
+  BLANK_LINE@246..247
+    BLANK_LINE@246..247 "\n"
+  PARAGRAPH@247..339
+    TEXT@247..322 "A digit before it, li ..."
+    NEWLINE@322..323 "\n"
+    TEXT@323..338 "in x.@key here."
+    NEWLINE@338..339 "\n"
+  BLANK_LINE@339..340
+    BLANK_LINE@339..340 "\n"
+  PARAGRAPH@340..414
+    TEXT@340..393 "But non-word punctuat ..."
+    CITATION@393..397
+      CITATION_MARKER@393..394 "@"
+      CITATION_KEY@394..397 "key"
+    TEXT@397..403 " and _"
+    CITATION@403..407
+      CITATION_MARKER@403..404 "@"
+      CITATION_KEY@404..407 "key"
+    TEXT@407..413 " here."
+    NEWLINE@413..414 "\n"
+  BLANK_LINE@414..415
+    BLANK_LINE@414..415 "\n"
+  PARAGRAPH@415..528
+    TEXT@415..470 "The suppress-author f ..."
+    CITATION@470..475
+      CITATION_MARKER@470..472 "-@"
+      CITATION_KEY@472..475 "key"
+    TEXT@475..485 " remains a"
+    NEWLINE@485..486 "\n"
+    TEXT@486..507 "citation because its "
+    INLINE_CODE@507..510
+      INLINE_CODE_MARKER@507..508 "`"
+      INLINE_CODE_CONTENT@508..509 "@"
+      INLINE_CODE_MARKER@509..510 "`"
+    TEXT@510..523 " follows the "
+    INLINE_CODE@523..526
+      INLINE_CODE_MARKER@523..524 "`"
+      INLINE_CODE_CONTENT@524..525 "-"
+      INLINE_CODE_MARKER@525..526 "`"
+    TEXT@526..527 "."
+    NEWLINE@527..528 "\n"
+  BLANK_LINE@528..529
+    BLANK_LINE@528..529 "\n"
+  PARAGRAPH@529..600
+    TEXT@529..580 "A space before it is  ..."
+    CITATION@580..586
+      CITATION_MARKER@580..581 "@"
+      CITATION_KEY@581..586 "doe99"
+    TEXT@586..599 " for details."
+    NEWLINE@599..600 "\n"
+  BLANK_LINE@600..601
+    BLANK_LINE@600..601 "\n"
+  PARAGRAPH@601..688
+    TEXT@601..658 "Bracketed citations a ..."
+    CITATION@658..666
+      LINK_START@658..659 "["
+      CITATION_MARKER@659..660 "@"
+      CITATION_KEY@660..665 "doe99"
+      LINK_DEST@665..666 "]"
+    TEXT@666..677 " is still a"
+    NEWLINE@677..678 "\n"
+    TEXT@678..687 "citation."
+    NEWLINE@687..688 "\n"

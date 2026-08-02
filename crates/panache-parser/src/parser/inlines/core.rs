@@ -468,8 +468,7 @@ fn parse_inline_range_impl(
                 }
                 ConstructDispo::BareCitation { end: dispo_end } => {
                     if dispo_end <= end
-                        && let Some((len, key, has_suppress)) =
-                            try_parse_bare_citation(&text[pos..])
+                        && let Some((len, key, has_suppress)) = try_parse_bare_citation(text, pos)
                         && pos + len == dispo_end
                     {
                         let is_crossref = config.extensions.quarto_crossrefs
@@ -1459,7 +1458,7 @@ fn parse_inline_range_impl(
         if config.dialect == Dialect::CommonMark
             && byte == b'@'
             && (config.extensions.citations || config.extensions.quarto_crossrefs)
-            && let Some((len, key, has_suppress)) = try_parse_bare_citation(&text[pos..])
+            && let Some((len, key, has_suppress)) = try_parse_bare_citation(text, pos)
         {
             let is_crossref = config.extensions.quarto_crossrefs
                 && super::citations::is_crossref_key(key, &config.crossref_prefixes);
@@ -1489,7 +1488,7 @@ fn parse_inline_range_impl(
             && pos + 1 < text.len()
             && text.as_bytes()[pos + 1] == b'@'
             && (config.extensions.citations || config.extensions.quarto_crossrefs)
-            && let Some((len, key, has_suppress)) = try_parse_bare_citation(&text[pos..])
+            && let Some((len, key, has_suppress)) = try_parse_bare_citation(text, pos)
         {
             let is_crossref = config.extensions.quarto_crossrefs
                 && super::citations::is_crossref_key(key, &config.crossref_prefixes);

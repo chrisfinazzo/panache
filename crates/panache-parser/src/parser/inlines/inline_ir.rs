@@ -632,7 +632,7 @@ pub(super) fn build_ir_into(
         if !is_commonmark
             && (b == b'@' || (b == b'-' && pos + 1 < end && bytes[pos + 1] == b'@'))
             && (exts.citations || exts.quarto_crossrefs)
-            && let Some((len, _, _)) = try_parse_bare_citation(&text[pos..])
+            && let Some((len, _, _)) = try_parse_bare_citation(text, pos)
             && pos + len <= end
         {
             flush_text!();
