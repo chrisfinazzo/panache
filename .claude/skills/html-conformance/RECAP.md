@@ -226,18 +226,25 @@ back into a session entry only if it's purely historical.
   missing close tag (unclosed `<div>` → `Div` with implicit close):
   1 clean open HTML_BLOCK_TAG + structural body + no
   HTML_BLOCK_CONTENT suffices.
-- **Known live panic (deferred): bq-nested def later-line.**
+- **bq-nested def later-line: panic DE-FANGED 2026-08-02, still
+  divergent + lossless-drop.**
   `> Term\n>\n> :   text\n>\n>     <div id="d">\n>     x\n>     </div>`
-  parses to an `HTML_BLOCK_DIV` whose body is a `CODE_BLOCK` (bq markers
-  + content indent NOT stripped) and whose close `HTML_BLOCK_TAG` starts
-  with `> ` + indent (not clean) → `div_has_structural_inner` = false →
-  projector `debug_assert!` panic on `parse --to pandoc-ast`. Root cause
-  is the same `bq_depth == 0` gate on `try_dispatch_content_indent_html_
-  block` that blocks the Phase-F later-line lift in blockquotes (the lift
-  doesn't strip `> ` markers). The general dispatcher still retags
-  `HTML_BLOCK_DIV` here without lifting the body — it should fall back to
-  opaque `HTML_BLOCK` when the bq body can't lift. Not in corpus; ranked
-  next target #1.
+  used to retag `HTML_BLOCK_DIV` with a `CODE_BLOCK` body (bq markers +
+  content indent NOT stripped) and a messy close → `div_has_structural_
+  inner` = false → projector `debug_assert!` panic. **Fix**: the
+  dispatcher's `HTML_BLOCK_DIV` retag now bails when
+  `ctx.blockquote_depth > 0 && ctx.content_indent > 0` (a content-container
+  body inside a bq — where the general path can't lift), keeping opaque
+  `HTML_BLOCK`. No more panic; projects to `RawBlock`/`CodeBlock`/`RawBlock`
+  (divergent from pandoc's `Div [Para x]`). Guarded by projector unit test
+  `bq_def_later_line_div_projects_without_panicking`. **Still open** (the
+  "full fix"): the same `bq_depth == 0` gate on `try_dispatch_content_
+  indent_html_block` blocks the structural lift here, AND the general bq
+  content-indent dispatch DROPS the line-0 4-space content indent from the
+  CST (a PRE-EXISTING losslessness violation, NOT div-specific — a
+  `<section>` in the same slot drops it too). Fixing both needs the lift to
+  strip `> ` markers. No parser golden pins this input (the losslessness
+  drop trips the golden harness). Ranked next target #1.
 - Same-line and multi-line close-line lifts are depth-aware:
   `probe_same_line_lift` + `matched_close_offset` +
   `try_split_close_line_depth_aware` + `split_close_marker_end`
@@ -661,68 +668,61 @@ verbatim-in-bq); table-cell reparses.
 | C | Comment/PI trailing softbreak fusion (`<!-- hi --> trailing\nmore`) | **Landed 2026-07-02; fenced-div container 2026-07-08; blockquote container 2026-07-08.** `SoftbreakFusion` enum bounds the reparse: `ToDocEnd` (outermost, corpus 0390) + `ToFencedDivClose` (plain fenced div, corpus 0481, `fenced_div_body_end`) + `ToBlockquoteEnd` (pure blockquote, corpus 0482, `blockquote_body_end` + `> `-prefix strip/re-inject via `ContainerPrefixState`). Grafts first block, maps `text_range().end()` to consumed lines. **List/content-indent containers stay `None` (need list-indent strip); lazy `>`-less bq continuation stays divergent (broader bq-continuation gap). Both deferred.** Detail in Persistent traps. |
 | D | Definition-body marker-line HTML dispatch (`:   <div>x</div>`, `:   <div>\n x\n</div>`) | **Landed 2026-07-08; multi-line-open body 2026-07-08.** `try_dispatch_definition_html_block` arm in the def first-content-line cascade (mirrors bq/list/fence). Throwaway-builder probe branches on `probe_consumed`: single-line close → byte-lossless marker-line emit; multi-line body → reuse `list_item_buffer::try_emit_html_block_lift` (strip `content_col` + reparse dedented + re-inject) so `Div [Para x]` matches pandoc (fixed a **losslessness** failure that reordered open/close tags). `<div id>` registers in the anchor index. Gated Pandoc + `bq_depth==0`. Corpus 0483/0484/**0487**. **Trailing softbreak fusion landed 2026-07-08** (`:   <!-- --> t\n    more` → one `Para`/`Plain`, corpus 0488, `try_fuse_definition_comment_trailing` with list-stop guard). def-in-bq multi-line + later-line multi-line (separate normal-container path) deferred. Detail in Persistent traps. |
 | E | Footnote-body marker-line HTML dispatch (`[^1]: <div>x</div>`) | **Landed 2026-07-08.** `try_dispatch_footnote_html_block` in `handle_footnote_open_effect`, mirroring Phase D but gated on `!html_block_cannot_interrupt` (extracted shared predicate) — footnotes keep comments/PIs/`<span>`/void-inline-block INLINE (unlike def bodies). `<div id>` registers in anchor index. Formatter marker-space drop fixed. Corpus 0485/0486. Gated Pandoc dialect. Multi-line-open + softbreak fusion deferred. Detail in Persistent traps. |
-| F | Later-line (non-marker) HTML block in a content-container body (`:   text\n\n    <div>\n    x\n    </div>`) | **Landed 2026-07-08; unclosed-div variant 2026-08-02.** `try_dispatch_content_indent_html_block` arm in `parse_inner_content` routes def/footnote/admonition later-line HTML through `try_emit_html_block_lift` with a new `line0_prefix` arg (line-0 indent injected *inside* the open tag so the formatter's verbatim HTML dump keeps the div in the definition). Fixes a losslessness drop + `Div [CodeBlock]`-instead-of-`Div [Para]` body. Single-line + multi-line, def/footnote/admonition. Gated Pandoc + `bq_depth==0`. Corpus 0489. **Unclosed `<div>` (no `</div>`, implicit EOF close) later-line now lifts too via `allow_unclosed_div` (corpus 0494)** — was rejected by the lift's `≥ 2` tag gate, fell back to indent-dropping general dispatch. bq-nested-def later-line still deferred (pre-existing gap; NOW KNOWN to panic the projector — see Persistent traps). **List-item unclosed-div variant landed 2026-08-02** (`- <div id="d">\n  x` → `Div [Para x]`, corpus 0495; empty-body `- <div>\n\nx\n\n</div>` → `Div []` + stranded `RawBlock "</div>"`, corpus 0496) via `emit_as_block`'s `allow_unclosed_div` flag (item-close site `true`, mid-item flush `false`). Detail in Persistent traps. |
+| F | Later-line (non-marker) HTML block in a content-container body (`:   text\n\n    <div>\n    x\n    </div>`) | **Landed 2026-07-08; unclosed-div variant 2026-08-02.** `try_dispatch_content_indent_html_block` arm in `parse_inner_content` routes def/footnote/admonition later-line HTML through `try_emit_html_block_lift` with a new `line0_prefix` arg (line-0 indent injected *inside* the open tag so the formatter's verbatim HTML dump keeps the div in the definition). Fixes a losslessness drop + `Div [CodeBlock]`-instead-of-`Div [Para]` body. Single-line + multi-line, def/footnote/admonition. Gated Pandoc + `bq_depth==0`. Corpus 0489. **Unclosed `<div>` (no `</div>`, implicit EOF close) later-line now lifts too via `allow_unclosed_div` (corpus 0494)** — was rejected by the lift's `≥ 2` tag gate, fell back to indent-dropping general dispatch. bq-nested-def later-line still deferred (pre-existing gap; the projector **panic was de-fanged 2026-08-02** — dispatcher keeps opaque `HTML_BLOCK` when `blockquote_depth > 0 && content_indent > 0`, so it now projects `RawBlock`/`CodeBlock`/`RawBlock` divergent-but-no-crash; still-open: pandoc `Div [Para x]` + a pre-existing line-0 content-indent losslessness drop — see Persistent traps). **List-item unclosed-div variant landed 2026-08-02** (`- <div id="d">\n  x` → `Div [Para x]`, corpus 0495; empty-body `- <div>\n\nx\n\n</div>` → `Div []` + stranded `RawBlock "</div>"`, corpus 0496) via `emit_as_block`'s `allow_unclosed_div` flag (item-close site `true`, mid-item flush `false`). Detail in Persistent traps. |
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-08-02 (Phase F extension — unclosed-div as a list-item body)
+## Latest session — 2026-08-02 (de-fang the bq-nested-def later-line projector panic)
 
-Conformance: **html 293 → 295 passing** (295 total, **0 fail — html
-100%**); total **494 → 496 / 496 (100%)**. Parser session: closed the
-previous session's ranked next-target #2. An UNCLOSED `<div>` (no `</div>`;
-pandoc closes it implicitly at the item boundary) opening on a bullet-list
-item's content now lifts to `Div [...]` inside the item instead of staying
-inline as `Plain [RawInline "<div>", …]`.
+Conformance: **html 295 → 295, total 496 → 496 (100%, unchanged)** — no
+corpus/allowlist change. Robustness session: closed the previous session's
+ranked #1, a **live projector panic**. `parse --to pandoc-ast` on a `<div>`
+opening on a later line of a definition body *inside* a blockquote no longer
+crashes.
 
 ### What landed
 
-- `- <div id="d">\n  x` → `Div ("d",[],[]) [Para [x]]` (0495); same-line
-  `- <div id="d">x` and blank+dedent `- <div id="d">\n  x\n\nafter` too.
-  All byte-lossless + idempotent, matching pandoc-native. `<div id>` resolves
-  in the anchor index.
-- **Empty-body edge (0496)**: `- <div id="d">\n\nnot in list\n\n</div>` →
-  `Div ("d",[],[]) []` inside the item + top-level `Para` + stranded
-  `RawBlock "</div>"`, matching pandoc (div implicitly closed at the item
-  boundary, the un-indented `</div>` a separate raw block). This also
-  disproves a prior RECAP claim that bare-empty-body unclosed divs stay
-  rejected — they lift to `Div []`.
-- **Root cause**: `emit_as_block` → `try_emit_html_block_lift` always passed
-  `allow_unclosed_div = false` (added last session), so a lone-open-tag
-  `HTML_BLOCK_DIV` in a list item was rejected and fell to the inline path.
-- **Fix** (parser-shape bucket): `emit_as_block` gained an
-  `allow_unclosed_div` param threaded to the lift. The **item-close** call
-  site (`core.rs:210`) passes `true` — safe because the close-form dispatcher
-  gate (`list_item_unclosed_html_block_tag`) has already accumulated any
-  matched `</div>` into the buffer, so a buffer ending on a lone open at item
-  close is genuinely unclosed. The **mid-item partial-flush** site
-  (`core.rs:418`) passes `false` (a trailing open there may still be closed in
-  a later chunk). No `pandoc_ast.rs` change — the projector already renders
-  the shape.
-- **Verified no regressions** on closed-div-in-item, top-level-close, and
-  heading-in-div-item shapes (all already correct, unchanged).
+- **The panic**: `> Term\n>\n> :   text\n>\n>     <div id="d">\n>     x\n>
+  </div>` retagged `HTML_BLOCK_DIV`, but in a bq content-container the body
+  keeps its `> ` markers + 4-space content indent → `CODE_BLOCK`, and the
+  close tag is messy → `div_has_structural_inner` = false → projector
+  `debug_assert!("HTML_BLOCK_DIV without structural inner shape")`.
+- **Fix** (parser-shape bucket, minimal defensive option per the ranked
+  target): the dispatcher's `HTML_BLOCK_DIV` retag guard gains
+  `&& !(ctx.blockquote_depth > 0 && ctx.content_indent > 0)`. In that exact
+  combination the general path can't lift the body, so keep opaque
+  `HTML_BLOCK`. Every other bq/div shape (plain `> <div>`, `content_indent
+  == 0`) is untouched and still lifts. One-file change in
+  `block_dispatcher.rs`.
+- **Result**: projects to `RawBlock "<div…>"` / `CodeBlock "x"` / `RawBlock
+  "</div>"` — divergent from pandoc's `Div [Para x]`, but no panic. The full
+  match is the deferred "full fix" (strip `> ` markers in
+  `try_dispatch_content_indent_html_block`).
+- **Discovered**: the same slot ALSO drops the line-0 4-space content indent
+  from the CST — a PRE-EXISTING losslessness violation (verified div-agnostic:
+  a `<section>` there drops it too), independent of this panic and of the
+  retag. Left deferred; it's why no parser golden pins this input (the drop
+  trips the golden harness's losslessness check).
+- **Regression guard**: projector unit test
+  `bq_def_later_line_div_projects_without_panicking` in `pandoc_ast.rs`
+  (parses under Pandoc opts, asserts `to_pandoc_ast` returns a `RawBlock`
+  fallback and no `Div`).
 
 ### Files in committable diff
 
-- `parser/utils/list_item_buffer.rs` (`emit_as_block` param + thread);
-  `parser/core.rs` (2 `emit_as_block` sites: item-close `true`, mid-flush
-  `false`).
-- Corpus `0495-…-list-item-unclosed/`, `0496-…-list-item-unclosed-empty/`;
-  allowlist (html-block section) + report.{txt,json}.
-- Paired parser goldens `list_item_html_div_unclosed_{pandoc,commonmark}`
-  (+ snapshots); formatter golden `list_item_html_div_unclosed`.
+- `parser/block_dispatcher.rs` (retag guard); `pandoc_ast.rs` (regression
+  test).
 - This RECAP.
 
 ### Suggested next sub-targets (ranked)
 
-1. **bq-nested def later-line — LIVE PROJECTOR PANIC.**
-   `> Term\n>\n> :   text\n>\n>     <div id="d">\n>     x\n>     </div>`
-   panics `parse --to pandoc-ast` (`HTML_BLOCK_DIV without structural inner
-   shape`): the general dispatcher retags `HTML_BLOCK_DIV` but the bq body
-   isn't lifted (`> ` + indent → `CODE_BLOCK`, close tag not clean). Minimal
-   defensive fix: fall back to opaque `HTML_BLOCK` when the bq body can't
-   lift. Full fix: strip `> ` markers in `try_dispatch_content_indent_html_
-   block` (currently gated `bq_depth == 0`). Elevated from a divergence to a
-   panic. Medium.
+1. **bq-nested def later-line — the FULL fix (now the divergence + losslessness
+   drop, no longer a panic).** Extend `try_dispatch_content_indent_html_block`
+   (or the lift it calls) to handle `bq_depth > 0`: strip `> ` markers + inject
+   them back so the body lifts to `Div [Para x]` AND the CST keeps the dropped
+   line-0 content indent. Fixes both the pandoc divergence and the pre-existing
+   losslessness violation. Medium. When it lands, add the corpus case + a
+   parser golden (the golden is currently blocked by the losslessness drop).
 2. **Def-body list-adjacent trailing looseness** (`:   <!-- --> t\n    -
    item` → pandoc `Plain [t]` but panache `Para [t]`). Pre-existing def
    looseness gap (also in the plain path, not HTML-specific). Small but
@@ -734,10 +734,10 @@ inline as `Plain [RawInline "<div>", …]`.
 
 ### New trap
 
-Folded into Persistent traps: the `allow_unclosed_div` flag now on
-`emit_as_block` (item-close `true` / mid-flush `false`) and the corrected
-empty-body-lifts note; the live bq-nested-def projector panic added to the
-latent-panic section.
+Folded into Persistent traps (latent-panic section): the bq-nested-def
+later-line panic is now DE-FANGED via the `blockquote_depth > 0 &&
+content_indent > 0` retag guard; the still-open divergence + pre-existing
+line-0 content-indent losslessness drop are recorded there.
 
 --------------------------------------------------------------------------------
 
@@ -746,6 +746,8 @@ latent-panic section.
 Newest first. One line per session: date — phase/sub-target — pass
 count delta — root cause / lever.
 
+- 2026-08-02 — de-fang the bq-nested-def later-line projector panic (`> Term\n>\n> :   text\n>\n>     <div id="d">\n>     x\n>     </div>`) — html 295 → 295 (no corpus change) — dispatcher `HTML_BLOCK_DIV` retag guard gains `&& !(blockquote_depth > 0 && content_indent > 0)`: a content-container body inside a bq can't lift on the general path, so keep opaque `HTML_BLOCK` → projects `RawBlock`/`CodeBlock`/`RawBlock` (divergent from `Div [Para x]`) instead of `div_has_structural_inner` panic; guarded by projector unit test; full fix (strip `> ` + fix the pre-existing line-0 content-indent losslessness drop) deferred.
+- 2026-08-02 — Phase F extension unclosed-div as a list-item body (`- <div id="d">\n  x` → `Div [Para x]`; empty-body `- <div>\n\nx\n\n</div>` → `Div []` + stranded `RawBlock "</div>"`) — html 293 → 295 (total 494 → 496) — `emit_as_block` gained `allow_unclosed_div`; item-close site passes `true` (close-form dispatcher already accumulated any matched `</div>`), mid-item flush `false`; no projector change; corpus 0495/0496.
 - 2026-08-02 — Phase F extension unclosed-div later-line in a content-container body (`Term\n\n:   text\n\n    <div id="d">\n    x` → `Div [Para x]`) — html 292 → 293 (total 489 → 494; 0490-0493 block-table cases landed between sessions) — `try_emit_html_block_lift` gained `allow_unclosed_div`; content-indent caller passes `true` so a single-open-tag `HTML_BLOCK_DIV` with a lifted body + no `HTML_BLOCK_CONTENT` remainder lifts (mirrors projector `div_has_structural_inner`); was rejected by the strict `≥ 2` gate → indent-dropping general dispatch; corpus 0494.
 - 2026-07-08 — Phase F later-line HTML block in a content-container body (`:   text\n\n    <div>\n    x\n    </div>` → `Div [Para x]`) — html 291 → 292 (total 488 → 489) — `try_dispatch_content_indent_html_block` arm in `parse_inner_content` routes def/footnote/admonition later-line HTML through `try_emit_html_block_lift` with a `line0_prefix` arg (line-0 indent injected *inside* the open tag so the formatter's verbatim HTML dump keeps the div in the def); fixed losslessness drop + `Div [CodeBlock]`; corpus 0489.
 - 2026-07-08 — Phase D extension definition-body comment/PI trailing softbreak fusion (`:   <!-- --> t\n    more` → one `Para`/`Plain`) — html 290 → 291 (total 487 → 488) — `try_fuse_definition_comment_trailing` gathers fusible-paragraph extent (stop at list-item start — lists interrupt in a def body but not at doc top level where the reparse runs), routes through `try_emit_html_block_lift`; no new `SoftbreakFusion` variant; corpus 0488.

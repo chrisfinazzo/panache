@@ -5925,6 +5925,39 @@ mod tests {
         serde_json::from_str(&s).expect("to_pandoc_json must emit valid JSON")
     }
 
+    fn pandoc_options() -> crate::options::ParserOptions {
+        crate::options::ParserOptions {
+            flavor: crate::options::Flavor::Pandoc,
+            dialect: crate::options::Dialect::for_flavor(crate::options::Flavor::Pandoc),
+            extensions: crate::options::Extensions::for_flavor(crate::options::Flavor::Pandoc),
+            ..crate::options::ParserOptions::default()
+        }
+    }
+
+    #[test]
+    fn bq_def_later_line_div_projects_without_panicking() {
+        // A `<div>` opening on a later line of a definition body *inside* a
+        // blockquote cannot lift structurally on the general dispatch path
+        // (the body keeps its `> ` markers + content indent → `CODE_BLOCK`,
+        // and the close tag is "messy"). The parser therefore keeps the
+        // opaque `HTML_BLOCK` shape rather than retagging `HTML_BLOCK_DIV`,
+        // so the projector emits `RawBlock`s instead of tripping the
+        // `div_has_structural_inner` debug-assert. Regression guard for the
+        // former `HTML_BLOCK_DIV without structural inner shape` panic.
+        let input = "> Term\n>\n> :   text\n>\n>     <div id=\"d\">\n>     x\n>     </div>\n";
+        let tree = parse(input, Some(pandoc_options()));
+        // Must not panic; the `<div>` stays raw (no `Div` block is emitted).
+        let native = to_pandoc_ast(&tree);
+        assert!(
+            native.contains("RawBlock") && native.contains("<div"),
+            "expected an opaque RawBlock fallback, got: {native}"
+        );
+        assert!(
+            !native.contains("Div ("),
+            "the unliftable bq-def div must not project as a structural Div, got: {native}"
+        );
+    }
+
     #[test]
     fn empty_doc_emits_envelope_with_no_blocks() {
         let v = parse_to_json("");

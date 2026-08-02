@@ -2118,6 +2118,18 @@ impl BlockParser for HtmlBlockParser {
             } if tag_name == "div"
                 && ctx.config.dialect == crate::options::Dialect::Pandoc
                 && ctx.config.extensions.native_divs
+                // A content-container body (def / footnote / admonition,
+                // `content_indent > 0`) *inside* a blockquote cannot lift
+                // structurally on this general path: the continuation and
+                // close lines keep both their `> ` markers and their content
+                // indent, so the body parses as a `CODE_BLOCK` and the close
+                // `HTML_BLOCK_TAG` is "messy". Retagging `HTML_BLOCK_DIV`
+                // there would yield a non-structural div that panics the
+                // projector (`div_has_structural_inner` == false). Keep the
+                // opaque `HTML_BLOCK` shape until the lift learns to strip
+                // `> ` markers (see `try_dispatch_content_indent_html_block`,
+                // gated `bq_depth == 0`).
+                && !(ctx.blockquote_depth > 0 && ctx.content_indent > 0)
                 && (probe_open_tag_line_has_close_gt(content, "div")
                     || pandoc_html_open_tag_closes(lines, line_pos, prefix)) =>
             {
