@@ -1021,8 +1021,12 @@ pub fn project_symbol_index(
     file: FileText,
     config: FileConfig,
 ) -> Option<&crate::linter::project_index::ProjectSymbolIndex> {
-    let path = db.path_of(file)?;
-    let doc_path = path.canonicalize().unwrap_or(path);
+    // Use the interned path as-is: loading (`load_referenced_files`) and
+    // `project_graph` key files on this exact form, never a canonical one.
+    // Canonicalizing here diverged from them whenever the path ran through a
+    // symlink (e.g. macOS's `/var` -> `/private/var`), so the aggregate looked
+    // siblings up by a form no loaded file matched and folded nothing.
+    let doc_path = db.path_of(file)?;
     let roots = crate::includes::find_project_roots(&doc_path);
     let project_root = roots.quarto_first()?;
     let is_bookdown = roots.bookdown.is_some();
@@ -4322,6 +4326,60 @@ mod tests {
             executed(&log, "project_document_contribution"),
             2,
             "each project document's contribution must be folded once, not per aggregating file"
+        );
+    }
+
+    /// Regression: on macOS the tempdir prefix (`/var/...`) is a symlink to
+    /// `/private/var/...`, so canonicalizing the document path inside
+    /// `project_symbol_index` diverged from the raw path the files were loaded
+    /// under, and the aggregate looked up siblings by the canonical form and
+    /// found nothing. Loading and aggregation must agree on path form: neither
+    /// side canonicalizes. Reproduced portably by loading through an explicit
+    /// symlink whose canonical target differs from the path used at load time.
+    #[cfg(unix)]
+    #[test]
+    fn project_symbol_index_aggregates_through_symlinked_root() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let real_root = temp.path().join("real");
+        std::fs::create_dir(&real_root).unwrap();
+        std::fs::write(real_root.join("_quarto.yml"), "project:\n  type: book\n").unwrap();
+        std::fs::write(
+            real_root.join("defs.qmd"),
+            "# Intro {#shared}\n\n[ref-def]: https://example.com\n",
+        )
+        .unwrap();
+        std::fs::write(
+            real_root.join("body.qmd"),
+            "See [ref-def] and [here](#shared).\n",
+        )
+        .unwrap();
+
+        // Load everything through a symlinked prefix, mirroring macOS's
+        // `/var` -> `/private/var` indirection. `canonicalize()` would resolve
+        // the link away and no longer match the interned paths.
+        let link_root = temp.path().join("link");
+        std::os::unix::fs::symlink(&real_root, &link_root).unwrap();
+        let body_path = link_root.join("body.qmd");
+
+        let mut db = SalsaDb::default();
+        let config = quarto_config(&db);
+        let body_file = db.update_file_text(
+            body_path.clone(),
+            std::fs::read_to_string(&body_path).unwrap(),
+        );
+        db.load_referenced_files(body_file, config, body_path.clone());
+
+        let aggregate =
+            project_symbol_index(&db, body_file, config).expect("document is in a project");
+        assert!(
+            aggregate.definitions.reference_labels.contains("ref-def"),
+            "sibling definition must aggregate through a symlinked root: {:?}",
+            aggregate.definitions
+        );
+        assert!(
+            aggregate.anchors.contains("shared"),
+            "sibling anchor must aggregate through a symlinked root: {:?}",
+            aggregate.anchors
         );
     }
 }
