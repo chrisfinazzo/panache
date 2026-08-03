@@ -190,6 +190,7 @@ golden_test_cases!(
     citations,
     citation_prefix_paren_escape_idempotency_278,
     definition_list,
+    definition_list_bare_marker_body,
     definition_list_heading_content,
     definition_list_nesting,
     definition_list_pandoc_loose_compact,

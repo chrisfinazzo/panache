@@ -2119,10 +2119,44 @@ impl Formatter {
                             self.output.push_str(tok.text());
                         }
                         NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::NEWLINE => {
+                            // Bare marker (`:` alone on its line, body on the next
+                            // line): drop this newline so the first block pulls up
+                            // onto the `:   ` line, matching pandoc and the
+                            // same-line-marker style used elsewhere. Detected by an
+                            // empty marker line (output still ends with `:   `) with
+                            // a block element immediately after.
+                            let bare_marker_pull_up = self.output.ends_with(":   ")
+                                && children.get(i + 1).is_some_and(|next| match next {
+                                    NodeOrToken::Node(n) if n.kind() == SyntaxKind::PLAIN => {
+                                        // A heading-shaped PLAIN (`# ...`) is literal
+                                        // inline text in a compact definition; pulling
+                                        // it onto the `:   ` line would reparse as a
+                                        // real ATX heading — a meaning change. Keep it
+                                        // on its own line.
+                                        let first_line = n
+                                            .text()
+                                            .to_string()
+                                            .lines()
+                                            .next()
+                                            .unwrap_or_default()
+                                            .trim_start_matches([' ', '\t'])
+                                            .to_string();
+                                        try_parse_atx_heading(&first_line).is_none()
+                                    }
+                                    NodeOrToken::Node(n) => is_block_element(n.kind()),
+                                    _ => false,
+                                });
                             // If next child is the first lazy paragraph, add space instead
                             if first_para_idx.is_some_and(|idx| i + 1 == idx) {
                                 self.output.push(' ');
-                            } else {
+                            } else if !bare_marker_pull_up {
+                                // A bare marker whose body stays on its own line (e.g.
+                                // a heading-shaped PLAIN that must not pull up) would
+                                // otherwise leave the `:   ` padding as trailing
+                                // whitespace. Drop it back to a lone `:`.
+                                if self.output.ends_with(":   ") {
+                                    self.output.truncate(self.output.len() - 3);
+                                }
                                 self.output.push('\n');
                             }
                         }
