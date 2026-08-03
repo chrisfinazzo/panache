@@ -141,6 +141,14 @@ pub(crate) struct BlockContext<'a> {
     /// Whether we're currently inside any list
     pub in_list: bool,
 
+    /// Whether we're currently inside a definition list. A definition marker
+    /// (`:`/`~`) only opens a `Definition` when a preceding term already
+    /// established the list; without one, `DefinitionListParser::detect_prepared`
+    /// falls through to the term check (pandoc `: foo` / `: bar`) or leaves the
+    /// line as a paragraph. Precomputed from the container stack (which is
+    /// intentionally not threaded through `BlockContext`).
+    pub in_definition_list: bool,
+
     /// Whether the innermost open fenced div wraps the innermost open list (the
     /// div is outer to the list). When true, a `:::` at the list content column
     /// is list content rather than the div's closer. See issue #439 and
@@ -993,21 +1001,42 @@ impl BlockParser for DefinitionListParser {
                 return None;
             }
 
-            let indent_bytes = super::utils::container_stack::byte_index_at_column(content, indent);
-            let has_content = content
-                .get(indent_bytes + 1 + spaces_after_bytes..)
-                .map(|slice| !slice.trim().is_empty())
-                .unwrap_or(false);
-            return Some((
-                BlockDetectionResult::YesCanInterrupt,
-                Some(Box::new(DefinitionPrepared::Definition {
-                    marker_char,
-                    indent,
-                    spaces_after: spaces_after_bytes,
-                    spaces_after_cols,
-                    has_content,
-                })),
-            ));
+            // A definition marker only opens a `Definition` when a preceding
+            // term already established the list (its Term arm opened the
+            // `DEFINITION_LIST`). Without one, this line is not a definition:
+            // fall through to the term check below, which turns it into a term
+            // when the next line is itself a marker (pandoc `: foo` / `: bar`),
+            // and otherwise leaves it to become a paragraph. This keeps a lone
+            // `:   foo` (or a bare `:` with the body on the next line) from
+            // opening a spurious definition list with no term.
+            //
+            // The orphan guard applies only at the true top level. Inside a
+            // blockquote or list, term detection (`next_line_is_definition_marker`
+            // below) runs on raw lines and cannot see a marker through the
+            // container prefix, so `in_definition_list` never becomes true even
+            // for a real term. Keeping the old unconditional open there avoids
+            // regressing definition lists in those containers (a separate,
+            // pre-existing gap tracked elsewhere).
+            let orphan_guard_applies =
+                !ctx.in_definition_list && ctx.blockquote_depth == 0 && !ctx.in_list;
+            if !orphan_guard_applies {
+                let indent_bytes =
+                    super::utils::container_stack::byte_index_at_column(content, indent);
+                let has_content = content
+                    .get(indent_bytes + 1 + spaces_after_bytes..)
+                    .map(|slice| !slice.trim().is_empty())
+                    .unwrap_or(false);
+                return Some((
+                    BlockDetectionResult::YesCanInterrupt,
+                    Some(Box::new(DefinitionPrepared::Definition {
+                        marker_char,
+                        indent,
+                        spaces_after: spaces_after_bytes,
+                        spaces_after_cols,
+                        has_content,
+                    })),
+                ));
+            }
         }
 
         if let Some(blank_count) = next_line_is_definition_marker(lines, line_pos)

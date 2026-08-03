@@ -492,16 +492,6 @@ intentionally excluded.
   Surfaced when the pre-commit `panache format` hook rewrote a backtick span
   in this file.
 
-- [ ] Definition-list marker with no preceding term opens a spurious
-  `DEFINITION_LIST`. A bare `:   foo` (or `:` with the body on the next
-  line) at a block boundary with no term line above it is parsed as a
-  definition list, but pandoc requires a term and treats the lone marker as
-  a paragraph (`:   foo` -> `Para`). The `DefinitionListParser` marker-line
-  path in `block_dispatcher.rs` never checks for a preceding term.
-  Pre-existing for the `:   content` form; the bare `:`-on-its-own-line form
-  now hits the same path after the `try_parse_definition_marker` fix. Add a
-  term guard so a marker without a term stays a paragraph.
-
 ### Performance
 
 ### YAML validation: consumer fidelity vs YAML 1.2 (needs design decision)

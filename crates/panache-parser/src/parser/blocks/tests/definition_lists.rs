@@ -185,6 +185,67 @@ fn dedented_list_after_blank_line_does_not_continue_definition_list() {
 }
 
 #[test]
+fn orphan_colon_marker_with_content_is_paragraph() {
+    // A `:` marker with no preceding term is not a definition list; pandoc
+    // treats the whole line as a paragraph (`Para [Str ":", Space, Str "foo"]`).
+    let input = ":   foo\n";
+    let tree = parse_blocks(input);
+
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "orphan `:` marker should not open a definition list"
+    );
+    assert_block_kinds(input, &[SyntaxKind::PARAGRAPH]);
+}
+
+#[test]
+fn orphan_tilde_marker_with_content_is_paragraph() {
+    let input = "~   foo\n";
+    let tree = parse_blocks(input);
+
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "orphan `~` marker should not open a definition list"
+    );
+    assert_block_kinds(input, &[SyntaxKind::PARAGRAPH]);
+}
+
+#[test]
+fn orphan_bare_marker_with_body_next_line_is_paragraph() {
+    // Bare marker with the body on the next line, no term above: pandoc yields
+    // `Para [Str ":", SoftBreak, Str "foo"]`.
+    let input = ":\n    foo\n";
+    let tree = parse_blocks(input);
+
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "bare orphan `:` marker should not open a definition list"
+    );
+}
+
+#[test]
+fn colon_marker_line_becomes_term_when_next_line_is_marker() {
+    // `: foo` / `: bar` has no explicit term, but pandoc makes the first line
+    // the term (literal `: foo`) and the second the definition (`bar`).
+    let input = ":   foo\n:   bar\n";
+    let tree = parse_blocks(input);
+
+    let definition_list =
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("should be a definition list");
+    let term = find_first(&definition_list, SyntaxKind::TERM).expect("term");
+    assert_eq!(
+        term.text().to_string().trim_end(),
+        ":   foo",
+        "the marker-shaped first line should be the literal term"
+    );
+    let definition = find_first(&definition_list, SyntaxKind::DEFINITION).expect("definition");
+    assert!(
+        definition.text().to_string().contains("bar"),
+        "second marker line supplies the definition body"
+    );
+}
+
+#[test]
 fn colon_table_caption_before_table_is_not_definition_list() {
     let input = "Here's a table with a reference:\n\n: (\\#tab:mytable) A table with a reference.\n\n| A   | B   | C   |\n| --- | --- | --- |\n| 1   | 2   | 3   |\n";
     let tree = parse_blocks(input);
