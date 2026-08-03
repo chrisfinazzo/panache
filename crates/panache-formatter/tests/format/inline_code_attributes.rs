@@ -118,7 +118,8 @@ fn whitespace_only_codespan_stays_idempotent() {
     let first = format(input, None, None);
     let second = format(&first, None, None);
     assert_eq!(first, second);
-    assert!(first.contains("spaces (``  ``)"));
+    // Two-space code-span content is preserved verbatim (single backtick).
+    assert!(first.contains("spaces (`  `)"));
 }
 
 #[test]

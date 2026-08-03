@@ -30,7 +30,7 @@ fn expand_tabs_code_span(text: &str, tab_width: usize) -> String {
             }
         }
     }
-    out.trim().to_string()
+    out
 }
 
 /// Render a `CITATION` or `CROSSREF` node by concatenating its child tokens.
@@ -192,6 +192,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
 
             // Preserve malformed multi-line triple-backtick code spans as-is so they
             // don't collapse into one line and then reparse differently on pass 2.
+            //
+            // A single-line Quarto executable chunk (```` ```{r}\n...\n``` ````) is
+            // instead collapsed to inline `{r} ...` form. Its surrounding newlines
+            // are block-structure boundaries, not code content, so they must be
+            // trimmed after the newline->space normalization below.
+            let mut collapse_block_chunk = false;
             if marker_len >= 3 && content.contains('\n') {
                 let trimmed_start = content.trim_start();
                 let first_line = trimmed_start.lines().next().unwrap_or_default();
@@ -200,16 +206,24 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 if !looks_quarto_chunk_header {
                     return node.text().to_string();
                 }
+                collapse_block_chunk = true;
             }
 
-            // Normalize content: replace newlines with spaces and trim
-            // Pandoc strips leading/trailing spaces from code spans
-            let normalized_content =
+            // Preserve code-span content verbatim: surrounding spaces are
+            // meaningful and kept as-is (unlike pandoc's markdown reader, which
+            // strips them). Only apply spec-mandated normalizations: internal
+            // line endings become spaces, and tabs expand unless preserved. The
+            // exception is a collapsed block chunk (above), whose structural
+            // boundary whitespace is trimmed.
+            let mut normalized_content =
                 if matches!(config.tab_stops, crate::config::TabStopMode::Preserve) {
-                    content.replace('\n', " ").trim().to_string()
+                    content.replace('\n', " ")
                 } else {
                     expand_tabs_code_span(&content, config.tab_width)
                 };
+            if collapse_block_chunk {
+                normalized_content = normalized_content.trim().to_string();
+            }
 
             let mut backtick_runs = std::collections::HashSet::new();
             let mut current_run = 0;

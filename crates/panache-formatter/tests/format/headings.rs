@@ -57,12 +57,17 @@ fn horizontal_rule_before_setext_like_paragraph_stays_idempotent() {
 #[test]
 fn list_nested_heading_normalizes_inline_code_like_top_level() {
     // Headings inside list items went through a separate formatter that dumped
-    // raw `child.text()` instead of formatting inline nodes, so a code span's
-    // padding (`  code  `) was reformatted at the top level but not in a list.
-    let input = "- # `  code  `\n";
+    // raw `child.text()` instead of formatting inline nodes. Verify the code
+    // span is normalized (over-fenced ``code`` collapses to `code`) the same in
+    // a list-nested heading as at the top level. (Surrounding-space padding is
+    // now preserved verbatim in both paths, so backtick-count normalization is
+    // the discriminator that a raw dump would fail.)
+    let input = "- # ``code``\n";
     let out = format(input, None, None);
+    let top = format("# ``code``\n", None, None);
     assert!(out.contains("`code`"), "code span not normalized: {out:?}");
-    assert!(!out.contains("`  code  `"), "raw code span left: {out:?}");
+    assert!(!out.contains("``code``"), "raw code span left: {out:?}");
+    assert!(top.contains("`code`"), "top-level baseline: {top:?}");
     assert_eq!(format(&out, None, None), out, "must be idempotent");
 }
 

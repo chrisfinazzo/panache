@@ -451,18 +451,6 @@ intentionally excluded.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
-- [ ] Formatter trims leading/trailing spaces *inside* inline-code spans. A span
-  whose backticks wrap content with leading spaces (two spaces, then
-  `| a | b |`) is reformatted with those spaces removed, mutating the
-  code-span content. The parse is lossless (`INLINE_CODE_CONTENT` keeps the
-  spaces), so this is a *formatter* transformation. It matches pandoc's AST
-  (`Code "| a | b |"`), which is more aggressive than CommonMark's "strip
-  one space only when both sides have one" rule, so it may be intended ---
-  but decide whether the formatter should preserve code-span content
-  verbatim instead. (No literal example here: the hook would trim it.)
-  Surfaced when the pre-commit `panache format` hook rewrote a backtick span
-  in this file.
-
 ### Performance
 
 ### YAML validation: consumer fidelity vs YAML 1.2 (needs design decision)

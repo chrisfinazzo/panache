@@ -313,10 +313,11 @@ Output
 
 ### Inline Code
 
-For inline code, Panache normalizes spacing within the code span and ensures
-that the code is enclosed in the appropriate number of backticks to avoid
-conflicts with the content. If the code contains spaces, it will be wrapped in
-double backticks to preserve the spaces.
+For inline code, Panache preserves the code-span content verbatim---including
+any leading or trailing spaces---and only ensures that the code is enclosed in
+the appropriate number of backticks to avoid conflicts with the content
+(internal line breaks are still converted to spaces). Surrounding spaces are
+kept because they are part of the code and can be meaningful.
 
 Input
 
@@ -329,7 +330,7 @@ Input
 Output
 
 :   `````markdown
-    Code with spaces: `code with spaces`
+    Code with spaces: ` code with spaces `
 
     ```` ```r ````
     `````
