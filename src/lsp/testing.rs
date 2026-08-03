@@ -128,6 +128,43 @@ impl LspTester {
         self.gs.on_initialize(params);
     }
 
+    /// Initialize advertising `workspace.configuration` client support, so the
+    /// server pulls the `panache` settings section via `workspace/configuration`
+    /// (after `initialized` and on every `didChangeConfiguration`).
+    pub fn initialize_pull_configuration(&mut self, root_uri: &str) {
+        let folder = WorkspaceFolder {
+            uri: root_uri.parse().unwrap(),
+            name: "workspace".to_string(),
+        };
+        let params = InitializeParams {
+            workspace_folders: Some(vec![folder]),
+            capabilities: ClientCapabilities {
+                workspace: Some(WorkspaceClientCapabilities {
+                    configuration: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        self.gs.on_initialize(params);
+    }
+
+    /// Run the post-`initialized` side effects (file-watcher registration and,
+    /// when the client advertises it, the startup `workspace/configuration`
+    /// pull). The emitted server→client requests land on the client channel and
+    /// are observable via [`Self::drain_client_messages`].
+    pub fn initialized(&mut self) {
+        self.gs.on_initialized();
+    }
+
+    /// Feed a successful reply to a server→client request back into the state,
+    /// as the main loop does for an inbound `Message::Response`.
+    pub fn send_client_response(&mut self, id: lsp_server::RequestId, result: serde_json::Value) {
+        self.gs
+            .on_client_response(lsp_server::Response::new_ok(id, result));
+    }
+
     pub fn initialize_with_options(
         &mut self,
         root_uri: &str,

@@ -95,8 +95,9 @@ spec-coverage audit (see `docs/guide/lsp.qmd` "LSP Specification Coverage").
 - [x] `workspace/didChangeWorkspaceFolders` - multi-root workspaces; config
   resolves per-document against the containing folder, and add/remove
   re-resolves open documents live
-- [ ] `workspace/configuration` - pull settings from the client instead of
-  relying only on discovered config files
+- [x] `workspace/configuration` - pull runtime settings from the client (after
+  `initialized` and on `didChangeConfiguration`) instead of relying only on
+  discovered config files and pushed settings
 - [ ] `workspace/executeCommand` - server-side commands backing complex code
   actions
 - [x] File operations beyond `willRenameFiles`: `didRenameFiles`,

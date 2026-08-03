@@ -262,10 +262,21 @@ impl GlobalState {
             .and_then(|td| td.diagnostic.as_ref())
             .and_then(|d| d.related_document_support)
             .unwrap_or(false);
+        // Pull configuration: a client that advertises `workspace.configuration`
+        // is queried for its `panache` settings section (after `initialized` and
+        // on every `didChangeConfiguration`) instead of the server relying solely
+        // on the `initializationOptions` seed and pushed settings.
+        self.supports_pull_configuration = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.configuration)
+            .unwrap_or(false);
         log::debug!(
-            "lsp pull diagnostics: supported={} refresh={}",
+            "lsp pull diagnostics: supported={} refresh={}; pull configuration: supported={}",
             self.supports_pull_diagnostics,
-            self.supports_diagnostic_refresh
+            self.supports_diagnostic_refresh,
+            self.supports_pull_configuration
         );
         if self.supports_pull_diagnostics && !self.supports_diagnostic_refresh {
             log::debug!(
@@ -337,6 +348,11 @@ impl GlobalState {
         self.send_request::<lsp_types::request::RegisterCapability>(RegistrationParams {
             registrations: vec![registration],
         });
+
+        // Pull the client's `panache` settings once at startup; the reply applies
+        // asynchronously via `on_client_response`. A no-op for clients that don't
+        // advertise `workspace.configuration` (they keep the push/seed path).
+        self.pull_configuration();
     }
 
     /// Route an incoming request: pool it over a read snapshot, or reject.

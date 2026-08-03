@@ -362,6 +362,16 @@ pub(crate) enum Task {
     },
 }
 
+/// What to do with the reply to a server→client request, keyed by its id in
+/// [`GlobalState::outgoing`].
+pub(crate) enum OutgoingRequest {
+    /// Fire-and-forget: only log a failure reply (e.g. `RegisterCapability`,
+    /// `workspace/diagnostic/refresh`). Carries the method for the log line.
+    LogOnly(&'static str),
+    /// A `workspace/configuration` pull: apply the returned settings on success.
+    PullConfiguration,
+}
+
 /// The synchronous, single-threaded-mutation server state.
 pub(crate) struct GlobalState {
     pub(crate) sender: ClientSender,
@@ -387,6 +397,12 @@ pub(crate) struct GlobalState {
     /// they reach the client on a per-document pull rather than only via
     /// `workspace/diagnostic`.
     pub(crate) supports_related_documents: bool,
+    /// Whether the client advertised `workspace.configuration` at `initialize`.
+    /// When `true` the server *pulls* the `panache` settings section via a
+    /// `workspace/configuration` request (after `initialized` and on every
+    /// `didChangeConfiguration`) rather than relying solely on the
+    /// `initializationOptions` seed and pushed settings.
+    pub(crate) supports_pull_configuration: bool,
     /// The current diagnostic set: push delivery, the pull store, and clear-on-fix
     /// bookkeeping unified behind one diff-based owner.
     pub(crate) diagnostics: DiagnosticCollection,
@@ -419,8 +435,8 @@ pub(crate) struct GlobalState {
     /// In-flight incoming request ids (for `$/cancelRequest`).
     pub(crate) in_flight: HashSet<RequestId>,
     pub(crate) cancelled: HashSet<RequestId>,
-    /// Outgoing server→client request ids → method, for logging replies.
-    pub(crate) outgoing: HashMap<RequestId, &'static str>,
+    /// Outgoing server→client request ids → what to do with the reply.
+    pub(crate) outgoing: HashMap<RequestId, OutgoingRequest>,
     pub(crate) next_outgoing_id: i32,
 
     /// Single debounce timer for the whole workspace. `Some(t)` means a quiescent
@@ -474,6 +490,7 @@ impl GlobalState {
             supports_pull_diagnostics: false,
             supports_diagnostic_refresh: false,
             supports_related_documents: false,
+            supports_pull_configuration: false,
             diagnostics: DiagnosticCollection::default(),
             salsa: crate::salsa::SalsaDb::default(),
             config_intern: Vec::new(),
@@ -571,11 +588,22 @@ impl GlobalState {
         self.sender.send(Message::Response(response));
     }
 
-    /// Issue a server→client request, tracking its id so we can log the reply.
+    /// Issue a fire-and-forget server→client request, tracking its id so a
+    /// failure reply is logged (the success payload, if any, is ignored).
     pub(crate) fn send_request<R: lsp_types::request::Request>(&mut self, params: R::Params) {
+        self.issue_request::<R>(params, OutgoingRequest::LogOnly(R::METHOD));
+    }
+
+    /// Send a server→client request of method `R`, tagging its id with what to do
+    /// when the reply arrives (see [`GlobalState::on_client_response`]).
+    fn issue_request<R: lsp_types::request::Request>(
+        &mut self,
+        params: R::Params,
+        kind: OutgoingRequest,
+    ) {
         let id = RequestId::from(self.next_outgoing_id);
         self.next_outgoing_id += 1;
-        self.outgoing.insert(id.clone(), R::METHOD);
+        self.outgoing.insert(id.clone(), kind);
         self.sender.send(Message::Request(Request::new(
             id,
             R::METHOD.to_owned(),
@@ -583,12 +611,45 @@ impl GlobalState {
         )));
     }
 
+    /// Pull the client's `panache` settings section via `workspace/configuration`.
+    /// A no-op unless the client advertised `workspace.configuration` support.
+    /// The reply is applied asynchronously in [`GlobalState::on_client_response`].
+    pub(crate) fn pull_configuration(&mut self) {
+        if !self.supports_pull_configuration {
+            return;
+        }
+        let params = lsp_types::ConfigurationParams {
+            items: vec![lsp_types::ConfigurationItem {
+                scope_uri: None,
+                section: Some("panache".to_owned()),
+            }],
+        };
+        self.issue_request::<lsp_types::request::WorkspaceConfiguration>(
+            params,
+            OutgoingRequest::PullConfiguration,
+        );
+    }
+
     /// Handle a reply to one of our server→client requests.
     pub(crate) fn on_client_response(&mut self, response: Response) {
-        if let Some(method) = self.outgoing.remove(&response.id)
-            && let Err(err) = response.response_result
-        {
-            log::warn!("server request {method} failed: {}", err.message);
+        match self.outgoing.remove(&response.id) {
+            Some(OutgoingRequest::LogOnly(method)) => {
+                if let Err(err) = response.response_result {
+                    log::warn!("server request {method} failed: {}", err.message);
+                }
+            }
+            Some(OutgoingRequest::PullConfiguration) => match response.response_result {
+                Ok(value) => {
+                    crate::lsp::handlers::configuration::apply_pulled_configuration(self, value)
+                }
+                Err(err) => {
+                    log::warn!(
+                        "server request workspace/configuration failed: {}",
+                        err.message
+                    );
+                }
+            },
+            None => {}
         }
     }
 

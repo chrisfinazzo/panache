@@ -178,7 +178,12 @@ Live configuration reload
 :   Re-read `panache.toml`/`.panache.toml` and apply client settings without a
     restart when the editor sends `workspace/didChangeConfiguration` or when a
     config file changes on disk (`workspace/didChangeWatchedFiles`). All open
-    documents are re-linted with the new configuration.
+    documents are re-linted with the new configuration. When the client
+    advertises `workspace.configuration`, the server also *pulls* the `panache`
+    settings section via a `workspace/configuration` request---once after
+    `initialize` and again on each `workspace/didChangeConfiguration`---so
+    pull-model editors (such as Zed) get live runtime settings without relying
+    on a pushed payload.
 
 Referenced-file updates
 :   Pick up changes to referenced files (bibliographies, includes, project
@@ -904,7 +909,7 @@ marked *out of scope*.
   | `workspace/willRenameFiles`                                                                                                 | ✅     | Links, shortcodes, frontmatter/config file paths            |
   | `workspace/didChangeWatchedFiles`                                                                                           | ✅     | Bibliography, config, and document files                    |
   | `workspace/didCreateFiles`, `didRenameFiles`, `didDeleteFiles`                                                              | ✅     | Hygiene-only: refresh cross-document diagnostics            |
-  | `workspace/didChangeConfiguration`, `workspace/configuration`                                                               | ❌     | Planned: runtime config reload                              |
+  | `workspace/didChangeConfiguration`, `workspace/configuration`                                                               | ✅     | Live runtime settings via push and pull                     |
   | `workspace/didChangeWorkspaceFolders`                                                                                       | ❌     | Advertised but not yet handled                              |
   | `workspace/executeCommand`                                                                                                  | ❌     | Planned: commands backing complex actions                   |
   | `workspace/willCreateFiles`, `willDeleteFiles`                                                                              | ⛔     | Intentionally omitted: no scaffolding/auto-deletion         |
