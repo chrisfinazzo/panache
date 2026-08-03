@@ -112,6 +112,23 @@ fn collapse_internal_newlines(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Whether `node` lives inside a table cell whose row must stay on a single
+/// line. Pipe and simple tables encode one row per source line, so any newline
+/// emitted inside a cell breaks the table; grid and multiline tables can hold
+/// multi-line block content and are excluded.
+fn in_single_line_table_cell(node: &SyntaxNode) -> bool {
+    let mut in_cell = false;
+    for ancestor in node.ancestors() {
+        match ancestor.kind() {
+            SyntaxKind::TABLE_CELL => in_cell = true,
+            SyntaxKind::PIPE_TABLE | SyntaxKind::SIMPLE_TABLE => return in_cell,
+            SyntaxKind::GRID_TABLE | SyntaxKind::MULTILINE_TABLE => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Format an inline node to normalized string (e.g., emphasis with asterisks)
 pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
     match node.kind() {
@@ -576,6 +593,17 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             let opening = opening_value.as_str();
             let closing = closing_value.as_str();
             let is_environment = display_math.is_environment_form();
+
+            // Display math inside a single-line table cell (pipe/simple table)
+            // must stay on one line: those cell formats terminate a row at the
+            // newline, so expanding `$$…$$` into a `$$\n…\n$$` block would split
+            // the cell across rows and corrupt the table (pandoc keeps the math
+            // inline in the cell). Collapse interior whitespace and emit a
+            // single-line `$$content$$`, which is idempotent across passes.
+            if in_single_line_table_cell(node) {
+                let inline_content = content.split_whitespace().collect::<Vec<_>>().join(" ");
+                return format!("{opening}{inline_content}{closing}");
+            }
 
             // Apply delimiter style preference
             let (open, close) = if is_environment {
