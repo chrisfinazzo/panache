@@ -1,8 +1,7 @@
 > Term
 >
-
-:   text
-
-    <div id="d">
-    x
-    </div>
+> :   text
+>
+>     <div id="d">
+>     x
+>     </div>

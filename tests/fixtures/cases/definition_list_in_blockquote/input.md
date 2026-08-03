@@ -1,0 +1,3 @@
+> Term
+> :   Definition text
+> continued

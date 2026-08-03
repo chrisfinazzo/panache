@@ -192,6 +192,7 @@ golden_test_cases!(
     definition_list,
     definition_list_bare_marker_body,
     definition_list_heading_content,
+    definition_list_in_blockquote,
     definition_list_nesting,
     definition_list_pandoc_loose_compact,
     definition_list_wrapping,

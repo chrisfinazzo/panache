@@ -1567,6 +1567,29 @@ impl Formatter {
                                 ctx.in_list_continuation = false;
                             }
                         }
+                        SyntaxKind::DEFINITION_LIST => {
+                            // Format the definition list to a temp buffer, then
+                            // re-emit each line behind the blockquote prefix so
+                            // the list stays inside the quote. Without this the
+                            // definition escapes the blockquote (dropping the
+                            // `>` prefix), which reparses as a top-level
+                            // paragraph -- a lossless/idempotency break.
+                            let saved_output = self.output.clone();
+                            self.output.clear();
+                            self.format_node_sync(child, indent);
+                            let def_output = self.output.clone();
+                            self.output = saved_output;
+
+                            self.append_blockquote_prefixed_block(
+                                &def_output,
+                                &content_prefix,
+                                &blank_prefix,
+                                None,
+                            );
+                            if let Some(ctx) = self.blockquote_context.as_mut() {
+                                ctx.in_list_continuation = false;
+                            }
+                        }
                         _ => {
                             // Handle other content within block quotes
                             self.format_node_sync(child, indent);
