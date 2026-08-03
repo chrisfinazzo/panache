@@ -127,32 +127,6 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Hard-wrapped text in code blocks
 - [ ] Use blanklines around horizontal rules
 
-#### YAML frontmatter semantics (yamllint gaps, #385)
-
-Surveyed yamllint's 23 rules against what panache already does. The bulk are
-**style** (`braces`/`brackets`/`colons`/`commas`/`hyphens` spacing,
-`indentation`, `line-length`, `quoted-strings`, `trailing-spaces`,
-`empty-lines`, comment formatting, `key-ordering`, `new-lines`, EOF newline) ---
-those belong to the YAML formatter and `panache format --check`, **not** the
-linter. Syntax validity and `key-duplicates` are already covered by
-`yaml-parse-error` (consumer-aware). The genuine *linter* gaps are the
-semantic-value footguns below; none are caught today (verified clean under both
-default and `--flavor quarto`):
-
-- [x] **Undeclared alias (yamllint `anchors`, undeclared case).**
-  `ref: *missing` with no matching `&missing` emitted nothing; an undefined
-  alias is a *hard error* in libyaml/js-yaml/PyYAML (YAML 1.2 §7.1). Fixed
-  as a **validator gap** in `yaml-parse-error`: `check_undeclared_alias`
-  does a single per-document forward pass over the token stream
-  (`PARSE_UNDECLARED_ALIAS`), also rejecting forward references.
-
-- [x] **Duplicate/unused anchors (yamllint `anchors`, remaining cases).**
-  Softer, lint-flavored; valid YAML that every consumer accepts, so these
-  landed as two **linter** rules (not validator checks):
-  `duplicate-yaml-anchor` (last-wins re-declaration) and
-  `unused-yaml-anchor` (declared but never aliased). Both default-on, scan
-  frontmatter + hashpipe `#|` regions, per-document scope.
-
 ### Linter bugs and performance (quarto-web triage, 2026-08)
 
 Surfaced while linting `quarto-dev/quarto-web` (\~580 `.qmd` + \~220 `.md`). Two
