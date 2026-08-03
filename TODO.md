@@ -130,35 +130,6 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 
 ### Linter bugs and performance (quarto-web triage, 2026-08)
 
-Surfaced while linting `quarto-dev/quarto-web` (\~580 `.qmd` + \~220 `.md`). Two
-correctness bugs from this triage are already fixed --- the inline-reference
-false-duplicate in `metadata/project.rs` (`duplicate-inline-reference-id` fired
-once per `references:` entry at 1:1) and include-partial diagnostics being
-reported once per includer in `main.rs`. The remaining findings:
-
-#### Performance: O(n^2) whole-project reparse on Quarto projects (FIXED)
-
-`panache lint .` on a project with a `_quarto.yml` used to peg every core for
-minutes; the whole cost was project-graph work re-triggered per file. Now linear
-in the number of files (synthetic N=320 Quarto book: \~1878ms -> \~111ms).
-
-- [x] **`project_graph` / `project_structure` reloaded the entire project per
-  file.** The CLI lint batch now groups files by project and shares one
-  `SalsaDb` per project: a sequential writer phase loads the project once,
-  the cross-document `project_graph` accumulator runs once per project (not
-  per file), and a parallel reader phase lints each file on a cloned
-  read-only handle. Standalone files stay singleton groups (per-file
-  parallelism preserved). See
-  `perf(cli): compute project graph once per project`.
-- [x] **`undefined-references` and `unused-definitions` re-parsed every project
-  doc per file.** Replaced the per-rule, per-sibling throwaway-`SalsaDb`
-  reparse with a single salsa-memoized project aggregate
-  (`ProjectSymbolIndex`, keyed on the interned project root, folded once per
-  document) exposed via `LintContext::project_symbol_index`; rules check
-  membership against it without copying. `undefined_anchor` now resolves
-  cross-file for Quarto too (was bookdown-only). See
-  `fix(linter): resolve cross-file refs via project   aggregate`.
-
 #### False positives: `undefined-anchor` on render-generated anchors
 
 - [ ] `undefined-anchor` flags anchors that only exist after render: Quarto
