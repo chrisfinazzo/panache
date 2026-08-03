@@ -900,30 +900,6 @@ for initial implementation.
 
 - [x] Completion for built-in shortcode names
 
-- [ ] Shortcode-inside-code-span desyncs backtick pairing in a definition-list
-  continuation. When an inline code span whose content is a `{{< ... >}}`
-  shortcode **wraps across a line break** inside a definition-list
-  definition, the shortcode is matched across the newline and swallows the
-  code span's backticks, so the intended `INLINE_CODE` never forms. The next
-  backtick then opens a stray code span, desyncing delimiter pairing so a
-  *later* bracketed token on the line parses as an
-  `UNRESOLVED_REFERENCE`/footnote ref -- a false-positive
-  `undefined-reference-label` / `undefined-footnote-id` lint. Minimal repro
-  (all three conditions required -- def-list continuation, a `{{< >}}`
-  shortcode in the span, and the span wrapping a line):
-
-  ```
-  Term
-  :   x `{{< include
-      >}}` then `[ref]` here.
-  ```
-
-  Neither a plain paragraph, a non-shortcode wrapping code span, nor a
-  non-wrapping shortcode span reproduces. The parser should recognize the code
-  span first (backticks win over shortcode detection) so the shortcode text
-  stays verbatim inside `INLINE_CODE_CONTENT`. Surfaced 2026-08 while writing
-  docs for the footnote cross-file scoping fix.
-
 ## Additional Markdown flavors
 
 ### mdsvex / Svelte-flavored Markdown

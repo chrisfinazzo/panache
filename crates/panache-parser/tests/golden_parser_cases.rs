@@ -176,6 +176,7 @@ golden_test_cases!(
     blankline_concatenation,
     blockquote_definition_later_line_html_div_pandoc,
     blockquote_depth_change,
+    blockquote_no_interrupt_def_plain_continuation_pandoc,
     blockquote_fenced_html_blocks_commonmark,
     blockquote_indented_code_tabs_commonmark,
     blockquote_lazy_continuation_reduced_markers,

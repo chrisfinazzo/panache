@@ -7,7 +7,9 @@
 use crate::options::{PandocCompat, ParserOptions};
 
 use crate::parser::block_dispatcher::{BlockContext, BlockParserRegistry};
-use crate::parser::blocks::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
+use crate::parser::blocks::blockquotes::{
+    self, count_blockquote_markers, strip_n_blockquote_markers,
+};
 use crate::parser::blocks::container_prefix::{ContainerPrefix, StrippedLines};
 use crate::parser::blocks::{definition_lists, html_blocks, lists, raw_blocks};
 use crate::parser::utils::container_stack::{ContainerStack, leading_indent};
@@ -316,6 +318,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
 
     /// Checks whether a line inside a definition should be treated as a plain continuation
     /// (and buffered into the definition PLAIN), rather than parsed as a new block.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn definition_plain_can_continue(
         &self,
         stripped_content: &str,
@@ -324,6 +327,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
         block_ctx: &BlockContext,
         lines: &[&str],
         pos: usize,
+        plain_open: bool,
     ) -> bool {
         let prev_line_blank = if pos > 0 {
             let prev_line = lines[pos - 1];
@@ -381,6 +385,24 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             }
         }
         if count_blockquote_markers(stripped_content).0 > 0 {
+            // Under pandoc's `blank_before_blockquote` rule a blockquote cannot
+            // interrupt an in-progress paragraph. With an open PLAIN and no
+            // point at which a blockquote could start here (no preceding blank
+            // line, not the definition's first block), the `>` line is lazy
+            // paragraph continuation, not a new blockquote — matching
+            // pandoc-native. Without an open PLAIN (blockquote as the
+            // definition's first block) or after a blank line it starts a
+            // blockquote as usual.
+            if self.config.extensions.blank_before_blockquote
+                && plain_open
+                && !blockquotes::can_start_blockquote(
+                    pos,
+                    lines,
+                    self.config.extensions.fenced_divs,
+                )
+            {
+                return true;
+            }
             return false;
         }
         if self.config.extensions.raw_html

@@ -3689,7 +3689,12 @@ impl<'a> Parser<'a> {
         // Check if we're in a Definition container (with or without an open PLAIN)
         // Continuation lines should be added to PLAIN, not treated as new blocks
         // BUT: Don't treat lines with block element markers as continuations
-        if matches!(self.containers.last(), Some(Container::Definition { .. })) {
+        if let Some(Container::Definition {
+            plain_open: definition_plain_open,
+            ..
+        }) = self.containers.last()
+        {
+            let definition_plain_open = *definition_plain_open;
             let is_definition_marker =
                 definition_lists::try_parse_definition_marker(stripped_content).is_some()
                     && !stripped_content.starts_with(':');
@@ -3739,6 +3744,7 @@ impl<'a> Parser<'a> {
                     },
                     &self.lines,
                     self.pos,
+                    definition_plain_open,
                 ) {
                     let content_line = stripped_content;
                     let (text_without_newline, newline_str) = strip_newline(content_line);
