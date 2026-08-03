@@ -43,8 +43,16 @@ pub(crate) fn try_parse_definition_marker(line: &str) -> Option<(char, usize, us
 
     let after_marker = &after_indent[1..];
 
-    // Must be followed by whitespace
-    if !after_marker.starts_with(' ') && !after_marker.starts_with('\t') && !after_marker.is_empty()
+    // Must be followed by whitespace, a line ending, or end of line. A bare
+    // marker whose definition body starts on the next line arrives as ":\n"
+    // (lines keep their trailing newline via `split_inclusive`); the newline is
+    // end-of-line, not content, so it's still a valid marker (matches pandoc's
+    // lazy `:`-on-its-own-line definition form).
+    if !after_marker.starts_with(' ')
+        && !after_marker.starts_with('\t')
+        && !after_marker.starts_with('\n')
+        && !after_marker.starts_with('\r')
+        && !after_marker.is_empty()
     {
         return None;
     }
@@ -179,6 +187,16 @@ mod tests {
     #[test]
     fn test_parse_definition_marker_at_eol() {
         assert_eq!(try_parse_definition_marker(":"), Some((':', 0, 0, 0)));
+    }
+
+    #[test]
+    fn test_parse_definition_marker_bare_with_newline() {
+        // Lines retain their trailing newline (`split_inclusive`), so a bare
+        // marker whose body starts on the next line arrives as ":\n". The
+        // trailing newline is end-of-line, not content, so it's still a marker.
+        assert_eq!(try_parse_definition_marker(":\n"), Some((':', 0, 0, 0)));
+        assert_eq!(try_parse_definition_marker("~\n"), Some(('~', 0, 0, 0)));
+        assert_eq!(try_parse_definition_marker(":\r\n"), Some((':', 0, 0, 0)));
     }
 
     #[test]

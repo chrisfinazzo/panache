@@ -228,6 +228,7 @@ golden_test_cases!(
     citation_nested_link_url_at,
     citation_prefix_paren_escape_278,
     definition_list,
+    definition_list_bare_marker_pandoc,
     definition_list_blockquote_continuation,
     definition_list_in_list_blockquote,
     definition_list_inner_list_no_blank,
