@@ -14,6 +14,7 @@ use crate::linter::offsets::line_col_to_byte_offset_1based;
 mod clippy;
 mod eslint;
 mod jarl;
+mod jolars;
 mod ruff;
 mod shellcheck;
 mod staticcheck;
@@ -106,6 +107,7 @@ pub(crate) fn file_suffix_for_language(language: &str) -> Option<&'static str> {
         "go" | "golang" => Some(".go"),
         "rust" | "rs" => Some(".rs"),
         "r" => Some(".R"),
+        "julia" | "jl" => Some(".jl"),
         "sh" | "bash" | "zsh" | "ksh" | "shell" => Some(".sh"),
         _ => None,
     }
@@ -143,6 +145,28 @@ impl ExternalLinterRegistry {
                 command: "jarl",
                 args: vec!["check", "--output-format=json"],
                 supported_languages: vec!["r"],
+            },
+        );
+        linters.insert(
+            "arity".to_string(),
+            LinterInfo {
+                name: "arity",
+                description: "A language server, formatter, and linter for R with correctness, readability, and performance lints and safe autofixes.",
+                url: "https://github.com/jolars/arity",
+                command: "arity",
+                args: vec!["lint", "--no-config", "--output", "json"],
+                supported_languages: vec!["r"],
+            },
+        );
+        linters.insert(
+            "fatou".to_string(),
+            LinterInfo {
+                name: "fatou",
+                description: "A language server, formatter, and linter for Julia that never requires running Julia itself.",
+                url: "https://github.com/jolars/fatou",
+                command: "fatou",
+                args: vec!["lint", "--no-config", "--output", "json"],
+                supported_languages: vec!["julia", "jl"],
             },
         );
         linters.insert(
@@ -279,6 +303,12 @@ pub fn parse_linter_output(
     if linter_name == jarl::JarlParser::NAME {
         return jarl::JarlParser::parse(&ctx);
     }
+    if linter_name == jolars::ArityParser::NAME {
+        return jolars::ArityParser::parse(&ctx);
+    }
+    if linter_name == jolars::FatouParser::NAME {
+        return jolars::FatouParser::parse(&ctx);
+    }
     if linter_name == ruff::RuffParser::NAME {
         return ruff::RuffParser::parse(&ctx);
     }
@@ -344,6 +374,8 @@ mod tests {
     fn test_registry_contains_linters() {
         let registry = ExternalLinterRegistry::new();
         assert!(registry.get("jarl").is_some());
+        assert!(registry.get("arity").is_some());
+        assert!(registry.get("fatou").is_some());
         assert!(registry.get("ruff").is_some());
         assert!(registry.get("eslint").is_some());
         assert!(registry.get("staticcheck").is_some());
@@ -356,6 +388,11 @@ mod tests {
         let registry = ExternalLinterRegistry::new();
         assert_eq!(registry.supports_language("jarl", "r"), Some(true));
         assert_eq!(registry.supports_language("jarl", "bash"), Some(false));
+        assert_eq!(registry.supports_language("arity", "r"), Some(true));
+        assert_eq!(registry.supports_language("arity", "julia"), Some(false));
+        assert_eq!(registry.supports_language("fatou", "julia"), Some(true));
+        assert_eq!(registry.supports_language("fatou", "jl"), Some(true));
+        assert_eq!(registry.supports_language("fatou", "r"), Some(false));
         assert_eq!(registry.supports_language("ruff", "python"), Some(true));
         assert_eq!(registry.supports_language("eslint", "js"), Some(true));
         assert_eq!(
@@ -382,6 +419,13 @@ mod tests {
             Some(false)
         );
         assert_eq!(registry.supports_language("unknown", "r"), None);
+    }
+
+    #[test]
+    fn test_file_suffix_for_language_covers_julia() {
+        assert_eq!(file_suffix_for_language("julia"), Some(".jl"));
+        assert_eq!(file_suffix_for_language("jl"), Some(".jl"));
+        assert_eq!(file_suffix_for_language("Julia"), Some(".jl"));
     }
 
     #[test]

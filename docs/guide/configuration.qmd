@@ -1476,7 +1476,8 @@ Enable linters for specific languages:
 
 ```toml
 [linters]
-r = "jarl"
+r = "arity"
+julia = "fatou"
 python = "ruff"
 sh = "shellcheck"
 js = "eslint"
@@ -1488,7 +1489,9 @@ Available linters:
 
   | Language              | Linter        | Command         | Notes                               |
   | --------------------- | ------------- | --------------- | ----------------------------------- |
+  | R                     | `arity`       | `arity`         | R linter with JSON diagnostics      |
   | R                     | `jarl`        | `jarl`          | R linter with JSON diagnostics      |
+  | Julia                 | `fatou`       | `fatou`         | Julia linter with JSON diagnostics  |
   | Python                | `ruff`        | `ruff`          | Python linter with JSON diagnostics |
   | Shell                 | `shellcheck`  | `shellcheck`    | Shell linter with JSON diagnostics  |
   | JavaScript/TypeScript | `eslint`      | `eslint`        | JS/TS linter with JSON diagnostics  |
@@ -1542,7 +1545,9 @@ Line-accurate
 
 Auto-fixes
 :   Supported for external linters that provide fix edits with mappable ranges
-    (currently `jarl`, `ruff`, and `eslint`)
+    (currently `arity`, `fatou`, `jarl`, `ruff`, and `eslint`). Fixes that the
+    linter marks as unsafe (`arity`, `fatou`) are only applied under
+    `--unsafe-fixes`.
 
 ### Example
 

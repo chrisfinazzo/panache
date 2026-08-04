@@ -51,6 +51,153 @@ result <- TRUE
     }
 
     #[test]
+    fn test_arity_linter_integration() {
+        // Skip if arity not available
+        if which::which("arity").is_err() {
+            println!("Skipping arity test - arity not installed");
+            return;
+        }
+
+        let input = r#"# Test
+
+```r
+any(is.na(x))
+result <- TRUE
+```
+"#;
+
+        let mut config = Config::default();
+        let mut linters = HashMap::new();
+        linters.insert("r".to_string(), "arity".to_string());
+        config.linters = linters;
+
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+
+        assert!(!diagnostics.is_empty(), "Expected diagnostics from arity");
+
+        let any_is_na_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "any-is-na")
+            .collect();
+        assert_eq!(any_is_na_diags.len(), 1, "Expected 1 any-is-na diagnostic");
+
+        assert_eq!(any_is_na_diags[0].location.line, 4); // any(is.na(x)) is on line 4
+
+        let fix = any_is_na_diags[0]
+            .fix
+            .as_ref()
+            .expect("arity fixes should map through block mappings");
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].replacement, "anyNA(x)");
+        // The fix edit must target the code inside the block, not the fences.
+        let start: usize = fix.edits[0].range.start().into();
+        let end: usize = fix.edits[0].range.end().into();
+        assert_eq!(&input[start..end], "any(is.na(x))");
+    }
+
+    #[test]
+    fn test_fatou_linter_integration() {
+        // Two julia blocks exercise concatenation and line mapping; the second
+        // block carries a fixable violation.
+        if which::which("fatou").is_err() {
+            println!("Skipping fatou test - fatou not installed");
+            return;
+        }
+
+        let input = r#"# Test
+
+```julia
+import Printf
+x = 1
+```
+
+Some text.
+
+```julia
+if x == nothing
+    y = 1
+end
+```
+"#;
+
+        let mut config = Config::default();
+        let mut linters = HashMap::new();
+        linters.insert("julia".to_string(), "fatou".to_string());
+        config.linters = linters;
+
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+
+        let unused_import_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "unused-import")
+            .collect();
+        assert_eq!(
+            unused_import_diags.len(),
+            1,
+            "Expected 1 unused-import diagnostic"
+        );
+        assert_eq!(unused_import_diags[0].location.line, 4); // import Printf is on line 4
+
+        let nothing_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "nothing-comparison")
+            .collect();
+        assert_eq!(
+            nothing_diags.len(),
+            1,
+            "Expected 1 nothing-comparison diagnostic"
+        );
+        assert_eq!(nothing_diags[0].location.line, 11); // x == nothing is on line 11
+
+        let fix = nothing_diags[0]
+            .fix
+            .as_ref()
+            .expect("fatou fixes should map through block mappings");
+        assert_eq!(fix.edits[0].replacement, "===");
+        let start: usize = fix.edits[0].range.start().into();
+        let end: usize = fix.edits[0].range.end().into();
+        assert_eq!(&input[start..end], "==");
+    }
+
+    #[test]
+    fn test_fatou_quarto_cell_integration() {
+        // A Quarto executable cell (```{julia}) should route to the julia linter.
+        if which::which("fatou").is_err() {
+            println!("Skipping fatou test - fatou not installed");
+            return;
+        }
+
+        use panache::config::{Extensions, Flavor};
+
+        let input = "# Test\n\n```{julia}\nimport Printf\nx = 1\n```\n";
+
+        let mut config = Config {
+            flavor: Flavor::Quarto,
+            extensions: Extensions::for_flavor(Flavor::Quarto),
+            ..Default::default()
+        };
+        let mut linters = HashMap::new();
+        linters.insert("julia".to_string(), "fatou".to_string());
+        config.linters = linters;
+
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+
+        let unused_import_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "unused-import")
+            .collect();
+        assert_eq!(
+            unused_import_diags.len(),
+            1,
+            "Expected 1 unused-import diagnostic in the Quarto cell"
+        );
+        assert_eq!(unused_import_diags[0].location.line, 4);
+    }
+
+    #[test]
     fn test_multiple_r_blocks_concatenation() {
         if which::which("jarl").is_err() {
             println!("Skipping jarl test - jarl not installed");
@@ -692,6 +839,78 @@ More text.
         );
 
         // Verify surrounding markdown is unchanged
+        assert!(output.contains("# Test Document"));
+        assert!(output.contains("Some text here."));
+        assert!(output.contains("More text."));
+        assert!(output.contains("```r"));
+    }
+
+    #[test]
+    fn test_arity_fix_application_end_to_end() {
+        // Same end-to-end fix application flow as the jarl test above, but for
+        // arity, whose diagnostics carry byte-offset ranges rather than
+        // line/column positions.
+        if which::which("arity").is_err() {
+            println!("Skipping arity test - arity not installed");
+            return;
+        }
+
+        let input = r#"# Test Document
+
+Some text here.
+
+```r
+any(is.na(x))
+any(is.na(y))
+```
+
+More text.
+"#;
+
+        let mut config = Config::default();
+        let mut linters = HashMap::new();
+        linters.insert("r".to_string(), "arity".to_string());
+        config.linters = linters;
+
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+
+        let with_fixes: Vec<_> = diagnostics.iter().filter(|d| d.fix.is_some()).collect();
+        assert!(!with_fixes.is_empty(), "Expected at least one fix");
+
+        use panache::linter::diagnostics::Edit;
+
+        let mut edits: Vec<&Edit> = diagnostics
+            .iter()
+            .filter_map(|d| d.fix.as_ref())
+            .flat_map(|f| &f.edits)
+            .collect();
+
+        edits.sort_by_key(|e| e.range.start());
+
+        let mut output = String::new();
+        let mut last_end = 0;
+
+        for edit in &edits {
+            let start: usize = edit.range.start().into();
+            let end: usize = edit.range.end().into();
+
+            output.push_str(&input[last_end..start]);
+            output.push_str(&edit.replacement);
+            last_end = end;
+        }
+
+        output.push_str(&input[last_end..]);
+
+        assert!(
+            output.contains("anyNA(x)"),
+            "Fix should replace any(is.na(x)) with anyNA(x)"
+        );
+        assert!(
+            output.contains("anyNA(y)"),
+            "Fix should replace any(is.na(y)) with anyNA(y)"
+        );
+
         assert!(output.contains("# Test Document"));
         assert!(output.contains("Some text here."));
         assert!(output.contains("More text."));

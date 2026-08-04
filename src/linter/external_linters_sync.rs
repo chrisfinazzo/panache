@@ -116,6 +116,54 @@ mod tests {
     }
 
     #[test]
+    fn test_arity_linter_sync() {
+        // Skip if arity not available
+        if which::which("arity").is_err() {
+            println!("Skipping arity test - arity not installed");
+            return;
+        }
+
+        let code = "any(is.na(x))\n";
+        let registry = ExternalLinterRegistry::new();
+
+        let result = run_linter_sync("arity", "r", code, code, &registry, None);
+        assert!(result.is_ok());
+
+        let diagnostics = result.unwrap();
+        assert!(!diagnostics.is_empty());
+
+        let any_is_na_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "any-is-na")
+            .collect();
+        assert_eq!(any_is_na_diags.len(), 1);
+    }
+
+    #[test]
+    fn test_fatou_linter_sync() {
+        // Skip if fatou not available
+        if which::which("fatou").is_err() {
+            println!("Skipping fatou test - fatou not installed");
+            return;
+        }
+
+        let code = "import Printf\nx = 1\n";
+        let registry = ExternalLinterRegistry::new();
+
+        let result = run_linter_sync("fatou", "julia", code, code, &registry, None);
+        assert!(result.is_ok());
+
+        let diagnostics = result.unwrap();
+        assert!(!diagnostics.is_empty());
+
+        let unused_import_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "unused-import")
+            .collect();
+        assert_eq!(unused_import_diags.len(), 1);
+    }
+
+    #[test]
     fn test_ruff_linter_sync() {
         // Skip if ruff not available
         if which::which("ruff").is_err() {
