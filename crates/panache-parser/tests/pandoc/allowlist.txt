@@ -671,3 +671,17 @@
 498
 499
 500
+
+# html-block / html-inline -- HTML character references in lifted attribute
+# values. Pandoc's TagSoup-based reader decodes terminated references
+# (`&name;`, `&#NN;`, `&#xHH;`) in the values it lifts into a `Div`/`Span`
+# `Attr`, so `<div id="a&amp;b">` carries the id `a&b`. Decoding happens at
+# read time in `decode_html_attr_entities` -- the CST keeps the source bytes,
+# so losslessness and formatter output are unaffected. 0504 is the negative
+# pin: an unknown name, a bare `&`, and a malformed numeric reference all stay
+# verbatim.
+501
+502
+503
+504
+505

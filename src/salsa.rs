@@ -3307,6 +3307,34 @@ mod tests {
         assert_eq!(index.heading_reference_ranges("Em", true).len(), 0);
     }
 
+    /// `<div id="a&amp;b">` declares the HTML id `a&b`, so that -- not the
+    /// encoded source spelling -- is what lands in the anchor index. Matches
+    /// pandoc's lifted `Div` attr.
+    #[test]
+    fn symbol_usage_index_decodes_entities_in_html_div_anchor() {
+        let db = SalsaDb::default();
+        let tree = crate::parse(
+            "<div id=\"a&amp;b\">\n\ntext\n\n</div>\n",
+            Some(crate::Config {
+                flavor: crate::config::Flavor::Pandoc,
+                ..Default::default()
+            }),
+        );
+        let index = symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+
+        assert_eq!(
+            index
+                .crossref_declarations("a&b")
+                .map(|ranges| ranges.len()),
+            Some(1),
+            "decoded id should be declared"
+        );
+        assert!(
+            index.crossref_declarations("a&amp;b").is_none(),
+            "encoded source spelling should not be declared"
+        );
+    }
+
     #[test]
     fn heading_outline_collects_heading_title_level_and_range() {
         let mut db = SalsaDb::default();

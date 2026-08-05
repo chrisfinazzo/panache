@@ -154,6 +154,108 @@ fn attr_value_string(raw: &str) -> String {
     raw.to_string()
 }
 
+/// Decode HTML character references in an attribute *value*, mirroring what
+/// pandoc's TagSoup-based reader does when it lifts `<div>`/`<span>`
+/// attributes into a `Div`/`Span` `Attr`.
+///
+/// Only fully terminated references decode (`&name;`, `&#NN;`, `&#xHH;`);
+/// an unknown name (`&notreal;`) and a bare `&` stay verbatim. Decoding is a
+/// single pass, so `&amp;amp;` yields `&amp;`, not `&`. Named lookup is
+/// case-sensitive against the HTML5 table, so `&AMP;` decodes but `&Amp;`
+/// does not.
+///
+/// Known gap: pandoc also decodes some *semicolon-less* legacy references
+/// (`id="a&amp b"` → `a& b`), gated on TagSoup's own name charset. That form
+/// is left verbatim here.
+///
+/// The CST keeps the source bytes untouched — this decodes only at read time,
+/// so losslessness is unaffected.
+pub fn decode_html_attr_entities(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.contains('&') {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let bytes = raw.as_bytes();
+    let mut out: Option<String> = None;
+    // Byte offset up to which `raw` has already been copied into `out`.
+    let mut copied = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            i += 1;
+            continue;
+        }
+        let Some((decoded, end)) = decode_char_reference(raw, i) else {
+            i += 1;
+            continue;
+        };
+        let buf = out.get_or_insert_with(String::new);
+        buf.push_str(&raw[copied..i]);
+        buf.push_str(&decoded);
+        i = end;
+        copied = end;
+    }
+    match out {
+        Some(mut buf) => {
+            buf.push_str(&raw[copied..]);
+            std::borrow::Cow::Owned(buf)
+        }
+        None => std::borrow::Cow::Borrowed(raw),
+    }
+}
+
+/// Decode the single character reference starting at `start` (which must index
+/// an `&` in `raw`), returning the replacement text and the byte offset just
+/// past the terminating `;`. `None` means "not a reference" — the caller
+/// leaves the bytes alone.
+fn decode_char_reference(raw: &str, start: usize) -> Option<(String, usize)> {
+    let rest = &raw[start + 1..];
+    let semi = rest.find(';')?;
+    let body = &rest[..semi];
+    if body.is_empty() {
+        return None;
+    }
+    // `end` is just past the `;`.
+    let end = start + 1 + semi + 1;
+
+    if let Some(digits) = body.strip_prefix('#') {
+        let code = if let Some(hex) = digits.strip_prefix(['x', 'X']) {
+            if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            digits.parse::<u32>().ok()
+        };
+        return Some((numeric_reference_char(code).to_string(), end));
+    }
+
+    if !body.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    // The table's `entity` field carries the full `&name;` form, so matching
+    // the source slice keeps the lookup semicolon-required.
+    let needle = &raw[start..end];
+    entities::ENTITIES
+        .iter()
+        .find(|e| e.entity == needle)
+        .map(|e| (e.characters.to_string(), end))
+}
+
+/// Map a numeric character reference's codepoint the way pandoc does: a
+/// surrogate becomes U+FFFD, anything above U+10FFFF (or too large to parse)
+/// becomes `?`, and `&#0;` stays NUL.
+fn numeric_reference_char(code: Option<u32>) -> char {
+    match code {
+        None => '?',
+        Some(c) if c > 0x10FFFF => '?',
+        Some(c) if (0xD800..=0xDFFF).contains(&c) => '\u{FFFD}',
+        Some(c) => char::from_u32(c).unwrap_or('\u{FFFD}'),
+    }
+}
+
 /// Scan an attribute `{...}` body into [`AttributeSpans`]. Returns `None` when
 /// no component is recognized (empty/whitespace-only/`{}` is not a valid
 /// attribute block). Offsets are relative to `content`.
@@ -359,14 +461,18 @@ pub fn parse_html_attribute_list(attrs_text: &str) -> Option<AttributeBlock> {
         match comp {
             HtmlAttrComponent::Id(r) => {
                 if identifier.is_none() {
-                    identifier = Some(attrs_text[r.clone()].to_string());
+                    identifier =
+                        Some(decode_html_attr_entities(&attrs_text[r.clone()]).into_owned());
                 }
             }
-            HtmlAttrComponent::Class(r) => classes.push(attrs_text[r.clone()].to_string()),
+            HtmlAttrComponent::Class(r) => {
+                classes.push(decode_html_attr_entities(&attrs_text[r.clone()]).into_owned())
+            }
             HtmlAttrComponent::KeyValue { key, value, .. } => {
                 key_values.push((
                     attrs_text[key.clone()].to_string(),
-                    attr_value_string(&attrs_text[value.clone()]),
+                    decode_html_attr_entities(&attr_value_string(&attrs_text[value.clone()]))
+                        .into_owned(),
                 ));
             }
             HtmlAttrComponent::Flag(r) => {
@@ -1117,6 +1223,85 @@ mod tests {
         );
         assert!(parse_html_attribute_list("   ").is_none());
         assert!(parse_html_attribute_list(r#"id="""#).is_none());
+    }
+
+    /// Terminated named and numeric references decode; everything else is
+    /// left verbatim. Pinned against `pandoc -f markdown -t native`.
+    #[test]
+    fn decode_html_attr_entities_named_and_numeric() {
+        // Named, case-sensitive against the HTML5 table.
+        assert_eq!(decode_html_attr_entities("a&amp;b"), "a&b");
+        assert_eq!(decode_html_attr_entities("a&AMP;b"), "a&b");
+        assert_eq!(decode_html_attr_entities("a&lt;b"), "a<b");
+        assert_eq!(decode_html_attr_entities("a&gt;b"), "a>b");
+        assert_eq!(decode_html_attr_entities("a&quot;b"), "a\"b");
+        assert_eq!(decode_html_attr_entities("a&copy;b"), "a\u{a9}b");
+        assert_eq!(decode_html_attr_entities("a&nbsp;b"), "a\u{a0}b");
+        // Numeric, decimal and hex (either case of the `x` marker).
+        assert_eq!(decode_html_attr_entities("a&#65;b"), "aAb");
+        assert_eq!(decode_html_attr_entities("a&#x41;b"), "aAb");
+        assert_eq!(decode_html_attr_entities("a&#X41;b"), "aAb");
+        assert_eq!(decode_html_attr_entities("a&#9;b"), "a\tb");
+        // Several references in one value.
+        assert_eq!(decode_html_attr_entities("&amp;&lt;&#66;"), "&<B");
+    }
+
+    /// A single decoding pass — the output is not rescanned, so an encoded
+    /// entity stays encoded (pandoc behaves the same).
+    #[test]
+    fn decode_html_attr_entities_is_single_pass() {
+        assert_eq!(decode_html_attr_entities("a&amp;amp;b"), "a&amp;b");
+    }
+
+    /// Anything that isn't a terminated, recognized reference is untouched,
+    /// and the no-op path borrows rather than allocating.
+    #[test]
+    fn decode_html_attr_entities_leaves_non_references() {
+        for raw in [
+            "plain",
+            "a&b",         // bare ampersand
+            "a&notreal;b", // unknown name
+            "a&;b",        // empty name
+            "a&#;b",       // no digits
+            "a&#x;b",      // no hex digits
+            "a&#zz;b",     // non-digits after `#`
+            "a&amp b",     // semicolon-less: known gap, left verbatim
+            "a&ampb",      // name runs into following text
+        ] {
+            assert!(
+                matches!(
+                    decode_html_attr_entities(raw),
+                    std::borrow::Cow::Borrowed(_)
+                ),
+                "{raw:?} should not allocate"
+            );
+            assert_eq!(decode_html_attr_entities(raw), raw);
+        }
+    }
+
+    /// Numeric edge cases follow pandoc: surrogates become U+FFFD, values past
+    /// U+10FFFF (or too large to parse) become `?`, and `&#0;` stays NUL.
+    #[test]
+    fn decode_html_attr_entities_numeric_edges() {
+        assert_eq!(decode_html_attr_entities("a&#xD800;b"), "a\u{fffd}b");
+        assert_eq!(decode_html_attr_entities("a&#x10FFFF;b"), "a\u{10ffff}b");
+        assert_eq!(decode_html_attr_entities("a&#x110000;b"), "a?b");
+        assert_eq!(decode_html_attr_entities("a&#99999999999999;b"), "a?b");
+        assert_eq!(decode_html_attr_entities("a&#0;b"), "a\0b");
+    }
+
+    /// Entities decode in ids, class words, and key/value values — but never
+    /// in the attribute *name*.
+    #[test]
+    fn html_attribute_list_decodes_entities() {
+        let attrs =
+            parse_html_attribute_list(r#"id="a&amp;b" class="c&lt;d e&#70;f" k="g&gt;h""#).unwrap();
+        assert_eq!(attrs.identifier.as_deref(), Some("a&b"));
+        assert_eq!(attrs.classes, vec!["c<d", "eFf"]);
+        assert_eq!(attrs.key_values, vec![("k".to_string(), "g>h".to_string())]);
+        // Unquoted values decode too.
+        let unquoted = parse_html_attribute_list("id=a&amp;b").unwrap();
+        assert_eq!(unquoted.identifier.as_deref(), Some("a&b"));
     }
 
     fn structured_div_info(raw: &str) -> crate::syntax::SyntaxNode {

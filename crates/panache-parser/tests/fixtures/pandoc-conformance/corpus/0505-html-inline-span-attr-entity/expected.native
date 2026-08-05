@@ -1,0 +1,8 @@
+[ Para
+    [ Str "x"
+    , Space
+    , Span ( "s&t" , [ "c<d" ] , [] ) [ Str "z" ]
+    , Space
+    , Str "y"
+    ]
+]

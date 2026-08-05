@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use crate::SyntaxNode;
+use crate::parser::utils::attributes::decode_html_attr_entities;
 use crate::syntax::{SyntaxKind, SyntaxToken};
 use rowan::NodeOrToken;
 use serde_json::{Value, json};
@@ -2168,12 +2169,13 @@ fn attr_from_html_attrs_node(node: &SyntaxNode) -> Attr {
                 if attr.id.is_empty()
                     && let Some(t) = el.as_token()
                 {
-                    attr.id = t.text().to_string();
+                    attr.id = decode_html_attr_entities(t.text()).into_owned();
                 }
             }
             SyntaxKind::ATTR_CLASS => {
                 if let Some(t) = el.as_token() {
-                    attr.classes.push(t.text().to_string());
+                    attr.classes
+                        .push(decode_html_attr_entities(t.text()).into_owned());
                 }
             }
             SyntaxKind::ATTR_KEY_VALUE => {
@@ -2182,7 +2184,8 @@ fn attr_from_html_attrs_node(node: &SyntaxNode) -> Attr {
                     if !key.is_empty() {
                         let value =
                             strip_any_quotes(&attr_kv_child_text(kv, SyntaxKind::ATTR_VALUE));
-                        attr.kvs.push((key, value));
+                        attr.kvs
+                            .push((key, decode_html_attr_entities(&value).into_owned()));
                     }
                 }
             }

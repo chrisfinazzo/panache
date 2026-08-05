@@ -2,16 +2,16 @@
 
 Rolling, terse handoff between `html-conformance` sessions. Read the
 Persistent traps + Phase status + Latest session's "next sub-targets"
-at start. At end: **rewrite** the Latest session entry, add one line to
-the Earlier log, fold still-relevant traps into Persistent. Keep ≤ 400
-lines (see `SKILL.md`).
+at start. At end: **rewrite** the Latest session entry, demote the old
+one to the Earlier log, fold still-relevant traps into Persistent. Keep
+≤ 400 lines (see `SKILL.md`).
 
 --------------------------------------------------------------------------------
 
 ## Persistent traps & invariants (cross-session)
 
-Distilled "you'd warn a future session" knowledge. Function/gate names
-are load-bearing; the code holds the full detail.
+"You'd warn a future session" knowledge. Function/gate names are
+load-bearing; the code holds the full detail.
 
 ### Disk + tooling
 
@@ -49,11 +49,11 @@ are load-bearing; the code holds the full detail.
   see it too).
 - **Baked multi-tag TEXT vs structural split.** The parser bakes
   consecutive standalone tags on one line into a SINGLE `HTML_BLOCK_TAG`
-  TEXT (`</p></div>`). 7b's `try_parse_standalone_block_tags_split`
-  emits one tag each (top-level + bq, via `strip_line_0_for_emission`),
-  so projector predicate `html_block_is_standalone_tag_sequence` (≥ 2
+  TEXT (`</p></div>`); 7b's `try_parse_standalone_block_tags_split` emits
+  one tag each (top-level + bq, via `strip_line_0_for_emission`), so the
+  projector predicate `html_block_is_standalone_tag_sequence` (≥ 2
   `HTML_BLOCK_TAG`, no `HTML_BLOCK_CONTENT`) is safe. Don't loosen it to
-  single-tag (would merge baked-multi). Single tags + multi-line stay
+  single-tag (would merge baked-multi); single tags + multi-line stay
   byte-walker.
 - **Void strict-block tags (`col`, `hr`, `meta`) close on the open
   line.** In `PANDOC_BLOCK_TAGS` (strict: always split, DO interrupt)
@@ -144,7 +144,16 @@ are load-bearing; the code holds the full detail.
 - **`AttributeNode::can_cast` accepts `HTML_ATTRS`** — the salsa walk
   picks up `<div id>`/`<span id>`/`<section id>` automatically (no
   parallel walk). Diverges from pandoc-native (RawBlock lifts no attr)
-  but matches anchor-link intent.
+  but matches anchor-link intent. **THREE readers see those values; a
+  semantics change must hit all.**
+  `AttributeNode::{id,classes,key_values}` prefer structured `ATTR_*`
+  tokens, falling back to `reparse()` → `parse_html_attribute_list`;
+  `pandoc_ast::attr_from_html_attrs_node` walks the same tokens.
+  `HTML_ATTRS` DOES emit structured children (`emit_html_attrs_node`), so
+  patching only the reparse helper misses the live path (symptom:
+  projector right, salsa/linter still raw). Corollary: `id_value_range`
+  must stay SOURCE-byte measured — deriving a length from `id()` breaks
+  once decoded (`a&amp;b` = 7 source bytes, 3 semantic).
 
 ### Structural lift (the lift family)
 
@@ -181,19 +190,15 @@ are load-bearing; the code holds the full detail.
   `inlines_from` and leading WS edge-trimmed by `coalesce_inlines`.
 - **Content-container later-line HTML** (`:   text\n\n    <div>…`)
   dispatches in `parse_inner_content`, gated Pandoc + innermost
-  Definition/FootnoteDefinition/Admonition + content_indent>0, split by
-  bq depth:
-  - `bq_depth==0`: `try_dispatch_content_indent_html_block` →
-    `try_emit_html_block_lift(line0_prefix=content-indent,
-    allow_unclosed_div=true)`. Without it the general dispatcher drops
-    the line-0 indent (losslessness) + parses body as `Div [CodeBlock]`.
-  - `bq_depth>0`: `try_dispatch_bq_content_indent_html_block` pre-strips
-    bq+content-indent, captures `>     ` per line, calls
-    `emit_html_block_lift_from_stripped` (bq_only prefixes; line 0's `>`
-    already emitted upstream, only its content indent re-injected).
-    Handles nested `> >` + multi-line opens. **Fully fixed 2026-08-02**;
-    the block_dispatcher de-fang guard (`!(blockquote_depth>0 &&
-    content_indent>0)`) STAYS as a fallback for shapes the lift rejects.
+  Definition/FootnoteDefinition/Admonition + content_indent>0, split by bq
+  depth: `bq_depth==0` → `try_dispatch_content_indent_html_block`
+  (`line0_prefix`=content-indent, `allow_unclosed_div`); `bq_depth>0` →
+  `try_dispatch_bq_content_indent_html_block` (pre-strips bq+indent,
+  captures `>     ` per line, `emit_html_block_lift_from_stripped` with
+  bq_only prefixes; line 0's `>` already emitted upstream). Without these
+  the general dispatcher drops the line-0 indent (losslessness) and parses
+  the body as `Div [CodeBlock]`. The block_dispatcher de-fang guard
+  (`!(blockquote_depth>0 && content_indent>0)`) STAYS as a fallback.
 - **Marker-line HTML** (`:   <div>…`, `[^1]: <div>…`) dispatches via
   `try_dispatch_definition_html_block` (def cascade) /
   `try_dispatch_footnote_html_block` (`handle_footnote_open_effect`).
@@ -211,8 +216,8 @@ are load-bearing; the code holds the full detail.
   (`<!-- hi --> t\nmore` → one `Para`): reparse `trailing +
   lines[close+1..fusion_end]`, graft first block, map `text_range().end()`
   → consumed lines. `fenced_div_body_end`/`blockquote_body_end` find the
-  container close (exclude the close marker so a bare `:::` doesn't fuse).
-  Bq strips+re-injects each continuation `> ` via `ContainerPrefixState`.
+  container close (excluding the close marker, so a bare `:::` doesn't
+  fuse); bq re-injects each continuation `> ` via `ContainerPrefixState`.
   List/content-indent containers stay `None` (deferred). Corpus
   0390/0481/0482.
 - **`graft_document_children` is a sibling-emit helper** — call AFTER
@@ -225,13 +230,10 @@ are load-bearing; the code holds the full detail.
 - **List-item HTML** (`ListItemBuffer::emit_as_block` →
   `try_emit_html_block_lift`): strict gate (line 0 is HTML start, reparse
   = one `HTML_BLOCK[_DIV]` covering all bytes, div needs ≥ 2 tags OR
-  `allow_unclosed_div`). `emit_as_block`/`try_emit_html_block_lift` take
-  `allow_unclosed_div`: item-close site `true` (close-form gate already
-  accumulated any matched `</div>`), mid-item flush `false` (lone open
-  may be a partial pair). Empty-body unclosed `<div>` DOES lift to
-  `Div []` (corpus 0496). Multi-line close recognition gated on
-  `BlockContext::list_item_unclosed_html_block_tag`
-  (`unclosed_pandoc_matched_pair_tag`). Indent norm:
+  `allow_unclosed_div` — item-close site `true`, mid-item flush `false`
+  since a lone open may be a partial pair). Empty-body unclosed `<div>`
+  DOES lift to `Div []` (corpus 0496). Multi-line close gated on
+  `BlockContext::list_item_unclosed_html_block_tag`; indent norm via
   `strip_list_item_indent` + re-inject. **`format_list_item` drops
   `LIST_MARKER` when the item has no PLAIN/PARAGRAPH content_node** —
   per-kind arms emit it on `no_content_emitted && is_first_real_child`
@@ -262,10 +264,18 @@ are load-bearing; the code holds the full detail.
 
 ### Out of scope / known divergences
 
-- **HTML entity decoding unimplemented** (out of html-tag scope → general
-  conformance). pandoc decodes named/numeric refs in text, heading text
-  (auto-ids change), URLs, autolinks; NOT code/raw HTML. Table
-  `panache_parser::entities::ENTITIES` vendored. Broad projector pass.
+- **HTML entity decoding: attribute VALUES done (08-05), rest open.**
+  `decode_html_attr_entities` covers lifted `<div>`/`<span>` attrs, and is
+  **HTML_ATTRS-only** — pandoc rejects an `&`-bearing brace body as an
+  attribute block outright (`:::{#a&amp;b}` → literal class), so never
+  decode Pandoc `{...}` values. Still open (general-conformance scope):
+  refs in text, heading text (auto-ids change), URLs, autolinks; NOT
+  code/raw HTML. Residual: `[x](#a&amp;b)` false-positives
+  `undefined-anchor` until *link URLs* decode too (declaration side is now
+  correct). Smaller known gaps: semicolon-less legacy refs (`id="a&amp b"`
+  → `a& b`); entity in attribute NAME must block the lift entirely
+  (`<div a&amp;b>` → pandoc `RawBlock`, panache lifts a `Div`); `&#0;`
+  prints `\0` where pandoc's writer prints `\NUL`.
 - **Definition-list-in-blockquote broad gap**: `> Term\n>\n> :   text` →
   pandoc `DefinitionList [([Term],[[Para text]])]`; panache emits
   `Para [Term]` + empty-term `DefinitionList` with `Plain [text]`.
@@ -303,60 +313,69 @@ are load-bearing; the code holds the full detail.
 | C | Comment/PI trailing softbreak fusion | **Landed** 07-02; fenced-div + bq containers 07-08. `SoftbreakFusion` enum. Corpus 0390/0481/0482. List/content-indent containers deferred. |
 | D | Definition-body marker-line HTML (`:   <div>…`) | **Landed** 07-08. `try_dispatch_definition_html_block`; multi-line body + comment-trailing fusion. Corpus 0483/0484/0487/0488. |
 | E | Footnote-body marker-line HTML (`[^1]: <div>…`) | **Landed** 07-08. `try_dispatch_footnote_html_block`, gated `!html_block_cannot_interrupt`. Corpus 0485/0486. |
+| G | Character references in lifted attribute values | **Landed** 08-05. `decode_html_attr_entities`, read-time only. Corpus 0501-0505. Semicolon-less legacy form + entity-in-attr-NAME deferred. |
 | F | Later-line HTML in a content-container body | **Landed** 07-08 + variants 08-02. `try_dispatch_content_indent_html_block` (bq0) + `try_dispatch_bq_content_indent_html_block` (bq>0). Unclosed-div (later-line 0494, list-item 0495/0496). bq-nested-def **fully fixed** 08-02 (goldens only, no corpus — def-list-in-bq gap). Corpus 0489. |
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-08-02 (bq-nested def later-line — the FULL fix)
+## Latest session — 2026-08-05 (Phase G: entities in attribute values)
 
-Conformance: **html 295 → 295, total 496 → 496 (100%, unchanged)** — no
-corpus/allowlist change (this shape can't be a conformance case; see
-below). Closed the previous session's ranked #1: the bq-nested-def
-later-line `<div>` now **lifts structurally** and the **line-0
-content-indent losslessness violation is fixed** (was
-de-fanged-but-divergent last session).
+Conformance: **html 295 → 300, total 500 → 505 (100%)**. Workspace tests
+4841 → 4850. Corpus was already 100% with 0 blocked at session start, so
+this was **divergence hunting, not failure chasing**: ~100 probe shapes
+diffed against pandoc-native surfaced two new clusters; took the larger.
 
 ### What landed
 
-- **Target**: `> :   text\n>\n>     <div id="d">\n>     x\n>     </div>`.
-  Was: opaque `HTML_BLOCK` (de-fanged) DROPPING the line-0 4-space
-  content indent (losslessness fail, `-4 bytes`). Now: `Div ("d",[],[])
-  [Para [Str "x"]]`, byte-lossless + idempotent.
-- **Parser fix** (parser-shape): new
-  `try_dispatch_bq_content_indent_html_block` arm in
-  `parse_inner_content` (gated Pandoc + `bq_depth>0` + `content_indent>0`
-  + innermost Definition/FootnoteDefinition/Admonition). Pre-strips each
-  continuation line with `ContainerPrefix::from_scalars(bq_depth,0,true,
-  content_col,false)`, captures the `>     ` bytes, reparses dedented,
-  re-injects as `ContainerPrefixLine::bq_only`.
-- **Refactor**: extracted
-  `list_item_buffer::emit_html_block_lift_from_stripped` (reparse-
-  validate-graft core) taking caller-supplied `Vec<ContainerPrefixLine>`.
-  Behavior-preserving for existing callers.
-- **Bonus**: nested `> >` depth and multi-line opens lift too. Throwaway-
-  probe fallback keeps the block_dispatcher de-fang guard live.
-- **NOT a conformance pass**: surrounding `Para [Term]` + empty-term
-  `DefinitionList` / `Plain`-vs-`Para` is the pre-existing, div-agnostic,
-  non-HTML def-list-in-bq gap. Pinned by goldens, not corpus.
-- Projector test renamed → `bq_def_later_line_div_lifts_structurally`.
+- **Target**: pandoc's TagSoup reader decodes character references in the
+  attribute values it lifts, so `<div id="a&amp;b">` carries id `a&b`.
+  Panache kept the raw spelling in every consumer. 13 probe shapes fixed.
+- **New `decode_html_attr_entities`** (`parser/utils/attributes.rs`):
+  single-pass, semicolon-required, case-sensitive named lookup against the
+  vendored HTML5 table + decimal/hex numeric. Borrows on the no-op path.
+  Numeric edges match pandoc: surrogate → U+FFFD, `> U+10FFFF` (or u32
+  overflow) → `?`, `&#0;` → NUL.
+- **Wired into all three readers** — the two-read-path trap cost a
+  debugging round: `parse_html_attribute_list` (reparse fallback),
+  `AttributeNode::{id,classes,key_values}` (structured tokens, the LIVE
+  path for HTML_ATTRS — salsa/linter), and
+  `pandoc_ast::attr_from_html_attrs_node` (projector).
+- **Gated to `HTML_ATTRS`.** Verified pandoc rejects `&` in a brace body
+  entirely (`:::{#a&amp;b}` → literal class), so Pandoc `{...}` values
+  must never decode. Pinned by `brace_attrs_do_not_decode_entities`.
+- **Fixed a latent range bug**: `id_value_range`'s reparse branch derived
+  its span length from `id()`. Decoding made that too short; now measured
+  in source bytes (scan to closing quote / whitespace).
+- **Read-time only** — CST bytes untouched, so losslessness, idempotency,
+  and formatter output are unchanged (`debug format --checks all` clean;
+  golden pins `&amp;` surviving a round-trip).
 
 ### Files in committable diff
 
-- `parser/core.rs`, `parser/utils/list_item_buffer.rs`, `pandoc_ast.rs`;
-  new parser golden `blockquote_definition_later_line_html_div_pandoc`
-  (+ snapshot + runner) + formatter golden
-  `html_block_div_definition_body_later_line_blockquote` (+ runner); RECAP.
+- `crates/panache-parser/src/parser/utils/attributes.rs` (decoder + 5
+  unit tests), `src/syntax/attributes.rs` (3 readers, range fix, 2 tests),
+  `src/pandoc_ast.rs` (projector reader).
+- `src/salsa.rs` — anchor-index regression test.
+- Corpus 0501-0505 + allowlist; formatter golden
+  `html_block_div_attr_entities` (+ runner); RECAP.
 
 ### Suggested next sub-targets (ranked)
 
-1. **Definition-list-in-blockquote broad gap** — general pandoc-
-   conformance target (NOT html scope), but it's what blocks the
-   bq-nested def+div cases from being real corpus passes. Flag to that
-   effort.
-2. **Def-body list-adjacent trailing looseness** (`Plain` vs `Para`) —
-   pre-existing def looseness, verify in the plain def path first. Small.
-3. **Multi-line-second-div inter-tag** — depth-model rework; risky,
-   larger; not in corpus.
+1. **Self-closing non-void tags** — `<div id="x"/>` opens a div in pandoc
+   (the `/` is ignored for non-void tags) and swallows following blocks;
+   panache emits an empty `Div` + siblings. 4 probe shapes
+   (bare, spaced `/ >`, with later `</div>`, inline-context). Contained,
+   but touches the matched-pair/depth model — read that trap first.
+2. **Entity in attribute NAME** — `<div a&amp;b>` must NOT lift at all
+   (pandoc `RawBlock`). Lift-eligibility gate on attribute-name validity;
+   small, and it pairs naturally with this session's work.
+3. **Semicolon-less legacy refs** (`id="a&amp b"` → `a& b`) — needs
+   TagSoup's name charset (`-` appears to terminate a match, `=`/space do
+   not). Obscure; verify the charset by probing before implementing.
+4. **Multi-line-second-div inter-tag** — depth-model rework; risky, not
+   in corpus.
+5. **Definition-list-in-blockquote broad gap** — NOT html scope; flag to
+   the general pandoc-conformance effort.
 
 --------------------------------------------------------------------------------
 
@@ -364,45 +383,30 @@ de-fanged-but-divergent last session).
 
 Newest first. date — sub-target — pass delta — lever.
 
-- 2026-08-02 — bq-nested-def later-line FULL FIX (`Div [Para x]`,
-  byte-lossless) — html 295 → 295 (no corpus; blocked by def-list-in-bq
-  gap) — `try_dispatch_bq_content_indent_html_block` +
+- 2026-08-02 — Phase F unclosed-div + bq-nested-def later-line — html 292
+  → 295 — `allow_unclosed_div` threaded through `try_emit_html_block_lift`
+  / `emit_as_block` (item-close `true`, mid-flush `false`), then
+  `try_dispatch_bq_content_indent_html_block` +
   `emit_html_block_lift_from_stripped` core (capture `&line[..len -
-  strip(line).len()]`, re-inject `bq_only`); de-fang guard superseded but
-  kept as fallback; goldens.
-- 2026-08-02 — Phase F unclosed-div list-item body (`- <div id>\n  x` →
-  `Div [Para x]`; empty `Div []` + stranded RawBlock) — html 293 → 295 —
-  `emit_as_block` `allow_unclosed_div` (item-close `true`, mid-flush
-  `false`); corpus 0495/0496.
-- 2026-08-02 — Phase F unclosed-div later-line content-container — html
-  292 → 293 — `try_emit_html_block_lift` `allow_unclosed_div`; corpus 0494
-  (0490-0493 block-table cases landed between sessions).
-- 2026-07-08 — Phase F later-line HTML in content-container (`Div [Para
-  x]`) — html 291 → 292 — `try_dispatch_content_indent_html_block` +
-  `line0_prefix`; corpus 0489.
-- 2026-07-08 — Phase D def-body comment/PI trailing fusion — html 290 →
-  291 — `try_fuse_definition_comment_trailing` (list-stop guard), corpus 0488.
-- 2026-07-08 — Phase D multi-line HTML on def marker line — html 289 →
-  290 — `try_dispatch_definition_html_block` probe branch, corpus 0487.
-- 2026-07-08 — Phase E footnote-body marker-line HTML — html 287 → 289 —
-  `try_dispatch_footnote_html_block` gated `!html_block_cannot_interrupt`;
-  formatter marker-space drop fixed; corpus 0485/0486.
-- 2026-07-08 — Phase D def-body marker-line HTML — html 285 → 287 —
-  `try_dispatch_definition_html_block` cascade arm; corpus 0483/0484.
-- 2026-07-08 — Phase C container softbreak fusion (fenced-div + bq) —
-  html 283 → 285 (html 100%) — `SoftbreakFusion` enum; corpus 0481/0482.
-- 2026-07-08 — corpus pin `<div>` inter-tag no-ws — html 282 → 283 —
-  0480 + goldens; no parser change.
+  strip(line).len()]`, re-inject `bq_only`) made the bq-nested-def shape
+  byte-lossless; de-fang guard kept as fallback. Corpus 0494-0496 (the
+  bq-def shape stays goldens-only — blocked by the def-list-in-bq gap).
+- 2026-07-08 — Phases D/E/F marker-line + later-line container HTML —
+  html 282 → 292 — `try_dispatch_definition_html_block` (cascade arm,
+  multi-line probe branch, `try_fuse_definition_comment_trailing` with
+  list-stop guard), `try_dispatch_footnote_html_block` gated
+  `!html_block_cannot_interrupt` (+ formatter marker-space drop),
+  `try_dispatch_content_indent_html_block` + `line0_prefix`,
+  `SoftbreakFusion` enum; corpus 0480-0489.
 - 2026-07-02 — Phases A/B/C + 7e cluster — html 262 → 282 — softbreak
   `ToDocEnd` (0390), inter-tag peel (0479), `body_fence_depth` (0478),
   `same_line_trailing_forces_opaque` (0472/0475-0477), void strict-block
   (0470-0471).
-- 2026-07-02 — Phase 7b/7c bq lifts (standalone split 0467-0469,
-  open-only 0464-0466) — html 262 → 271 — dropped `bq_depth==0` guards;
-  `emit_html_block_body_lifted_bq_messy`.
-- 2026-06-29 — Phase 7b standalone-tag split — html 259 → 262 —
-  `try_parse_standalone_block_tags_split`. 2026-06-17 — Phase 7a opaque →
-  `HTML_BLOCK_RAW` — flat (CST-fidelity) — `html_block_node_kind` retag.
+- 2026-06-17→07-02 — Phases 7a/7b/7c — html 259 → 271 —
+  `html_block_node_kind` retag (opaque → `HTML_BLOCK_RAW`, flat),
+  `try_parse_standalone_block_tags_split`, bq lifts via dropped
+  `bq_depth==0` guards (`emit_html_block_body_lifted_bq_messy`); corpus
+  0464-0469.
 - 2026-05-08→18 — Phases 1-6 seed + waves — html 0 → 257 —
   `HTML_BLOCK_DIV`/`INLINE_HTML_SPAN`/`HTML_ATTRS`, projector
   `inline_pending`, CM/Pandoc tag-set split, `PARAGRAPH→PLAIN`,

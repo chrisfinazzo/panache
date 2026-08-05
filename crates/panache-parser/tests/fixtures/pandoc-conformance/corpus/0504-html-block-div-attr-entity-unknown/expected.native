@@ -1,0 +1,4 @@
+[ Div
+    ( "a&notreal;b" , [ "x&y" ] , [ ( "data-k" , "p&#;q" ) ] )
+    [ Para [ Str "text" ] ]
+]
