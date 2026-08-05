@@ -19,43 +19,30 @@ linters on code blocks.
 
 ## Installation
 
-### From crates.io
+Panache is available from several sources:
 
-If you have Rust installed, the easiest way is likely to install from
-[crates.io](https://crates.io/crates/panache):
+- **crates.io**: `cargo install panache`
+- **Homebrew**: `brew install panache`
+- **npm**: `npm install -g @panache-cli/panache` (or `npx @panache-cli/panache`)
+- **PyPI**: `uv tool install panache-cli`/`pipx install panache-cli`
+- **Aqua**: `aqua install jolars/panache`
+- **Nixpkgs**: the `panache` package
+- **Arch Linux**: from the AUR:
+  [`panache-bin`](https://aur.archlinux.org/packages/panache-bin/) (prebuilt),
+  [`panache`](https://aur.archlinux.org/packages/panache/) (built from source)
+- **Prebuilt binaries**: tarballs, `.deb`, and `.rpm` from the [releases
+  page](https://github.com/jolars/panache/releases)
+- **VS Code/Open VSX**: the Panache extension, from the [VS Code
+  Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.panache)
+  or [Open VSX](https://open-vsx.org/extension/jolars/panache) (also works in
+  Positron), which installs the CLI and starts the language server automatically
 
-```bash
-cargo install panache
-```
+### Install script
 
-### Homebrew
-
-Panache is available from Homebrew on macOS and Linux:
-
-```bash
-brew install panache
-```
-
-### Aqua
-
-If you use [Aqua](https://aquaproj.github.io/), you can install Panache with:
-
-```bash
-aqua install jolars/panache
-```
-
-### Pre-built Binaries
-
-Alternatively, you can install pre-built binary packages from the [releases
-page](https://github.com/jolars/panache/releases) for Linux, macOS, and Windows.
-For Linux, packages are available for generic distributions (tarballs) as well
-as Debian/Ubuntu (`.deb`) and Fedora/RHEL/openSUSE (`.rpm`).
-
-If you prefer a one-liner installer that picks the right release artifact for
-your platform, you can use the installer scripts below. These scripts are
-fetched from the latest release and then download the matching Panache CLI
-release asset for your platform, installing to a user-local directory by
-default. If you prefer, download and inspect the script before running it.
+The installer scripts pick the right release artifact for your platform and
+install to a user-local directory by default. They are fetched from the latest
+release and then download the matching Panache CLI release asset. If you prefer,
+download and inspect the script before running it.
 
 For macOS and Linux:
 
@@ -73,82 +60,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/j
 Set `PANACHE_INSTALL_DIR` to change the destination and `PANACHE_TAG` to pin a
 version.
 
-### Arch Linux
-
-There are also two recipies available for Arch Linux in the AUR:
-[panache](https://aur.archlinux.org/packages/panache/) and
-[panache-bin](https://aur.archlinux.org/packages/panache-bin/). The first builds
-from source for your system, the second uses precompiled binaries attatched to
-GH releases. Install either using `yay` or your favorite AUR helper:
-
-```bash
-yay -S panache
-yay -S panache-bin
-```
-
-### NixOS
-
-Panache is available in NixOS via the `panache` package in `nixpkgs`. To add it
-to your system configuration, include it in the `environment.systemPackages`:
-
-```nix
-{ pkgs, ... }:
-
-{
-  environment.systemPackages = [
-    pkgs.panache
-  ];
-}
-```
-
-### From PyPI (via uv or pipx)
-
-Install with [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/):
-
-```bash
-# One-shot run, no install:
-uvx --from panache-cli panache format path/to/file.qmd
-
-# Persistent install:
-uv tool install panache-cli
-# or
-pipx install panache-cli
-```
-
-### From NPM (via npmx)
-
-Install with [npx](https://www.npmjs.com/package/npx) or
-[npmx](https://www.npmjs.com/package/npmx):
-
-```bash
-# One-shot run, no install:
-npx @panache-cli/panache format path/to/file.qmd
-
-# Persistent install:
-npm install -g @panache-cli/panache
-```
-
-### VS Code Extension
-
-If you are running VS Code or an editor that supports VS Code extensions (like
-Positron), you can install the [Panache
-extension](https://marketplace.visualstudio.com/items?itemName=jolars.panache)
-from the VS Code Marketplace or the [Open VSX
-extension](https://open-vsx.org/extension/jolars/panache), which will
-automatically also install the `panache` CLI and start the language server when
-editing supported files.
-
-### Development Version
-
-To install the latest development version, you can run
-
-```bash
-cargo install --git https://github.com/jolars/panache.git panache
-```
-
-This presumes you have a working and up-to-date Rust toolchain (stable, 2024
-edition) installed. You also need to have `cargo` in your `PATH` if you want to
-use the `panache` command directly after installation.
+See [getting started](https://panache.bz/getting-started) for per-platform
+detail and the development version.
 
 ## Usage
 

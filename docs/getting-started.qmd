@@ -24,6 +24,14 @@ Install `panache` with Cargo:
 cargo install panache
 ```
 
+### Aqua
+
+If you use [Aqua](https://aquaproj.github.io/), install `panache` with:
+
+```bash
+aqua install jolars/panache
+```
+
 ### Pre-built Binaries
 
 Download platform-specific binaries from the [releases
@@ -35,25 +43,27 @@ page](https://github.com/jolars/panache/releases):
 
 If you prefer a one-liner installer that picks the right release artifact for
 your platform, you can use the installer scripts below.^[These scripts are
-fetched directly from this repository and then download the latest matching
-Panache CLI release asset for your platform, installing to a user-local
-directory by default. If you prefer, download and inspect the script before
-running it.]
+fetched from the latest release and then download the matching Panache CLI
+release asset for your platform, installing to a user-local directory by
+default. If you prefer, download and inspect the script before running it.]
 
 ::: {.panel-tabset}
 ### Linux and macOS
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-    https://raw.githubusercontent.com/jolars/panache/refs/heads/main/scripts/panache-installer.sh | sh
+    https://github.com/jolars/panache/releases/latest/download/panache-installer.sh | sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jolars/panache/refs/heads/main/scripts/panache-installer.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/jolars/panache/releases/latest/download/panache-installer.ps1 | iex"
 ```
 :::
+
+Set `PANACHE_INSTALL_DIR` to change the destination and `PANACHE_TAG` to pin a
+version.
 
 ### Arch Linux
 
@@ -107,6 +117,18 @@ npx @panache-cli/panache format path/to/file.qmd
 # Persistent install:
 npm install -g @panache-cli/panache
 ```
+
+### Development Version
+
+To install the latest development version, run:
+
+```bash
+cargo install --git https://github.com/jolars/panache.git panache
+```
+
+This presumes you have a working and up-to-date Rust toolchain (stable, 2024
+edition) installed. You also need `cargo` on your `PATH` if you want to use the
+`panache` command directly after installation.
 
 ### Verify Installation
 
