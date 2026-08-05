@@ -193,6 +193,10 @@ name = "cli_cache"
 harness = false
 
 [[bench]]
+name = "linting"
+harness = false
+
+[[bench]]
 name = "lsp_relint"
 harness = false
 required-features = ["lsp"]
