@@ -985,6 +985,54 @@ fn test_swallowed_list_marker_commonmark() {
 }
 
 #[test]
+fn test_unsupported_metadata_key() {
+    let diagnostics =
+        lint_file_with_config("unsupported_metadata_key.qmd", "flavor = \"quarto\"\n");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "unsupported-metadata-key")
+        .collect();
+
+    // `[flow]`, `&anchored [x]`, the nested `? [a, b]`, the `[d, e]` key inside
+    // a flow mapping, and the `*scalar` alias key. Scalar keys (`1:`, `no:`)
+    // and collections in value position are not flagged.
+    assert_eq!(issues.len(), 5, "expected 5 diagnostics, got {:#?}", issues);
+    let lines: Vec<usize> = issues.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![5, 6, 8, 10, 12]);
+    assert!(
+        issues
+            .iter()
+            .all(|d| d.severity == panache::linter::Severity::Error)
+    );
+    assert!(issues.iter().all(|d| d.fix.is_none()));
+    assert!(
+        issues[4].message.contains("alias"),
+        "the alias key should say so, got {:?}",
+        issues[4].message
+    );
+    assert!(
+        issues[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("Non-string keys are not supported")),
+        "expected pandoc's error text in a note, got {:#?}",
+        issues[0].notes
+    );
+}
+
+#[test]
+fn test_unsupported_metadata_key_not_registered_for_commonmark() {
+    let diagnostics =
+        lint_file_with_config("unsupported_metadata_key.qmd", "flavor = \"commonmark\"\n");
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "unsupported-metadata-key"),
+        "pandoc never reads CommonMark frontmatter as metadata"
+    );
+}
+
+#[test]
 fn test_footnote_after_image() {
     let diagnostics = lint_file_with_config("footnote_after_image.qmd", "flavor = \"quarto\"\n");
     let issues: Vec<_> = diagnostics

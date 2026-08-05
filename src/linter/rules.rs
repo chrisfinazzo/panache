@@ -32,6 +32,7 @@ pub mod swallowed_list_marker;
 pub mod undefined_anchor;
 pub mod undefined_references;
 pub mod unspaced_citation;
+pub mod unsupported_metadata_key;
 pub mod unused_definitions;
 pub mod unused_yaml_anchor;
 
@@ -63,6 +64,11 @@ pub enum Requirement {
     ChunkFlavor,
     /// Needs the Quarto flavor specifically (e.g. Quarto schema validation).
     Quarto,
+    /// Needs a flavor whose frontmatter reaches pandoc's metadata layer
+    /// (Pandoc, Quarto, R Markdown) --- i.e. one whose frontmatter consumer set
+    /// includes libyaml. See
+    /// [`YamlValidationContext`](crate::parser::yaml::YamlValidationContext).
+    PandocMetadata,
 }
 
 impl Requirement {
@@ -88,6 +94,12 @@ impl Requirement {
                 matches!(config.flavor, Flavor::Quarto | Flavor::RMarkdown)
             }
             Requirement::Quarto => matches!(config.flavor, Flavor::Quarto),
+            Requirement::PandocMetadata => {
+                use crate::parser::yaml::{YamlConsumer, YamlValidationContext};
+                YamlValidationContext::frontmatter(config.flavor)
+                    .consumers()
+                    .contains(YamlConsumer::Libyaml)
+            }
         }
     }
 }

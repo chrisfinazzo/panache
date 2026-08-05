@@ -664,6 +664,107 @@ warning[unused-yaml-anchor]: YAML anchor `&brand` is never used
   --> document.md:2:8
 ```
 
+### `unsupported-metadata-key` {#unsupported-metadata-key}
+
+Detects a frontmatter mapping key that pandoc's metadata layer refuses to
+convert, which aborts the whole document with an error pointing at the top of
+the metadata block rather than at the key.
+
+Severity
+:   Error
+
+Auto-fix
+:   No (quoting the key invents a key the author never wrote, and the usual
+    real-world trigger wants the line moved out of the frontmatter instead)
+
+Requirements
+:   Requires a flavor whose frontmatter reaches pandoc as metadata --- Pandoc,
+    Quarto, or R Markdown. GFM, CommonMark, MultiMarkdown, mdsvex, and MyST
+    frontmatter is not read by pandoc, so the rule is not registered there.
+
+Diagnostic codes
+:   [`unsupported-metadata-key`](#unsupported-metadata-key)
+
+Description
+
+:   Pandoc parses frontmatter with libyaml and then converts the result to
+    metadata, where every mapping key must be a string. libyaml accepts a
+    collection key (`[a, b]: v`, `{x: 1}: v`, an explicit `? - a`⏎`  - b`⏎`: v`)
+    or an alias key (`*anchor: v`), so no YAML parse error fires --- pandoc
+    fails a step later with
+
+    ```text
+    Error parsing YAML metadata at (line 1, column 1):
+    Error in $: Non-string keys are not supported
+    ```
+
+    and nothing renders. The reported position is the start of the metadata block,
+    so on a long header it says nothing about which key is at fault. This rule
+    points at the key.
+
+    Collection keys are rejected at any depth, including inside a top-level
+    sequence, and an alias key is rejected even when its anchor holds a plain scalar
+    (pandoc reports `Non-string key alias` there), so every alias key is flagged
+    without resolving the anchor.
+
+    Non-string *scalar* keys are fine and never flagged: pandoc stringifies them, so
+    `1: one`, `no: nope`, and `2024-01-01: launch` all convert. This is a key-shape
+    rule, not a YAML 1.1 typing rule --- for values whose *type* differs between
+    pandoc and Quarto's js-yaml, see [`consumer-divergence`](#consumer-divergence).
+
+    Only frontmatter is checked. Hashpipe `#|` cell options are read by js-yaml
+    (Quarto) or the R `yaml` package (knitr), neither of which restricts key shape,
+    and they never reach pandoc's metadata layer.
+
+    A frontmatter block whose top level is a *scalar* or a *sequence* is not this
+    error: pandoc declines to treat such a block as metadata at all and re-reads it
+    as document content. Panache parses those the same way, so there is nothing to
+    report.
+
+**Example violation:**
+
+```markdown
+---
+title: Notes
+[1]: https://example.com
+---
+```
+
+**Diagnostic:**
+
+```
+error[unsupported-metadata-key]: sequence used as a metadata key is not
+supported by pandoc
+ --> document.qmd:3:1
+  = note: pandoc converts frontmatter to metadata, where every key must be a
+          string; it fails the whole document with `Non-string keys are not
+          supported`
+  = help: quote the key to make it a string, or move the line out of the
+          frontmatter if it was not meant to be metadata
+```
+
+**Correct forms:**
+
+The line was meant to be a link reference definition, so it belongs in the
+document body:
+
+```markdown
+---
+title: Notes
+---
+
+[1]: https://example.com
+```
+
+Or, if it really is metadata, quote the key so it is a string:
+
+```markdown
+---
+title: Notes
+"[1]": https://example.com
+---
+```
+
 ### `citation-keys` {#citation-keys}
 
 Validates citation keys against loaded bibliographies and detects conflicts in

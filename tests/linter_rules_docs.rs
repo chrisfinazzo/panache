@@ -95,6 +95,7 @@ fn requirement_token(req: Requirement) -> Option<&'static str> {
         Requirement::TexMath => Some("tex-math"),
         Requirement::ChunkFlavor => Some("chunk"),
         Requirement::Quarto => Some("quarto"),
+        Requirement::PandocMetadata => Some("pandoc"),
     }
 }
 

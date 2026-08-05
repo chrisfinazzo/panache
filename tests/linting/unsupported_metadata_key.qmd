@@ -1,0 +1,17 @@
+---
+title: Metadata keys
+1: a number key is stringified by pandoc
+no: so is a YAML 1.1 boolean
+[flow]: block
+&anchored [x]: value
+crossref:
+  ? [a, b]
+  : nested keys are rejected at any depth
+outer: {a: [b, c], [d, e]: f}
+alias: &scalar 1
+*scalar : an alias key fails whatever the anchor holds
+ok: [1, 2]
+also: {a: 1}
+---
+
+Collections are only a problem in key position.

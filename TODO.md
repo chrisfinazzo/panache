@@ -272,11 +272,18 @@ in `crates/panache-parser/tests/yaml/consumer-matrix.md`.
   (`validate_doc_frontmatter`) was made context-aware too, so `panache lint`
   agrees with the parser and never double-reports. See
   `tests/yaml/consumer-matrix.md`.
-- [ ] **pandoc metadata-must-be-a-mapping --- OUT OF SCOPE.** 11 frontmatter
-  cases (e.g. `LX3P` `[flow]: block`, top-level sequences) where pandoc
-  rejects but libyaml accepts. This is a frontmatter-shape rule, not YAML
-  parse validity --- a candidate future lint. See
-  `scripts/yaml-oracle/oracle-discrepancies.md`.
+- [x] **pandoc metadata key shape --- DONE as a lint, not a validator check.**
+  The 11 frontmatter cases where pandoc rejects but libyaml accepts (e.g.
+  `LX3P` `[flow]: block`) are a metadata-conversion rule, not YAML parse
+  validity, so they stay out of the validator. A 2026-08-05 audit through
+  pandoc's *markdown reader* (the oracle fed YAML to pandoc directly)
+  narrowed the real surface: only **collection keys** at any depth and
+  **alias keys** (rejected even when the anchor holds a scalar) fail.
+  Non-string *scalar* keys (`1:`, `no:`, `2024-01-01:`) convert fine ---
+  pandoc stringifies them --- and a top-level sequence/scalar is not an
+  error at all, since pandoc re-reads such a block as content, which Panache
+  already matches. Covered by the `unsupported-metadata-key` lint rule
+  (error severity, no auto-fix); see `tests/yaml/consumer-matrix.md`.
 - [x] **`? : x` (one-line explicit empty key) --- DONE, no code change needed.**
   A four-oracle audit (2026-08-05) confirmed the whole same-line family
   (`? : x`, `- ? : x`, `? :`, nested, extra spaces, trailing comment) is

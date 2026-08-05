@@ -117,6 +117,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::stray_fenced_div_markers::StrayFencedDivMarkersRule),
         Box::new(rules::swallowed_list_marker::SwallowedListMarkerRule),
         Box::new(rules::footnote_after_image::FootnoteAfterImageRule),
+        Box::new(rules::unsupported_metadata_key::UnsupportedMetadataKeyRule),
     ]
 }
 

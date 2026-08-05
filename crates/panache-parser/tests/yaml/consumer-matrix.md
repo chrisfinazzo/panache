@@ -163,10 +163,25 @@ host-side metadata-extraction gate (`validate_doc_frontmatter`) was made
 context-aware too, so `panache lint` agrees with the parser and never
 double-reports.
 
-## pandoc-only frontmatter rejections (metadata shape) — OUT OF SCOPE
+## pandoc-only frontmatter rejections (metadata shape) — LINTED, NOT VALIDATED
 
 11 cases where `pandoc_direct=err` but `psych_libyaml=ok` (e.g. `LX3P`
-`[flow]: block`, `SBG9`, top-level sequences/scalars). These are pandoc's
-*metadata-must-be-a-mapping* rule, a frontmatter-shape concern distinct from
-YAML parse validity — a candidate future lint, not a YAML validator check. See
-`scripts/yaml-oracle/oracle-discrepancies.md`.
+`[flow]: block`, `SBG9`). These are pandoc's metadata-conversion rule, a
+frontmatter-shape concern distinct from YAML parse validity, so they stay out of
+the validator and are covered by the `unsupported-metadata-key` **lint** rule
+instead. See `scripts/yaml-oracle/oracle-discrepancies.md`.
+
+A 2026-08-05 audit through pandoc's **markdown reader** (the oracle rows came
+from feeding YAML to pandoc directly) narrowed what the rule has to cover:
+
+- Rejected: a mapping key that is a **collection** (`[a, b]`, `{x: 1}`, an
+  explicit `? - a`/`: v`) at any depth, including inside a top-level sequence
+  (`- [a]: b`); and any **alias key** (`*x :`) — even when the anchor holds a
+  plain scalar, where pandoc reports `Non-string key alias` instead.
+- Accepted: non-string *scalar* keys. `1: one`, `no: nope`, and
+  `2024-01-01: launch` all convert, because pandoc stringifies scalar keys — so
+  there is no YAML 1.1 typing arm to this rule. Anchored (`&x k:`) and tagged
+  (`!!str k:`) scalar keys are fine too.
+- Not an error at all: a top-level frontmatter *scalar* or *sequence*. Pandoc
+  declines to read the block as metadata and re-parses it as content; Panache
+  already parses `---`⏎`- a`⏎`- b`⏎`---` as a simple table, matching it.
