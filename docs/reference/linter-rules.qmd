@@ -1296,6 +1296,85 @@ the preceding line pulls it into a paragraph
           div instead of paragraph text
 ```
 
+### `swallowed-list-marker` {#swallowed-list-marker}
+
+Detects a line that looks like a bullet or numbered list marker but was absorbed
+into the paragraph above, because no blank line separates them.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No
+
+Diagnostic codes
+:   [`swallowed-list-marker`](#swallowed-list-marker)
+
+Description
+
+:   Pandoc-markdown never lets a list interrupt a paragraph. A marker on the
+    line directly below prose is therefore not a list at all---it is lazy
+    continuation text, and reformatting splices the markers into the sentence
+    above:
+
+    ```markdown
+    Reviewing this incident, the conclusion may only be
+    - train the registration staff
+    - scan the coordinate column
+    ```
+
+    becomes one paragraph reading
+    `Reviewing this incident, the conclusion may only be - train the ...`. Pandoc
+    produces exactly the same single `Para`, so this is an authoring trap rather
+    than a formatting bug---but a silent one, which is what this rule fixes.
+
+    Under the CommonMark and GFM flavors bullets and ordered lists starting at `1`
+    *do* interrupt a paragraph, so they parse as real lists and are never flagged.
+    An ordered list starting at any other number still cannot interrupt, so `2.`
+    after a prose line is flagged there too, with a help note naming the CommonMark
+    rule instead.
+
+    A run of consecutive marker lines produces a single diagnostic anchored at the
+    first one, because the remedy is a single blank line above the run. Inserting
+    one before every item would instead produce a *loose* list, which renders each
+    item wrapped in its own paragraph.
+
+    The rule is deliberately narrower than Pandoc's own marker syntax, to keep it
+    quiet on ordinary prose. It recognizes `-`, `*`, and `+` bullets, and decimal
+    markers of at most two digits followed by `.` or `)`. It does not flag
+    alphabetical, roman, or example-list markers (`a.`, `iv.`, `(@ok)`), all of
+    which occur often in normal sentences, nor longer numbers, so
+    `2024. was a good year` is left alone. Markers indented four or more columns,
+    thematic-break shapes (`- - -`), and escaped markers (`\-`) are also skipped.
+
+**Example violation:**
+
+```markdown
+Reviewing this incident, the conclusion may only be
+- train the registration staff
+- scan the coordinate column
+```
+
+**Diagnostic:**
+
+```
+warning[swallowed-list-marker]: '-' looks like a list marker, but the preceding
+line pulls it into a paragraph
+ --> document.qmd:2:1
+  = note: 2 consecutive lines here start with a list marker; all of them are
+          reflowed into the paragraph above
+  = help: Pandoc-markdown never lets a list interrupt a paragraph. Insert a
+          blank line above this line to start a real list, or escape the marker
+          ('\-') if it is meant as prose
+```
+
+**Resolution:** there is no auto-fix because two different intentions are
+plausible and the rule cannot tell them apart. If a list was meant, insert a
+blank line above the run; if the marker is prose (`Prices range from $5` /
+`- $10 depending on volume`), escape it. A blank line is also not reliably
+sufficient on its own: any prose following the run would become lazy
+continuation of the final list item, and would need its own blank line too.
+
 ### `math-syntax` {#math-syntax}
 
 Detects structural problems in the TeX content of inline (`$...$`) and display

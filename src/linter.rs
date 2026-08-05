@@ -115,6 +115,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::html_entities::HtmlEntitiesRule),
         Box::new(rules::link_text_is_url::LinkTextIsUrlRule),
         Box::new(rules::stray_fenced_div_markers::StrayFencedDivMarkersRule),
+        Box::new(rules::swallowed_list_marker::SwallowedListMarkerRule),
     ]
 }
 

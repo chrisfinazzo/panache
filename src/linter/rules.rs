@@ -27,6 +27,7 @@ pub mod math_content;
 pub mod missing_chunk_labels;
 pub mod quarto_schema;
 pub mod stray_fenced_div_markers;
+pub mod swallowed_list_marker;
 pub mod undefined_anchor;
 pub mod undefined_references;
 pub mod unspaced_citation;

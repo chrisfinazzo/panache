@@ -942,6 +942,49 @@ fn test_stray_fenced_div_markers() {
 }
 
 #[test]
+fn test_swallowed_list_marker() {
+    let diagnostics = lint_file("swallowed_list_marker.md");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "swallowed-list-marker")
+        .collect();
+
+    assert_eq!(issues.len(), 4, "expected 4 diagnostics, got {:#?}", issues);
+    let lines: Vec<usize> = issues.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![4, 13, 17, 20]);
+    assert!(issues.iter().all(|d| d.fix.is_none()));
+    assert!(
+        issues[0].message.contains("list marker"),
+        "message should name the failure mode"
+    );
+}
+
+#[test]
+fn test_swallowed_list_marker_commonmark() {
+    // Under CommonMark bullets and `1.` interrupt the paragraph and become
+    // real lists, so only the run starting at `2.` is still swallowed.
+    let diagnostics = lint_file_with_config(
+        "swallowed_list_marker_commonmark.md",
+        "flavor = \"commonmark\"\n",
+    );
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "swallowed-list-marker")
+        .collect();
+
+    assert_eq!(issues.len(), 1, "expected 1 diagnostic, got {:#?}", issues);
+    assert_eq!(issues[0].location.line, 8);
+    assert!(
+        issues[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("start at 1")),
+        "help should explain the CommonMark rule, got {:#?}",
+        issues[0].notes
+    );
+}
+
+#[test]
 fn test_quarto_schema_frontmatter_and_cells() {
     // unknown-key is opt-in; enable it so this exercises both code families.
     let diagnostics = lint_file_with_config(
