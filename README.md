@@ -53,23 +53,25 @@ as Debian/Ubuntu (`.deb`) and Fedora/RHEL/openSUSE (`.rpm`).
 
 If you prefer a one-liner installer that picks the right release artifact for
 your platform, you can use the installer scripts below. These scripts are
-fetched directly from this repository and then download the latest matching
-Panache CLI release asset for your platform, installing to a user-local
-directory by default. If you prefer, download and inspect the script before
-running it.
+fetched from the latest release and then download the matching Panache CLI
+release asset for your platform, installing to a user-local directory by
+default. If you prefer, download and inspect the script before running it.
 
 For macOS and Linux:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
-    https://raw.githubusercontent.com/jolars/panache/refs/heads/main/scripts/panache-installer.sh | sh
+    https://github.com/jolars/panache/releases/latest/download/panache-installer.sh | sh
 ```
 
 For Windows PowerShell:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jolars/panache/refs/heads/main/scripts/panache-installer.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/jolars/panache/releases/latest/download/panache-installer.ps1 | iex"
 ```
+
+Set `PANACHE_INSTALL_DIR` to change the destination and `PANACHE_TAG` to pin a
+version.
 
 ### Arch Linux
 
