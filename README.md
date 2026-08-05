@@ -26,7 +26,8 @@ Panache is available from several sources:
 - **npm**: `npm install -g @panache-cli/panache` (or `npx @panache-cli/panache`)
 - **PyPI**: `uv tool install panache-cli`/`pipx install panache-cli`
 - **Aqua**: `aqua install jolars/panache`
-- **Nixpkgs**: the `panache` package
+- **NixOS**: the `panache` package on
+  [Nixpkgs](https://search.nixos.org/packages?channel=unstable&show=panache&from=0&size=50&sort=relevance&type=packages)
 - **Arch Linux**: from the AUR:
   [`panache-bin`](https://aur.archlinux.org/packages/panache-bin/) (prebuilt),
   [`panache`](https://aur.archlinux.org/packages/panache/) (built from source)
