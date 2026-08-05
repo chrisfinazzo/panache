@@ -426,6 +426,12 @@ release stream and depends on the published `panache-formatter` crate. Do not
 reintroduce an asset-uploading release workflow into this repo for anything but
 the CLI.
 
+**AUR**: `packaging/aur/PKGBUILD` is the source of truth for the `panache-bin`
+package; `publish-aur.yml` (chained from `build-and-test.yml`, gated on `v*`)
+rewrites `pkgver`/`pkgrel`/checksums and pushes to the AUR, which is a pure
+deploy target. There is no `jolars/panache-aur` mirror any more. Details and the
+`task aur:push` fallback are in `packaging/aur/README.md`.
+
 ## External Resources
 
 - **Pandoc spec** (definitive reference for parser work):

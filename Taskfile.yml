@@ -126,6 +126,11 @@ tasks:
     cmds:
       - cargo llvm-cov --all-features --workspace --open
 
+  aur:push:
+    desc: "Manually publish panache-bin to the AUR (CI fallback; args: [version] [pkgrel])"
+    cmds:
+      - ./scripts/aur_push.sh {{.CLI_ARGS}}
+
   vsix:
     desc: Build VS Code extension package
     dir: editors/code

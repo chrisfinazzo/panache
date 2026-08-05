@@ -130,3 +130,16 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+
+  # Only the primary CLI stream (`v*`) carries the binaries the PKGBUILD
+  # downloads, so the other tag streams are skipped.
+  publish-aur:
+    name: Publish AUR Package
+    needs: [versionary, build-release-assets]
+    if: ${{ needs.versionary.outputs.release_created == 'true' && startsWith(needs.versionary.outputs.tag_name, 'v') }}
+    uses: ./.github/workflows/publish-aur.yml
+    with:
+      tag: ${{ needs.versionary.outputs.tag_name }}
+    secrets: inherit
+    permissions:
+      contents: read
