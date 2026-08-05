@@ -1255,6 +1255,53 @@ See the prior reports[^a][^b] for context.
 See the prior reports[^a] [^b] for context.
 ```
 
+### `footnote-swallowed-by-bracket` {#footnote-swallowed-by-bracket}
+
+Detects inline footnotes (`^[note]`) followed immediately by `[` or `(`, where
+pandoc consumes the note body as a link label and the footnote silently
+disappears.
+
+Severity
+:   Warning
+
+Auto-fix
+:   Yes (inserts a space after the footnote's closing `]`; safe for the `[`
+    form, unsafe for the `(` form)
+
+Requirements
+:   Requires `extensions.inline-footnotes = true` in configuration
+
+Diagnostic codes
+:   [`footnote-swallowed-by-bracket`](#footnote-swallowed-by-bracket)
+
+Description
+
+:   Pandoc only reads `^[` as an inline-footnote opener when the closing `]` is
+    not followed by another bracket run. When a `[` follows, the two bracket
+    groups are parsed as a reference link and the whole span degrades to literal
+    text --- the `^[` markers show up verbatim in the output. When a `(`
+    follows, it is worse: `[note](dest)` becomes an ordinary link and the `^` is
+    left behind as a stray caret, so the document renders cleanly and the lost
+    footnote is easy to miss.
+
+    Inserting a single space after the footnote's closing `]` restores the footnote
+    and leaves the following link intact. For the `(` form the fix is marked unsafe,
+    because a stray `^` in front of an intended link is an equally plausible
+    reading; apply it with `--unsafe-fixes` once you have confirmed a footnote was
+    meant.
+
+**Example violation:**
+
+```markdown
+Coordinates^[Notes on coordinates.][Figure 1](#fig-1) follow.
+```
+
+**Auto-fix output:**
+
+```markdown
+Coordinates^[Notes on coordinates.] [Figure 1](#fig-1) follow.
+```
+
 ### `footnote-ref-in-footnote-def` {#footnote-ref-in-footnote-def}
 
 Detects footnote references (`[^id]`) that appear inside a reference-style

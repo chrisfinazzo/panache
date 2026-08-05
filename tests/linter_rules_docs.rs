@@ -88,6 +88,7 @@ fn requirement_token(req: Requirement) -> Option<&'static str> {
         Requirement::Always => None,
         Requirement::HeaderAttributes => Some("header-attributes"),
         Requirement::Footnotes => Some("footnotes"),
+        Requirement::InlineFootnotes => Some("inline-footnotes"),
         Requirement::Citations => Some("citations"),
         Requirement::FencedCodeAttributes => Some("fenced-code-attributes"),
         Requirement::FencedDivs => Some("fenced-divs"),

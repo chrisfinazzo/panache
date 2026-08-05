@@ -1033,6 +1033,57 @@ fn test_unsupported_metadata_key_not_registered_for_commonmark() {
 }
 
 #[test]
+fn test_footnote_swallowed_by_bracket() {
+    let diagnostics = lint_file("footnote_swallowed_by_bracket.md");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "footnote-swallowed-by-bracket")
+        .collect();
+
+    // Only the reference-label and inline-destination forms are swallowed;
+    // the spaced, escaped, and ordinary-follower lines are clean.
+    assert_eq!(issues.len(), 2, "expected 2 diagnostics, got {:#?}", issues);
+    let lines: Vec<usize> = issues.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![3, 5]);
+
+    // The span points at the `^[` that failed to open a footnote.
+    for issue in &issues {
+        assert_eq!(
+            u32::from(issue.location.range.len()),
+            2,
+            "expected a two-byte `^[` span, got {:#?}",
+            issue.location
+        );
+    }
+
+    // Reference-label form: intent is unambiguous, so the fix is safe.
+    let bracket_fix = issues[0].fix.as_ref().expect("bracket form should fix");
+    assert_eq!(bracket_fix.safety, panache::linter::FixSafety::Safe);
+    assert_eq!(bracket_fix.edits.len(), 1);
+    assert_eq!(bracket_fix.edits[0].replacement, " ");
+
+    // Inline-destination form could be a stray caret, so the fix is unsafe.
+    let paren_fix = issues[1].fix.as_ref().expect("paren form should fix");
+    assert_eq!(paren_fix.safety, panache::linter::FixSafety::Unsafe);
+}
+
+#[test]
+fn test_footnote_swallowed_by_bracket_needs_inline_footnotes() {
+    // CommonMark has no `^[note]` syntax, so `^` before a link is just a
+    // caret and there is nothing to warn about.
+    let diagnostics = lint_file_with_config(
+        "footnote_swallowed_by_bracket.md",
+        "flavor = \"commonmark\"\n",
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "footnote-swallowed-by-bracket"),
+        "rule should be gated off without extensions.inline-footnotes"
+    );
+}
+
+#[test]
 fn test_footnote_after_image() {
     let diagnostics = lint_file_with_config("footnote_after_image.qmd", "flavor = \"quarto\"\n");
     let issues: Vec<_> = diagnostics

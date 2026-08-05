@@ -19,6 +19,7 @@ pub mod empty_values;
 pub mod figure_crossref_captions;
 pub mod footnote_after_image;
 pub mod footnote_ref_in_footnote_def;
+pub mod footnote_swallowed_by_bracket;
 pub mod heading_eaten_attrs;
 pub mod heading_hierarchy;
 pub mod heading_strip_comments_residue;
@@ -50,6 +51,9 @@ pub enum Requirement {
     HeaderAttributes,
     /// Needs `extensions.footnotes`.
     Footnotes,
+    /// Needs `extensions.inline-footnotes` (the `^[note]` form specifically;
+    /// a flavor can enable reference footnotes without it).
+    InlineFootnotes,
     /// Needs `extensions.citations`.
     Citations,
     /// Needs `extensions.fenced-code-attributes`.
@@ -80,6 +84,7 @@ impl Requirement {
             Requirement::Always => true,
             Requirement::HeaderAttributes => ext.header_attributes,
             Requirement::Footnotes => ext.footnotes,
+            Requirement::InlineFootnotes => ext.inline_footnotes,
             Requirement::Citations => ext.citations,
             Requirement::FencedCodeAttributes => ext.fenced_code_attributes,
             Requirement::FencedDivs => ext.fenced_divs,
