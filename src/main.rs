@@ -1594,8 +1594,8 @@ fn main() -> io::Result<()> {
                 }
 
                 if fix {
-                    let fixed_output = apply_fixes(&input, &diagnostics, unsafe_fixes);
-                    print!("{}", fixed_output);
+                    let fixed = apply_fixes(&input, &diagnostics, unsafe_fixes);
+                    print!("{}", fixed.output);
                     let unsafe_skipped = if unsafe_fixes {
                         0
                     } else {
@@ -1603,6 +1603,9 @@ fn main() -> io::Result<()> {
                     };
                     if unsafe_skipped > 0 && !cli.quiet {
                         eprintln!("{}", unsafe_fixes_hint(unsafe_skipped));
+                    }
+                    if fixed.conflicted > 0 && !cli.quiet {
+                        eprintln!("{}", conflicting_fixes_hint(fixed.conflicted));
                     }
                     // `--fix` retains an exit code of 0: the fixes were written to
                     // stdout. Only the reporting mode signals violations via exit code.
@@ -2063,11 +2066,16 @@ fn main() -> io::Result<()> {
                         } else {
                             count_unsafe_fixes(&root_doc.diagnostics)
                         };
+                        let mut conflicted = 0;
                         if fixable > 0 {
-                            let fixed_output =
+                            let fixed =
                                 apply_fixes(&root_doc.input, &root_doc.diagnostics, unsafe_fixes);
-                            fs::write(&file_path, fixed_output)?;
+                            conflicted = fixed.conflicted;
+                            fs::write(&file_path, fixed.output)?;
                         }
+                        // Conflicting fixes were counted as fixable but did
+                        // not land, so keep the summary honest.
+                        let fixable = fixable.saturating_sub(conflicted);
                         if !remaining.is_empty() && !cli.quiet {
                             print_diagnostics(
                                 &remaining,
@@ -2082,6 +2090,9 @@ fn main() -> io::Result<()> {
                             print_fix_summary(fixable, no_fix_count, &file_path);
                             if unsafe_skipped > 0 {
                                 println!("{}", unsafe_fixes_hint(unsafe_skipped));
+                            }
+                            if conflicted > 0 {
+                                println!("{}", conflicting_fixes_hint(conflicted));
                             }
                         }
                     } else if !cli.quiet {
@@ -2523,29 +2534,83 @@ fn unsafe_fixes_hint(count: usize) -> String {
     format!("{count} unsafe fix(es) available; run with --unsafe-fixes to apply.")
 }
 
+fn conflicting_fixes_hint(count: usize) -> String {
+    format!("{count} fix(es) overlapped an applied fix and were skipped; re-run to apply.")
+}
+
+/// The result of rewriting a document with its diagnostics' fixes.
+struct AppliedFixes {
+    output: String,
+    /// Fixes skipped because they overlapped an already-applied fix.
+    conflicted: usize,
+}
+
+/// Apply the fixes attached to `diagnostics` to `input`.
+///
+/// Fixes can genuinely overlap: an external linter may report two rules for
+/// the same span (ruff emits both `I001` and `F401` for an unused import,
+/// each rewriting the whole import line). Overlapping edits cannot both be
+/// applied in one pass, so a fix whose edits land inside already-rewritten
+/// text is skipped wholesale --- never partially, since a fix's edits are
+/// only meaningful together --- and counted for the caller to report. The
+/// skipped fixes apply on a subsequent run, once the first round settled.
 fn apply_fixes(
     input: &str,
     diagnostics: &[panache::linter::Diagnostic],
     allow_unsafe: bool,
-) -> String {
+) -> AppliedFixes {
     use panache::linter::FixSafety;
     use panache::linter::diagnostics::Edit;
 
-    let mut edits: Vec<&Edit> = diagnostics
+    let mut fixes: Vec<Vec<&Edit>> = diagnostics
         .iter()
         .filter_map(|d| d.fix.as_ref())
         .filter(|f| allow_unsafe || f.safety == FixSafety::Safe)
-        .flat_map(|f| &f.edits)
+        .map(|f| {
+            let mut edits: Vec<&Edit> = f.edits.iter().collect();
+            edits.sort_by_key(|e| e.range.start());
+            edits
+        })
+        .filter(|edits| !edits.is_empty())
         .collect();
 
-    edits.sort_by_key(|e| e.range.start());
+    // Order by where each fix first touches the document so the greedy pass
+    // below walks forward. Ties keep the order the rules produced them in.
+    fixes.sort_by_key(|edits| edits[0].range.start());
+
+    let mut accepted: Vec<&Edit> = Vec::new();
+    let mut covered_end = 0usize;
+    let mut conflicted = 0usize;
+
+    for edits in fixes {
+        let first_start: usize = edits[0].range.start().into();
+        if first_start < covered_end {
+            conflicted += 1;
+            continue;
+        }
+        let fix_end: usize = edits
+            .iter()
+            .map(|e| usize::from(e.range.end()))
+            .max()
+            .unwrap_or(first_start);
+        covered_end = fix_end.max(covered_end);
+        accepted.extend(edits);
+    }
+
+    accepted.sort_by_key(|e| e.range.start());
 
     let mut output = String::new();
-    let mut last_end = 0;
+    let mut last_end = 0usize;
 
-    for edit in edits {
+    for edit in accepted {
         let start: usize = edit.range.start().into();
         let end: usize = edit.range.end().into();
+
+        // Edits within a single fix are expected to be disjoint; guard anyway
+        // so a malformed fix cannot panic the whole run.
+        if start < last_end {
+            continue;
+        }
 
         output.push_str(&input[last_end..start]);
         output.push_str(&edit.replacement);
@@ -2553,7 +2618,7 @@ fn apply_fixes(
     }
 
     output.push_str(&input[last_end..]);
-    output
+    AppliedFixes { output, conflicted }
 }
 
 fn merge_missing_diagnostics(
@@ -2784,6 +2849,89 @@ mod tests {
             Some(OsStr::new("dumb")),
             true,
         ));
+    }
+
+    mod apply_fixes {
+        use super::super::apply_fixes;
+        use panache::linter::diagnostics::{Diagnostic, Edit, Fix, Location};
+        use rowan::TextRange;
+
+        fn diag(input: &str, start: u32, end: u32, replacement: &str, safe: bool) -> Diagnostic {
+            let range = TextRange::new(start.into(), end.into());
+            let edits = vec![Edit {
+                range,
+                replacement: replacement.to_string(),
+            }];
+            let fix = if safe {
+                Fix::safe("fix", edits)
+            } else {
+                Fix::unsafe_fix("fix", edits)
+            };
+            Diagnostic::warning(Location::from_range(range, input), "test", "test").with_fix(fix)
+        }
+
+        #[test]
+        fn disjoint_fixes_all_apply() {
+            let input = "aaa bbb ccc";
+            let diagnostics = [
+                diag(input, 0, 3, "XXX", true),
+                diag(input, 8, 11, "ZZZ", true),
+            ];
+            let applied = apply_fixes(input, &diagnostics, false);
+            assert_eq!(applied.output, "XXX bbb ZZZ");
+            assert_eq!(applied.conflicted, 0);
+        }
+
+        // Two rules rewriting the same span used to panic while slicing the
+        // input (ruff reports both `I001` and `F401` for an unused import).
+        #[test]
+        fn identical_ranges_apply_once_and_report_the_conflict() {
+            let input = "import os\nprint()\n";
+            let diagnostics = [
+                diag(input, 0, 10, "import os\n\n", true),
+                diag(input, 0, 10, "", true),
+            ];
+            let applied = apply_fixes(input, &diagnostics, false);
+            assert_eq!(applied.output, "import os\n\nprint()\n");
+            assert_eq!(applied.conflicted, 1);
+        }
+
+        #[test]
+        fn partially_overlapping_fixes_skip_the_later_one() {
+            let input = "aaa bbb ccc";
+            let diagnostics = [diag(input, 0, 7, "X", true), diag(input, 4, 11, "Y", true)];
+            let applied = apply_fixes(input, &diagnostics, false);
+            assert_eq!(applied.output, "X ccc");
+            assert_eq!(applied.conflicted, 1);
+        }
+
+        // A fix ending exactly where the next begins is not a conflict.
+        #[test]
+        fn abutting_fixes_both_apply() {
+            let input = "aaabbb";
+            let diagnostics = [diag(input, 0, 3, "X", true), diag(input, 3, 6, "Y", true)];
+            let applied = apply_fixes(input, &diagnostics, false);
+            assert_eq!(applied.output, "XY");
+            assert_eq!(applied.conflicted, 0);
+        }
+
+        // An unsafe fix that is filtered out must not consume the span and
+        // push the safe fix into a phantom conflict.
+        #[test]
+        fn skipped_unsafe_fix_leaves_the_span_free() {
+            let input = "aaa bbb";
+            let diagnostics = [
+                diag(input, 0, 3, "UNSAFE", false),
+                diag(input, 0, 3, "SAFE", true),
+            ];
+            let applied = apply_fixes(input, &diagnostics, false);
+            assert_eq!(applied.output, "SAFE bbb");
+            assert_eq!(applied.conflicted, 0);
+
+            let applied = apply_fixes(input, &diagnostics, true);
+            assert_eq!(applied.output, "UNSAFE bbb");
+            assert_eq!(applied.conflicted, 1);
+        }
     }
 
     #[test]

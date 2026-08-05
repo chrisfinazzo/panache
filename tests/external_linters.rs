@@ -351,36 +351,46 @@ print("ok")
         let with_fixes: Vec<_> = diagnostics.iter().filter(|d| d.fix.is_some()).collect();
         assert!(!with_fixes.is_empty(), "Expected at least one Ruff fix");
 
-        use panache::linter::diagnostics::Edit;
+        // What this test guards is the offset mapping: ruff reports
+        // line/column inside the extracted chunk, and those have to come back
+        // as ranges into the *document*. Ruff may report several rules for the
+        // unused import (0.16 emits both `F401` and `I001`); each one's edits
+        // must land on the `import os\n` line, never on the fence or the
+        // surrounding Markdown.
+        let import_line = input.find("import os").expect("fixture has the import");
+        let import_end = import_line + "import os\n".len();
 
-        let mut edits: Vec<&Edit> = diagnostics
+        let edits: Vec<_> = diagnostics
             .iter()
             .filter_map(|d| d.fix.as_ref())
             .flat_map(|f| &f.edits)
             .collect();
-
-        edits.sort_by_key(|e| e.range.start());
-
-        let mut output = String::new();
-        let mut last_end = 0;
+        assert!(!edits.is_empty(), "Expected at least one Ruff edit");
 
         for edit in &edits {
             let start: usize = edit.range.start().into();
             let end: usize = edit.range.end().into();
-
-            output.push_str(&input[last_end..start]);
-            output.push_str(&edit.replacement);
-            last_end = end;
+            assert!(
+                start >= import_line && end <= import_end,
+                "edit {start}..{end} escaped the import line ({import_line}..{import_end})"
+            );
         }
 
-        output.push_str(&input[last_end..]);
-
+        // Applying any one of those edits on its own removes the import from
+        // the document. (Applying *all* of them is the caller's job: ruff's
+        // two fixes overlap, so the CLI applies one per pass --- see the
+        // `apply_fixes` unit tests in `src/main.rs`.)
+        let removes_import = edits.iter().any(|edit| {
+            let start: usize = edit.range.start().into();
+            let end: usize = edit.range.end().into();
+            let patched = format!("{}{}{}", &input[..start], edit.replacement, &input[end..]);
+            !patched.contains("import os")
+        });
         assert!(
-            !output.contains("import os"),
-            "Ruff fix should remove unused import"
+            removes_import,
+            "no Ruff fix removed the unused import: {:?}",
+            edits.iter().map(|e| &e.replacement).collect::<Vec<_>>()
         );
-        assert!(output.contains("print(\"ok\")"));
-        assert!(output.contains("```python"));
     }
 
     #[test]
