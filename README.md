@@ -37,7 +37,7 @@ Panache is available from several sources:
   or [Open VSX](https://open-vsx.org/extension/jolars/panache) (also works in
   Positron), which installs the CLI and starts the language server automatically
 
-### Install script
+### Install Script
 
 The installer scripts pick the right release artifact for your platform and
 install to a user-local directory by default. They are fetched from the latest
