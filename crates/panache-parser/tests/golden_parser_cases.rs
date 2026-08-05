@@ -518,6 +518,7 @@ golden_test_cases!(
     inline_code,
     inline_code_attributes_lossless,
     inline_footnotes,
+    inline_footnote_followed_by_bracket,
     inline_math,
     inline_math_multiline_dollars,
     inline_math_multiline_dollars_gfm,

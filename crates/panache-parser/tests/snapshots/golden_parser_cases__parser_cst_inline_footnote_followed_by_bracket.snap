@@ -1,0 +1,165 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..632
+  PARAGRAPH@0..61
+    TEXT@0..38 "A bracket run right a ..."
+    INLINE_CODE@38..41
+      INLINE_CODE_MARKER@38..39 "`"
+      INLINE_CODE_CONTENT@39..40 "]"
+      INLINE_CODE_MARKER@40..41 "`"
+    TEXT@41..60 " swallows the note."
+    NEWLINE@60..61 "\n"
+  BLANK_LINE@61..62
+    BLANK_LINE@61..62 "\n"
+  PARAGRAPH@62..124
+    TEXT@62..74 "Coordinates^"
+    UNRESOLVED_REFERENCE@74..107
+      LINK_START@74..75
+        LINK_START@74..75 "["
+      LINK_TEXT@75..96
+        TEXT@75..96 "Notes on coordinates."
+      TEXT@96..97 "]"
+      TEXT@97..98 "["
+      LINK_REF@98..106
+        TEXT@98..106 "Figure 1"
+      TEXT@106..107 "]"
+    TEXT@107..123 "(#fig-1) follow."
+    NEWLINE@123..124 "\n"
+  BLANK_LINE@124..125
+    BLANK_LINE@124..125 "\n"
+  PARAGRAPH@125..188
+    TEXT@125..135 "Collapsed^"
+    UNRESOLVED_REFERENCE@135..149
+      LINK_START@135..136
+        LINK_START@135..136 "["
+      LINK_TEXT@136..146
+        TEXT@136..146 "Note body."
+      TEXT@146..147 "]"
+      TEXT@147..148 "["
+      LINK_REF@148..148
+      TEXT@148..149 "]"
+    TEXT@149..165 " and bare label^"
+    LINK@165..182
+      LINK_START@165..166
+        LINK_START@165..166 "["
+      LINK_TEXT@166..176
+        TEXT@166..176 "Note body."
+      TEXT@176..177 "]"
+      TEXT@177..178 "["
+      LINK_REF@178..181
+        TEXT@178..181 "ref"
+      TEXT@181..182 "]"
+    TEXT@182..187 " too."
+    NEWLINE@187..188 "\n"
+  BLANK_LINE@188..189
+    BLANK_LINE@188..189 "\n"
+  PARAGRAPH@189..246
+    TEXT@189..245 "A paren run turns the ..."
+    NEWLINE@245..246 "\n"
+  BLANK_LINE@246..247
+    BLANK_LINE@246..247 "\n"
+  PARAGRAPH@247..299
+    TEXT@247..259 "Coordinates^"
+    LINK@259..290
+      LINK_START@259..260
+        LINK_START@259..260 "["
+      LINK_TEXT@260..281
+        TEXT@260..281 "Notes on coordinates."
+      LINK_TEXT_END@281..282 "]"
+      LINK_DEST_START@282..283 "("
+      LINK_DEST@283..289
+        TEXT@283..289 "#fig-1"
+      LINK_DEST_END@289..290 ")"
+    TEXT@290..298 " follow."
+    NEWLINE@298..299 "\n"
+  BLANK_LINE@299..300
+    BLANK_LINE@299..300 "\n"
+  PARAGRAPH@300..368
+    TEXT@300..318 "Empty destination^"
+    LINK@318..332
+      LINK_START@318..319
+        LINK_START@318..319 "["
+      LINK_TEXT@319..329
+        TEXT@319..329 "Note body."
+      LINK_TEXT_END@329..330 "]"
+      LINK_DEST_START@330..331 "("
+      LINK_DEST@331..331
+        TEXT@331..331 ""
+      LINK_DEST_END@331..332 ")"
+    TEXT@332..350 " and unterminated^"
+    UNRESOLVED_REFERENCE@350..362
+      LINK_START@350..351
+        LINK_START@350..351 "["
+      LINK_TEXT@351..361
+        TEXT@351..361 "Note body."
+      TEXT@361..362 "]"
+    TEXT@362..367 "(oops"
+    NEWLINE@367..368 "\n"
+  BLANK_LINE@368..369
+    BLANK_LINE@368..369 "\n"
+  PARAGRAPH@369..396
+    TEXT@369..395 "A space restores the  ..."
+    NEWLINE@395..396 "\n"
+  BLANK_LINE@396..397
+    BLANK_LINE@396..397 "\n"
+  PARAGRAPH@397..460
+    TEXT@397..408 "Coordinates"
+    INLINE_FOOTNOTE@408..432
+      INLINE_FOOTNOTE_START@408..410 "^["
+      TEXT@410..431 "Notes on coordinates."
+      INLINE_FOOTNOTE_END@431..432 "]"
+    TEXT@432..433 " "
+    LINK@433..451
+      LINK_START@433..434
+        LINK_START@433..434 "["
+      LINK_TEXT@434..442
+        TEXT@434..442 "Figure 1"
+      LINK_TEXT_END@442..443 "]"
+      LINK_DEST_START@443..444 "("
+      LINK_DEST@444..450
+        TEXT@444..450 "#fig-1"
+      LINK_DEST_END@450..451 ")"
+    TEXT@451..459 " follow."
+    NEWLINE@459..460 "\n"
+  BLANK_LINE@460..461
+    BLANK_LINE@460..461 "\n"
+  PARAGRAPH@461..604
+    TEXT@461..508 "Other followers are u ..."
+    INLINE_FOOTNOTE@508..521
+      INLINE_FOOTNOTE_START@508..510 "^["
+      TEXT@510..520 "Note body."
+      INLINE_FOOTNOTE_END@520..521 "]"
+    TEXT@521..531 ". Emphasis"
+    NEWLINE@531..532 "\n"
+    TEXT@532..543 "right after"
+    INLINE_FOOTNOTE@543..556
+      INLINE_FOOTNOTE_START@543..545 "^["
+      TEXT@545..555 "Note body."
+      INLINE_FOOTNOTE_END@555..556 "]"
+    EMPHASIS@556..564
+      EMPHASIS_MARKER@556..557 "*"
+      TEXT@557..563 "stress"
+      EMPHASIS_MARKER@563..564 "*"
+    TEXT@564..585 " and text right after"
+    INLINE_FOOTNOTE@585..598
+      INLINE_FOOTNOTE_START@585..587 "^["
+      TEXT@587..597 "Note body."
+      INLINE_FOOTNOTE_END@597..598 "]"
+    TEXT@598..603 "tail."
+    NEWLINE@603..604 "\n"
+  BLANK_LINE@604..605
+    BLANK_LINE@604..605 "\n"
+  REFERENCE_DEFINITION@605..632
+    LINK@605..610
+      LINK_START@605..606
+        LINK_START@605..606 "["
+      LINK_TEXT@606..609
+        TEXT@606..609 "ref"
+      TEXT@609..610 "]"
+    TEXT@610..611 ":"
+    WHITESPACE@611..612 " "
+    REFERENCE_URL@612..631
+      TEXT@612..631 "https://example.com"
+    NEWLINE@631..632 "\n"
