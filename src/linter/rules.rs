@@ -17,6 +17,7 @@ pub mod emoji_aliases;
 pub mod empty_list_item;
 pub mod empty_values;
 pub mod figure_crossref_captions;
+pub mod footnote_after_image;
 pub mod footnote_ref_in_footnote_def;
 pub mod heading_eaten_attrs;
 pub mod heading_hierarchy;

@@ -1213,6 +1213,95 @@ warning[footnote-ref-in-footnote-def]: Footnote reference '[^b]' inside a footno
           keep the reference outside the definition body, or remove it
 ```
 
+### `footnote-after-image` {#footnote-after-image}
+
+Detects a footnote hanging off a standalone image, which keeps the image from
+being promoted to a figure and silently discards its caption.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No (the user must decide whether the note belongs inside the caption or
+    beside the figure as a separate paragraph)
+
+Requirements
+:   Requires `extensions.footnotes = true` in configuration (default for Pandoc,
+    Quarto, R Markdown, and GFM flavors) and
+    `extensions.implicit-figures = true` (default for Pandoc, Quarto, and R
+    Markdown).
+
+Diagnostic codes
+:   [`footnote-after-image`](#footnote-after-image)
+
+Description
+
+:   Pandoc's `implicit_figures` promotes an image to a figure only when the
+    image is *alone* in its paragraph. A trailing footnote breaks that
+    condition, so
+
+    ```markdown
+    ![A caption here.](img.jpg){#fig-1}
+    ^[A note about the figure.]
+    ```
+
+    parses as `Para [Image, SoftBreak, Note]` rather than `Figure`. Nothing errors:
+    the caption text survives only as the image's `alt` attribute and never renders
+    as a caption. Under Quarto the consequence is louder, because the `#fig-` id no
+    longer labels a figure and `@fig-1` renders as an unresolved `**?@fig-1**`.
+
+    Both placements are flagged: the footnote on the line below (which pandoc reads
+    as lazy continuation of the image's paragraph) and the footnote on the same
+    line. Reference-style footnotes (`[^1]`) demote the figure exactly as inline
+    ones (`^[...]`) do, and are flagged alike.
+
+    The rule stays quiet when the demotion costs nothing. An image with neither
+    caption text nor an id (`![](img.jpg)`) loses only an empty figure wrapper. A
+    paragraph holding prose alongside the footnote is also skipped, because removing
+    the footnote would not restore the figure there and the advice would be wrong.
+
+    There is deliberately no auto-fix. The two resolutions mean different things:
+    moving the footnote inside the caption makes it part of the caption, while
+    inserting a blank line restores the figure and leaves the note as a separate
+    paragraph. Splicing a multi-line footnote body into a caption is also not a
+    mechanical edit.
+
+**Example violation:**
+
+```markdown
+![A caption here.](img.jpg){#fig-1}
+^[A note about the figure.]
+```
+
+**Diagnostic:**
+
+```
+warning[footnote-after-image]: footnote attached to a standalone image keeps it
+from becoming a figure
+ --> document.qmd:2:1
+  = note: an image becomes a figure only when it is alone in its paragraph; the
+          trailing footnote demotes it
+  = note: the caption text will render as the image's alt attribute, not as a
+          caption
+  = note: the id no longer labels a figure, so cross-references to it will not
+          resolve
+  = help: move the footnote inside the caption, as in
+          `![Caption. ^[note]](img.jpg)`, or separate it from the image with a
+          blank line to keep the figure
+```
+
+**Correct forms:**
+
+```markdown
+![A caption ^[A note about the figure.] here.](img.jpg){#fig-1}
+```
+
+```markdown
+![A caption here.](img.jpg){#fig-1}
+
+^[A separate remark.]
+```
+
 ### `stray-fenced-div-markers` {#stray-fenced-div-markers}
 
 Detects runs of three or more colons (`:::`, `::::`, ...) that appear inside

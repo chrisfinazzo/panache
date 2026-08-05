@@ -985,6 +985,35 @@ fn test_swallowed_list_marker_commonmark() {
 }
 
 #[test]
+fn test_footnote_after_image() {
+    let diagnostics = lint_file_with_config("footnote_after_image.qmd", "flavor = \"quarto\"\n");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "footnote-after-image")
+        .collect();
+
+    assert_eq!(issues.len(), 3, "expected 3 diagnostics, got {:#?}", issues);
+    // Next-line footnote, same-line footnote, next-line footnote reference.
+    let lines: Vec<usize> = issues.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![4, 8, 13]);
+    assert!(issues.iter().all(|d| d.fix.is_none()));
+    assert!(
+        issues[0].message.contains("figure"),
+        "message should name the failure mode, got {:?}",
+        issues[0].message
+    );
+    // The `{#fig-1}` id means a Quarto cross-reference breaks too.
+    assert!(
+        issues[0]
+            .notes
+            .iter()
+            .any(|n| n.message.contains("cross-references")),
+        "expected a cross-reference note, got {:#?}",
+        issues[0].notes
+    );
+}
+
+#[test]
 fn test_quarto_schema_frontmatter_and_cells() {
     // unknown-key is opt-in; enable it so this exercises both code families.
     let diagnostics = lint_file_with_config(

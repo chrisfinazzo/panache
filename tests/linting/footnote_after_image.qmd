@@ -1,0 +1,37 @@
+# Footnotes after images
+
+![A caption here.](fig.jpg){#fig-1}
+^[A note about the figure.]
+
+Same line, same trap:
+
+![Another caption.](other.jpg){#fig-2}^[Attached inline.]
+
+A footnote reference demotes it too:
+
+![Third caption.](third.jpg)
+[^ref]
+
+[^ref]: The reference body.
+
+## Correct forms
+
+The footnote belongs inside the caption:
+
+![A caption ^[with its note.] here.](good.jpg){#fig-3}
+
+A blank line keeps the figure intact:
+
+![Separated caption.](sep.jpg){#fig-4}
+
+^[A standalone remark.]
+
+Nothing is lost when the image has neither caption nor id:
+
+![](bare.jpg)
+^[A note on a bare image.]
+
+Prose alongside the footnote is a different problem:
+
+![Cap.](mixed.jpg)
+^[A note.] and more prose follows
