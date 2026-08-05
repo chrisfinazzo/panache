@@ -79,6 +79,10 @@ impl DefinitionItem {
                 SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH => {
                     !has_leading_atx_heading_with_remainder(&blocks[0].text().to_string())
                 }
+                // A body promoted to a figure by `implicit_figures` is a
+                // single image, so it stays compact like the plain it
+                // replaced. No heading check: an image is never ATX-shaped.
+                SyntaxKind::FIGURE => true,
                 SyntaxKind::CODE_BLOCK => false,
                 _ => false,
             }

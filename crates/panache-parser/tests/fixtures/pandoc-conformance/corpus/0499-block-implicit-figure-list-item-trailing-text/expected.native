@@ -1,0 +1,11 @@
+[ BulletList
+    [ [ Plain
+          [ Image ( "" , [] , [] ) [ Str "Cap." ] ( "a.jpg" , "" )
+          , SoftBreak
+          , Str "trailing"
+          , Space
+          , Str "prose"
+          ]
+      ]
+    ]
+]

@@ -81,3 +81,89 @@ fn figure_with_trailing_line_in_blockquote_stays_a_paragraph() {
         "expected no FIGURE, got:\n{tree:#?}"
     );
 }
+
+/// Assert that `input` round-trips and that a `FIGURE` is (or is not) present.
+fn assert_figure(input: &str, expected: bool) {
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "not lossless: {input:?}");
+    let found = tree.descendants().any(|n| n.kind() == SyntaxKind::FIGURE);
+    assert_eq!(found, expected, "for input {input:?}, got:\n{tree:#?}");
+}
+
+// --- list items -----------------------------------------------------------
+//
+// Pandoc promotes any block whose entire content is one image, not just a
+// top-level paragraph, so a list item holding only an image is a `Figure`.
+
+#[test]
+fn standalone_image_in_list_item_is_a_figure() {
+    // pandoc -f markdown: BulletList [[Figure ...]]
+    assert_figure("- ![Cap.](a.jpg)\n", true);
+}
+
+#[test]
+fn standalone_image_in_ordered_list_item_is_a_figure() {
+    // pandoc -f markdown: OrderedList (1, Decimal, Period) [[Figure ...]]
+    assert_figure("1. ![Cap.](a.jpg)\n", true);
+}
+
+#[test]
+fn standalone_image_in_each_list_item_is_a_figure() {
+    let input = "- ![One.](a.jpg)\n\n- ![Two.](b.jpg)\n";
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input);
+    assert_eq!(
+        tree.descendants()
+            .filter(|n| n.kind() == SyntaxKind::FIGURE)
+            .count(),
+        2,
+        "{tree:#?}"
+    );
+}
+
+#[test]
+fn image_with_trailing_line_in_list_item_stays_plain() {
+    // pandoc -f markdown: BulletList [[Plain [Image, SoftBreak, Str ..]]]
+    assert_figure("- ![Cap.](a.jpg)\n  trailing prose\n", false);
+}
+
+#[test]
+fn image_in_later_list_item_chunk_is_a_figure() {
+    // pandoc -f markdown: BulletList [[Para [Str "text"], Figure ...]]
+    assert_figure("- text\n\n  ![Cap.](a.jpg)\n", true);
+}
+
+// --- definition lists -----------------------------------------------------
+
+#[test]
+fn standalone_image_in_definition_body_is_a_figure() {
+    // pandoc -f markdown: DefinitionList [([Str "Term"], [[Figure ...]])]
+    assert_figure("Term\n\n:   ![Cap.](a.jpg)\n", true);
+}
+
+#[test]
+fn standalone_image_in_tight_definition_body_is_a_figure() {
+    assert_figure("Term\n:   ![Cap.](a.jpg)\n", true);
+}
+
+#[test]
+fn image_with_trailing_line_in_definition_body_stays_plain() {
+    assert_figure("Term\n:   ![Cap.](a.jpg)\n    trailing prose\n", false);
+}
+
+#[test]
+fn list_item_figure_is_gated_on_implicit_figures() {
+    use crate::options::{Extensions, Flavor};
+
+    let config = crate::options::ParserOptions {
+        flavor: Flavor::Gfm,
+        dialect: crate::options::Dialect::for_flavor(Flavor::Gfm),
+        extensions: Extensions::for_flavor(Flavor::Gfm),
+        ..Default::default()
+    };
+    let tree = super::helpers::parse_blocks_with_config("- ![Cap.](a.jpg)\n", &config);
+    assert!(
+        !tree.descendants().any(|n| n.kind() == SyntaxKind::FIGURE),
+        "{tree:#?}"
+    );
+}

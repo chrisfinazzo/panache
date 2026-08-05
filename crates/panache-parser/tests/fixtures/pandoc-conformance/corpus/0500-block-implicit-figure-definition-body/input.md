@@ -1,0 +1,2 @@
+Term
+:   ![Cap.](a.jpg)

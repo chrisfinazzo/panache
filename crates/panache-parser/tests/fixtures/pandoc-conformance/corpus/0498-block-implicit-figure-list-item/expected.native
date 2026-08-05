@@ -1,0 +1,10 @@
+[ BulletList
+    [ [ Figure
+          ( "" , [] , [] )
+          (Caption Nothing [ Plain [ Str "Cap." ] ])
+          [ Plain
+              [ Image ( "" , [] , [] ) [ Str "Cap." ] ( "a.jpg" , "" ) ]
+          ]
+      ]
+    ]
+]

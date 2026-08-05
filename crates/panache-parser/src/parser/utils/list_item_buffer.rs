@@ -7,6 +7,7 @@ use crate::options::{Dialect, ParserOptions};
 use crate::parser::blocks::container_prefix::{
     ContainerPrefixLine, ContainerPrefixState, emit_container_prefix_tokens,
 };
+use crate::parser::blocks::figures::paragraph_is_standalone_image;
 use crate::parser::blocks::headings::{emit_atx_heading, try_parse_atx_heading};
 use crate::parser::blocks::horizontal_rules::{emit_horizontal_rule, try_parse_horizontal_rule};
 use crate::parser::blocks::html_blocks::{
@@ -333,7 +334,12 @@ impl ListItemBuffer {
             }
         }
 
-        let block_kind = if use_paragraph {
+        // Pandoc's `implicit_figures` promotes any block whose whole content
+        // is one image, so an item holding only an image is a `Figure` --- not
+        // `Plain`/`Para`, which is why `use_paragraph` drops out here.
+        let block_kind = if paragraph_is_standalone_image(&text, config) {
+            SyntaxKind::FIGURE
+        } else if use_paragraph {
             SyntaxKind::PARAGRAPH
         } else {
             SyntaxKind::PLAIN
@@ -348,7 +354,7 @@ impl ListItemBuffer {
             inline_emission::emit_inlines(builder, &text, config, suppress_footnote_refs);
         }
 
-        builder.finish_node(); // Close PLAIN or PARAGRAPH
+        builder.finish_node(); // Close FIGURE, PLAIN, or PARAGRAPH
     }
 
     /// Clear the buffer for reuse. Also drops any open display-math state:

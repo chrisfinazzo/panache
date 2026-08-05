@@ -438,14 +438,6 @@ intentionally excluded.
 
 ### Divergences from pandoc
 
-- [ ] Implicit-figure promotion does not reach list items or definition-list
-  bodies. Pandoc promotes any block whose whole content is one image, so
-  `- ![Cap.](img.jpg)` is `BulletList [[Figure ...]]`; panache emits `PLAIN`
-  there because promotion lives at paragraph close and those containers
-  flush through `ListItemBuffer::emit_as_block` / the definition `PLAIN`
-  buffer instead. Surfaced 2026-08 while fixing the trailing-content
-  demotion.
-
 ### Architecture
 
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-

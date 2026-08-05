@@ -654,3 +654,20 @@
 
 # block (Fenced code block inside a single-column multiline table cell flattens to an inline Code span, matching pandoc join-then-parse; issue #438.)
 493
+
+# block (Implicit-figure promotion is a whole-block property, not a per-line
+# one. Pandoc's `implicit_figures` promotes a block to `Figure` only when its
+# entire content is one image, so a lazy continuation line demotes it back to
+# `Para`/`Plain` (0497, 0499) and the promotion applies wherever such a block
+# occurs -- top level, blockquote, list item (0498), definition body (0500) --
+# not only at the top level. Panache used to decide this in the block
+# dispatcher from a single line, emitting `FIGURE` + `PARAGRAPH` for the
+# trailing-text shape and never promoting inside list items or definition
+# bodies. The decision now happens where each buffer closes and its full text
+# is known: `core.rs` paragraph close, `list_item_buffer.rs::emit_as_block`,
+# and `emit_definition_plain_or_heading`, all via
+# `blocks/figures.rs::paragraph_is_standalone_image`.)
+497
+498
+499
+500

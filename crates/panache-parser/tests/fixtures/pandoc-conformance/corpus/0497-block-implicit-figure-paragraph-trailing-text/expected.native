@@ -1,0 +1,8 @@
+[ Para
+    [ Image ( "" , [] , [] ) [ Str "Cap." ] ( "img.jpg" , "" )
+    , SoftBreak
+    , Str "trailing"
+    , Space
+    , Str "prose"
+    ]
+]

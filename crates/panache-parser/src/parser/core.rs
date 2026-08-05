@@ -4791,7 +4791,14 @@ fn emit_definition_plain_or_heading(
         }
     }
 
-    builder.start_node(SyntaxKind::PLAIN.into());
+    // A definition body that is only an image is a `Figure` under pandoc's
+    // `implicit_figures`, same as a paragraph or a list item that is.
+    let block_kind = if paragraph_is_standalone_image(text, config) {
+        SyntaxKind::FIGURE
+    } else {
+        SyntaxKind::PLAIN
+    };
+    builder.start_node(block_kind.into());
     inline_emission::emit_inlines(builder, text, config, suppress_footnote_refs);
     builder.finish_node();
 }

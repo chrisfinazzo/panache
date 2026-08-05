@@ -115,6 +115,18 @@ impl Formatter {
         }
     }
 
+    /// Block kinds that carry a list item's inline content on the marker line.
+    ///
+    /// `FIGURE` sits alongside `PLAIN`/`PARAGRAPH` because pandoc's
+    /// `implicit_figures` promotes an image-only item body to a figure, but it
+    /// lays out exactly like the plain it replaces.
+    fn is_item_content_block(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH | SyntaxKind::FIGURE
+        )
+    }
+
     /// Block-level kinds that participate in CMark looseness detection inside
     /// a list item. HTML_BLOCK is intentionally excluded — pandoc treats raw
     /// HTML comments inline, so panache's ignore-directive comments inside an
@@ -124,6 +136,7 @@ impl Formatter {
             kind,
             SyntaxKind::PLAIN
                 | SyntaxKind::PARAGRAPH
+                | SyntaxKind::FIGURE
                 | SyntaxKind::HEADING
                 | SyntaxKind::CODE_BLOCK
                 | SyntaxKind::BLOCK_QUOTE
@@ -505,7 +518,7 @@ impl Formatter {
                 }
                 rowan::NodeOrToken::Node(n) if seen_marker => {
                     match n.kind() {
-                        SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH => {
+                        k if Self::is_item_content_block(k) => {
                             // Skip PLAIN/PARAGRAPH trailing a lifted leading
                             // HTML_BLOCK (the Comment/PI trailing-text-split
                             // shape `- <!-- hi --> trailing`). The marker
@@ -629,7 +642,7 @@ impl Formatter {
                 }
 
                 match child.kind() {
-                    SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH => {
+                    k if Self::is_item_content_block(k) => {
                         self.format_list_continuation_paragraph(&child, hanging);
                     }
                     SyntaxKind::LIST => {
@@ -1123,7 +1136,7 @@ impl Formatter {
         // Skip Plain/PARAGRAPH nodes that were already processed for word wrapping.
         for child in node.children() {
             match child.kind() {
-                SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH => {
+                k if Self::is_item_content_block(k) => {
                     if Self::is_marker_only_blockquote_continuation(&child) {
                         continue;
                     }
@@ -1174,9 +1187,7 @@ impl Formatter {
                 SyntaxKind::BLOCK_QUOTE => {
                     let follows_primary_content = child
                         .prev_sibling()
-                        .map(|prev| {
-                            matches!(prev.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH)
-                        })
+                        .map(|prev| Self::is_item_content_block(prev.kind()))
                         .unwrap_or(false);
 
                     if content_starts_with_blockquote && follows_primary_content {
@@ -1228,6 +1239,7 @@ impl Formatter {
                         prev_kind,
                         Some(SyntaxKind::PLAIN)
                             | Some(SyntaxKind::PARAGRAPH)
+                            | Some(SyntaxKind::FIGURE)
                             | Some(SyntaxKind::HEADING)
                             | Some(SyntaxKind::CODE_BLOCK)
                             | Some(SyntaxKind::BLOCK_QUOTE)
@@ -1285,6 +1297,7 @@ impl Formatter {
                         prev_kind,
                         Some(SyntaxKind::PLAIN)
                             | Some(SyntaxKind::PARAGRAPH)
+                            | Some(SyntaxKind::FIGURE)
                             | Some(SyntaxKind::HEADING)
                             | Some(SyntaxKind::CODE_BLOCK)
                             | Some(SyntaxKind::BLOCK_QUOTE)
@@ -1341,6 +1354,7 @@ impl Formatter {
                         prev_kind,
                         Some(SyntaxKind::PLAIN)
                             | Some(SyntaxKind::PARAGRAPH)
+                            | Some(SyntaxKind::FIGURE)
                             | Some(SyntaxKind::HEADING)
                             | Some(SyntaxKind::CODE_BLOCK)
                             | Some(SyntaxKind::BLOCK_QUOTE)

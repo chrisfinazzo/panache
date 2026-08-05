@@ -965,9 +965,10 @@ implicit-figures = true
 :   Inline images `![alt](url)` (default: enabled)
 
 `implicit-figures`
-:   A paragraph whose entire content is a single image becomes a figure
-    (default: enabled). Any other content in the paragraph---including a lazy
-    continuation line---keeps it an ordinary paragraph.
+:   A block whose entire content is a single image becomes a figure (default:
+    enabled). This covers a paragraph, a blockquote body, a list item, and a
+    definition-list body alike. Any other content in the block---including a
+    lazy continuation line---keeps it an ordinary paragraph.
 
 #### Math
 

@@ -1795,7 +1795,10 @@ impl Formatter {
                 log::trace!("Formatting figure");
                 let text = self.format_inline_node(node);
                 let trimmed = text.trim();
-                if indent > 0 {
+                // A figure as a definition body pulls up onto the `:   `
+                // marker line, exactly like the PLAIN it replaced; indenting
+                // again would double the marker's padding.
+                if indent > 0 && !self.output.ends_with(":   ") {
                     self.output.push_str(&" ".repeat(indent));
                 }
                 self.output.push_str(trimmed);

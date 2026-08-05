@@ -329,6 +329,7 @@ golden_test_cases!(
     html_inline_span_idempotent,
     ignore_directives,
     images,
+    implicit_figure_in_containers,
     indented_code,
     inline_code,
     inline_code_attribute_normalization,
