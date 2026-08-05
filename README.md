@@ -9,7 +9,8 @@ VSX](https://img.shields.io/open-vsx/v/jolars/panache?logo=vsix)](https://open-v
 Code](https://vsmarketplacebadges.dev/version-short/jolars.panache.svg?logo=vsix)](https://marketplace.visualstudio.com/items?itemName=jolars.panache)
 [![PyPI
 version](https://badge.fury.io/py/panache-cli.svg?icon=si%3Apython)](https://badge.fury.io/py/panache-cli)
-[![npm version](https://badge.fury.io/js/@panache-cli%2Fpanache.svg?icon=si%3Anpm)](https://badge.fury.io/js/@panache-cli%2Fpanache)
+[![npm
+version](https://badge.fury.io/js/@panache-cli%2Fpanache.svg?icon=si%3Anpm)](https://badge.fury.io/js/@panache-cli%2Fpanache)
 [![codecov](https://codecov.io/gh/jolars/panache/graph/badge.svg?token=uaBVOBfILv)](https://codecov.io/gh/jolars/panache)
 
 A language server, formatter, and linter for Markdown, Quarto, and R Markdown,
@@ -17,6 +18,15 @@ built in Rust with a lossless CST parser and support for external formatters and
 linters on code blocks.
 
 ## Installation
+
+### From crates.io
+
+If you have Rust installed, the easiest way is likely to install from
+[crates.io](https://crates.io/crates/panache):
+
+```bash
+cargo install panache
+```
 
 ### Homebrew
 
@@ -26,13 +36,12 @@ Panache is available from Homebrew on macOS and Linux:
 brew install panache
 ```
 
-### From crates.io
+### Aqua
 
-If you have Rust installed, the easiest way is likely to install from
-[crates.io](https://crates.io/crates/panache):
+If you use [Aqua](https://aquaproj.github.io/), you can install Panache with:
 
 ```bash
-cargo install panache
+aqua install jolars/panache
 ```
 
 ### Pre-built Binaries
