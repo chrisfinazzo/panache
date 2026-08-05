@@ -11,6 +11,7 @@ use super::blocks::code_blocks;
 use super::blocks::container_prefix::{ContainerPrefix, StrippedLines, strip_content_indent};
 use super::blocks::definition_lists;
 use super::blocks::fenced_divs;
+use super::blocks::figures::paragraph_is_standalone_image;
 use super::blocks::headings::{
     emit_atx_heading, emit_setext_heading, emit_setext_heading_body, try_parse_atx_heading,
     try_parse_setext_heading,
@@ -241,11 +242,22 @@ impl<'a> Parser<'a> {
                     let buffer_clone = buffer.clone();
                     let checkpoint = *start_checkpoint;
                     let suppress_footnote_refs = self.in_footnote_definition();
+                    // Pandoc's `implicit_figures` promotes a paragraph whose
+                    // entire content is one image to a `Figure`. The image
+                    // must be alone in the paragraph, so this can only be
+                    // decided here, at close, once the buffer is complete.
+                    let wrapper = if paragraph_is_standalone_image(
+                        &buffer_clone.get_text_for_parsing(),
+                        self.config,
+                    ) {
+                        SyntaxKind::FIGURE
+                    } else {
+                        SyntaxKind::PARAGRAPH
+                    };
                     // Pop container first
                     self.containers.stack.pop();
-                    // Retroactively wrap as PARAGRAPH and emit buffered content
-                    self.builder
-                        .start_node_at(checkpoint, SyntaxKind::PARAGRAPH.into());
+                    // Retroactively wrap and emit buffered content
+                    self.builder.start_node_at(checkpoint, wrapper.into());
                     buffer_clone.emit_with_inlines(
                         &mut self.builder,
                         self.config,

@@ -18,15 +18,14 @@
 //! does, which makes this an authoring trap the formatter cannot fix on its
 //! own (#456).
 //!
-//! `extensions.implicit_figures` is the gate: with it off there is no figure
-//! promotion to lose, so nothing here is a trap. For the next-line shape the
-//! CST is a second, implicit gate -- a `FIGURE` node only exists when the
-//! extension is on.
+//! Both shapes reach the rule as one `PARAGRAPH` holding the image and the
+//! footnote: the parser promotes to `FIGURE` only at paragraph close, and the
+//! footnote line is lazy continuation, so the promotion never happens. The
+//! same-line and next-line forms therefore differ only in the trivia between
+//! the two significant children.
 //!
-//! Note that panache's parser diverges from pandoc here: it closes the `FIGURE`
-//! at the newline and starts a fresh `PARAGRAPH`, where pandoc keeps one `Para`
-//! via lazy continuation. The divergence is what the rule matches on, but it is
-//! the parser's to fix; this rule only reports the authoring hazard.
+//! `extensions.implicit_figures` is the gate: with it off there is no figure
+//! promotion to lose, so nothing here is a trap.
 //!
 //! There is deliberately no auto-fix. Two resolutions are valid and they mean
 //! different things: move the footnote inside the caption (it becomes part of
@@ -73,7 +72,7 @@ impl Rule for FootnoteAfterImageRule {
     }
 
     fn node_interests(&self) -> &'static [SyntaxKind] {
-        &[SyntaxKind::FIGURE, SyntaxKind::PARAGRAPH]
+        &[SyntaxKind::PARAGRAPH]
     }
 
     fn check(&self, cx: &LintContext) -> Vec<Diagnostic> {
@@ -84,31 +83,10 @@ impl Rule for FootnoteAfterImageRule {
 
         let mut diagnostics = Vec::new();
 
-        // Next-line shape: a `FIGURE` whose immediately following sibling is a
-        // footnote-only `PARAGRAPH`. No `BLANK_LINE` sits between them, so
-        // pandoc reads the footnote as lazy continuation of the image's
-        // paragraph and never promotes the figure.
-        for figure in cx.nodes(SyntaxKind::FIGURE) {
-            let Some(image) = child_of_kind(figure, SyntaxKind::IMAGE_LINK) else {
-                continue;
-            };
-            let Some(next) = figure.next_sibling() else {
-                continue;
-            };
-            if next.kind() != SyntaxKind::PARAGRAPH {
-                continue;
-            }
-            let Some(footnote) = sole_footnote(&next) else {
-                continue;
-            };
-            if let Some(diagnostic) = report(cx, &image, &footnote) {
-                diagnostics.push(diagnostic);
-            }
-        }
-
-        // Same-line shape: a `PARAGRAPH` that is exactly an image followed by a
-        // footnote. The parser already refused to make this a `FIGURE`, which
-        // matches pandoc -- but the author's intent is the same trap.
+        // A `PARAGRAPH` that is exactly an image followed by a footnote --
+        // whether the footnote sits on the same line or on the next one as
+        // lazy continuation. Either way the paragraph is not image-only, so
+        // the parser refused to promote it to a `FIGURE`, matching pandoc.
         for paragraph in cx.nodes(SyntaxKind::PARAGRAPH) {
             let significant = significant_children(paragraph);
             let [first, second] = significant.as_slice() else {
@@ -181,22 +159,6 @@ fn stakes(image: &SyntaxNode) -> Stakes {
         .any(|element| element.kind() == SyntaxKind::ATTR_ID);
 
     Stakes { caption, id }
-}
-
-/// The single footnote making up `paragraph`, if that is all it contains.
-///
-/// Requiring the paragraph to hold *only* the footnote keeps the diagnostic
-/// actionable: with trailing prose alongside it, removing the footnote would
-/// not restore the figure, so the advice would be wrong.
-fn sole_footnote(paragraph: &SyntaxNode) -> Option<SyntaxNode> {
-    let significant = significant_children(paragraph);
-    let [only] = significant.as_slice() else {
-        return None;
-    };
-    if !is_footnote(only.kind()) {
-        return None;
-    }
-    only.as_node().cloned()
 }
 
 fn is_footnote(kind: SyntaxKind) -> bool {

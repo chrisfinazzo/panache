@@ -31,7 +31,6 @@ use super::blocks::definition_lists::{
     next_line_is_definition_marker, try_parse_definition_marker,
 };
 use super::blocks::fenced_divs::{DivFenceInfo, is_div_closing_fence, try_parse_div_fence_open};
-use super::blocks::figures::parse_figure;
 use super::blocks::headings::{
     emit_atx_heading, emit_setext_heading, try_parse_atx_heading, try_parse_setext_heading,
 };
@@ -70,7 +69,6 @@ use super::blocks::tables::{
     is_caption_followed_by_table, try_parse_grid_table, try_parse_multiline_table,
     try_parse_pipe_table, try_parse_simple_table,
 };
-use super::inlines::links::{LinkScanContext, try_parse_inline_image};
 use super::inlines::svelte::{SvelteKind, emit_svelte_template, try_parse_svelte_template};
 use super::utils::attributes::{emit_div_info_node, parse_html_tag_attributes};
 use super::utils::container_stack::{byte_index_at_column, leading_indent};
@@ -577,65 +575,6 @@ impl BlockParser for YamlMetadataParser {
 
     fn name(&self) -> &'static str {
         "yaml_metadata"
-    }
-}
-
-/// Figure parser (standalone image on its own line)
-pub(crate) struct FigureParser;
-
-impl BlockParser for FigureParser {
-    fn detect_prepared(
-        &self,
-        ctx: &BlockContext,
-        lines: &StrippedLines<'_, '_>,
-    ) -> Option<(BlockDetectionResult, Option<Box<dyn Any>>)> {
-        // Pandoc-only behavior; CommonMark/GFM keep the image inline within
-        // the paragraph and do not promote it to a figure block.
-        if !ctx.config.extensions.implicit_figures {
-            return None;
-        }
-
-        // Must have blank line before
-        if !ctx.has_blank_before {
-            return None;
-        }
-
-        let trimmed = lines.first().trim();
-
-        // Must start with ![
-        if !trimmed.starts_with("![") {
-            return None;
-        }
-
-        // Run the expensive inline-image validation once here.
-        let (len, _alt, _dest, _attrs) =
-            try_parse_inline_image(trimmed, LinkScanContext::from_options(ctx.config))?;
-        let after_image = &trimmed[len..];
-        if !after_image.trim().is_empty() {
-            return None;
-        }
-
-        Some((BlockDetectionResult::Yes, Some(Box::new(len))))
-    }
-
-    fn parse_prepared(
-        &self,
-        ctx: &BlockContext,
-        builder: &mut GreenNodeBuilder<'static>,
-        lines: &StrippedLines<'_, '_>,
-        payload: Option<&dyn Any>,
-    ) -> usize {
-        // If detection succeeded, we already validated that this is a standalone image.
-        // Payload currently only caches the parsed length (future-proofing).
-        let _len = payload.and_then(|p| p.downcast_ref::<usize>().copied());
-
-        let line = lines.raw_at(0);
-        parse_figure(builder, line, ctx.config);
-        1
-    }
-
-    fn name(&self) -> &'static str {
-        "figure"
     }
 }
 
@@ -3822,8 +3761,6 @@ impl BlockParserRegistry {
             Box::new(BlockQuoteParser),
             // (15) Horizontal rules - AFTER headings per Pandoc
             Box::new(HorizontalRuleParser),
-            // Figures (standalone images) - Pandoc doesn't have these
-            Box::new(FigureParser),
             // (17) Definition lists
             Box::new(DefinitionListParser),
             // (18) Footnote definitions (noteBlock)

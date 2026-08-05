@@ -504,6 +504,7 @@ golden_test_cases!(
     html_comment_after_paragraph_commonmark,
     html_comment_after_paragraph_pandoc,
     ignore_directives,
+    implicit_figure_promotion,
     images,
     indented_code,
     indented_code_after_atx_heading_commonmark,

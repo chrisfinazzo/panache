@@ -1,36 +1,39 @@
-//! Figure parsing for standalone images.
+//! Implicit-figure promotion for standalone images.
 //!
-//! In Pandoc, a paragraph containing only an image (and optional attributes)
-//! is treated as a Figure block element rather than a paragraph with inline image.
+//! Pandoc's `implicit_figures` extension turns a paragraph into a `Figure`
+//! when---and only when---the image is *alone* in that paragraph. The
+//! decision therefore cannot be made when the image line is first seen: a
+//! lazy continuation line on the next row keeps the whole thing a single
+//! `Para [Image, SoftBreak, ...]`. Promotion happens at paragraph close,
+//! where the buffered paragraph text is already known, the same way setext
+//! headings and `PLAIN` retagging are resolved.
 
 use crate::options::ParserOptions;
-use crate::syntax::SyntaxKind;
-use rowan::GreenNodeBuilder;
 
-use crate::parser::utils::helpers;
-use crate::parser::utils::inline_emission::emit_inlines;
+use crate::parser::inlines::links::{LinkScanContext, try_parse_inline_image};
 
-/// Parse a figure block (standalone image).
+/// Whether a closing paragraph's buffered text is a standalone image, i.e.
+/// whether it should be wrapped as `FIGURE` rather than `PARAGRAPH`.
 ///
-/// Emits inline-parsed structure directly during block parsing.
-pub(in crate::parser) fn parse_figure(
-    builder: &mut GreenNodeBuilder<'static>,
-    line: &str,
-    config: &ParserOptions,
-) {
-    builder.start_node(SyntaxKind::FIGURE.into());
-
-    // Split off trailing newline
-    let (text_without_newline, newline_str) = helpers::strip_newline(line);
-
-    // Parse inline content (IMAGE_LINK) directly
-    if !text_without_newline.is_empty() {
-        emit_inlines(builder, text_without_newline, config, false);
+/// `text` is the paragraph's accumulated content with container markers
+/// stripped (see `ParagraphBuffer::get_text_for_parsing`).
+pub(in crate::parser) fn paragraph_is_standalone_image(text: &str, config: &ParserOptions) -> bool {
+    // Pandoc-only behavior; CommonMark/GFM keep the image inline within the
+    // paragraph and do not promote it to a figure block.
+    if !config.extensions.implicit_figures {
+        return false;
     }
 
-    if !newline_str.is_empty() {
-        builder.token(SyntaxKind::NEWLINE.into(), newline_str);
+    let trimmed = text.trim();
+    if !trimmed.starts_with("![") {
+        return false;
     }
 
-    builder.finish_node(); // Close Figure
+    let Some((len, _alt, _dest, _attrs)) =
+        try_parse_inline_image(trimmed, LinkScanContext::from_options(config))
+    else {
+        return false;
+    };
+
+    trimmed[len..].trim().is_empty()
 }
