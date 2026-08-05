@@ -284,14 +284,22 @@ fn is_key_trivia(kind: SyntaxKind) -> bool {
     )
 }
 
-/// Consumer check — implicit empty block mapping key.
+/// Consumer check — empty block mapping key.
 ///
 /// A `YAML_BLOCK_MAP_KEY` whose only non-trivia child is the `:` (`:`,
 /// `: a`⏎`: b`, `- :`, a nested `: x`) is valid YAML 1.2 but rejected by every
 /// real consumer. Block-only by construction: flow-context empty keys (`[:x]`,
 /// `{x: :x}`) are accepted by libyaml/js-yaml and live under `YAML_FLOW_MAP_KEY`,
 /// so they are never matched here. Explicit (`?`) keys and anchored/tagged keys
-/// carry a non-colon child and are likewise skipped.
+/// carry a non-colon child, so the *outer* key node is skipped.
+///
+/// The one-line explicit form `? : x` is still caught, via the inner key: YAML
+/// 1.2 reads it as an explicit key whose content is a nested mapping with an
+/// implicit empty key (M2N8/00's events: `+MAP` ⏎ `=VAL :` ⏎ `=VAL :x`), and
+/// the CST mirrors that, so the nested `YAML_BLOCK_MAP_KEY` is colon-only and
+/// matches here. That is the correct verdict — pandoc, js-yaml, and R `yaml`
+/// all reject the same-line form and all accept `?`⏎`: x`. See
+/// `tests/yaml/consumer-matrix.md` and the `consumer_explicit_empty_key` tests.
 fn check_implicit_empty_block_key(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for key in tree
         .descendants()
@@ -307,7 +315,7 @@ fn check_implicit_empty_block_key(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
             let range = first.expect("checked above").text_range();
             return Some(YamlDiagnostic {
                 code: diagnostic_codes::CONSUMER_IMPLICIT_EMPTY_KEY,
-                message: "implicit empty mapping key is rejected by pandoc and quarto",
+                message: "empty mapping key is rejected by pandoc, quarto, and rmarkdown",
                 byte_start: range.start().into(),
                 byte_end: range.end().into(),
             });
@@ -3051,6 +3059,126 @@ mod tests {
                     "R yaml rejects the block-indent tab in {input:?}",
                 );
             }
+        }
+    }
+
+    /// The one-line explicit empty key, `? : x`. Valid YAML 1.2 but rejected by
+    /// pandoc, js-yaml, and R `yaml` alike ("did not find expected key" /
+    /// "incomplete explicit mapping pair"); moving the `:` onto its own line
+    /// makes every consumer accept. YAML 1.2 reads the same-line form as an
+    /// explicit key whose *content* is a nested mapping with an implicit empty
+    /// key (M2N8/00's events: `+MAP` ⏎ `=VAL :` ⏎ `=VAL :x`), and the CST
+    /// mirrors that — so `check_implicit_empty_block_key` already covers the
+    /// family via the inner colon-only key, even though it skips the outer
+    /// explicit key. These tests pin that coverage and its boundaries. Verdicts
+    /// measured via `scripts/yaml-oracle/`; see `tests/yaml/consumer-matrix.md`.
+    mod consumer_explicit_empty_key {
+        use super::*;
+        use crate::options::Flavor;
+
+        const SEQ_ONELINE: &str = "- ? : x\n"; // M2N8/00
+        const TOP_ONELINE: &str = "? : x\n";
+        const NESTED_ONELINE: &str = "k:\n  ? : x\n";
+        const NO_VALUE: &str = "? :\n";
+        const AFTER_ENTRY: &str = "t: 1\n? : x\n";
+        const EXTRA_SPACES: &str = "?  :  x\n";
+        const TRAILING_COMMENT: &str = "? : # c\n";
+
+        /// Same-line `? :` — rejected by every real consumer.
+        const REJECTED: &[&str] = &[
+            SEQ_ONELINE,
+            TOP_ONELINE,
+            NESTED_ONELINE,
+            NO_VALUE,
+            AFTER_ENTRY,
+            EXTRA_SPACES,
+            TRAILING_COMMENT,
+        ];
+
+        /// Accepted by every real consumer: the `:` on a later line, an explicit
+        /// key that carries content, or a flow-context empty key.
+        const ACCEPTED: &[&str] = &[
+            "?\n: x\n",
+            "?\n:\n",
+            "? a\n: x\n",
+            "? a\n",
+            "? # c\n: x\n",
+            "- ?\n  : x\n",
+            "{? : x}\n",
+            "a: {? : x}\n",
+        ];
+
+        fn code(input: &str, ctx: YamlValidationContext) -> Option<&'static str> {
+            validate_yaml_with_context(input, ctx).map(|d| d.code)
+        }
+
+        #[test]
+        fn substrate_accepts_every_explicit_empty_key_shape() {
+            // All of these are valid YAML 1.2 — the check is Pool-2 only, so the
+            // suite verdicts stay unchanged.
+            for input in REJECTED.iter().chain(ACCEPTED) {
+                assert_eq!(
+                    code(input, YamlValidationContext::substrate()),
+                    None,
+                    "substrate must keep the 1.2 verdict (valid) for {input:?}",
+                );
+            }
+        }
+
+        #[test]
+        fn lenient_flavor_accepts_every_explicit_empty_key_shape() {
+            let ctx = YamlValidationContext::frontmatter(Flavor::CommonMark);
+            for input in REJECTED.iter().chain(ACCEPTED) {
+                assert_eq!(
+                    code(input, ctx),
+                    None,
+                    "no asserted consumer ⇒ lenient: {input:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn every_real_consumer_context_rejects_same_line_explicit_empty_key() {
+            let contexts = [
+                YamlValidationContext::frontmatter(Flavor::Pandoc),
+                YamlValidationContext::frontmatter(Flavor::Quarto),
+                YamlValidationContext::frontmatter(Flavor::RMarkdown),
+                YamlValidationContext::hashpipe(Flavor::Quarto),
+                YamlValidationContext::hashpipe(Flavor::RMarkdown),
+            ];
+            for ctx in contexts {
+                for input in REJECTED {
+                    assert_eq!(
+                        code(input, ctx),
+                        Some(diagnostic_codes::CONSUMER_IMPLICIT_EMPTY_KEY),
+                        "{ctx:?} must reject the one-line explicit empty key in {input:?}",
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn real_consumer_contexts_accept_the_multiline_and_flow_shapes() {
+            for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
+                let ctx = YamlValidationContext::frontmatter(flavor);
+                for input in ACCEPTED {
+                    assert_eq!(
+                        code(input, ctx),
+                        None,
+                        "{flavor:?} frontmatter should accept {input:?}",
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn diagnostic_points_at_the_offending_colon() {
+            // The empty key is the nested mapping's, so the span is the `:` —
+            // the character to delete or move to its own line.
+            let ctx = YamlValidationContext::frontmatter(Flavor::Quarto);
+            let diag = validate_yaml_with_context(TOP_ONELINE, ctx).expect("rejected");
+            assert_eq!(&TOP_ONELINE[diag.byte_start..diag.byte_end], ":");
+            assert_eq!(diag.byte_start, 2, "the second `:`-column, not the `?`");
         }
     }
 

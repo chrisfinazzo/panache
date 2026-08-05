@@ -181,11 +181,47 @@ fn implicit_empty_key_rejected_by_real_consumers() {
     );
 }
 
-/// A flow-context empty key (`[:x]`) and a normal key are accepted everywhere —
-/// the empty-key check is block-only and must not over-reach.
+/// Coverage: the one-line explicit empty key `? : x` (suite case `M2N8/00`) is
+/// rejected under every real flavor. YAML 1.2 reads it as an explicit key whose
+/// content is a nested mapping with an implicit empty key, so the block
+/// empty-key check covers it; pandoc, js-yaml, and R `yaml` all reject it
+/// (oracle: `did not find expected key` / `incomplete explicit mapping pair`).
+/// Moving the `:` onto its own line is the fix, and must stay accepted.
+#[test]
+fn one_line_explicit_empty_key_rejected_by_real_consumers() {
+    let same_line = case_input("M2N8/00"); // `- ? : x`
+    assert_eq!(same_line, "- ? : x\n", "fixture drifted");
+
+    for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
+        assert!(
+            rejects(&same_line, YamlValidationContext::frontmatter(flavor)),
+            "{flavor:?} frontmatter rejects the one-line explicit empty key"
+        );
+    }
+    assert!(rejects(
+        &same_line,
+        YamlValidationContext::hashpipe(Flavor::Quarto)
+    ));
+
+    // Substrate keeps the 1.2 verdict (M2N8/00 is a valid suite case).
+    assert!(!rejects(&same_line, YamlValidationContext::substrate()));
+
+    // The `:`-on-its-own-line form is accepted by every consumer.
+    for body in ["?\n: x\n", "- ?\n  : x\n", "? a\n: x\n"] {
+        for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
+            assert!(
+                !rejects(body, YamlValidationContext::frontmatter(flavor)),
+                "{flavor:?} frontmatter should accept {body:?}"
+            );
+        }
+    }
+}
+
+/// A flow-context empty key (`[:x]`, `{? : x}`) and a normal key are accepted
+/// everywhere — the empty-key check is block-only and must not over-reach.
 #[test]
 fn flow_empty_key_and_normal_key_accepted() {
-    for body in ["foo: [:x]\n", "a: 1\nb: 2\n"] {
+    for body in ["foo: [:x]\n", "a: 1\nb: 2\n", "a: {? : x}\n"] {
         for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
             assert!(
                 !rejects(body, YamlValidationContext::frontmatter(flavor)),

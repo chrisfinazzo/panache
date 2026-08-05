@@ -277,9 +277,21 @@ in `crates/panache-parser/tests/yaml/consumer-matrix.md`.
   rejects but libyaml accepts. This is a frontmatter-shape rule, not YAML
   parse validity --- a candidate future lint. See
   `scripts/yaml-oracle/oracle-discrepancies.md`.
-- [ ] **`? : x`** (one-line explicit empty key) is rejected by pandoc but the
-  empty-key check intentionally skips explicit (`?`) keys. Low priority;
-  characterize against both consumers before tightening.
+- [x] **`? : x` (one-line explicit empty key) --- DONE, no code change needed.**
+  A four-oracle audit (2026-08-05) confirmed the whole same-line family
+  (`? : x`, `- ? : x`, `? :`, nested, extra spaces, trailing comment) is
+  rejected by pandoc, libyaml, js-yaml, and R `yaml` alike, while every
+  `:`-on-its-own-line form (`?`⏎`: x`) and every flow form (`{? : x}`) is
+  accepted by all four. The empty-key check already gets this right: it
+  skips the *outer* explicit key, but YAML 1.2 reads the same-line form as
+  an explicit key whose content is a nested mapping with an implicit empty
+  key (`M2N8/00`'s events), so the nested colon-only key matches. The
+  behavior is now pinned by `validator::tests::consumer_explicit_empty_key`
+  and
+  `yaml_consumer::one_line_explicit_empty_key_rejected_by_real_consumers`;
+  see `tests/yaml/consumer-matrix.md` B1. (pandoc-only rejections of
+  explicit keys with non-string content --- `? []: x`, `? key: v` --- remain
+  the metadata-shape rule below, deliberately untouched.)
 
 ## Parser - Coverage
 

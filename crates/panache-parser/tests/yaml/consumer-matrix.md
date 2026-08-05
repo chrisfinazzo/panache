@@ -51,27 +51,54 @@ full suite conformity (every allowlisted case parses iff 1.2-valid), so
 
 ## Pool-2 consumer-only checks to ADD (substrate accepts, a consumer rejects)
 
-### B1. Implicit empty block key — `rejecting_consumers = {libyaml, jsyaml}` — LAND
+### B1. Empty block key — `rejecting_consumers = {libyaml, jsyaml, ryaml}` — LANDED
 
 A block mapping key whose only non-trivia content is the `:` (e.g. `:`,
 `: a`⏎`: b`, `- :`, `? : x`). Valid YAML 1.2 (the suite marks these valid) but
 rejected by **all three** real consumers, uniformly.
 
-Reinstate the reverted `check_implicit_empty_block_key` (reuse
-`PARSE_INVALID_KEY_TOKEN`). It is **block-only** — this is load-bearing: the
-flow-context empty-key cases below are *accepted* by libyaml and js-yaml and
-must NOT be flagged.
+`check_implicit_empty_block_key`, gated `ConsumerSet::all()`. It is
+**block-only** — this is load-bearing: the flow-context empty-key cases below
+are *accepted* by libyaml and js-yaml and must NOT be flagged.
 
 Confirmed reject by all three (single-doc): `NHX8` (`:`), `2JQS` (`: a`⏎`: b`),
 `6M2F`, `S3PD`, `M2N8/00` (`- ? : x`), `SM9W/01`, `UKK6/00` (`- :`). Plus the
 multidoc `NKF9` sub-doc. These are exactly the 8 allowlisted 1.2-valid cases the
-draft "flips" — placing the check in Pool-2 (never runs under substrate) keeps
-the suite green.
+check "flips" — placing it in Pool-2 (never runs under substrate) keeps the
+suite green.
 
 Must stay accepted (flow context — do NOT flag): `HM87/00` (`[:x]`), `CFD4`
 (`[ : empty key ]`), `58MP` (`{x: :x}`), `FRK4` (`{ ? foo :, : bar, }`).
 
-### B2. Duplicate mapping keys — `rejecting_consumers = {jsyaml, ryaml}` — LAND
+#### The one-line explicit form `? : x`
+
+`M2N8/00` is in the list above for a reason worth spelling out: the check skips
+the *outer* explicit (`?`) key, yet still covers the whole `? : x` family.
+YAML 1.2 reads the same-line form as an explicit key whose **content** is a
+nested mapping with an implicit empty key (`M2N8/00`'s events: `+MAP` ⏎
+`=VAL :` ⏎ `=VAL :x`), and the CST mirrors that, so the nested
+`YAML_BLOCK_MAP_KEY` is colon-only and matches.
+
+That is the correct verdict — the discriminator is whether the `:` shares the
+`?`'s line. A space-vs-newline audit (2026-08-05) over the four oracles:
+
+| shape | pandoc | psych | jsyaml | ryaml |
+| --- | --- | --- | --- | --- |
+| `- ? : x` (`M2N8/00`), `? : x`, `k:`⏎`  ? : x` | err | err | err | err |
+| `? :`, `t: 1`⏎`? : x`, `?  :  x`, `? : # c` | err | err | err | err |
+| `?`⏎`: x`, `?`⏎`:`, `- ?`⏎`  : x` | ok | ok | ok | ok |
+| `? a`⏎`: x`, `? a`, `? &a`⏎`: x`, `? # c`⏎`: x` | ok | ok | ok | ok |
+| `{? : x}`, `a: {? : x}` (flow) | ok | ok | ok | ok |
+
+pandoc *alone* additionally rejects explicit keys that carry non-string content
+(`? []: x` = `M2N8/01`, `? key: v`, `? a : x`) — that is the metadata-shape rule
+under OUT OF SCOPE below, not a parse-validity divergence, and the check does
+not touch those shapes. `?\t: x` is the tab story (below).
+
+Pinned by `validator::tests::consumer_explicit_empty_key` and
+`yaml_consumer::one_line_explicit_empty_key_rejected_by_real_consumers`.
+
+### B2. Duplicate mapping keys — `rejecting_consumers = {jsyaml, ryaml}` — LANDED
 
 `a: 1`⏎`a: 2` (and nested). Rejected by **js-yaml** (`duplicated mapping key`)
 and **R-yaml** (`Duplicate map key`); pandoc/libyaml and Ruby-Psych **accept**
