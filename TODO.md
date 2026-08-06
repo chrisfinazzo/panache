@@ -188,11 +188,16 @@ Round-trip failures (`input` -> lossy output):
 
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
-- [ ] `parse_line` honours the block registry only for `OpenBlockQuote` effects,
+- [x] `parse_line` honours the block registry only for `OpenBlockQuote` effects,
   throwing away every other prepared match and re-deriving container
   structure from a raw marker count. The setext-over-a-blockquote fix
   special-cases one parser name; the general cleanup is to let the
-  registry's verdict stand.
+  registry's verdict stand. Any non-blockquote verdict on the raw line now
+  wins over the marker count (registry order mirrors pandoc's reader order),
+  and the CommonMark same-container rule moved into
+  `SetextHeadingParser::detect_prepared`, where it belongs. Still excluded:
+  shifted blockquotes inside list items, where `dispatcher_ctx` carries no
+  `list_indent_info` and the verdict is therefore untrustworthy.
 - [ ] Under CommonMark, `> a\n> ---\n` should be `BlockQuote [Header 2 "a"]`
   (pandoc's commonmark reader agrees); panache gives
   `BlockQuote [Para, HR]`. Lossless, so no fixture pins it.

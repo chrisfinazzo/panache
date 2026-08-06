@@ -1,5 +1,5 @@
 use super::helpers::{find_first, parse_blocks_gfm};
-use crate::options::ParserOptions;
+use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::parser::Parser;
 use crate::syntax::SyntaxKind;
 
@@ -379,6 +379,53 @@ fn test_losslessness_setext_underline_after_nested_blockquote_line() {
     assert!(
         find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_none(),
         "expected no blockquote, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_commonmark_setext_underline_does_not_cross_a_blockquote() {
+    // CommonMark keeps the container boundary: `> a\n---\n` is
+    // `BlockQuote [Para "a"], HorizontalRule` (verified with
+    // `pandoc -f commonmark`), so the setext parser must decline the quoted
+    // line under this dialect and let the blockquote parser take it.
+    let input = "> a\n---\nb\n";
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_some(),
+        "expected a BLOCK_QUOTE under CommonMark, got:\n{tree:#?}"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_none(),
+        "expected no setext HEADING under CommonMark, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_commonmark_setext_underline_does_not_cross_a_nested_blockquote() {
+    // Same at depth 2: the underline sits outside both quotes.
+    let input = "> > a\n---\n";
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_some(),
+        "expected a BLOCK_QUOTE under CommonMark, got:\n{tree:#?}"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_none(),
+        "expected no setext HEADING under CommonMark, got:\n{tree:#?}"
     );
 }
 
