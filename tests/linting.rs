@@ -1084,6 +1084,71 @@ fn test_footnote_swallowed_by_bracket_needs_inline_footnotes() {
 }
 
 #[test]
+fn test_reversed_footnote_marker() {
+    let diagnostics = lint_file("reversed_footnote_marker.md");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "reversed-footnote-marker")
+        .collect();
+
+    // The backwards markers: single-line prose, prose across a line break,
+    // prose that degrades into a citation, and one whose swap would build a
+    // link. The bare label, the inline footnote, and the caret-led link text
+    // are clean.
+    assert_eq!(issues.len(), 4, "expected 4 diagnostics, got {:#?}", issues);
+    let lines: Vec<usize> = issues.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![3, 5, 8, 19]);
+
+    // The span points at the `[^` that failed to open a footnote reference.
+    for issue in &issues {
+        assert_eq!(
+            u32::from(issue.location.range.len()),
+            2,
+            "expected a two-byte `[^` span, got {:#?}",
+            issue.location
+        );
+    }
+
+    for issue in &issues[..3] {
+        let fix = issue.fix.as_ref().expect("marker swap fix");
+        assert_eq!(fix.safety, panache::linter::FixSafety::Unsafe);
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].replacement, "^[");
+    }
+
+    // A `(` right after the closing `]` makes the swap produce a link, not a
+    // footnote, so no fix is offered.
+    assert!(
+        issues[3].fix.is_none(),
+        "expected no fix, got {:#?}",
+        issues[3].fix
+    );
+
+    // The reference-not-found rule stands down on these, so the reader gets
+    // one accurate diagnostic instead of two conflicting ones.
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "undefined-footnote-id" || d.code == "undefined-reference-label"),
+        "undefined-references should not double-report: {:#?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn test_reversed_footnote_marker_needs_inline_footnotes() {
+    // GFM footnote labels go through markdown-it, which accepts spaces, so
+    // there is no reversed marker to warn about.
+    let diagnostics = lint_file_with_config("reversed_footnote_marker.md", "flavor = \"gfm\"\n");
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "reversed-footnote-marker"),
+        "rule should be gated off without extensions.inline-footnotes"
+    );
+}
+
+#[test]
 fn test_footnote_after_image() {
     let diagnostics = lint_file_with_config("footnote_after_image.qmd", "flavor = \"quarto\"\n");
     let issues: Vec<_> = diagnostics

@@ -28,6 +28,7 @@ pub mod link_text_is_url;
 pub mod math_content;
 pub mod missing_chunk_labels;
 pub mod quarto_schema;
+pub mod reversed_footnote_marker;
 pub mod stray_fenced_div_markers;
 pub mod swallowed_list_marker;
 pub mod undefined_anchor;

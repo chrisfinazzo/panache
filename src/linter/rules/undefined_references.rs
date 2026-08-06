@@ -104,6 +104,14 @@ impl Rule for UndefinedReferencesRule {
             .cloned()
             .filter_map(UnresolvedReference::cast)
         {
+            // A `[^`-opened bracket is a reversed inline-footnote marker, not a
+            // reference label; `reversed-footnote-marker` says so precisely.
+            // Same flavor scoping as the footnote branch below.
+            let start = usize::from(unresolved.syntax().text_range().start());
+            if config.extensions.inline_footnotes && input[start..].starts_with("[^") {
+                continue;
+            }
+
             let Some((label_text, location_node)) = extract_unresolved_label_and_node(&unresolved)
             else {
                 continue;
@@ -127,6 +135,17 @@ impl Rule for UndefinedReferencesRule {
             .filter_map(FootnoteReference::cast)
         {
             let id = footnote_ref.id();
+
+            // Under pandoc a whitespace-bearing label never reads as a footnote
+            // reference at all --- the bracket degrades to text, a link, or a
+            // citation --- so "footnote not found" would be the wrong claim.
+            // `reversed-footnote-marker` owns that shape. The guard is scoped to
+            // flavors with inline footnotes because GFM and MyST route `[^id]`
+            // through markdown-it, which does accept spaces in the label.
+            if config.extensions.inline_footnotes && id.chars().any(char::is_whitespace) {
+                continue;
+            }
+
             let normalized = normalize_label(&id);
             if normalized.is_empty() || footnote_defined(&normalized) {
                 continue;

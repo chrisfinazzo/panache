@@ -477,6 +477,12 @@ model.
 Emitted when a footnote reference points to an ID that has no matching footnote
 definition.
 
+On flavors with inline footnotes, a label containing whitespace
+(`[^and a note about them]`) is left to
+[`reversed-footnote-marker`](#reversed-footnote-marker) instead: pandoc never
+reads such a bracket as a footnote reference in the first place, so reporting a
+missing definition would be misleading.
+
 ### `undefined-anchor` {#undefined-anchor}
 
 Detects inline links whose `#fragment` destination has no matching anchor in the
@@ -1300,6 +1306,63 @@ Coordinates^[Notes on coordinates.][Figure 1](#fig-1) follow.
 
 ```markdown
 Coordinates^[Notes on coordinates.] [Figure 1](#fig-1) follow.
+```
+
+### `reversed-footnote-marker` {#reversed-footnote-marker}
+
+Detects `[^...]` brackets that pandoc will not read as a footnote reference,
+which usually means the inline-footnote marker was written backwards ---
+`[^note]` where `^[note]` was meant.
+
+Severity
+:   Warning
+
+Auto-fix
+:   Yes, but unsafe (swaps the `[^` opener for `^[`; the brackets currently
+    render as something, so promoting them to a footnote changes the output).
+    Withheld when a `[` or `(` follows the closing `]`, where the swap would not
+    produce a footnote at all.
+
+Requirements
+:   Requires `extensions.inline-footnotes = true` in configuration
+
+Diagnostic codes
+:   [`reversed-footnote-marker`](#reversed-footnote-marker)
+
+Description
+
+:   Pandoc's reference form takes a bare label: `[^` has to be followed by label
+    characters with no whitespace and a closing `]` on the same line. Prose
+    between the brackets breaks all of that, and the bracket run quietly
+    degrades into something else --- literal text, or a citation when the prose
+    happens to contain an `@key`. Because nothing disappears from the rendered
+    output, the missing note is easy to overlook.
+
+    A well-formed but undefined label (`[^missing]`) is a different problem and
+    stays with [`undefined-footnote-id`](#undefined-footnote-id). Links whose text
+    merely starts with a caret (`[^text](dest)`) are left alone: they render as
+    working links, so a stray caret is the likelier reading.
+
+    The fix is marked unsafe because it changes what the document renders: the
+    brackets stop being prose and become a footnote. Apply it with `--unsafe-fixes`
+    once you have confirmed a note was meant.
+
+    No fix is offered when a `[` or `(` follows the closing `]`. There the swap
+    would leave the note just as absent while creating a
+    [`footnote-swallowed-by-bracket`](#footnote-swallowed-by-bracket) defect ---
+    `^[note](dest)` is a stray caret plus a link, and `^[note][ref]` is literal
+    text. Deciding where the note ends is the author's call.
+
+**Example violation:**
+
+```markdown
+Coordinates are read-only [^and they are derived from the street number].
+```
+
+**Auto-fix output:**
+
+```markdown
+Coordinates are read-only ^[and they are derived from the street number].
 ```
 
 ### `footnote-ref-in-footnote-def` {#footnote-ref-in-footnote-def}
