@@ -574,6 +574,25 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
         }
     }
 
+    /// Peek the tail [`Self::emit_prefix_at`] would return for the line at
+    /// ABSOLUTE index `i`, emitting nothing.
+    ///
+    /// Use this — not [`Self::strip_at`] — when a decision made during
+    /// classification has to hold at emission time. `strip_at` walks list
+    /// indent with `advance_columns` (any character counts as a column),
+    /// emission with `strip_list_indent` (whitespace only); on an
+    /// under-indented lazy line such as `" b |"` inside a two-column list
+    /// item they return `" |"` and `"b |"` respectively.
+    pub fn peek_prefix_at(&self, i: usize) -> &'a str {
+        content_line_prefix_tail(
+            self.raw[i],
+            self.prefix.bq_depth(),
+            self.prefix.list_content_col(),
+            bq_outer_of_list(self.prefix),
+            self.prefix.content_indent(),
+        )
+    }
+
     /// Emit the continuation-line container prefix for the line at
     /// ABSOLUTE index `i` as kind-tagged tokens, returning the
     /// post-prefix tail. Thin wrapper over [`emit_content_line_prefixes`]
@@ -667,6 +686,53 @@ pub(crate) fn emit_blockquote_prefix_tokens(builder: &mut GreenNodeBuilder<'stat
     }
 }
 
+/// Non-emitting twin of [`emit_content_line_prefixes`]: the tail that
+/// function would return, computed without touching a builder.
+///
+/// Block parsers that classify a continuation line before emitting it must
+/// peek with *this*, not with [`ContainerPrefix::strip`] — the latter walks
+/// list indent with `advance_columns`, which counts any character as a
+/// column, while emission strips whitespace only. On an under-indented lazy
+/// line the two disagree, and a classification made against the wrong tail
+/// cannot be honoured at emission time.
+pub(crate) fn content_line_prefix_tail<'a>(
+    content_line: &'a str,
+    bq_depth: usize,
+    list_content_col: usize,
+    bq_outer: bool,
+    content_indent: usize,
+) -> &'a str {
+    let mut s = content_line;
+
+    let strip_list = |s: &mut &'a str| {
+        if list_content_col > 0 {
+            *s = strip_list_indent(s, list_content_col);
+        }
+    };
+    let strip_bq = |s: &mut &'a str| {
+        if bq_depth > 0 {
+            *s = strip_n_blockquote_markers(s, bq_depth);
+        }
+    };
+
+    if bq_outer {
+        strip_bq(&mut s);
+        strip_list(&mut s);
+    } else {
+        strip_list(&mut s);
+        strip_bq(&mut s);
+    }
+
+    if content_indent > 0 {
+        let indent_bytes = byte_index_at_column(s, content_indent);
+        if s.len() >= indent_bytes && indent_bytes > 0 {
+            s = &s[indent_bytes..];
+        }
+    }
+
+    s
+}
+
 pub(crate) fn emit_content_line_prefixes<'a>(
     builder: &mut GreenNodeBuilder<'static>,
     content_line: &'a str,
@@ -754,6 +820,17 @@ pub(crate) fn emit_content_line_prefixes<'a>(
 
     let final_offset = content_line.len() - s.len();
     flush_ws(builder, &mut pending_ws_start, final_offset);
+    debug_assert_eq!(
+        s,
+        content_line_prefix_tail(
+            content_line,
+            bq_depth,
+            list_content_col,
+            bq_outer,
+            content_indent
+        ),
+        "the peek twin must strip exactly what emission strips"
+    );
     s
 }
 
@@ -1027,6 +1104,28 @@ mod tests {
         assert_eq!(lines.get(1), "second");
         assert_eq!(lines.pos(), 1);
         assert_eq!(lines.raw_at(0), "first");
+    }
+
+    #[test]
+    fn peek_prefix_at_agrees_with_emit_prefix_at() {
+        // The invariant a classify-then-emit block parser depends on: what the
+        // peek reports is what the emitter hands back. `strip_at` does NOT
+        // satisfy it — it walks list indent column-blind — which is how a
+        // line block inside a list item used to panic on a lazy line whose
+        // trailing `|` the peek mistook for a marker.
+        let prefix = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
+        let raw = ["  | a", " b |", "   c", "x", "  | d"];
+        let lines = StrippedLines::new(&raw, 0, &prefix);
+        for (i, raw_line) in raw.iter().enumerate().skip(1) {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(SyntaxKind::DOCUMENT.into());
+            let emitted = lines.emit_prefix_at(&mut builder, i);
+            builder.finish_node();
+            assert_eq!(lines.peek_prefix_at(i), emitted, "line {i}: {raw_line:?}");
+        }
+        // And the specific divergence that motivated the split.
+        assert_eq!(lines.strip_at(1), " |");
+        assert_eq!(lines.peek_prefix_at(1), "b |");
     }
 
     #[test]

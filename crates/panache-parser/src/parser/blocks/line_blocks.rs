@@ -65,7 +65,11 @@ pub(crate) fn parse_line_block(
             // line 0 is a marker line; commit without a peek.
             LineKind::Marker
         } else {
-            let peek = window.strip_at(pos);
+            // Peek with the strip emission will actually use: `strip_at`
+            // walks the list indent column-blind, so on an under-indented
+            // lazy line like `" b |"` it hands back `" |"` and the trailing
+            // pipe reads as a marker the emitter will not find.
+            let peek = window.peek_prefix_at(pos);
             if parse_line_block_line_marker(peek).is_some() {
                 LineKind::Marker
             } else if peek.starts_with(' ') && !peek.trim_start().starts_with("| ") {
