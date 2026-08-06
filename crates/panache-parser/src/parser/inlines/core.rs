@@ -1227,12 +1227,7 @@ fn parse_inline_range_impl(
                     builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos]);
                 }
 
-                let dollar_count = text[pos..].chars().take_while(|&c| c == '$').count();
-                log::trace!(
-                    "Matched display math at pos {}: {} dollars",
-                    pos,
-                    dollar_count
-                );
+                log::trace!("Matched display math at pos {}: {} bytes", pos, len);
 
                 // Check for trailing attributes (Quarto cross-reference support).
                 // The Quarto attribute block sits on the same line as the closing
@@ -1264,7 +1259,7 @@ fn parse_inline_range_impl(
                 };
 
                 let total_len = len + attr_len;
-                emit_display_math(builder, content, dollar_count, math_opts(config));
+                emit_display_math(builder, content, math_opts(config));
 
                 // Emit attributes if present, structured over the raw source
                 // bytes (leading whitespace split out as its own token).

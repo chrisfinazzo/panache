@@ -216,61 +216,36 @@ pub fn try_parse_double_backslash_inline_math(
     None
 }
 
-/// Try to parse display math ($$...$$) starting at the current position.
-/// Returns the number of characters consumed and the math content if successful.
+/// Try to parse display math (`$$...$$`) starting at the current position.
+/// Returns the number of bytes consumed and the math content if successful.
 /// Display math can span multiple lines in inline contexts.
 ///
-/// Per Pandoc spec (tex_math_dollars extension):
-/// - Opening delimiter is at least $$
-/// - Closing delimiter must have at least as many $ as opening
-/// - Content can span multiple lines
+/// Per Pandoc (`tex_math_dollars`, `mathDisplayWith "$$" "$$"`):
+/// - Both delimiters are *exactly* two dollars. A longer opening run puts its
+///   extra dollars into the content (`$$$x$$` is display math over `$x`); a
+///   longer closing run leaves its extra dollars in the document as text
+///   (`$$x$$$` is display math over `x` followed by a literal `$`). Consuming
+///   more than two closing dollars while emitting a two-dollar marker used to
+///   drop those bytes outright.
+/// - The content must be non-empty (`many1Till`), so `$$$$` is literal text.
+/// - There is no escape handling inside the span: the first `$$` after the
+///   first content character closes it.
 pub fn try_parse_display_math(text: &str) -> Option<(usize, &str)> {
-    // Must start with at least $$
-    if !text.starts_with("$$") {
+    const DELIM: &str = "$$";
+
+    let rest = text.strip_prefix(DELIM)?;
+
+    // Pandoc consumes at least one content character before it starts looking
+    // for the closing delimiter, so an immediate `$$` is not empty display
+    // math but literal text.
+    if rest.starts_with(DELIM) {
         return None;
     }
+    let first_len = rest.chars().next()?.len_utf8();
 
-    // Count opening dollar signs
-    let opening_count = text.chars().take_while(|&c| c == '$').count();
-    if opening_count < 2 {
-        return None;
-    }
-
-    let rest = &text[opening_count..];
-
-    // Look for matching closing delimiter
-    let mut pos = 0;
-    while pos < rest.len() {
-        let ch = rest[pos..].chars().next()?;
-
-        if ch == '$' {
-            // Check if it's escaped
-            if pos > 0 && rest.as_bytes()[pos - 1] == b'\\' {
-                // Escaped dollar, continue searching
-                pos += ch.len_utf8();
-                continue;
-            }
-
-            // Count closing dollar signs
-            let closing_count = rest[pos..].chars().take_while(|&c| c == '$').count();
-
-            // Must have at least as many closing dollars as opening
-            if closing_count >= opening_count {
-                let math_content = &rest[..pos];
-                let total_len = opening_count + pos + closing_count;
-                return Some((total_len, math_content));
-            }
-
-            // Not enough dollars, skip this run and continue
-            pos += closing_count;
-            continue;
-        }
-
-        pos += ch.len_utf8();
-    }
-
-    // No matching close found
-    None
+    let close = first_len + rest[first_len..].find(DELIM)?;
+    let math_content = &rest[..close];
+    Some((DELIM.len() + close + DELIM.len(), math_content))
 }
 
 /// Try to parse single backslash display math: \[...\]
@@ -430,23 +405,21 @@ pub fn emit_double_backslash_inline_math(
 }
 
 /// Emit a display math node to the builder (when occurring inline in paragraph).
-pub fn emit_display_math(
-    builder: &mut impl InlineSink,
-    content: &str,
-    dollar_count: usize,
-    opts: MathParseOptions,
-) {
+///
+/// The markers are always `$$` because [`try_parse_display_math`] consumes
+/// exactly two dollars on each side; any surplus dollars are content or
+/// trailing text and must be emitted by the caller.
+pub fn emit_display_math(builder: &mut impl InlineSink, content: &str, opts: MathParseOptions) {
     builder.start_node(SyntaxKind::DISPLAY_MATH.into());
 
     // Opening $$
-    let marker = "$".repeat(dollar_count);
-    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), &marker);
+    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), "$$");
 
     // Math content
     emit_math_content(builder, content, opts);
 
     // Closing $$
-    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), &marker);
+    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), "$$");
 
     builder.finish_node();
 }
@@ -627,8 +600,26 @@ mod tests {
 
     #[test]
     fn test_parse_display_math_triple_dollars() {
+        // Pandoc's opener is exactly `$$`, so the third dollar is content and
+        // the trailing one is left behind as text.
         let result = try_parse_display_math("$$$x = y$$$");
-        assert_eq!(result, Some((11, "x = y")));
+        assert_eq!(result, Some((10, "$x = y")));
+    }
+
+    #[test]
+    fn test_parse_display_math_long_closing_run_is_not_consumed() {
+        // The closer is exactly `$$`; extra dollars stay in the source.
+        let result = try_parse_display_math("$$\nx^2 + y\n$$$");
+        assert_eq!(result, Some((13, "\nx^2 + y\n")));
+
+        let result = try_parse_display_math("$$\nx^2 +$$$$");
+        assert_eq!(result, Some((10, "\nx^2 +")));
+    }
+
+    #[test]
+    fn test_parse_display_math_empty_content_is_literal() {
+        assert_eq!(try_parse_display_math("$$$$"), None);
+        assert_eq!(try_parse_display_math("$$$$$"), None);
     }
 
     #[test]

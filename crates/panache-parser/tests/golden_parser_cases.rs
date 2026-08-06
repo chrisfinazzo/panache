@@ -241,6 +241,7 @@ golden_test_cases!(
     display_math_blank_line_termination,
     display_math_content_on_fence_line,
     display_math_escaped_dollar,
+    display_math_long_dollar_runs,
     display_math_trailing_text,
     dollar_display_math_in_list_item,
     double_backslash_math,

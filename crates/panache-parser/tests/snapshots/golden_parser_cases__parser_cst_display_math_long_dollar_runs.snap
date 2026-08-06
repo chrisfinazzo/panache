@@ -1,0 +1,113 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..393
+  HEADING@0..37
+    ATX_HEADING_MARKER@0..1
+      ATX_HEADING_MARKER@0..1 "#"
+    WHITESPACE@1..2 " "
+    HEADING_CONTENT@2..36
+      TEXT@2..36 "Display math with lon ..."
+    NEWLINE@36..37 "\n"
+  BLANK_LINE@37..38
+    BLANK_LINE@37..38 "\n"
+  PARAGRAPH@38..109
+    TEXT@38..66 "Both delimiters are e ..."
+    INLINE_CODE@66..70
+      INLINE_CODE_MARKER@66..67 "`"
+      INLINE_CODE_CONTENT@67..69 "$$"
+      INLINE_CODE_MARKER@69..70 "`"
+    TEXT@70..108 "; surplus dollars are ..."
+    NEWLINE@108..109 "\n"
+  BLANK_LINE@109..110
+    BLANK_LINE@109..110 "\n"
+  PARAGRAPH@110..125
+    DISPLAY_MATH@110..123
+      DISPLAY_MATH_MARKER@110..112 "$$"
+      MATH_CONTENT@112..121
+        MATH_NEWLINE@112..113 "\n"
+        MATH_TEXT@113..114 "x"
+        MATH_SCRIPT@114..115 "^"
+        MATH_TEXT@115..116 "2"
+        MATH_SPACE@116..117 " "
+        MATH_OPERATOR@117..118 "+"
+        MATH_SPACE@118..119 " "
+        MATH_TEXT@119..120 "y"
+        MATH_NEWLINE@120..121 "\n"
+      DISPLAY_MATH_MARKER@121..123 "$$"
+    TEXT@123..124 "$"
+    NEWLINE@124..125 "\n"
+  BLANK_LINE@125..126
+    BLANK_LINE@125..126 "\n"
+  PARAGRAPH@126..182
+    TEXT@126..181 "A longer closing run  ..."
+    NEWLINE@181..182 "\n"
+  BLANK_LINE@182..183
+    BLANK_LINE@182..183 "\n"
+  PARAGRAPH@183..200
+    DISPLAY_MATH@183..196
+      DISPLAY_MATH_MARKER@183..185 "$$"
+      MATH_CONTENT@185..194
+        MATH_NEWLINE@185..186 "\n"
+        MATH_TEXT@186..187 "x"
+        MATH_SCRIPT@187..188 "^"
+        MATH_TEXT@188..189 "2"
+        MATH_SPACE@189..190 " "
+        MATH_OPERATOR@190..191 "+"
+        MATH_SPACE@191..192 " "
+        MATH_TEXT@192..193 "y"
+        MATH_NEWLINE@193..194 "\n"
+      DISPLAY_MATH_MARKER@194..196 "$$"
+    TEXT@196..197 "$"
+    TEXT@197..199 "ra"
+    NEWLINE@199..200 "\n"
+  BLANK_LINE@200..201
+    BLANK_LINE@200..201 "\n"
+  PARAGRAPH@201..239
+    TEXT@201..238 "A closing run that ov ..."
+    NEWLINE@238..239 "\n"
+  BLANK_LINE@239..240
+    BLANK_LINE@239..240 "\n"
+  PARAGRAPH@240..253
+    DISPLAY_MATH@240..250
+      DISPLAY_MATH_MARKER@240..242 "$$"
+      MATH_CONTENT@242..248
+        MATH_NEWLINE@242..243 "\n"
+        MATH_TEXT@243..244 "x"
+        MATH_SCRIPT@244..245 "^"
+        MATH_TEXT@245..246 "2"
+        MATH_SPACE@246..247 " "
+        MATH_OPERATOR@247..248 "+"
+      DISPLAY_MATH_MARKER@248..250 "$$"
+    TEXT@250..251 "$"
+    TEXT@251..252 "$"
+    NEWLINE@252..253 "\n"
+  BLANK_LINE@253..254
+    BLANK_LINE@253..254 "\n"
+  PARAGRAPH@254..315
+    TEXT@254..314 "A longer opening run  ..."
+    NEWLINE@314..315 "\n"
+  BLANK_LINE@315..316
+    BLANK_LINE@315..316 "\n"
+  PARAGRAPH@316..328
+    DISPLAY_MATH@316..326
+      DISPLAY_MATH_MARKER@316..318 "$$"
+      MATH_CONTENT@318..324
+        MATH_TEXT@318..320 "$x"
+        MATH_SPACE@320..321 " "
+        MATH_OPERATOR@321..322 "="
+        MATH_SPACE@322..323 " "
+        MATH_TEXT@323..324 "y"
+      DISPLAY_MATH_MARKER@324..326 "$$"
+    TEXT@326..327 "$"
+    NEWLINE@327..328 "\n"
+  BLANK_LINE@328..329
+    BLANK_LINE@328..329 "\n"
+  PARAGRAPH@329..393
+    TEXT@329..388 "Four dollars are empt ..."
+    TEXT@388..389 "$"
+    TEXT@389..390 "$"
+    TEXT@390..391 "$"
+    TEXT@391..392 "$"
+    NEWLINE@392..393 "\n"

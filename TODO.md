@@ -168,10 +168,13 @@ bugs. Minimized reproducers live in
 
 Round-trip failures (`input` -> lossy output):
 
-- [ ] Display-math closing fence *drops* bytes (content loss, not a reorder):
+- [x] Display-math closing fence *drops* bytes (content loss, not a reorder):
   `$$\nx^2 + y\n$$$\n` -> `$$\nx^2 + y\n$$\n`. Also `$$\nx^2 + y\n$$$ra\n`
   -> `$$\nx^2 + y\n$$ra\n` and `$$\nx^2 +$$$$\n\npara\n` ->
-  `$$\nx^2 +$$\n\npara\n`.
+  `$$\nx^2 +$$\n\npara\n`. `try_parse_display_math` consumed a whole closing
+  dollar run while `emit_display_math` only wrote back an opener-length
+  marker. Both delimiters are now exactly `$$` (pandoc's
+  `mathDisplayWith "$$" "$$"`), so surplus dollars stay content or text.
 - [ ] Fenced-div opener mangles the whitespace run before its label, and
   duplicates part of the label: `:::  te\nbody\n:::\n\npara\n` ->
   `::: tee\nbody\n:::\n\npara\n`; `:::: \ty\n:::\n::::\n\npara\n` ->
