@@ -1567,6 +1567,31 @@ impl Formatter {
                                 ctx.in_list_continuation = false;
                             }
                         }
+                        SyntaxKind::LINE_BLOCK => {
+                            // Format the line block to a temp buffer, then
+                            // re-emit each line behind the blockquote prefix.
+                            // Without this the lines escape the quote (dropping
+                            // the `>` prefix), which reparses as a top-level
+                            // line block -- a losslessness break, and inside a
+                            // list item an idempotency break as well.
+                            // `content_prefix` already carries `base_indent`,
+                            // so format at indent 0 to avoid double-indenting.
+                            let saved_output = self.output.clone();
+                            self.output.clear();
+                            self.format_node_sync(child, 0);
+                            let line_block_output = self.output.clone();
+                            self.output = saved_output;
+
+                            self.append_blockquote_prefixed_block(
+                                &line_block_output,
+                                &content_prefix,
+                                &blank_prefix,
+                                None,
+                            );
+                            if let Some(ctx) = self.blockquote_context.as_mut() {
+                                ctx.in_list_continuation = false;
+                            }
+                        }
                         SyntaxKind::DEFINITION_LIST => {
                             // Format the definition list to a temp buffer, then
                             // re-emit each line behind the blockquote prefix so

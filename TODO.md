@@ -254,17 +254,17 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `LINE_BLOCK` arm in the formatter ignored its `indent` argument and
   emitted every `|` line at column 0; it now prefixes each line with the
   container indent. The CST already matched pandoc here, so this was
-  formatter-only. Note that a line block still escapes an enclosing
-  blockquote (`> | foo` formats to `| foo`) --- the blockquote walker's
-  fallback arm does not re-prefix line block lines. That is tracked
-  separately below.
-- [ ] A line block inside a blockquote escapes the quote through the formatter:
-  `> | foo` formats to `| foo` (the `>` is dropped, so the `BlockQuote` is
-  lost), and `- > | foo` formats to `- \n  | foo` and then to `- \| foo`, an
-  idempotency break. The `BLOCK_QUOTE` arm in the formatter re-prefixes
-  paragraphs, lists, and definition lists explicitly but sends `LINE_BLOCK`
-  down the `_ =>` fallback, which emits the lines unprefixed. It needs the
-  same `append_blockquote_prefixed_block` treatment `DEFINITION_LIST` gets.
+  formatter-only.
+- [x] A line block inside a blockquote escapes the quote through the formatter:
+  `> | foo` formatted to `| foo` (the `>` was dropped, so the `BlockQuote`
+  was lost), and `- > | foo` formatted to `- \n  | foo` and then to
+  `- \| foo`, an idempotency break. The `BLOCK_QUOTE` arm re-prefixes
+  paragraphs, lists, and definition lists explicitly but sent `LINE_BLOCK`
+  down the `_ =>` fallback, which emitted the lines unprefixed. `LINE_BLOCK`
+  now gets the same `append_blockquote_prefixed_block` treatment
+  `DEFINITION_LIST` gets, rendering to a temp buffer at indent 0 because
+  `content_prefix` already carries the container indent. The CST already
+  matched pandoc, so this was formatter-only.
 - [ ] Pandoc folds an under-indented lazy line into a line block
   (`- x\n\n  | a\n b |\n` is one `LineBlock [[a, b, |]]`); panache ends the
   line block and emits the lazy line as its own block.
