@@ -198,9 +198,22 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `SetextHeadingParser::detect_prepared`, where it belongs. Still excluded:
   shifted blockquotes inside list items, where `dispatcher_ctx` carries no
   `list_indent_info` and the verdict is therefore untrustworthy.
-- [ ] Under CommonMark, `> a\n> ---\n` should be `BlockQuote [Header 2 "a"]`
-  (pandoc's commonmark reader agrees); panache gives
-  `BlockQuote [Para, HR]`. Lossless, so no fixture pins it.
+- [x] Under CommonMark, `> a\n> ---\n` should be `BlockQuote [Header 2 "a"]`
+  (pandoc's commonmark reader agrees); panache gave `BlockQuote [Para, HR]`.
+  The same-container rule in `SetextHeadingParser::detect_prepared` counted
+  `>` markers on `ctx.next_line`, which the blockquote-carrying dispatch
+  path in `parse_line` hands over already stripped of every marker --- so
+  the count was always 0. It now reads the depth off the raw lookahead line.
+  The same root cause made `a\n> ---\n` a top-level `Header 2` instead of
+  `Para, BlockQuote [HR]`.
+- [ ] Under Pandoc, `a\n> ---\n` should be one `Para` (pandoc reads it as
+  `[Str "a", SoftBreak, Str ">", Space, Str "\8212"]`); panache gives
+  `Header 2 "a"`. Same shape as the CommonMark bug above, but the fix is not
+  the same rule: Pandoc treats a leading marker run on the *text* line as
+  literal text (`> foo\n---\n` is a top-level H2 with the marker included),
+  so the underline's raw depth has to be compared against
+  `ctx.blockquote_depth` alone rather than against the text line's own
+  marker count.
 - [ ] A line block inside a list item loses its indent through the formatter
   (`- x\n\n  | a\n b\n` re-formats to a line block at column 0), which then
   absorbs the following line on reparse and breaks idempotency.

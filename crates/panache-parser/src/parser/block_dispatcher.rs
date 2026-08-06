@@ -3500,6 +3500,11 @@ impl BlockParser for SetextHeadingParser {
         let content = lines.first();
         let line_pos = lines.pos();
         let lines = lines.raw();
+        // The underline's own blockquote depth has to be read off the *raw*
+        // line: `ctx.next_line` reaches us stripped of every `>` marker on
+        // the blockquote-carrying dispatch path, so counting markers on it
+        // would always yield 0. Used by the same-container rule below.
+        let next_line_raw = lines.get(line_pos + 1).copied();
         // Setext headings usually require blank line before (unless at document start),
         // but Pandoc also allows consecutive setext headings without an intervening blank line.
         let follows_setext_heading = if line_pos >= 2 {
@@ -3581,7 +3586,7 @@ impl BlockParser for SetextHeadingParser {
             // top-level setext H2 with the text `> foo`, marker run included,
             // so gate on dialect.
             if ctx.config.dialect == crate::options::Dialect::CommonMark
-                && count_blockquote_markers(next_line).0
+                && next_line_raw.map_or(0, |line| count_blockquote_markers(line).0)
                     != ctx.blockquote_depth + count_blockquote_markers(content).0
             {
                 return None;

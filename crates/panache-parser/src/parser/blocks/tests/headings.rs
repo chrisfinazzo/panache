@@ -338,6 +338,58 @@ fn atx_interrupts_reduced_marker_lazy_list_when_extension_disabled() {
 }
 
 #[test]
+fn setext_forms_inside_blockquote_under_commonmark() {
+    // pandoc -f commonmark on `> a\n> ---`: BlockQuote [Header 2 "a"].
+    // The underline shares the text line's container, so it underlines
+    // rather than closing the quote as a thematic break.
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let input = "> a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(quote.kind(), SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(
+        quote.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::HEADING]
+    );
+}
+
+#[test]
+fn setext_underline_in_deeper_blockquote_is_not_an_underline() {
+    // pandoc -f commonmark on `a\n> ---`: Para "a", BlockQuote
+    // [HorizontalRule]. The underline opens a quote the text line is not
+    // in, so the containers differ and no heading forms.
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    let input = "a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        node.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::PARAGRAPH, SyntaxKind::BLOCK_QUOTE]
+    );
+}
+
+#[test]
 fn setext_underline_mid_paragraph_stays_text_when_extension_disabled() {
     // Pandoc never forms a setext heading mid-paragraph, even with
     // `blank_before_header` disabled: `markdown-blank_before_header` keeps
