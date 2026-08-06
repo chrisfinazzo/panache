@@ -2001,11 +2001,19 @@ impl Formatter {
                 // outer LIST_ITEM / BLOCK_QUOTE walkers re-emit those
                 // prefixes; if we left them in `content` they'd appear
                 // twice in the output.
+                // A LINE_BLOCK_LINE without a LINE_BLOCK_MARKER is a
+                // continuation of the line above (`| a` + `  b` is the single
+                // line `a b`). Re-emitting it with its own `| ` would split
+                // one line into two, so fold it in — as pandoc's own writer
+                // does. Collect the rendered lines first so the fold is a
+                // plain append instead of surgery on `self.output`.
+                let mut rendered: Vec<String> = Vec::new();
                 for child in node.children() {
                     if child.kind() != SyntaxKind::LINE_BLOCK_LINE {
                         continue;
                     }
                     let mut content = String::new();
+                    let mut has_marker = false;
                     let mut past_prefix = false;
                     for elem in child.children_with_tokens() {
                         let kind = elem.kind();
@@ -2019,7 +2027,10 @@ impl Formatter {
                         }
                         past_prefix = true;
                         match kind {
-                            SyntaxKind::LINE_BLOCK_MARKER => continue,
+                            SyntaxKind::LINE_BLOCK_MARKER => {
+                                has_marker = true;
+                                continue;
+                            }
                             SyntaxKind::NEWLINE => break,
                             _ => match &elem {
                                 NodeOrToken::Token(t) => content.push_str(t.text()),
@@ -2027,15 +2038,32 @@ impl Formatter {
                             },
                         }
                     }
-                    let content_trimmed = content.trim();
+                    match rendered.last_mut() {
+                        Some(previous) if !has_marker => {
+                            let continuation = content.trim();
+                            if !continuation.is_empty() {
+                                if !previous.is_empty() {
+                                    previous.push(' ');
+                                }
+                                previous.push_str(continuation);
+                            }
+                        }
+                        // Leading spaces after the marker are significant
+                        // (pandoc renders them as non-breaking spaces), so
+                        // only the trailing side is trimmed.
+                        _ => rendered.push(content.trim_end().to_string()),
+                    }
+                }
+
+                for line in &rendered {
                     self.output.push_str(&line_indent);
-                    if content_trimmed.is_empty() {
+                    if line.trim().is_empty() {
                         // Empty line block line - just output "|"
                         self.output.push('|');
                     } else {
                         // Normal line - output "| " followed by content
                         self.output.push_str("| ");
-                        self.output.push_str(content.trim_end());
+                        self.output.push_str(line);
                     }
                     self.output.push('\n');
                 }

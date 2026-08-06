@@ -1,0 +1,3 @@
+[ LineBlock
+    [ [ Str "a" , Space , Str "|" , Space , Str "b" ] ]
+]

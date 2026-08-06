@@ -362,6 +362,7 @@ golden_test_cases!(
     latex_environment,
     lazy_continuation_deep,
     leading_blanklines,
+    line_block_continuation_line,
     line_block_in_blockquote,
     line_blocks,
     list_alpha_nested_idempotency_143,

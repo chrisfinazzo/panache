@@ -1,0 +1,13 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..8
+  LINE_BLOCK@0..8
+    LINE_BLOCK_LINE@0..4
+      LINE_BLOCK_MARKER@0..2 "| "
+      TEXT@2..3 "a"
+      NEWLINE@3..4 "\n"
+    LINE_BLOCK_LINE@4..8
+      TEXT@4..7 "  b"
+      NEWLINE@7..8 "\n"

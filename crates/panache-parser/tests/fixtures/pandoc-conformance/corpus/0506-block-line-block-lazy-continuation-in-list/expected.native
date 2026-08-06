@@ -1,0 +1,7 @@
+[ BulletList
+    [ [ Para [ Str "x" ]
+      , LineBlock
+          [ [ Str "a" , Space , Str "b" , Space , Str "|" ] ]
+      ]
+    ]
+]

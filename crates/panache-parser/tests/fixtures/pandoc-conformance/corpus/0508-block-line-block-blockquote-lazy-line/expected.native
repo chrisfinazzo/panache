@@ -1,0 +1,5 @@
+[ BlockQuote
+    [ LineBlock [ [ Str "a" ] ]
+    , Para [ Str "b" , Space , Str "|" ]
+    ]
+]

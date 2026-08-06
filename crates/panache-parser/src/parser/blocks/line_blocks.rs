@@ -6,7 +6,7 @@ use super::blockquotes::strip_n_blockquote_markers;
 use super::container_prefix::{
     StrippedLines, advance_columns, bq_outer_of_list, strip_list_indent,
 };
-use crate::parser::utils::container_stack::byte_index_at_column;
+use crate::parser::utils::container_stack::{byte_index_at_column, leading_indent};
 use crate::parser::utils::helpers::strip_newline;
 use crate::parser::utils::inline_emission;
 
@@ -72,7 +72,7 @@ pub(crate) fn parse_line_block(
             let peek = window.peek_prefix_at(pos);
             if parse_line_block_line_marker(peek).is_some() {
                 LineKind::Marker
-            } else if peek.starts_with(' ') && !peek.trim_start().starts_with("| ") {
+            } else if continues_previous_line(peek, raw_line, list_content_col) {
                 LineKind::Continuation
             } else {
                 break;
@@ -142,6 +142,34 @@ pub(crate) fn parse_line_block(
 enum LineKind {
     Marker,
     Continuation,
+}
+
+/// Does this line continue the line above rather than open a line of its own?
+///
+/// Pandoc's rule is "the line starts with a space"
+/// (`many (try (char ' ' >> anyLine))` in `lineBlockLine`), applied to the
+/// text left after the enclosing containers have taken their prefix. `peek`
+/// is that text, so it decides the ordinary cases.
+///
+/// The list case needs the raw line too. Pandoc gobbles a list item's
+/// continuation indent all-or-nothing (`optional (gobbleSpaces n)`): a lazy
+/// line indented *less* than the content column keeps every leading space it
+/// had, so it still reads as a continuation. Panache's strip is greedy and
+/// eats what it can, so `" b |"` inside a two-column item reaches us as
+/// `"b |"` — recover the pre-strip shape from `raw_line`. A line indented
+/// *exactly* to the content column is not a continuation: there the gobble
+/// succeeds and consumes all of it.
+///
+/// A whitespace-only line satisfies the rule and folds in as an empty
+/// continuation, which is also what pandoc does — `| a\n  \n| b` is one line
+/// block of two lines, not two line blocks.
+fn continues_previous_line(peek: &str, raw_line: &str, list_content_col: usize) -> bool {
+    if peek.starts_with(' ') && !peek.trim_start().starts_with("| ") {
+        return true;
+    }
+    list_content_col > 0
+        && raw_line.starts_with([' ', '\t'])
+        && leading_indent(raw_line).0 < list_content_col
 }
 
 /// Strip and emit the active container prefix on the dispatch line (line 0).
@@ -313,6 +341,32 @@ mod tests {
         let new_pos = parse_line_block(&window, &mut builder, &ParserOptions::default());
 
         assert_eq!(new_pos, 3);
+    }
+
+    #[test]
+    fn continuation_needs_leading_space_at_top_level() {
+        // list_content_col == 0: only the stripped tail decides.
+        assert!(continues_previous_line("  b", "  b", 0));
+        assert!(!continues_previous_line("b", "b", 0));
+        assert!(!continues_previous_line("\n", "\n", 0));
+        // A whitespace-only line reads as an empty continuation, matching
+        // pandoc: `| a\n  \n| b` is one line block of two lines.
+        assert!(continues_previous_line("   \n", "   \n", 0));
+    }
+
+    #[test]
+    fn under_indented_lazy_line_continues_inside_a_list_item() {
+        // Pandoc's `gobbleSpaces 2` fails on a one-space line, so `" b |"`
+        // keeps its indent and continues the line above. Panache's strip is
+        // greedy and hands us `"b |"`, hence the raw-line check.
+        assert!(continues_previous_line("b |", " b |", 2));
+        // Indented past the content column: still a continuation.
+        assert!(continues_previous_line(" b |", "   b |", 2));
+        // Indented exactly to the content column: the gobble succeeds and
+        // consumes all of it, so this opens a new block instead.
+        assert!(!continues_previous_line("b |", "  b |", 2));
+        // No indent at all: never a continuation.
+        assert!(!continues_previous_line("b |", "b |", 2));
     }
 
     #[test]

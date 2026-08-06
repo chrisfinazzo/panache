@@ -2404,23 +2404,35 @@ fn advance_col(start: usize, s: &str) -> usize {
 }
 
 fn line_block(node: &SyntaxNode) -> Block {
-    let lines: Vec<Vec<Inline>> = node
+    // A `LINE_BLOCK_LINE` without a `LINE_BLOCK_MARKER` is a continuation
+    // line: pandoc's `lineBlockLine` joins it onto the marker line above with
+    // `unwords`, so `| a` + `  b` is the single line `a b`, not two lines.
+    let mut lines: Vec<Vec<Inline>> = Vec::new();
+    for line in node
         .children()
         .filter(|c| c.kind() == SyntaxKind::LINE_BLOCK_LINE)
-        .map(|line| {
-            let mut out = Vec::new();
-            for el in line.children_with_tokens() {
-                match el {
-                    NodeOrToken::Token(t) => match t.kind() {
-                        SyntaxKind::LINE_BLOCK_MARKER | SyntaxKind::NEWLINE => {}
-                        _ => push_token_inline(&t, &mut out),
-                    },
-                    NodeOrToken::Node(n) => out.push(inline_from_node(&n)),
-                }
+    {
+        let mut out = Vec::new();
+        let mut has_marker = false;
+        for el in line.children_with_tokens() {
+            match el {
+                NodeOrToken::Token(t) => match t.kind() {
+                    SyntaxKind::LINE_BLOCK_MARKER => has_marker = true,
+                    SyntaxKind::NEWLINE => {}
+                    _ => push_token_inline(&t, &mut out),
+                },
+                NodeOrToken::Node(n) => out.push(inline_from_node(&n)),
             }
-            coalesce_inlines(out)
-        })
-        .collect();
+        }
+        match lines.last_mut() {
+            Some(previous) if !has_marker => {
+                previous.push(Inline::Space);
+                previous.append(&mut out);
+                *previous = coalesce_inlines(std::mem::take(previous));
+            }
+            _ => lines.push(coalesce_inlines(out)),
+        }
+    }
     Block::LineBlock(lines)
 }
 

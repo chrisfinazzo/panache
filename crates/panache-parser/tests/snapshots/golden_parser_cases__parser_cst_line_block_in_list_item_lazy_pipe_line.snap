@@ -12,12 +12,13 @@ DOCUMENT@0..16
         NEWLINE@3..4 "\n"
       BLANK_LINE@4..5
         BLANK_LINE@4..5 "\n"
-      LINE_BLOCK@5..11
+      LINE_BLOCK@5..16
         LINE_BLOCK_LINE@5..11
           WHITESPACE@5..7 "  "
           LINE_BLOCK_MARKER@7..9 "| "
           TEXT@9..10 "a"
           NEWLINE@10..11 "\n"
-      PLAIN@11..16
-        TEXT@11..15 " b |"
-        NEWLINE@15..16 "\n"
+        LINE_BLOCK_LINE@11..16
+          WHITESPACE@11..12 " "
+          TEXT@12..15 "b |"
+          NEWLINE@15..16 "\n"

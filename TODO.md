@@ -265,9 +265,37 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `DEFINITION_LIST` gets, rendering to a temp buffer at indent 0 because
   `content_prefix` already carries the container indent. The CST already
   matched pandoc, so this was formatter-only.
-- [ ] Pandoc folds an under-indented lazy line into a line block
-  (`- x\n\n  | a\n b |\n` is one `LineBlock [[a, b, |]]`); panache ends the
-  line block and emits the lazy line as its own block.
+- [x] Pandoc folds an under-indented lazy line into a line block
+  (`- x\n\n  | a\n b |\n` is one `LineBlock [[a, b, |]]`); panache ended the
+  line block and emitted the lazy line as its own block. Two causes. (1)
+  Pandoc gobbles a list item's continuation indent all-or-nothing
+  (`optional (gobbleSpaces n)`), so a lazy line indented *less* than the
+  content column keeps every leading space it had and still reads as a
+  continuation; panache's strip is greedy, so the classification now also
+  consults the raw line (`continues_previous_line`). A line indented
+  *exactly* to the content column still opens a new block. (2) Continuation
+  lines were projected and formatted as lines of their own. A
+  `LINE_BLOCK_LINE` with no `LINE_BLOCK_MARKER` now folds into the line
+  above --- with a `Space` in `pandoc_ast.rs`, and by appending to the
+  rendered line in the formatter's `LINE_BLOCK` arm, which previously gave
+  the continuation its own `|` and so turned one line into two. Corpus 506
+  and 507.
+- [ ] Pandoc drops a lazy line's indentation when its blockquote reader folds it
+  back into the quote, so the line cannot continue a line block:
+  `> | a\n b |\n` is `BlockQuote [LineBlock [[a]], Para [b, |]]`, and
+  `> | a\n  | b\n` is two line-block lines, not one folded line. Panache
+  keeps the leading space and reads a continuation in both. Classifying the
+  lazy line is easy; keeping it inside the quote is not --- panache only
+  holds a quote open across a lazy line for an open `Paragraph`, `ListItem`,
+  or `DEFINITION_LIST`, so the same gap already shows up after a heading
+  (`> # h\n b |\n` lets `b |` escape to the top level). Wants the general
+  pandoc-dialect blockquote-laziness rule. Corpus 508, blocked.
+- [ ] Pandoc tries `many (char ' ' >> anyLine)` *before* the next `| ` marker
+  line, so an indented marker line continues the line above: `| a\n  | b\n`
+  is one `LineBlock [[a, |, b]]`. Panache checks for a marker first and
+  reads two lines. Swapping the order needs the blockquote rule above first,
+  since inside a quote the lazy line's indent is dropped and
+  `> | a\n  | b\n` must stay two lines. Corpus 509, blocked.
 
 ### Architecture
 
