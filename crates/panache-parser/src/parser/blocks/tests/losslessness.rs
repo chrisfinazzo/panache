@@ -487,3 +487,38 @@ fn test_losslessness_fenced_div_open_after_list_item_line() {
         "a `:::` opener must not interrupt buffered list-item text, got:\n{tree:#?}"
     );
 }
+
+#[test]
+fn test_losslessness_setext_underline_caps_nested_blockquote() {
+    // The capped depth leaves the surplus `>` in the heading's text, so the
+    // marker bytes are re-emitted by the setext parser rather than by the
+    // blockquote path. Losslessness pins that hand-off.
+    let input = "> > a\n> ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn test_losslessness_capped_blockquote_markers_without_spaces() {
+    let input = ">> a\n>---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn test_losslessness_capped_blockquote_three_levels_with_trailing_line() {
+    let input = "> > > a\n> ---\n> b\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn test_losslessness_capped_blockquote_inside_open_quote() {
+    let input = "> a\n>\n> > b\n> ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+}

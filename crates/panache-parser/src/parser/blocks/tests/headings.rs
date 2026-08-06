@@ -569,3 +569,320 @@ fn parses_mmd_header_identifier_before_atx_closing_hashes() {
     assert_eq!(attr.text().to_string(), "[my id]");
     assert_eq!(node.text().to_string(), input);
 }
+
+// ---------------------------------------------------------------------------
+// Blockquote depth capping (pandoc's one-marker-per-line recursion)
+//
+// `blockQuote` strips exactly one `>` per line and re-parses the rest, and
+// `setextHeader` runs before it in pandoc's reader order — so an underline
+// carrying fewer markers than its text line caps the quote and the surplus
+// `>` becomes literal heading text. See `Parser::blockquote_depth_cap`.
+// ---------------------------------------------------------------------------
+
+fn commonmark_options() -> ParserOptions {
+    ParserOptions {
+        flavor: Flavor::CommonMark,
+        dialect: Dialect::for_flavor(Flavor::CommonMark),
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    }
+}
+
+/// Kinds of `node`'s direct children.
+fn child_kinds(node: &SyntaxNode) -> Vec<SyntaxKind> {
+    node.children().map(|child| child.kind()).collect()
+}
+
+#[test]
+fn setext_underline_caps_nested_blockquote_depth_under_pandoc() {
+    // pandoc -f markdown on `> > a\n> ---`:
+    // BlockQuote [Header 2 [Str ">", Space, Str "a"]].
+    let config = ParserOptions::default();
+    let input = "> > a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(child_kinds(&node), vec![SyntaxKind::BLOCK_QUOTE]);
+    let quote = node.children().next().unwrap();
+    assert_eq!(child_kinds(&quote), vec![SyntaxKind::HEADING]);
+    assert!(
+        quote
+            .descendants()
+            .all(|n| n.kind() != SyntaxKind::BLOCK_QUOTE || n == quote),
+        "the underline's single marker caps the quote at depth 1"
+    );
+    assert_eq!(
+        get_heading_content(&node).as_deref(),
+        Some("> a"),
+        "the surplus marker is literal heading text"
+    );
+}
+
+#[test]
+fn setext_equals_underline_caps_nested_blockquote_depth_under_pandoc() {
+    // pandoc -f markdown on `> > a\n> ===`:
+    // BlockQuote [Header 1 [Str ">", Space, Str "a"]]. `===` is not a
+    // thematic break, so only the setext path can claim this line.
+    let config = ParserOptions::default();
+    let input = "> > a\n> ===\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(child_kinds(&quote), vec![SyntaxKind::HEADING]);
+    assert_eq!(get_heading_content(&node).as_deref(), Some("> a"));
+}
+
+#[test]
+fn setext_underline_caps_three_blockquotes_to_one_under_pandoc() {
+    // pandoc -f markdown on `> > > a\n> ---`: BlockQuote [Header 2
+    // [Str ">", Space, Str ">", Space, Str "a"]] — both surplus markers
+    // land in the heading text.
+    let config = ParserOptions::default();
+    let input = "> > > a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(child_kinds(&quote), vec![SyntaxKind::HEADING]);
+    assert_eq!(get_heading_content(&node).as_deref(), Some("> > a"));
+}
+
+#[test]
+fn capped_blockquote_keeps_following_line_in_the_same_quote() {
+    // pandoc -f markdown on `> > a\n> ---\n> b`:
+    // BlockQuote [Header 2 ["> a"], Para [b]].
+    let config = ParserOptions::default();
+    let input = "> > a\n> ---\n> b\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(
+        child_kinds(&quote),
+        vec![SyntaxKind::HEADING, SyntaxKind::PARAGRAPH]
+    );
+}
+
+#[test]
+fn setext_underline_caps_depth_from_inside_an_open_blockquote() {
+    // pandoc -f markdown on `> a\n>\n> > b\n> ---`:
+    // BlockQuote [Para [a], Header 2 ["> b"]]. The cap equals the depth
+    // already on the stack, so no new level opens at all.
+    let config = ParserOptions::default();
+    let input = "> a\n>\n> > b\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(
+        child_kinds(&quote),
+        vec![
+            SyntaxKind::PARAGRAPH,
+            SyntaxKind::BLANK_LINE,
+            SyntaxKind::HEADING
+        ]
+    );
+    assert_eq!(get_heading_content(&node).as_deref(), Some("> b"));
+}
+
+#[test]
+fn setext_underline_caps_to_its_own_depth_not_to_one() {
+    // pandoc -f markdown on `> a\n>\n> > > b\n> > ---`:
+    // BlockQuote [Para [a], BlockQuote [Header 2 ["> b"]]] — the cap is
+    // the underline's depth (2), not the outermost level.
+    let config = ParserOptions::default();
+    let input = "> a\n>\n> > > b\n> > ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(
+        child_kinds(&outer),
+        vec![
+            SyntaxKind::PARAGRAPH,
+            SyntaxKind::BLANK_LINE,
+            SyntaxKind::BLOCK_QUOTE
+        ]
+    );
+    let inner = outer
+        .children()
+        .find(|n| n.kind() == SyntaxKind::BLOCK_QUOTE)
+        .unwrap();
+    assert_eq!(child_kinds(&inner), vec![SyntaxKind::HEADING]);
+    assert_eq!(get_heading_content(&node).as_deref(), Some("> b"));
+}
+
+#[test]
+fn capped_blockquote_handles_markers_without_trailing_spaces() {
+    // Marker runs written without spaces cap the same way: pandoc reads
+    // both `> > a\n>---` and `>> a\n> ---` as BlockQuote [Header 2 ["> a"]].
+    let config = ParserOptions::default();
+    for input in ["> > a\n>---\n", ">> a\n> ---\n"] {
+        let node = Parser::new(input, &config).parse();
+        assert_eq!(
+            node.text().to_string(),
+            input,
+            "parser must remain lossless for {input:?}"
+        );
+        let quote = node.children().next().unwrap();
+        assert_eq!(
+            child_kinds(&quote),
+            vec![SyntaxKind::HEADING],
+            "unexpected shape for {input:?}"
+        );
+        assert_eq!(get_heading_content(&node).as_deref(), Some("> a"));
+    }
+}
+
+#[test]
+fn underline_matching_full_depth_keeps_both_quotes_under_pandoc() {
+    // pandoc -f markdown on `> > a\n> > ---`:
+    // BlockQuote [BlockQuote [Header 2 [Str "a"]]]. The underline reaches
+    // the text line's own depth, so there is nothing to cap.
+    let config = ParserOptions::default();
+    let input = "> > a\n> > ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
+    let inner = outer.children().next().unwrap();
+    assert_eq!(child_kinds(&inner), vec![SyntaxKind::HEADING]);
+    assert_eq!(get_heading_content(&node).as_deref(), Some("a"));
+}
+
+#[test]
+fn spaced_thematic_break_does_not_cap_blockquote_depth() {
+    // pandoc -f markdown on `> > a\n> - - -`: BlockQuote [BlockQuote [Para
+    // [a, SoftBreak, "- - -"]]]. `- - -` is not a setext underline, and
+    // `hrule` ranks *below* `blockQuote`, so nothing caps the depth.
+    let config = ParserOptions::default();
+    let input = "> > a\n> - - -\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
+    assert!(node.descendants().all(|n| n.kind() != SyntaxKind::HEADING));
+}
+
+#[test]
+fn definition_marker_below_blockquote_rank_does_not_cap_depth() {
+    // pandoc -f markdown on `> > a\n: b` keeps BOTH quotes, because
+    // `definitionList` ranks below `blockQuote` in the reader order. This
+    // pins the rank rule: capping on "the winner isn't the blockquote
+    // parser" would wrongly collapse this to one quote, since
+    // `BlockQuoteParser` declines outright at a non-zero probe depth.
+    let config = ParserOptions::default();
+    let input = "> > a\n: b\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(outer.kind(), SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
+}
+
+#[test]
+fn blank_line_before_underline_does_not_cap_depth() {
+    // pandoc -f markdown on `> > a\n\n> ---`: two separate quotes, the
+    // second holding a thematic break. The blank line ends the run, so
+    // the underline never belongs to the first quote's text line.
+    let config = ParserOptions::default();
+    let input = "> > a\n\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        child_kinds(&node),
+        vec![
+            SyntaxKind::BLOCK_QUOTE,
+            SyntaxKind::BLANK_LINE,
+            SyntaxKind::BLOCK_QUOTE
+        ]
+    );
+}
+
+#[test]
+fn commonmark_nested_underline_still_closes_the_inner_quote() {
+    // The cap is Pandoc-only. cmark on `> > a\n> ---` nests two quotes and
+    // makes the underline a thematic break in the outer one: capping here
+    // would be wrong, because CommonMark reads the surplus `>` as a real
+    // container rather than as literal text.
+    let config = commonmark_options();
+    let input = "> > a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(
+        child_kinds(&outer),
+        vec![SyntaxKind::BLOCK_QUOTE, SyntaxKind::HORIZONTAL_RULE]
+    );
+}
+
+#[test]
+fn commonmark_nested_underline_at_full_depth_is_a_heading() {
+    // cmark on `> > a\n> > ---`: <blockquote><blockquote><h2>a</h2>.
+    // Guards the CommonMark side of the dialect gate — the probe would
+    // otherwise claim at depth 1 and collapse this to a single quote.
+    let config = commonmark_options();
+    let input = "> > a\n> > ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let outer = node.children().next().unwrap();
+    assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
+    let inner = outer.children().next().unwrap();
+    assert_eq!(child_kinds(&inner), vec![SyntaxKind::HEADING]);
+    assert_eq!(get_heading_content(&node).as_deref(), Some("a"));
+}

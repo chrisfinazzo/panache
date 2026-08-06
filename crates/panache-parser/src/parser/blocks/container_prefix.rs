@@ -190,6 +190,25 @@ impl ContainerPrefix {
         }
     }
 
+    /// Clone this prefix with `n` additional `BlockQuoteMarker` ops
+    /// appended — the prefix the stack *would* produce if `n` more
+    /// blockquotes were opened on top of it.
+    ///
+    /// Appending is faithful to [`Self::from_stack`] because a newly
+    /// opened blockquote always enters at the top of the container
+    /// stack, so it strips last: a stack ending in `ListItem` flushes
+    /// its pending `ListAdvance` before the `BlockQuoteMarker` either
+    /// way. Used by the blockquote depth-cap probe in `core.rs`, which
+    /// asks the block registry what it would match at a hypothetical
+    /// depth before committing to opening that many levels.
+    pub fn with_extra_blockquotes(&self, n: usize) -> Self {
+        let mut next = self.clone();
+        for _ in 0..n {
+            next.ops.push(StripOp::BlockQuoteMarker);
+        }
+        next
+    }
+
     /// Build a prefix that reproduces an explicit set of container scalars
     /// — the inverse of the [`Self::bq_depth`] / [`Self::list_content_col`]
     /// / [`Self::content_indent`] accessors and [`bq_outer_of_list`]. Used
@@ -967,6 +986,27 @@ mod tests {
         assert_eq!(p.strip(">> foo"), "> foo");
         assert_eq!(p.strip("> "), "");
         assert_eq!(p.strip("plain"), "plain");
+    }
+
+    #[test]
+    fn with_extra_blockquotes_matches_a_deeper_stack() {
+        let base = ContainerPrefix::from_stack(&[Container::BlockQuote {}], false);
+        let deeper = base.with_extra_blockquotes(1);
+        assert_eq!(deeper.bq_depth(), 2);
+        assert_eq!(deeper.strip("> > a"), "a");
+        // The probe reads line 0 through the emission-side strip, which is
+        // what `StrippedLines::first` and `dispatch_tail` use.
+        assert_eq!(base.strip_line_0_for_emission("> > a"), "> a");
+        assert_eq!(deeper.strip_line_0_for_emission("> > a"), "a");
+        // Equivalent to building the prefix from the stack it models.
+        let from_stack = ContainerPrefix::from_stack(
+            &[Container::BlockQuote {}, Container::BlockQuote {}],
+            false,
+        );
+        assert_eq!(deeper.ops().len(), from_stack.ops().len());
+        assert_eq!(deeper.bq_depth(), from_stack.bq_depth());
+        // Zero extra levels is the identity.
+        assert_eq!(base.with_extra_blockquotes(0).bq_depth(), 1);
     }
 
     #[test]

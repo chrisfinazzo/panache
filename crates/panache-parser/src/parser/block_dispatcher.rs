@@ -3702,6 +3702,9 @@ fn prev_line_is_terminal_one_liner(
 /// than numeric priorities.
 pub(crate) struct BlockParserRegistry {
     parsers: Vec<Box<dyn BlockParser>>,
+    /// Index of [`BlockQuoteParser`] in `parsers`, cached so callers can
+    /// compare a match's rank against it. See [`Self::outranks_blockquote`].
+    blockquote_index: usize,
 }
 
 impl BlockParserRegistry {
@@ -3797,7 +3800,29 @@ impl BlockParserRegistry {
             Box::new(ReferenceDefinitionParser),
         ];
 
-        Self { parsers }
+        let blockquote_index = parsers
+            .iter()
+            .position(|p| matches!(p.effect(), BlockEffect::OpenBlockQuote))
+            .expect("registry must contain a blockquote parser");
+
+        Self {
+            parsers,
+            blockquote_index,
+        }
+    }
+
+    /// True when `block_match`'s parser precedes [`BlockQuoteParser`] in the
+    /// registry — pandoc's reader would have tried it before `blockQuote`,
+    /// so it wins the line.
+    ///
+    /// Rank, not effect, is the right test: `BlockQuoteParser` declines
+    /// outright once `ctx.blockquote_depth > 0`, so at any probe depth
+    /// `k >= 1` its silence is an artifact rather than a verdict, and
+    /// "the winner isn't the blockquote parser" would wrongly let
+    /// lower-ranked parsers (definition lists, thematic breaks) claim a
+    /// line pandoc keeps inside the quote.
+    pub fn outranks_blockquote(&self, block_match: &PreparedBlockMatch) -> bool {
+        block_match.parser_index < self.blockquote_index
     }
 
     /// Like `detect()`, but allows parsers to return cached payload for emission.

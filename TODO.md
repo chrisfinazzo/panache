@@ -213,16 +213,33 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   text (`> foo\n---\n` is a top-level H2 with the marker included), so the
   underline's raw depth is now compared against `ctx.blockquote_depth`
   alone. Also fixes `> a\n> > ---\n` and the indented `a\n   > ---\n`.
-- [ ] Under Pandoc, `> > a\n> ---\n` should be
-  `BlockQuote [Header 2 [">", Space, "a"]]` --- pandoc commits a
-  blockquote's depth per *block*, so the one-marker underline caps the quote
-  at depth 1 and the surplus `>` on the text line becomes literal heading
-  text. Panache opens both quotes on the text line and can only see depth
-  per *line*, so it gives `BlockQuote [BlockQuote [Para]]`. Fixing this
-  needs blockquote depth to be decided with lookahead over the whole run of
-  quoted lines, not a same-container tweak in `SetextHeadingParser`.
-  Lossless either way; the CommonMark reading of the same input is already
-  correct.
+- [x] Under Pandoc, `> > a\n> ---\n` should be
+  `BlockQuote [Header 2 [">", Space, "a"]]`; panache gave
+  `BlockQuote [BlockQuote [Para]]`. Pandoc's `blockQuote` strips exactly
+  *one* `>` per line and recursively re-parses the rest, so every parser
+  ahead of it in the reader order --- `setextHeader` among them --- gets a
+  shot at content that still begins with `>`. `Parser::blockquote_depth_cap`
+  now probes the registry at each depth the line would pass through and
+  stops at the first winner that outranks `BlockQuoteParser`; that depth
+  caps the open and the surplus markers stay in the content as literal text.
+  Rank, not effect, is the test: `BlockQuoteParser` declines outright at a
+  non-zero `ctx.blockquote_depth`, so lower-ranked parsers would otherwise
+  win by default (`> > a\n: b\n` keeps both quotes in pandoc).
+  Pandoc-dialect only --- CommonMark reads the surplus `>` as a real
+  container, not as text.
+- [ ] Under Pandoc, `> > a | b\n> ---|---\n` should be `BlockQuote [Table …]`
+  with `> a` as the first cell (`table` outranks `blockQuote`, so the depth
+  cap above applies); panache gives `BlockQuote [BlockQuote [Para]]` because
+  `TableParser` does not claim the line at the probe depth. Same root cause
+  as the setext case, different claimant.
+- [ ] Under Pandoc, `> > a\n: b\n` should be
+  `BlockQuote [BlockQuote [DefinitionList [(a, [[Plain b]])]]]`; panache
+  drops the definition body and lets `: b` escape the quotes entirely as a
+  top-level `Para`. Unrelated to blockquote depth (the quote nesting is
+  already right, and
+  `blockquote_depth_cap_declines_below_blockquote_rank_pandoc` pins it) ---
+  that fixture's snapshot records the wrong `: b` placement until this is
+  fixed.
 - [ ] A line block inside a list item loses its indent through the formatter
   (`- x\n\n  | a\n b\n` re-formats to a line block at column 0), which then
   absorbs the following line on reparse and breaks idempotency.

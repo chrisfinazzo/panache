@@ -2414,6 +2414,150 @@ impl<'a> Parser<'a> {
         marker_info
     }
 
+    /// Build a `BlockContext` describing the current line *as if* the
+    /// container stack already carried `bq_depth` blockquotes.
+    ///
+    /// Field-for-field mirror of the context `parse_inner_content` builds
+    /// (see the `BlockContext { .. }` literal and the blank/doc-start
+    /// fill-in that follows it) — the two must stay in sync, because a
+    /// verdict this probe reaches has to survive re-detection there. The
+    /// deliberate differences:
+    ///
+    /// - `blockquote_depth` is the hypothetical `bq_depth`, not the stack's.
+    /// - `next_line` is stripped of *every* marker, matching the inner
+    ///   context. `parse_line`'s own context passes the raw next line
+    ///   instead, which would make `SetextHeadingParser`'s leading-byte
+    ///   gate reject any underline still carrying a `>`.
+    /// - `has_blank_before`'s blockquote clause also fires when this probe
+    ///   would open a level, since that is what the stack looks like at
+    ///   re-detection time.
+    /// - `after_metadata_block` is read, never taken: a probe must not
+    ///   consume parser state.
+    fn probe_block_context(
+        &self,
+        bq_depth: usize,
+        current_bq_depth: usize,
+        content: &'a str,
+    ) -> BlockContext<'a> {
+        let has_blank_before = if self.pos == 0 || self.after_metadata_block {
+            true
+        } else {
+            let prev_line = self.lines[self.pos - 1];
+            let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
+            let (prev_inner_no_nl, _) = strip_newline(prev_inner);
+            let prev_is_fenced_div_open = self.config.extensions.fenced_divs
+                && fenced_divs::try_parse_div_fence_open(
+                    strip_n_blockquote_markers(prev_inner_no_nl, prev_bq_depth).trim_start(),
+                )
+                .is_some();
+
+            is_blank_line(prev_line)
+                || prev_is_fenced_div_open
+                || bq_depth > current_bq_depth
+                || matches!(self.containers.last(), Some(Container::BlockQuote { .. }))
+                || !self.previous_block_requires_blank_before_heading()
+        };
+
+        let at_document_start = self.pos == 0 && bq_depth == 0;
+        let prev_line_blank = self.pos > 0 && {
+            let prev_line = self.lines[self.pos - 1];
+            let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
+            is_blank_line(prev_line) || (prev_bq_depth > 0 && is_blank_line(prev_inner))
+        };
+
+        BlockContext {
+            has_blank_before,
+            has_blank_before_strict: at_document_start || prev_line_blank,
+            at_document_start,
+            in_fenced_div: self.in_fenced_div(),
+            fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
+            fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
+            myst_directive_closer: self.innermost_myst_directive_closer(),
+            blockquote_depth: bq_depth,
+            config: self.config,
+            diags: self.diagnostics.clone(),
+            content_indent: 0,
+            indent_to_emit: None,
+            list_indent_info: if lists::in_list(&self.containers) {
+                let content_col = paragraphs::current_content_col(&self.containers);
+                (content_col > 0).then_some(super::block_dispatcher::ListIndentInfo { content_col })
+            } else {
+                None
+            },
+            in_list: lists::in_list(&self.containers),
+            in_definition_list: definition_lists::in_definition_list(&self.containers),
+            in_marker_only_list_item: matches!(
+                self.containers.last(),
+                Some(Container::ListItem {
+                    marker_only: true,
+                    ..
+                })
+            ),
+            list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
+            paragraph_open: self.is_paragraph_open(),
+            next_line: (self.pos + 1 < self.lines.len())
+                .then(|| count_blockquote_markers(self.lines[self.pos + 1]).1),
+            open_alpha_hint: lists::open_list_hint_at_indent(
+                &self.containers,
+                leading_indent(content).0,
+            ),
+        }
+    }
+
+    /// How many blockquote levels this line may open, when fewer than its
+    /// `>` count.
+    ///
+    /// Pandoc's `blockQuote` strips exactly *one* `>` per line of a quoted
+    /// run and recursively re-parses the remainder, so every parser ahead
+    /// of `blockQuote` in the reader order gets a shot at content that
+    /// still begins with `>`. `setextHeader` is one of those, which is why
+    /// `pandoc -f markdown -t native` reads `> > a\n> ---\n` as
+    /// `BlockQuote [Header 2 [Str ">", Space, Str "a"]]` — the underline's
+    /// single marker caps the quote at depth 1 and the surplus `>` becomes
+    /// literal heading text.
+    ///
+    /// Counting markers per line, as this parser does, would open both
+    /// quotes. So probe the registry at each depth the line would pass
+    /// through and stop at the first one whose winner outranks
+    /// `BlockQuoteParser`; that depth is the cap. `k == bq_depth` is
+    /// excluded, so "nothing claims" is bit-identical to counting.
+    ///
+    /// Pandoc-dialect only, and this one *is* a dialect difference rather
+    /// than a parser's own gate. Capping presumes the surplus markers are
+    /// literal text, which is true only under Pandoc. CommonMark reads
+    /// them as real containers, and `SetextHeadingParser` says so by
+    /// folding the content's own markers into its same-container
+    /// comparison — so at probe depth `k` it answers about depth
+    /// `k + own_markers`, and its "yes" cannot be read as a verdict for
+    /// `k`. Without this gate `> > a\n> > ---\n` collapses to a single
+    /// quote under CommonMark, where `cmark` nests two.
+    fn blockquote_depth_cap(&self, current_bq_depth: usize, bq_depth: usize) -> Option<usize> {
+        if self.config.dialect != crate::options::Dialect::Pandoc {
+            return None;
+        }
+
+        // A capped line re-enters `parse_inner_content` with its surplus
+        // markers still in the content, where the content-indent blockquote
+        // path would consume them a second time. Leave those stacks alone.
+        if self.content_container_indent_to_strip() != 0 {
+            return None;
+        }
+
+        let base =
+            ContainerPrefix::from_stack(&self.containers.stack, self.dispatch_list_marker_consumed);
+        for k in current_bq_depth.max(1)..bq_depth {
+            let prefix = base.with_extra_blockquotes(k - current_bq_depth);
+            let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
+            let ctx = self.probe_block_context(k, current_bq_depth, stripped.first());
+            if let Some(block_match) = self.block_registry.detect_prepared(&ctx, &stripped)
+                && self.block_registry.outranks_blockquote(&block_match)
+            {
+                return Some(k);
+            }
+        }
+        None
+    }
+
     /// Detect blockquote markers that begin at list-content indentation instead
     /// of column 0 on the physical line.
     fn shifted_blockquote_from_list<'b>(
@@ -2632,7 +2776,7 @@ impl<'a> Parser<'a> {
         };
 
         let mut registry_claims_raw_line = false;
-        let blockquote_payload = if let Some(dispatcher_ctx) = dispatcher_ctx.as_ref() {
+        let mut blockquote_payload = if let Some(dispatcher_ctx) = dispatcher_ctx.as_ref() {
             let prefix = ContainerPrefix::from_ctx(dispatcher_ctx);
             let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
             self.block_registry
@@ -2855,6 +2999,29 @@ impl<'a> Parser<'a> {
         // block to the registry rather than a quote inside the item.
         if registry_claims_raw_line && bq_depth > 0 && !used_shifted_bq {
             return self.parse_inner_content(line, None);
+        }
+
+        // Same rule as the hatch above, generalized past depth 0: pandoc
+        // strips one `>` per line and re-parses, so a higher-ranked parser
+        // can claim the line at any depth this one would pass through, not
+        // just at the depth the stack currently sits at. Cap the open here
+        // and the surplus markers stay in `inner_content`, where the
+        // claiming parser re-emits them as its own bytes.
+        if bq_depth > current_bq_depth
+            && !used_shifted_bq
+            && let Some(cap) = self.blockquote_depth_cap(current_bq_depth, bq_depth)
+        {
+            bq_depth = cap;
+            inner_content = blockquotes::strip_n_blockquote_markers(line, cap);
+            // The dispatcher fork below emits from `blockquote_match`'s own
+            // boxed payload, which still carries the uncapped depth, and
+            // pushes one container per level of it. Force the manual path.
+            blockquote_match = None;
+            if let Some(payload) = blockquote_payload.as_mut() {
+                payload.depth = cap;
+                // The only depth-dependent term of the nesting gate.
+                payload.can_nest |= cap <= 1;
+            }
         }
 
         // Handle blockquote depth changes
