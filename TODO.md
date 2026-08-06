@@ -156,6 +156,46 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 
 ## Parser
 
+### Parser bugs found by the incremental fuzzer (2026-08)
+
+The incremental reparse fuzz harness
+(`crates/panache-parser/tests/incremental_fuzz.rs`, on
+`feat/incremental-parsing-graduation`) checks that a full parse round-trips its
+bytes before it judges a splice --- a broken oracle cannot judge anything. That
+precondition check found the following; none of them are incremental-parser
+bugs. Minimized reproducers live in
+`crates/panache-parser/tests/incremental_regressions.rs` on that branch.
+
+Round-trip failures (`input` -> lossy output):
+
+- [ ] Display-math closing fence *drops* bytes (content loss, not a reorder):
+  `$$\nx^2 + y\n$$$\n` -> `$$\nx^2 + y\n$$\n`. Also `$$\nx^2 + y\n$$$ra\n`
+  -> `$$\nx^2 + y\n$$ra\n` and `$$\nx^2 +$$$$\n\npara\n` ->
+  `$$\nx^2 +$$\n\npara\n`.
+- [ ] Fenced-div opener mangles the whitespace run before its label, and
+  duplicates part of the label: `:::  te\nbody\n:::\n\npara\n` ->
+  `::: tee\nbody\n:::\n\npara\n`; `:::: \ty\n:::\n::::\n\npara\n` ->
+  `:::: yy\n:::\n::::\n\npara\n`;
+  `::::     outer\n::: inner\nbody\n:::\n::::\n` ->
+  `:::: outeruter\n::: inner\nbody\n:::\n::::\n`.
+
+Adjacent, found while fixing the losslessness bugs the same harness turned up:
+
+- [ ] `parse_line` honours the block registry only for `OpenBlockQuote` effects,
+  throwing away every other prepared match and re-deriving container
+  structure from a raw marker count. The setext-over-a-blockquote fix
+  special-cases one parser name; the general cleanup is to let the
+  registry's verdict stand.
+- [ ] Under CommonMark, `> a\n> ---\n` should be `BlockQuote [Header 2 "a"]`
+  (pandoc's commonmark reader agrees); panache gives
+  `BlockQuote [Para, HR]`. Lossless, so no fixture pins it.
+- [ ] A line block inside a list item loses its indent through the formatter
+  (`- x\n\n  | a\n b\n` re-formats to a line block at column 0), which then
+  absorbs the following line on reparse and breaks idempotency.
+- [ ] Pandoc folds an under-indented lazy line into a line block
+  (`- x\n\n  | a\n b |\n` is one `LineBlock [[a, b, |]]`); panache ends the
+  line block and emits the lazy line as its own block.
+
 ### Architecture
 
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
