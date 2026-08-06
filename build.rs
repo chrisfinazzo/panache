@@ -69,24 +69,22 @@ fn generate_cli_markdown() -> Result<()> {
         return Ok(());
     }
 
-    let opts = clap_markdown::MarkdownOptions::default()
-        .show_footer(false)
-        .show_table_of_contents(false);
+    // The Pandoc flavor emits the YAML metadata block itself (and drops the
+    // root command's duplicate `h1` in favor of the metadata title).
+    let options = clapdown::Options::new()
+        .flavor(clapdown::Flavor::Pandoc)
+        .title("CLI Reference")
+        .metadata_field(
+            "description",
+            "Comprehensive reference for the Panache CLI, including all commands, \
+             options, and usage examples.",
+        )
+        .footer(false)
+        .table_of_contents(false);
+    let markdown = clapdown::render(&cmd, &options);
 
-    // Generate markdown documentation
-    let markdown = clap_markdown::help_markdown_command_custom(&cmd, &opts);
-
-    // // Build the complete document with frontmatter
-    let mut document = String::new();
-    document.push_str("---\n");
-    document.push_str("title: CLI Reference\n");
-    document.push_str("description: >\n  Comprehensive reference for the Panache CLI, including all commands, options,\n  and usage examples.\n");
-    document.push_str("---\n\n");
-    document.push_str(&markdown);
-
-    // Write the document
     let output_path = docs_dir.join("cli.qmd");
-    fs::write(&output_path, &document)?;
+    fs::write(&output_path, &markdown)?;
     println!("Generated CLI markdown: {:?}", output_path);
 
     Ok(())

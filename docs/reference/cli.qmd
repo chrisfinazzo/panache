@@ -1,74 +1,63 @@
 ---
 title: CLI Reference
-description: >
-  Comprehensive reference for the Panache CLI, including all commands, options,
-  and usage examples.
+description: Comprehensive reference for the Panache CLI, including all commands, options, and usage examples.
 ---
-
-# Command-Line Help for `panache`
-
-This document contains the help content for the `panache` command-line program.
-
-## `panache`
 
 Panache is a command-line formatter, linter, and language server (implementing the Language Server Protocol, LSP) for Quarto (.qmd), Pandoc, and Markdown files written in Rust. It understands Quarto/Pandoc-specific syntax that other formatters like Prettier and mdformat struggle with, including fenced divs, tables, and math formatting.
 
 **Usage:** `panache [OPTIONS] <COMMAND>`
 
-For help with a specific command, see: `panache help <command>`.
+## Options
 
-Homepage and downloads (including .deb and .rpm packages): <https://panache.bz>
+`--config <CONFIG>`
+:   Path to a custom configuration file. If not specified, Panache will search for .panache.toml or panache.toml in the current directory and its parents, then fall back to ~/.config/panache/config.toml.
 
-###### **Subcommands:**
+`--stdin-filename <PATH>`
+:   Synthetic filename to associate with stdin input. This is useful for editor integrations that pipe content via stdin but still need Panache to infer flavor/extensions from file extension (for example: `--stdin-filename doc.qmd`).
 
-* `format` — Format a Quarto, Pandoc, or Markdown document
-* `parse` — Parse and display the CST tree for debugging
-* `lsp` — Start the Language Server Protocol server
-* `lint` — Lint a Quarto, Pandoc, or Markdown document
-* `clean` — Delete cache data
-* `debug` — Debug utilities for parser/formatter diagnostics
+`--flavor <FLAVOR>`
+:   Override the markdown flavor for this invocation. Takes the highest precedence: it overrides any value in panache.toml, the [flavor-overrides] glob table, and the flavor inferred from the file extension. Extension overrides from [extensions] in panache.toml still merge on top of the flavor's defaults. Useful when the file extension is unknown (e.g. a .txt file containing markdown) or when you want to force a one-off interpretation.
 
-###### **Options:**
+    Possible values:
 
-* `--config <CONFIG>` — Path to a custom configuration file. If not specified, Panache will search for .panache.toml or panache.toml in the current directory and its parents, then fall back to ~/.config/panache/config.toml.
-* `--stdin-filename <PATH>` — Synthetic filename to associate with stdin input. This is useful for editor integrations that pipe content via stdin but still need Panache to infer flavor/extensions from file extension (for example: `--stdin-filename doc.qmd`).
-* `--flavor <FLAVOR>` — Override the markdown flavor for this invocation. Takes the highest precedence: it overrides any value in panache.toml, the [flavor-overrides] glob table, and the flavor inferred from the file extension. Extension overrides from [extensions] in panache.toml still merge on top of the flavor's defaults. Useful when the file extension is unknown (e.g. a .txt file containing markdown) or when you want to force a one-off interpretation.
+    - `pandoc`: Pandoc's Markdown (the extended dialect described in `man pandoc`)
+    - `quarto`: Quarto's Markdown (Pandoc-based, with Quarto-specific extensions and shortcodes)
+    - `rmarkdown`: R Markdown (Pandoc-based, with knitr/Rmd code chunks)
+    - `gfm`: GitHub Flavored Markdown
+    - `commonmark`: CommonMark (the strict, standardized base dialect)
+    - `multimarkdown`: MultiMarkdown (Fletcher Penney's extended Markdown dialect)
+    - `mdsvex`: mdsvex (Svelte-flavored Markdown: CommonMark + Svelte template syntax)
+    - `myst`: MyST (CommonMark + Sphinx/MyST directives, roles, and targets)
 
-  Possible values:
-  - `pandoc`:
-    Pandoc's Markdown (the extended dialect described in `man pandoc`)
-  - `quarto`:
-    Quarto's Markdown (Pandoc-based, with Quarto-specific extensions and shortcodes)
-  - `rmarkdown`:
-    R Markdown (Pandoc-based, with knitr/Rmd code chunks)
-  - `gfm`:
-    GitHub Flavored Markdown
-  - `commonmark`:
-    CommonMark (the strict, standardized base dialect)
-  - `multimarkdown`:
-    MultiMarkdown (Fletcher Penney's extended Markdown dialect)
-  - `mdsvex`:
-    mdsvex (Svelte-flavored Markdown: CommonMark + Svelte template syntax)
-  - `myst`:
-    MyST (CommonMark + Sphinx/MyST directives, roles, and targets)
+`--color <WHEN>`
+:   Control when colored output is used
 
-* `--color <WHEN>` — Control when colored output is used
+    Default value: `auto`
 
-  Default value: `auto`
+    Possible values: `auto`, `always`, `never`
 
-  Possible values: `auto`, `always`, `never`
+`--no-color`
+:   Disable colored output (equivalent to --color never)
 
-* `--no-color` — Disable colored output (equivalent to --color never)
-* `-q`, `--quiet` — Suppress informational status messages on stdout (e.g. "Formatted X", "N file left unchanged", "All files are correctly formatted", "No issues found") as well as per-violation lint diagnostics. Under `format --check` it also drops the per-file diff, leaving the list of files that would be reformatted and a summary. Errors are still written to stderr, and primary command output (such as formatted content when reading from stdin, JSON/Markdown reports, or the parsed CST) continues to print so that pipelines keep working. The process exit code still reflects whether issues were found in --check mode.
-* `-v`, `--verbose` — Print additional informational output where supported. Currently used by `panache clean` to include a summary of cache size and file count alongside the "Removed cache directory" message. Conflicts with --quiet.
-* `--isolated` — Ignore all discovered configuration files
-* `--no-cache` — Disable all lint/format cache reads and writes for this run. Can also be enabled with PANACHE_NO_CACHE.
-* `--cache-dir <CACHE_DIR>` — Path to the cache directory for this invocation. Overrides config `cache-dir`. Can also be set with PANACHE_CACHE_DIR.
-* `-j`, `--jobs <N>` — Number of worker threads to use when formatting or linting multiple files. 0 (the default) selects an automatic level based on available CPU cores. 1 forces serial processing. Single-file invocations always run on one thread; the inner external-formatter pool (see external-max-parallel) is only used when this value is 1 or when only one file is being processed. Can also be set with PANACHE_JOBS.
+`-q`, `--quiet`
+:   Suppress informational status messages on stdout (e.g. "Formatted X", "N file left unchanged", "All files are correctly formatted", "No issues found") as well as per-violation lint diagnostics. Under `format --check` it also drops the per-file diff, leaving the list of files that would be reformatted and a summary. Errors are still written to stderr, and primary command output (such as formatted content when reading from stdin, JSON/Markdown reports, or the parsed CST) continues to print so that pipelines keep working. The process exit code still reflects whether issues were found in --check mode.
 
-  Default value: `0`
+`-v`, `--verbose`
+:   Print additional informational output where supported. Currently used by `panache clean` to include a summary of cache size and file count alongside the "Removed cache directory" message. Conflicts with --quiet.
 
+`--isolated`
+:   Ignore all discovered configuration files
 
+`--no-cache`
+:   Disable all lint/format cache reads and writes for this run. Can also be enabled with PANACHE_NO_CACHE.
+
+`--cache-dir <CACHE_DIR>`
+:   Path to the cache directory for this invocation. Overrides config `cache-dir`. Can also be set with PANACHE_CACHE_DIR.
+
+`-j`, `--jobs <N>`
+:   Number of worker threads to use when formatting or linting multiple files. 0 (the default) selects an automatic level based on available CPU cores. 1 forces serial processing. Single-file invocations always run on one thread; the inner external-formatter pool (see external-max-parallel) is only used when this value is 1 or when only one file is being processed. Can also be set with PANACHE_JOBS.
+
+    Default value: `0`
 
 ## `panache format`
 
@@ -76,30 +65,36 @@ Format a Quarto, Pandoc, or R Markdown document according to Panache's formattin
 
 **Usage:** `panache format [OPTIONS] [FILES]...`
 
-###### **Arguments:**
+### Arguments
 
-* `<FILES>` — Path(s) to the input file(s) or directories to format. If not provided, or if the single argument `-` is given, reads from stdin. Supports .qmd, .md, .Rmd/.Rmarkdown, and other Markdown-based formats. When file paths are provided, the files are formatted in place by default. Stdin input always outputs to stdout. Supports glob patterns (e.g., *.md) and directories (e.g., . or docs/). Directories are traversed recursively, respecting .gitignore files. `-` cannot be combined with other paths.
+`<FILES>...`
+:   Path(s) to the input file(s) or directories to format. If not provided, or if the single argument `-` is given, reads from stdin. Supports .qmd, .md, .Rmd/.Rmarkdown, and other Markdown-based formats. When file paths are provided, the files are formatted in place by default. Stdin input always outputs to stdout. Supports glob patterns (e.g., *.md) and directories (e.g., . or docs/). Directories are traversed recursively, respecting .gitignore files. `-` cannot be combined with other paths.
 
-###### **Options:**
+### Options
 
-* `--check` — Check if the file is already formatted according to Panache's rules without making any changes. If the file is not formatted, displays a diff and exits with code 1. If formatted, exits with code 0. Useful for CI/CD pipelines.
-* `--range <START:END>` — Format only the specified line range. Lines are 1-indexed and inclusive. The range will be expanded to complete block boundaries to ensure well-formed output. For example, if you select part of a list, the entire list will be formatted. Format: `--range START:END` (e.g., --range 5:10 formats lines 5 through 10). 
+`--check`
+:   Check if the file is already formatted according to Panache's rules without making any changes. If the file is not formatted, displays a diff and exits with code 1. If formatted, exits with code 0. Useful for CI/CD pipelines.
 
-   Note: This feature is experimental. Range filtering may not work correctly in all cases.
-* `--force-exclude` — Apply exclude patterns from your configuration even to files passed explicitly on the command line.
+`--range <START:END>`
+:   Format only the specified line range. Lines are 1-indexed and inclusive. The range will be expanded to complete block boundaries to ensure well-formed output. For example, if you select part of a list, the entire list will be formatted. Format: `--range START:END` (e.g., --range 5:10 formats lines 5 through 10). 
 
-   By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless.
+    Note: This feature is experimental. Range filtering may not work correctly in all cases.
 
-   This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
-* `-o`, `--option <KEY=VALUE>` — Override an individual config option for this invocation, using the kebab-case key names from panache.toml. May be repeated. Takes precedence over both panache.toml and the built-in defaults. 
+`--force-exclude`
+:   Apply exclude patterns from your configuration even to files passed explicitly on the command line.
 
-   Supported keys: `line-width` (positive integer, measured in Unicode display columns, where East Asian wide characters count as 2: `x宮` is 3 columns, not 2 characters or 4 UTF-8 bytes); `wrap` (one of: reflow, sentence, semantic, preserve); and `extensions.<name>=<bool>` to toggle any extension (booleans accept true/false/1/0/yes/no/on/off). 
+    By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless.
 
-   Example: `--option line-width=100 -o wrap=sentence -o extensions.east-asian-line-breaks=true`. 
+    This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
 
-   Note: this is an escape hatch for ad-hoc invocations. Prefer panache.toml so that everyone formatting the repository gets the same result.
+`-o`, `--option <KEY=VALUE>`
+:   Override an individual config option for this invocation, using the kebab-case key names from panache.toml. May be repeated. Takes precedence over both panache.toml and the built-in defaults. 
 
+    Supported keys: `line-width` (positive integer, measured in Unicode display columns, where East Asian wide characters count as 2: `x宮` is 3 columns, not 2 characters or 4 UTF-8 bytes); `wrap` (one of: reflow, sentence, semantic, preserve); and `extensions.<name>=<bool>` to toggle any extension (booleans accept true/false/1/0/yes/no/on/off). 
 
+    Example: `--option line-width=100 -o wrap=sentence -o extensions.east-asian-line-breaks=true`. 
+
+    Note: this is an escape hatch for ad-hoc invocations. Prefer panache.toml so that everyone formatting the repository gets the same result.
 
 ## `panache parse`
 
@@ -107,24 +102,25 @@ Parse a document and display its Concrete Syntax Tree (CST) for debugging and un
 
 **Usage:** `panache parse [OPTIONS] [FILE]`
 
-###### **Arguments:**
+### Arguments
 
-* `<FILE>` — Path to the input file to parse. If not provided, or if `-` is given, reads from stdin. The parser respects extension flags from the configuration file.
+`<FILE>`
+:   Path to the input file to parse. If not provided, or if `-` is given, reads from stdin. The parser respects extension flags from the configuration file.
 
-###### **Options:**
+### Options
 
-* `--to <FORMAT>` — Choose what to print to stdout:
-   - cst (default): debug-format CST tree, useful for parser debugging.
-   - pandoc-ast: pandoc-native AST text, the same shape produced by `pandoc -f markdown -t native`. Unsupported constructs emit visible `Unsupported "<KIND>"` sentinels rather than being silently dropped.
-   - pandoc-json: the same AST encoded as JSON, matching `pandoc -f markdown -t json`. UTF-8 round-trips cleanly through `jq`/`ascii2uni` since strings use standard JSON escaping rather than Haskell-show numeric escapes.
+`--to <FORMAT>`
+:   Choose what to print to stdout:
+    - cst (default): debug-format CST tree, useful for parser debugging.
+    - pandoc-ast: pandoc-native AST text, the same shape produced by `pandoc -f markdown -t native`. Unsupported constructs emit visible `Unsupported "<KIND>"` sentinels rather than being silently dropped.
+    - pandoc-json: the same AST encoded as JSON, matching `pandoc -f markdown -t json`. UTF-8 round-trips cleanly through `jq`/`ascii2uni` since strings use standard JSON escaping rather than Haskell-show numeric escapes.
 
-  Default value: `cst`
+    Default value: `cst`
 
-  Possible values: `cst`, `pandoc-ast`, `pandoc-json`
+    Possible values: `cst`, `pandoc-ast`, `pandoc-json`
 
-* `--json <PATH>` — Write the parsed CST to the given JSON file in addition to printing the selected --to format to stdout. The JSON output is always CST-shaped regardless of --to; it includes node kinds, text ranges, and token text.
-
-
+`--json <PATH>`
+:   Write the parsed CST to the given JSON file in addition to printing the selected --to format to stdout. The JSON output is always CST-shaped regardless of --to; it includes node kinds, text ranges, and token text.
 
 ## `panache lsp`
 
@@ -132,15 +128,10 @@ Start the Panache language server protocol (LSP) server for editor integration. 
 
 **Usage:** `panache lsp [OPTIONS]`
 
-The LSP server communicates via stdin/stdout and is typically launched automatically by your editor's LSP client. You generally don't need to run this command manually.
+### Options
 
-For editor configuration examples, see: https://github.com/jolars/panache#editor-integration
-
-###### **Options:**
-
-* `--debug` — Enable verbose LSP debug logging to ~/.local/state/panache/lsp-debug.log (or $XDG_STATE_HOME/panache/lsp-debug.log when XDG_STATE_HOME is set). Logs are written to file to avoid interfering with the LSP protocol over stdout.
-
-
+`--debug`
+:   Enable verbose LSP debug logging to ~/.local/state/panache/lsp-debug.log (or $XDG_STATE_HOME/panache/lsp-debug.log when XDG_STATE_HOME is set). Logs are written to file to avoid interfering with the LSP protocol over stdout.
 
 ## `panache lint`
 
@@ -148,32 +139,37 @@ Lint a document to check for correctness issues and best practice violations. Un
 
 **Usage:** `panache lint [OPTIONS] [FILES]...`
 
-Configure rules in panache.toml with [lint] section.
+### Arguments
 
-###### **Arguments:**
+`<FILES>...`
+:   Path(s) to the input file(s) or directories to check. If not provided, or if the single argument `-` is given, reads from stdin. Supports .qmd, .md, .Rmd/.Rmarkdown, and other Markdown-based formats. Supports glob patterns (e.g., *.md) and directories (e.g., . or docs/). Directories are traversed recursively, respecting .gitignore files. `-` cannot be combined with other paths.
 
-* `<FILES>` — Path(s) to the input file(s) or directories to check. If not provided, or if the single argument `-` is given, reads from stdin. Supports .qmd, .md, .Rmd/.Rmarkdown, and other Markdown-based formats. Supports glob patterns (e.g., *.md) and directories (e.g., . or docs/). Directories are traversed recursively, respecting .gitignore files. `-` cannot be combined with other paths.
+### Options
 
-###### **Options:**
+`--fix`
+:   Automatically fix violations where possible
 
-* `--fix` — Automatically fix violations where possible
-* `--unsafe-fixes` — Apply auto-fixes marked unsafe in addition to safe ones. 
+`--unsafe-fixes`
+:   Apply auto-fixes marked unsafe in addition to safe ones. 
 
-   A fix is unsafe when applying it may change the document's meaning rather than merely tidy its syntax (for example, the `empty-values` rule's fix deletes the empty key). Unsafe fixes are skipped by a bare --fix; this flag opts into them. Requires --fix.
-* `--message-format <MESSAGE_FORMAT>` — Diagnostic rendering format
+    A fix is unsafe when applying it may change the document's meaning rather than merely tidy its syntax (for example, the `empty-values` rule's fix deletes the empty key). Unsafe fixes are skipped by a bare --fix; this flag opts into them. Requires --fix.
 
-  Default value: `human`
+`--message-format <MESSAGE_FORMAT>`
+:   Diagnostic rendering format
 
-  Possible values: `human`, `short`
+    Default value: `human`
 
-* `--force-exclude` — Apply exclude patterns from your configuration even to files passed explicitly on the command line. 
+    Possible values: `human`, `short`
 
-   By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless. 
+`--force-exclude`
+:   Apply exclude patterns from your configuration even to files passed explicitly on the command line. 
 
-   This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
-* `--check` — Deprecated and now a no-op. `panache lint` exits with code 1 whenever any violations are found, so this flag is no longer needed. It is still accepted for backward compatibility but will be removed in a future release. Use `--fix` to apply auto-fixes instead of reporting.
+    By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless. 
 
+    This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
 
+`--check`
+:   Deprecated and now a no-op. `panache lint` exits with code 1 whenever any violations are found, so this flag is no longer needed. It is still accepted for backward compatibility but will be removed in a future release. Use `--fix` to apply auto-fixes instead of reporting.
 
 ## `panache clean`
 
@@ -181,12 +177,13 @@ Delete Panache's on-disk cache data.
 
 **Usage:** `panache clean [OPTIONS]`
 
-###### **Options:**
+### Options
 
-* `--all` — Remove all Panache cache buckets
-* `--dry-run` — Print the cache path(s) that would be deleted, along with a summary of file count and size, but do not modify anything on disk. The size summary is always shown in --dry-run mode (the global --verbose flag is not required). Combine with --all to preview removal of every cache bucket.
+`--all`
+:   Remove all Panache cache buckets
 
-
+`--dry-run`
+:   Print the cache path(s) that would be deleted, along with a summary of file count and size, but do not modify anything on disk. The size summary is always shown in --dry-run mode (the global --verbose flag is not required). Combine with --all to preview removal of every cache bucket.
 
 ## `panache debug`
 
@@ -194,39 +191,41 @@ Debugging utilities for parse/format workflows. These commands are intended for 
 
 **Usage:** `panache debug <COMMAND>`
 
-###### **Subcommands:**
-
-* `format` — Run parser+formatter checks and emit diagnostics
-
-
-
-## `panache debug format`
+### `panache debug format`
 
 Run parser+formatter checks and emit diagnostics
 
 **Usage:** `panache debug format [OPTIONS] [FILES]...`
 
-###### **Arguments:**
+#### Arguments
 
-* `<FILES>` — Input file path(s) or directories (use `-` for stdin)
+`<FILES>...`
+:   Input file path(s) or directories (use `-` for stdin)
 
-###### **Options:**
+#### Options
 
-* `--checks <CHECKS>` — Which checks to run
+`--checks <CHECKS>`
+:   Which checks to run
 
-  Default value: `all`
+    Default value: `all`
 
-  Possible values: `idempotency`, `losslessness`, `all`
+    Possible values: `idempotency`, `losslessness`, `all`
 
-* `--json` — Emit JSON output for machine-readable tooling
-* `--report` — Emit Markdown report output suitable for issue descriptions
-* `--dump-dir <DIR>` — Directory where failing artifacts are written
-* `--dump-passes` — Write input/parse/format pass artifacts to --dump-dir for every file
-* `--force-exclude` — Apply exclude patterns from your configuration even to files passed explicitly on the command line. 
+`--json`
+:   Emit JSON output for machine-readable tooling
 
-   By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless. 
+`--report`
+:   Emit Markdown report output suitable for issue descriptions
 
-   This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
+`--dump-dir <DIR>`
+:   Directory where failing artifacts are written
 
+`--dump-passes`
+:   Write input/parse/format pass artifacts to --dump-dir for every file
 
+`--force-exclude`
+:   Apply exclude patterns from your configuration even to files passed explicitly on the command line. 
 
+    By default, explicitly-named files bypass exclude patterns: the assumption is that if you asked for a specific file, you want it processed. With --force-exclude, those patterns are honored regardless. 
+
+    This is primarily intended for pre-commit hooks (and similar tooling), which pass changed files explicitly but should still respect the project's exclude configuration.
