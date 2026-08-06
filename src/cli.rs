@@ -337,17 +337,6 @@ For editor configuration examples, see: https://github.com/jolars/panache#editor
         )]
         files: Vec<PathBuf>,
 
-        /// Deprecated: linting exits non-zero on violations by default
-        #[arg(long)]
-        #[arg(help = "Deprecated (no-op): lint now exits non-zero on violations by default")]
-        #[arg(
-            long_help = "Deprecated and now a no-op. `panache lint` exits with code 1 whenever \
-            any violations are found, so this flag is no longer needed. It is still accepted for \
-            backward compatibility but will be removed in a future release. Use `--fix` to apply \
-            auto-fixes instead of reporting."
-        )]
-        check: bool,
-
         /// Apply auto-fixes
         #[arg(long)]
         #[arg(help = "Automatically fix violations where possible")]
@@ -384,6 +373,20 @@ For editor configuration examples, see: https://github.com/jolars/panache#editor
             configuration."
         )]
         force_exclude: bool,
+
+        // Declared last on purpose: clap derives `display_order` from field
+        // position, and both the man page's SYNOPSIS and its OPTIONS list sort
+        // on that, so a deprecated no-op led every listing while it sat first.
+        /// Deprecated: linting exits non-zero on violations by default
+        #[arg(long)]
+        #[arg(help = "Deprecated (no-op): lint now exits non-zero on violations by default")]
+        #[arg(
+            long_help = "Deprecated and now a no-op. `panache lint` exits with code 1 whenever \
+            any violations are found, so this flag is no longer needed. It is still accepted for \
+            backward compatibility but will be removed in a future release. Use `--fix` to apply \
+            auto-fixes instead of reporting."
+        )]
+        check: bool,
     },
     /// Delete cache data
     #[command(long_about = "Delete Panache's on-disk cache data.")]
