@@ -1962,6 +1962,12 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
+                // Every emitted line needs the container indent. Dropping it
+                // lets a line block nested in a list item escape to column 0,
+                // where it reparses as a top-level line block that swallows
+                // the following line -- an idempotency break.
+                let line_indent = " ".repeat(indent);
+
                 // Format each line preserving line breaks and leading spaces.
                 // Walk LINE_BLOCK_LINE children-with-tokens so we can skip
                 // leading container-prefix tokens (WHITESPACE,
@@ -1997,6 +2003,7 @@ impl Formatter {
                         }
                     }
                     let content_trimmed = content.trim();
+                    self.output.push_str(&line_indent);
                     if content_trimmed.is_empty() {
                         // Empty line block line - just output "|"
                         self.output.push('|');
