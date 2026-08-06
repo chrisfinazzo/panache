@@ -236,14 +236,18 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   table --- the requirement is dropped, which also makes top-level
   `a | b\n---|---\n` and `| a\n|---\n` (previously a `LineBlock`) tables, as
   pandoc has them.
-- [ ] Under Pandoc, `> > a\n: b\n` should be
+- [x] Under Pandoc, `> > a\n: b\n` should be
   `BlockQuote [BlockQuote [DefinitionList [(a, [[Plain b]])]]]`; panache
-  drops the definition body and lets `: b` escape the quotes entirely as a
-  top-level `Para`. Unrelated to blockquote depth (the quote nesting is
-  already right, and
-  `blockquote_depth_cap_declines_below_blockquote_rank_pandoc` pins it) ---
-  that fixture's snapshot records the wrong `: b` placement until this is
-  fixed.
+  dropped the definition body and let `: b` escape the quotes entirely as a
+  top-level `Para`. Two independent causes, both fixed. (1) The term
+  look-ahead ran on raw lines, so a `> : b` under a quote never matched the
+  0-3-space marker test and the term above it lost its body --- it now runs
+  on the container-stripped window, which also retires the
+  `blockquote_depth == 0` carve-out in the orphan guard. (2) Pandoc's
+  blockquote reader folds lazy lines into the quote's raw content before
+  parsing blocks, so an unquoted `: b` still belongs to the open definition
+  list; the lazy gate in `core.rs` only recognized an open `Paragraph` or
+  `ListItem`, and now recognizes an open `DEFINITION_LIST` too.
 - [ ] A line block inside a list item loses its indent through the formatter
   (`- x\n\n  | a\n b\n` re-formats to a line block at column 0), which then
   absorbs the following line on reparse and breaks idempotency.

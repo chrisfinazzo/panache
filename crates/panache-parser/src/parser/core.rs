@@ -1111,16 +1111,7 @@ impl<'a> Parser<'a> {
             self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
             self.containers.push(Container::DefinitionItem {});
             emit_term(&mut self.builder, first_line_content, self.config);
-            for i in 0..blank_count {
-                let blank_pos = self.pos + 1 + i;
-                if blank_pos < self.lines.len() {
-                    let blank_line = self.lines[blank_pos];
-                    self.builder.start_node(SyntaxKind::BLANK_LINE.into());
-                    self.builder
-                        .token(SyntaxKind::BLANK_LINE.into(), blank_line);
-                    self.builder.finish_node();
-                }
-            }
+            self.emit_term_lookahead_blank_lines(blank_count);
             return blank_count;
         }
 
@@ -2359,17 +2350,7 @@ impl<'a> Parser<'a> {
                 self.containers.push(Container::DefinitionItem {});
 
                 emit_term(&mut self.builder, content, self.config);
-
-                for i in 0..*blank_count {
-                    let blank_pos = self.pos + 1 + i;
-                    if blank_pos < self.lines.len() {
-                        let blank_line = self.lines[blank_pos];
-                        self.builder.start_node(SyntaxKind::BLANK_LINE.into());
-                        self.builder
-                            .token(SyntaxKind::BLANK_LINE.into(), blank_line);
-                        self.builder.finish_node();
-                    }
-                }
+                self.emit_term_lookahead_blank_lines(*blank_count);
                 extras = *blank_count;
             }
         };
@@ -2630,6 +2611,35 @@ impl<'a> Parser<'a> {
                     info.has_trailing_space,
                 );
             }
+        }
+    }
+
+    /// Emit the blank lines a definition-list term look-ahead skipped over.
+    ///
+    /// The look-ahead runs on container-stripped lines, so inside a blockquote
+    /// a "blank" line still carries its `>` markers in the source. Split them
+    /// off as `BLOCK_QUOTE_MARKER` tokens the way the main blank-line path
+    /// does, instead of burying them in the `BLANK_LINE` token.
+    fn emit_term_lookahead_blank_lines(&mut self, blank_count: usize) {
+        let bq_depth = self.current_blockquote_depth();
+        for i in 0..blank_count {
+            let blank_pos = self.pos + 1 + i;
+            if blank_pos >= self.lines.len() {
+                continue;
+            }
+            let blank_line = self.lines[blank_pos];
+            let (line_depth, _) = blockquotes::count_blockquote_markers(blank_line);
+            let depth = line_depth.min(bq_depth);
+            let content = if depth > 0 {
+                let marker_info = parse_blockquote_marker_info(blank_line);
+                self.emit_blockquote_markers(&marker_info, depth);
+                strip_n_blockquote_markers(blank_line, depth)
+            } else {
+                blank_line
+            };
+            self.builder.start_node(SyntaxKind::BLANK_LINE.into());
+            self.builder.token(SyntaxKind::BLANK_LINE.into(), content);
+            self.builder.finish_node();
         }
     }
 
@@ -3359,6 +3369,29 @@ impl<'a> Parser<'a> {
                     }
                     return LineDispatch::consumed(1);
                 }
+            }
+            // Lazy continuation of a definition list open inside the quote.
+            // Pandoc's blockquote reader folds lazy lines into the quote's raw
+            // content before parsing blocks, so `> a` / `: b` is one
+            // `BlockQuote [DefinitionList ...]`, not a quote followed by a
+            // top-level paragraph. The open DEFINITION_LIST is the analogue of
+            // an open Paragraph for the gate above: a `:` line belongs to it
+            // whether or not it repeats the `>` markers.
+            if self.config.extensions.definition_lists
+                && definition_lists::in_definition_list(&self.containers)
+                && definition_lists::try_parse_definition_marker(inner_content).is_some()
+            {
+                if bq_depth > 0 {
+                    let marker_info = self.marker_info_for_line(
+                        blockquote_payload.as_ref(),
+                        line,
+                        bq_marker_line,
+                        shifted_bq_prefix,
+                        used_shifted_bq,
+                    );
+                    self.emit_blockquote_markers(&marker_info, bq_depth);
+                }
+                return self.parse_inner_content(inner_content, Some(inner_content));
             }
             // CommonMark §5.1: a no-`>` line that begins a list marker
             // closes the blockquote and starts a fresh list at the outer

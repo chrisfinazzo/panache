@@ -3,17 +3,20 @@ source: crates/panache-parser/tests/golden_parser_cases.rs
 expression: cst_output
 ---
 DOCUMENT@0..10
-  BLOCK_QUOTE@0..6
+  BLOCK_QUOTE@0..10
     BLOCK_QUOTE_MARKER@0..1 ">"
     WHITESPACE@1..2 " "
-    BLOCK_QUOTE@2..6
+    BLOCK_QUOTE@2..10
       BLOCK_QUOTE_MARKER@2..3 ">"
       WHITESPACE@3..4 " "
-      DEFINITION_LIST@4..6
-        DEFINITION_ITEM@4..6
+      DEFINITION_LIST@4..10
+        DEFINITION_ITEM@4..10
           TERM@4..6
             TEXT@4..5 "a"
             NEWLINE@5..6 "\n"
-  PARAGRAPH@6..10
-    TEXT@6..9 ": b"
-    NEWLINE@9..10 "\n"
+          DEFINITION@6..10
+            DEFINITION_MARKER@6..7 ":"
+            WHITESPACE@7..8 " "
+            PLAIN@8..10
+              TEXT@8..9 "b"
+              NEWLINE@9..10 "\n"

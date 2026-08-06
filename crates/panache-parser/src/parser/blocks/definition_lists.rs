@@ -97,7 +97,7 @@ pub(crate) fn emit_definition_marker(
 
 // Helper functions for definition list management in Parser
 
-use crate::parser::blocks::tables::is_caption_followed_by_table;
+use crate::parser::blocks::tables::{LineView, is_caption_followed_by_table};
 use crate::parser::utils::container_stack::{Container, ContainerStack};
 
 /// Check if we're in a definition list.
@@ -110,25 +110,25 @@ pub(in crate::parser) fn in_definition_list(containers: &ContainerStack) -> bool
 
 /// Look ahead past blank lines to find a definition marker.
 /// Returns Some(blank_line_count) if found, None otherwise.
+///
+/// `lines` is absolute-indexed. Pass a [`StrippedLines`] rather than a raw
+/// slice whenever a container prefix is open: the marker test only accepts
+/// 0-3 leading spaces, so a raw `> : b` never matches and the term line above
+/// it would silently lose its definition body.
 pub(in crate::parser) fn next_line_is_definition_marker(
-    lines: &[&str],
+    lines: &(impl LineView + ?Sized),
     pos: usize,
 ) -> Option<usize> {
     let mut check_pos = pos + 1;
     let mut blank_count = 0;
-    while check_pos < lines.len() {
-        let line = lines[check_pos];
+    while check_pos < lines.line_count() {
+        let line = lines.line(check_pos);
         if line.trim().is_empty() {
             blank_count += 1;
             check_pos += 1;
             continue;
         }
         if let Some((marker, ..)) = try_parse_definition_marker(line) {
-            // Raw lines throughout: the marker detection above is itself raw, so
-            // this only fires outside container prefixes (at top level raw ==
-            // stripped). Inside a blockquote the raw `> :` never matches the
-            // marker, so this caption gate is unreachable there — the
-            // container-aware gate lives in `DefinitionListParser::detect_prepared`.
             if marker == ':' && is_caption_followed_by_table(lines, check_pos) {
                 return None;
             }
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn next_line_marker_ignores_colon_table_caption() {
-        let lines = vec![
+        let lines = [
             "Here's a table with a reference:",
             "",
             ": (\\#tab:mytable) A table with a reference.",
@@ -211,7 +211,7 @@ mod tests {
             "| 1   | 2   | 3   |",
         ];
         assert!(is_caption_followed_by_table(&lines[..], 2));
-        assert_eq!(next_line_is_definition_marker(&lines, 0), None);
+        assert_eq!(next_line_is_definition_marker(&lines[..], 0), None);
     }
 
     #[test]

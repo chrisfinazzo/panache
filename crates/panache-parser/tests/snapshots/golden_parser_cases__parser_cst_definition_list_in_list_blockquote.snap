@@ -10,14 +10,14 @@ DOCUMENT@0..26
       BLOCK_QUOTE@2..26
         BLOCK_QUOTE_MARKER@2..3 ">"
         WHITESPACE@3..4 " "
-        PARAGRAPH@4..13
-          TEXT@4..8 "Term"
-          NEWLINE@8..9 "\n"
-          WHITESPACE@9..11 "  "
-          BLOCK_QUOTE_MARKER@11..12 ">"
-          WHITESPACE@12..13 " "
-        DEFINITION_LIST@13..26
-          DEFINITION_ITEM@13..26
+        DEFINITION_LIST@4..26
+          DEFINITION_ITEM@4..26
+            TERM@4..9
+              TEXT@4..8 "Term"
+              NEWLINE@8..9 "\n"
+            WHITESPACE@9..11 "  "
+            BLOCK_QUOTE_MARKER@11..12 ">"
+            WHITESPACE@12..13 " "
             DEFINITION@13..26
               DEFINITION_MARKER@13..14 ":"
               WHITESPACE@14..15 " "

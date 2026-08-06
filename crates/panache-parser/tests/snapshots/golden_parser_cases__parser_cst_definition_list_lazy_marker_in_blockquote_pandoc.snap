@@ -1,0 +1,40 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..54
+  BLOCK_QUOTE@0..22
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    DEFINITION_LIST@2..22
+      DEFINITION_ITEM@2..22
+        TERM@2..7
+          TEXT@2..6 "Term"
+          NEWLINE@6..7 "\n"
+        DEFINITION@7..22
+          DEFINITION_MARKER@7..8 ":"
+          WHITESPACE@8..11 "   "
+          PLAIN@11..22
+            TEXT@11..21 "Definition"
+            NEWLINE@21..22 "\n"
+  BLANK_LINE@22..23
+    BLANK_LINE@22..23 "\n"
+  BLOCK_QUOTE@23..54
+    BLOCK_QUOTE_MARKER@23..24 ">"
+    WHITESPACE@24..25 " "
+    BLOCK_QUOTE@25..54
+      BLOCK_QUOTE_MARKER@25..26 ">"
+      WHITESPACE@26..27 " "
+      DEFINITION_LIST@27..54
+        DEFINITION_ITEM@27..54
+          TERM@27..34
+            TEXT@27..33 "Nested"
+            NEWLINE@33..34 "\n"
+          BLOCK_QUOTE_MARKER@34..35 ">"
+          WHITESPACE@35..36 " "
+          DEFINITION@36..54
+            DEFINITION_MARKER@36..37 ":"
+            WHITESPACE@37..40 "   "
+            PLAIN@40..54
+              TEXT@40..53 "Reduced depth"
+              NEWLINE@53..54 "\n"

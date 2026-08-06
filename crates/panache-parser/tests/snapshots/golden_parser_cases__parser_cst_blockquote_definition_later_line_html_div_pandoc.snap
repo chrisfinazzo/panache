@@ -1,22 +1,21 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 99
 expression: cst_output
 ---
 DOCUMENT@0..62
   BLOCK_QUOTE@0..62
     BLOCK_QUOTE_MARKER@0..1 ">"
     WHITESPACE@1..2 " "
-    PARAGRAPH@2..7
-      TEXT@2..6 "Term"
-      NEWLINE@6..7 "\n"
-    BLOCK_QUOTE_MARKER@7..8 ">"
-    BLANK_LINE@8..9
-      BLANK_LINE@8..9 "\n"
-    BLOCK_QUOTE_MARKER@9..10 ">"
-    WHITESPACE@10..11 " "
-    DEFINITION_LIST@11..62
-      DEFINITION_ITEM@11..62
+    DEFINITION_LIST@2..62
+      DEFINITION_ITEM@2..62
+        TERM@2..7
+          TEXT@2..6 "Term"
+          NEWLINE@6..7 "\n"
+        BLOCK_QUOTE_MARKER@7..8 ">"
+        BLANK_LINE@8..9
+          BLANK_LINE@8..9 "\n"
+        BLOCK_QUOTE_MARKER@9..10 ">"
+        WHITESPACE@10..11 " "
         DEFINITION@11..62
           DEFINITION_MARKER@11..12 ":"
           WHITESPACE@12..15 "   "

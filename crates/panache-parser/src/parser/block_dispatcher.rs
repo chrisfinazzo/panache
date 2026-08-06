@@ -917,10 +917,14 @@ impl BlockParser for DefinitionListParser {
         let content = lines.first();
         let line_pos = lines.pos();
         let prefix = lines.prefix();
-        let lines = lines.raw();
+        let raw = lines.raw();
         if !ctx.config.extensions.definition_lists {
             return None;
         }
+        // Container-stripped lookahead window: `lines` already strips line 0,
+        // and `strip_at` strips the rest, so `> : b` under a blockquote is seen
+        // as `: b` by both the caption gate and the term check below.
+        let stripped = StrippedLines::with_dispatch(raw, line_pos, line_pos, prefix);
 
         if let Some((marker_char, indent, spaces_after_cols, spaces_after_bytes)) =
             try_parse_definition_marker(content)
@@ -933,10 +937,7 @@ impl BlockParser for DefinitionListParser {
             // slip through this gate.
             if marker_char == ':'
                 && ctx.config.extensions.table_captions
-                && is_caption_followed_by_table(
-                    &StrippedLines::with_dispatch(lines, line_pos, line_pos, prefix),
-                    line_pos,
-                )
+                && is_caption_followed_by_table(&stripped, line_pos)
             {
                 return None;
             }
@@ -951,14 +952,11 @@ impl BlockParser for DefinitionListParser {
             // opening a spurious definition list with no term.
             //
             // The orphan guard applies only at the true top level. Inside a
-            // blockquote or list, term detection (`next_line_is_definition_marker`
-            // below) runs on raw lines and cannot see a marker through the
-            // container prefix, so `in_definition_list` never becomes true even
-            // for a real term. Keeping the old unconditional open there avoids
-            // regressing definition lists in those containers (a separate,
-            // pre-existing gap tracked elsewhere).
-            let orphan_guard_applies =
-                !ctx.in_definition_list && ctx.blockquote_depth == 0 && !ctx.in_list;
+            // list, term detection below still cannot see a marker through the
+            // list's content-column prefix, so `in_definition_list` never
+            // becomes true even for a real term; keeping the old unconditional
+            // open there avoids regressing definition lists in lists.
+            let orphan_guard_applies = !ctx.in_definition_list && !ctx.in_list;
             if !orphan_guard_applies {
                 let indent_bytes =
                     super::utils::container_stack::byte_index_at_column(content, indent);
@@ -979,7 +977,7 @@ impl BlockParser for DefinitionListParser {
             }
         }
 
-        if let Some(blank_count) = next_line_is_definition_marker(lines, line_pos)
+        if let Some(blank_count) = next_line_is_definition_marker(&stripped, line_pos)
             && !content.trim().is_empty()
         {
             return Some((

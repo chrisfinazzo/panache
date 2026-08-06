@@ -263,3 +263,81 @@ fn colon_table_caption_before_table_is_not_definition_list() {
         "expected TABLE_CAPTION node for colon caption"
     );
 }
+
+/// Assert the whole document is a single definition list nested `depth`
+/// blockquotes deep, with `term` / `definition` as its one item.
+fn assert_quoted_definition_list(input: &str, depth: usize, term: &str, definition: &str) {
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "parse must be lossless");
+
+    assert_block_kinds(input, &[SyntaxKind::BLOCK_QUOTE]);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::BLOCK_QUOTE).len(),
+        depth,
+        "definition list should stay {depth} blockquotes deep"
+    );
+
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    assert_eq!(
+        find_first(&list, SyntaxKind::TERM)
+            .expect("term")
+            .text()
+            .to_string()
+            .trim_end(),
+        term
+    );
+    assert!(
+        find_first(&list, SyntaxKind::DEFINITION)
+            .expect("definition body")
+            .text()
+            .to_string()
+            .contains(definition),
+        "definition body should carry {definition:?}"
+    );
+}
+
+#[test]
+fn definition_list_in_blockquote_keeps_its_body() {
+    // The term look-ahead runs on container-stripped lines, so it sees `: b`
+    // through the `> ` prefix. Pandoc: `BlockQuote [DefinitionList [(a, [[Plain
+    // b]])]]`.
+    assert_quoted_definition_list("> a\n> : b\n", 1, "a", "b");
+}
+
+#[test]
+fn definition_list_in_nested_blockquote_keeps_its_body() {
+    assert_quoted_definition_list("> > a\n> > : b\n", 2, "a", "b");
+}
+
+#[test]
+fn lazy_definition_marker_stays_inside_blockquote() {
+    // Pandoc folds lazy lines into the blockquote's raw content before parsing
+    // blocks, so the unquoted `: b` is the term's definition rather than a
+    // top-level paragraph.
+    assert_quoted_definition_list("> a\n: b\n", 1, "a", "b");
+}
+
+#[test]
+fn lazy_definition_marker_stays_inside_nested_blockquote() {
+    assert_quoted_definition_list("> > a\n: b\n", 2, "a", "b");
+}
+
+#[test]
+fn lazy_definition_marker_reduced_depth_stays_inside_blockquote() {
+    // One `>` under a depth-2 quote is still lazy: the marker belongs to the
+    // inner definition list, not to the outer quote.
+    assert_quoted_definition_list("> > a\n> : b\n", 2, "a", "b");
+}
+
+#[test]
+fn lazy_definition_markers_add_further_definitions() {
+    let input = "> > a\n: b\n: c\n";
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "parse must be lossless");
+
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    let definitions = find_all(&list, SyntaxKind::DEFINITION);
+    assert_eq!(definitions.len(), 2, "both lazy markers open a definition");
+    assert!(definitions[0].text().to_string().contains('b'));
+    assert!(definitions[1].text().to_string().contains('c'));
+}
