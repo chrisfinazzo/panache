@@ -2631,6 +2631,7 @@ impl<'a> Parser<'a> {
             None
         };
 
+        let mut setext_claims_raw_line = false;
         let blockquote_payload = if let Some(dispatcher_ctx) = dispatcher_ctx.as_ref() {
             let prefix = ContainerPrefix::from_ctx(dispatcher_ctx);
             let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
@@ -2647,6 +2648,8 @@ impl<'a> Parser<'a> {
                                 .cloned()
                         })
                     } else {
+                        setext_claims_raw_line =
+                            self.block_registry.parser_name(&prepared) == "setext_heading";
                         None
                     }
                 })
@@ -2829,6 +2832,25 @@ impl<'a> Parser<'a> {
             self.builder.finish_node();
 
             return LineDispatch::consumed(1);
+        }
+
+        // A setext underline claims the line above it *as raw text*, marker
+        // run included: pandoc reads `> a\n---\n` as
+        // `Header 2 [Str ">", Space, Str "a"]` with no blockquote at all, and
+        // the registry (which ran on the raw line above) already said so.
+        // Opening a blockquote off the raw marker count here would override
+        // that verdict and then re-dispatch the stripped content, where setext
+        // runs a second time and re-emits the marker — the bytes are
+        // duplicated. Hand the raw line to the dispatcher instead.
+        // CommonMark disagrees — a setext underline never reaches across a
+        // container boundary there, so `> a\n---\n` stays a blockquote plus a
+        // thematic break (spec examples #92, #101, #234). Pandoc-dialect only.
+        if setext_claims_raw_line
+            && bq_depth > 0
+            && !used_shifted_bq
+            && self.config.dialect != crate::options::Dialect::CommonMark
+        {
+            return self.parse_inner_content(line, None);
         }
 
         // Handle blockquote depth changes

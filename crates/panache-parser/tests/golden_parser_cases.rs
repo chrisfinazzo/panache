@@ -315,6 +315,7 @@ golden_test_cases!(
     setext_multiline_commonmark,
     setext_multiline_pandoc,
     setext_underline_crosses_blockquote_commonmark,
+    setext_underline_crosses_blockquote_pandoc,
     setext_short_underline_commonmark,
     setext_short_underline_pandoc,
     setext_text_thematic_break_commonmark,

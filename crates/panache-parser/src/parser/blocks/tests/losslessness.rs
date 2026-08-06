@@ -327,3 +327,53 @@ fn test_refdef_after_blank_line_in_list_item() {
         "a blank-line separated refdef inside a list item is a refdef, got:\n{tree:#?}"
     );
 }
+
+#[test]
+fn test_losslessness_setext_underline_after_blockquote_line() {
+    // Found by the incremental fuzz harness. Under the Pandoc dialect a
+    // setext underline claims the preceding line *as raw text*, blockquote
+    // marker included: `> a\n---\n` is `Header 2 [Str ">", Space, Str "a"]`
+    // with no blockquote at all. `parse_line` opened a BLOCK_QUOTE off the
+    // raw marker count anyway and then re-dispatched the stripped content,
+    // where setext ran a second time and re-emitted the marker — so the
+    // 10-byte input produced a 12-byte CST (`> > a\n---\nb\n`).
+    let input = "> a\n---\nb\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_none(),
+        "pandoc gives a top-level setext heading here, not a blockquote, got:\n{tree:#?}"
+    );
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_some(),
+        "expected a top-level setext HEADING, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_losslessness_setext_underline_after_nested_blockquote_line() {
+    // Same rule at depth 2: `Header 2 [Str ">", Space, Str ">", Space, Str "a"]`.
+    let input = "> > a\n---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_none(),
+        "expected no blockquote, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_blockquote_survives_a_thematic_break_below_it() {
+    // The guard must stay narrow: with a blank line between them the `---`
+    // is a thematic break and the blockquote is a real blockquote.
+    let input = "> a\n\n---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_some(),
+        "expected a BLOCK_QUOTE, got:\n{tree:#?}"
+    );
+}
