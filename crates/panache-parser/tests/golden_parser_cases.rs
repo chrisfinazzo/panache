@@ -684,6 +684,7 @@ golden_test_cases!(
     raw_blocks,
     raw_inline_format_attr,
     raw_tex_commands,
+    refdef_after_list_item_line,
     reference_definition_attached_title_commonmark,
     reference_definition_attached_title_pandoc,
     reference_definition_inside_blockquote,

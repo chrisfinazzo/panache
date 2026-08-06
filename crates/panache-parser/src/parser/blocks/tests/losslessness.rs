@@ -280,3 +280,50 @@ fn test_losslessness_multiline_table_blank_rows_and_following_captioned_simple_t
     let tree = parser.parse();
     assert_eq!(tree.text().to_string(), input);
 }
+
+#[test]
+fn test_losslessness_refdef_after_list_item_line() {
+    // Found by the incremental fuzz harness. A list item's first-line text
+    // lives in the item's `ListItemBuffer`, not in the green builder, so a
+    // reference definition emitted on the next line lands *before* it and
+    // swaps the document's bytes: `- a\n[x]: /url\n` round-tripped as
+    // `- [x]: /url\na\n`. Pandoc folds the line into the item's `Plain`
+    // (`Plain [Str "a", SoftBreak, Str "[x]:", Space, Str "/url"]`), the same
+    // rule that already keeps a refdef from interrupting a paragraph.
+    let input = "- a\n[x]: /url\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::REFERENCE_DEFINITION).is_none(),
+        "a refdef must not interrupt buffered list-item text, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_refdef_after_list_still_claims_top_level_line() {
+    // The guard above must stay narrow: once the list is closed the buffered
+    // item content is gone, so a refdef at top level is still a refdef.
+    let input = "- a\n\n[x]: /url\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::REFERENCE_DEFINITION).is_some(),
+        "a refdef after a closed list is still a refdef, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_refdef_after_blank_line_in_list_item() {
+    // Blank-line separated: the buffer has been flushed, so the refdef is a
+    // block of its own inside the item (pandoc's own spec example).
+    let input = "- a\n\n  [x]: /url\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::REFERENCE_DEFINITION).is_some(),
+        "a blank-line separated refdef inside a list item is a refdef, got:\n{tree:#?}"
+    );
+}

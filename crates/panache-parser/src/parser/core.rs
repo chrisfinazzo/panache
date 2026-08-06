@@ -833,6 +833,48 @@ impl<'a> Parser<'a> {
         matches!(self.containers.last(), Some(Container::Paragraph { .. }))
     }
 
+    /// Whether the innermost container is a list item whose content is still
+    /// buffered.
+    ///
+    /// A `ListItemBuffer` holds bytes that have *not* been written to the
+    /// green builder yet, so it is the analogue of an open paragraph: any
+    /// block emitted while it is non-empty lands before the buffered text and
+    /// reorders the document. Paragraph-interrupt rules must consult this as
+    /// well as [`Self::is_paragraph_open`].
+    fn is_list_item_content_open(&self) -> bool {
+        matches!(
+            self.containers.last(),
+            Some(Container::ListItem { buffer, .. }) if !buffer.is_empty()
+        )
+    }
+
+    /// Append `line` to whichever open text buffer is holding the current
+    /// block's content — the paragraph's, or the list item's.
+    ///
+    /// Used by the paragraph-interrupt guards in the no-blank-before
+    /// dispatch arm, which must fold the line into the open block instead of
+    /// letting a `Yes` detection emit a sibling.
+    fn append_lazy_continuation_line(&mut self, line: &str) {
+        if self.is_paragraph_open() {
+            paragraphs::append_paragraph_line(
+                &mut self.containers,
+                &mut self.builder,
+                line,
+                self.config,
+            );
+        } else if let Some(Container::ListItem {
+            buffer,
+            marker_only,
+            ..
+        }) = self.containers.stack.last_mut()
+        {
+            buffer.push_text(line, self.config);
+            if !line.trim().is_empty() {
+                *marker_only = false;
+            }
+        }
+    }
+
     /// Fold an open paragraph's buffered content into a setext heading and emit it.
     ///
     /// Used for CommonMark multi-line setext: when a setext underline is matched
@@ -4376,30 +4418,33 @@ impl<'a> Parser<'a> {
                     }
 
                     // Reference definitions cannot interrupt a paragraph
-                    // (CommonMark §4.7 / Pandoc-markdown agree).
-                    if parser_name == "reference_definition" && self.is_paragraph_open() {
-                        paragraphs::append_paragraph_line(
-                            &mut self.containers,
-                            &mut self.builder,
+                    // (CommonMark §4.7 / Pandoc-markdown agree), nor a list
+                    // item's still-buffered content — pandoc folds
+                    // `- a\n[x]: /url\n` into the item's `Plain`, and emitting
+                    // the definition here would put it *before* the buffered
+                    // `a` in the CST.
+                    if parser_name == "reference_definition"
+                        && (self.is_paragraph_open() || self.is_list_item_content_open())
+                    {
+                        self.append_lazy_continuation_line(
                             line_to_append.unwrap_or(self.lines[self.pos]),
-                            self.config,
                         );
                         return LineDispatch::consumed(1);
                     }
 
                     // Contract: a `Yes` detection in this no-blank-before
-                    // branch must not reach emission while a paragraph is
-                    // open — the fall-through below emits the block before
-                    // the buffered paragraph text, silently reordering bytes
-                    // in the CST. Detectors must gate themselves (return
-                    // `None` to stay paragraph text, like setext under
-                    // Pandoc) or return `YesCanInterrupt` (which flushes the
-                    // paragraph first), or be special-cased above.
+                    // branch must not reach emission while a paragraph or a
+                    // list item's buffered content is open — the fall-through
+                    // below emits the block before those buffered bytes,
+                    // silently reordering the CST. Detectors must gate
+                    // themselves (return `None` to stay paragraph text, like
+                    // setext under Pandoc) or return `YesCanInterrupt` (which
+                    // flushes the buffers first), or be special-cased above.
                     debug_assert!(
-                        !self.is_paragraph_open(),
-                        "block parser `{parser_name}` returned `Yes` while a paragraph is \
-                         open; this reorders bytes — gate the detection or return \
-                         `YesCanInterrupt`"
+                        !self.is_paragraph_open() && !self.is_list_item_content_open(),
+                        "block parser `{parser_name}` returned `Yes` while a paragraph or \
+                         buffered list-item content is open; this reorders bytes — gate the \
+                         detection or return `YesCanInterrupt`"
                     );
                 }
                 BlockDetectionResult::No => unreachable!(),
