@@ -102,7 +102,9 @@ pub struct Cli {
     #[arg(
         long_help = "Suppress informational status messages on stdout (e.g. \"Formatted X\", \
         \"N file left unchanged\", \"All files are correctly formatted\", \"No issues found\") \
-        as well as per-violation lint diagnostics. Errors are still written to stderr, and \
+        as well as per-violation lint diagnostics. Under `format --check` it also drops the \
+        per-file diff, leaving the list of files that would be reformatted and a summary. \
+        Errors are still written to stderr, and \
         primary command output (such as formatted content when reading from stdin, JSON/Markdown \
         reports, or the parsed CST) continues to print so that pipelines keep working. The \
         process exit code still reflects whether issues were found in --check mode."

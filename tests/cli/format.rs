@@ -656,8 +656,11 @@ fn test_format_quiet_check_suppresses_correctly_formatted() {
         .stdout(predicate::str::is_empty());
 }
 
+/// `--quiet` trades the diff for the file list plus a summary. It is never
+/// silent on failure: `--check` writes nothing, so leaving the user with only an
+/// exit code would say nothing about *which* files are unformatted.
 #[test]
-fn test_format_quiet_check_still_prints_diff_on_failure() {
+fn test_format_quiet_check_lists_files_without_the_diff() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("test.qmd");
     fs::write(
@@ -668,6 +671,27 @@ fn test_format_quiet_check_still_prints_diff_on_failure() {
 
     cargo_bin_cmd!("panache")
         .args(["format", "--check", "--quiet", test_file.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("would reformat"))
+        .stdout(predicate::str::contains(
+            "1 of 1 file(s) would be reformatted",
+        ))
+        .stdout(predicate::str::contains("Diff in").not());
+}
+
+#[test]
+fn test_format_check_prints_diff_without_quiet() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.qmd");
+    fs::write(
+        &test_file,
+        "# Heading\n\nThis is a very long line that exceeds the default line width of 80 characters and should be wrapped when formatted.",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["format", "--check", test_file.to_str().unwrap()])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Diff in"));

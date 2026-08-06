@@ -59,7 +59,7 @@ Homepage and downloads (including .deb and .rpm packages): <https://panache.bz>
   Possible values: `auto`, `always`, `never`
 
 * `--no-color` — Disable colored output (equivalent to --color never)
-* `-q`, `--quiet` — Suppress informational status messages on stdout (e.g. "Formatted X", "N file left unchanged", "All files are correctly formatted", "No issues found") as well as per-violation lint diagnostics. Errors are still written to stderr, and primary command output (such as formatted content when reading from stdin, JSON/Markdown reports, or the parsed CST) continues to print so that pipelines keep working. The process exit code still reflects whether issues were found in --check mode.
+* `-q`, `--quiet` — Suppress informational status messages on stdout (e.g. "Formatted X", "N file left unchanged", "All files are correctly formatted", "No issues found") as well as per-violation lint diagnostics. Under `format --check` it also drops the per-file diff, leaving the list of files that would be reformatted and a summary. Errors are still written to stderr, and primary command output (such as formatted content when reading from stdin, JSON/Markdown reports, or the parsed CST) continues to print so that pipelines keep working. The process exit code still reflects whether issues were found in --check mode.
 * `-v`, `--verbose` — Print additional informational output where supported. Currently used by `panache clean` to include a summary of cache size and file count alongside the "Removed cache directory" message. Conflicts with --quiet.
 * `--isolated` — Ignore all discovered configuration files
 * `--no-cache` — Disable all lint/format cache reads and writes for this run. Can also be enabled with PANACHE_NO_CACHE.

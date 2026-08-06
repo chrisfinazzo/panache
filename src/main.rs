@@ -1137,12 +1137,23 @@ fn main() -> io::Result<()> {
             let mut all_formatted = true;
             let mut reformatted_count = 0usize;
             let mut unchanged_count = 0usize;
+            let mut changed_count = 0usize;
             for outcome in outcomes {
                 let o = outcome?;
                 if check {
                     if o.input != o.output {
-                        let file_name = o.file_path.to_str().unwrap_or("<unknown>");
-                        print_diff(file_name, &o.input, &o.output, use_color);
+                        // `--check` writes nothing, so the diff is normally the
+                        // only account of what would change; `--quiet` trades it
+                        // for the file list plus a summary, for callers (a CI
+                        // step over a wholly unformatted project) that would
+                        // drown in hunks.
+                        if cli.quiet {
+                            println!("would reformat {}", o.file_path.display());
+                        } else {
+                            let file_name = o.file_path.to_str().unwrap_or("<unknown>");
+                            print_diff(file_name, &o.input, &o.output, use_color);
+                        }
+                        changed_count += 1;
                         all_formatted = false;
                     } else if expanded_files.len() == 1 && !cli.quiet {
                         println!("{} is correctly formatted", o.file_path.display());
@@ -1164,6 +1175,16 @@ fn main() -> io::Result<()> {
                         println!("All {} files are correctly formatted", expanded_files.len());
                     }
                 } else {
+                    if cli.quiet {
+                        // The list above carries no totals of its own, so the
+                        // summary is what tells you how much of the tree is
+                        // unformatted.
+                        println!(
+                            "{} of {} file(s) would be reformatted",
+                            changed_count,
+                            expanded_files.len()
+                        );
+                    }
                     std::process::exit(1);
                 }
             } else if !cli.quiet {
