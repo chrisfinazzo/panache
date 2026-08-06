@@ -314,6 +314,7 @@ golden_test_cases!(
     setext_mid_paragraph_no_blank_before_header,
     setext_multiline_commonmark,
     setext_multiline_pandoc,
+    setext_heading_inside_blockquote_pandoc,
     setext_underline_crosses_blockquote_commonmark,
     setext_underline_crosses_blockquote_pandoc,
     setext_short_underline_commonmark,

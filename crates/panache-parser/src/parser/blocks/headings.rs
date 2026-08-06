@@ -165,6 +165,22 @@ pub(crate) fn emit_setext_heading_body(
     _level: usize,
     config: &ParserOptions,
 ) {
+    emit_setext_heading_text(builder, text_line, config);
+    emit_setext_underline(builder, underline_line);
+}
+
+/// Emit a setext heading's text half: `HEADING_CONTENT`, any trailing
+/// attributes, and the newline that ends the text line.
+///
+/// Split from [`emit_setext_underline`] so a caller can emit the underline
+/// line's container prefix (blockquote markers, list indent) *between* the
+/// two — the underline is a second source line, and only the dispatch line's
+/// prefix is emitted upstream by the parser core.
+pub(crate) fn emit_setext_heading_text(
+    builder: &mut GreenNodeBuilder<'static>,
+    text_line: &str,
+    config: &ParserOptions,
+) {
     // Strip trailing newline from text line for processing
     let (text_without_newline, text_newline_str) =
         if let Some(stripped) = text_line.strip_suffix("\r\n") {
@@ -230,7 +246,12 @@ pub(crate) fn emit_setext_heading_body(
     if !text_newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), text_newline_str);
     }
+}
 
+/// Emit a setext heading's underline half: leading spaces, the
+/// `SETEXT_HEADING_UNDERLINE` node, and the trailing newline. See
+/// [`emit_setext_heading_text`] for why this is a separate entry point.
+pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, underline_line: &str) {
     // Strip trailing newline from underline for processing
     let (underline_without_newline, underline_newline_str) =
         if let Some(stripped) = underline_line.strip_suffix("\r\n") {

@@ -32,7 +32,8 @@ use super::blocks::definition_lists::{
 };
 use super::blocks::fenced_divs::{DivFenceInfo, is_div_closing_fence, try_parse_div_fence_open};
 use super::blocks::headings::{
-    emit_atx_heading, emit_setext_heading, try_parse_atx_heading, try_parse_setext_heading,
+    emit_atx_heading, emit_setext_heading_text, emit_setext_underline, try_parse_atx_heading,
+    try_parse_setext_heading,
 };
 use super::blocks::horizontal_rules::{emit_horizontal_rule, try_parse_horizontal_rule};
 use super::blocks::html_blocks::{
@@ -3607,16 +3608,22 @@ impl BlockParser for SetextHeadingParser {
         lines: &StrippedLines<'_, '_>,
         _payload: Option<&dyn Any>,
     ) -> usize {
-        // Get text line and underline line
-        let text_line = lines.raw_at(0);
-        let underline_line = lines.raw_at(1);
+        // Both lines are stripped of the container prefix: detection ran on
+        // the stripped lines, and emitting the raw ones would write the
+        // prefix twice (the core already emitted the dispatch line's markers
+        // upstream) — `> a\n> ---\n` used to round-trip as `> > a\n> ---\n`.
+        // The underline is a *second* source line, so nothing upstream
+        // emitted its prefix; `emit_or_dispatch_tail` writes it here, between
+        // the heading's text half and its underline half.
+        use crate::syntax::SyntaxKind;
 
-        // Determine level from underline character (no need to call try_parse again)
-        let underline_char = underline_line.trim().chars().next().unwrap_or('=');
-        let level = if underline_char == '=' { 1 } else { 2 };
+        let text_line = lines.dispatch_tail();
 
-        // Emit the setext heading
-        emit_setext_heading(builder, text_line, underline_line, level, ctx.config);
+        builder.start_node(SyntaxKind::HEADING.into());
+        emit_setext_heading_text(builder, text_line, ctx.config);
+        let underline_line = lines.emit_or_dispatch_tail(builder, lines.dispatch_pos() + 1);
+        emit_setext_underline(builder, underline_line);
+        builder.finish_node(); // HEADING
 
         // Return lines consumed: text line + underline line
         2

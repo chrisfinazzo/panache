@@ -377,3 +377,19 @@ fn test_blockquote_survives_a_thematic_break_below_it() {
         "expected a BLOCK_QUOTE, got:\n{tree:#?}"
     );
 }
+
+#[test]
+fn test_losslessness_setext_heading_inside_blockquote() {
+    // `SetextHeadingParser::parse_prepared` emitted from `lines.raw_at(..)`
+    // while detection used the stripped lines, so the container prefix was
+    // written twice: once by `parse_line`'s marker emission and again inside
+    // the heading's own text. Pandoc: `BlockQuote [Header 2 [Str "a"]]`.
+    let input = "> a\n> ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::BLOCK_QUOTE).is_some(),
+        "expected a BLOCK_QUOTE wrapping the heading, got:\n{tree:#?}"
+    );
+}
