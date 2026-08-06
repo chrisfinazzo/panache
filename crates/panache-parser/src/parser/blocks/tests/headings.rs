@@ -390,6 +390,50 @@ fn setext_underline_in_deeper_blockquote_is_not_an_underline() {
 }
 
 #[test]
+fn setext_underline_that_opens_a_blockquote_is_lazy_text_under_pandoc() {
+    // pandoc -f markdown on `a\n> ---`: one Para, `[Str "a", SoftBreak,
+    // Str ">", Space, Str "---"]`. Pandoc reads a marker run on the *text*
+    // line as literal text (`> foo\n---` is a top-level H2 including the
+    // `>`), but the underline still has to land in the text line's
+    // container — here it does not, so the line stays lazy paragraph text.
+    let config = ParserOptions::default();
+    let input = "a\n> ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        node.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::PARAGRAPH]
+    );
+}
+
+#[test]
+fn setext_underline_in_deeper_blockquote_is_lazy_text_under_pandoc() {
+    // pandoc -f markdown on `> a\n> > ---`: BlockQuote [Para [Str "a",
+    // SoftBreak, Str ">", Space, Str "---"]] — the underline opens a quote
+    // deeper than the text line's, so no heading forms there either.
+    let config = ParserOptions::default();
+    let input = "> a\n> > ---\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(quote.kind(), SyntaxKind::BLOCK_QUOTE);
+    assert!(
+        node.descendants().all(|n| n.kind() != SyntaxKind::HEADING),
+        "an underline one quote deeper than its text must not form a heading"
+    );
+}
+
+#[test]
 fn setext_underline_mid_paragraph_stays_text_when_extension_disabled() {
     // Pandoc never forms a setext heading mid-paragraph, even with
     // `blank_before_header` disabled: `markdown-blank_before_header` keeps

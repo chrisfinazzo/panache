@@ -206,14 +206,23 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   the count was always 0. It now reads the depth off the raw lookahead line.
   The same root cause made `a\n> ---\n` a top-level `Header 2` instead of
   `Para, BlockQuote [HR]`.
-- [ ] Under Pandoc, `a\n> ---\n` should be one `Para` (pandoc reads it as
-  `[Str "a", SoftBreak, Str ">", Space, Str "\8212"]`); panache gives
-  `Header 2 "a"`. Same shape as the CommonMark bug above, but the fix is not
-  the same rule: Pandoc treats a leading marker run on the *text* line as
-  literal text (`> foo\n---\n` is a top-level H2 with the marker included),
-  so the underline's raw depth has to be compared against
-  `ctx.blockquote_depth` alone rather than against the text line's own
-  marker count.
+- [x] Under Pandoc, `a\n> ---\n` should be one `Para` (pandoc reads it as
+  `[Str "a", SoftBreak, Str ">", Space, Str "\8212"]`); panache gave
+  `Header 2 "a"`. Same shape as the CommonMark bug above, but not the same
+  rule: Pandoc treats a leading marker run on the *text* line as literal
+  text (`> foo\n---\n` is a top-level H2 with the marker included), so the
+  underline's raw depth is now compared against `ctx.blockquote_depth`
+  alone. Also fixes `> a\n> > ---\n` and the indented `a\n   > ---\n`.
+- [ ] Under Pandoc, `> > a\n> ---\n` should be
+  `BlockQuote [Header 2 [">", Space, "a"]]` --- pandoc commits a
+  blockquote's depth per *block*, so the one-marker underline caps the quote
+  at depth 1 and the surplus `>` on the text line becomes literal heading
+  text. Panache opens both quotes on the text line and can only see depth
+  per *line*, so it gives `BlockQuote [BlockQuote [Para]]`. Fixing this
+  needs blockquote depth to be decided with lookahead over the whole run of
+  quoted lines, not a same-container tweak in `SetextHeadingParser`.
+  Lossless either way; the CommonMark reading of the same input is already
+  correct.
 - [ ] A line block inside a list item loses its indent through the formatter
   (`- x\n\n  | a\n b\n` re-formats to a line block at column 0), which then
   absorbs the following line on reparse and breaks idempotency.

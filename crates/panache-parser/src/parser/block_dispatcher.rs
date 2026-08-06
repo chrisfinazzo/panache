@@ -3574,21 +3574,32 @@ impl BlockParser for SetextHeadingParser {
             {
                 return None;
             }
-            // CommonMark §4.3: the underline must be in the same container as
-            // the text. The text line's container is the one `ctx` describes
-            // plus any blockquote it opens itself (`content` is stripped of
-            // `ctx.blockquote_depth` markers, so a leading `>` here is a
-            // *new* quote), and the underline's is its own marker run. If
-            // they differ, the construct can't be a setext heading — the
-            // underline closes the blockquote and (for `---` after a
-            // non-empty paragraph) becomes a thematic break instead. Pandoc
-            // disagrees on both counts: it treats `> foo\n---\n` as a
-            // top-level setext H2 with the text `> foo`, marker run included,
-            // so gate on dialect.
-            if ctx.config.dialect == crate::options::Dialect::CommonMark
-                && next_line_raw.map_or(0, |line| count_blockquote_markers(line).0)
-                    != ctx.blockquote_depth + count_blockquote_markers(content).0
-            {
+            // Both dialects require the underline to sit in the same
+            // container as the text, but they disagree on which container the
+            // text line is in, so each gets its own reading of "same".
+            //
+            // CommonMark §4.3: the text line's container is the one `ctx`
+            // describes plus any blockquote it opens itself (`content` is
+            // stripped of `ctx.blockquote_depth` markers, so a leading `>`
+            // here is a *new* quote). If the two differ the construct can't
+            // be a setext heading — the underline closes the blockquote and
+            // (for `---` after a non-empty paragraph) becomes a thematic
+            // break instead.
+            //
+            // Pandoc reads a marker run on the *text* line as literal text
+            // rather than as a container: `> foo\n---\n` is a top-level H2
+            // whose text is `> foo`, marker included. So the text line's
+            // container is just `ctx.blockquote_depth`, and `content`'s own
+            // markers must not be added — but the underline still has to land
+            // in that same container, which is what keeps `a\n> ---\n` a
+            // lazy paragraph continuation rather than an H2.
+            let text_bq_depth = match ctx.config.dialect {
+                crate::options::Dialect::CommonMark => {
+                    ctx.blockquote_depth + count_blockquote_markers(content).0
+                }
+                _ => ctx.blockquote_depth,
+            };
+            if next_line_raw.map_or(0, |line| count_blockquote_markers(line).0) != text_bq_depth {
                 return None;
             }
             // Same-container rule for list items: if the text line is inside a
