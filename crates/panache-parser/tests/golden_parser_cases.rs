@@ -284,6 +284,7 @@ golden_test_cases!(
     fenced_div_attributes_structured,
     fenced_math_in_list_blockquote,
     fenced_div_list_idempotency_setup,
+    fenced_div_open_after_list_item_line,
     fenced_div_list_item_nested_div_close,
     fenced_div_indented_close_top_level,
     fenced_div_close_grid_table,

@@ -406,3 +406,19 @@ fn test_losslessness_line_block_in_list_item_with_lazy_pipe_line() {
     let tree = Parser::new(input, &config).parse();
     assert_eq!(tree.text().to_string(), input);
 }
+
+#[test]
+fn test_losslessness_fenced_div_open_after_list_item_line() {
+    // Same trap as the refdef case: a `:::` opener detected as `Yes` while a
+    // list item's content is still buffered would emit the div *before* the
+    // buffered text. Pandoc folds the line into the item's `Plain`
+    // (`Str "a", SoftBreak, Str "|", SoftBreak, Str ":::", Space, Str "note"`).
+    let input = "1. a\n|\n::: note\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::FENCED_DIV).is_none(),
+        "a `:::` opener must not interrupt buffered list-item text, got:\n{tree:#?}"
+    );
+}

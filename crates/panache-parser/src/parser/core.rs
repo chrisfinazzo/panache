@@ -4422,19 +4422,14 @@ impl<'a> Parser<'a> {
                     }
 
                     // Keep ambiguous fenced-div openers from interrupting an
-                    // active paragraph without a blank line.
-                    if parser_name == "fenced_div_open" && self.is_paragraph_open() {
-                        if !self.is_paragraph_open() {
-                            paragraphs::start_paragraph_if_needed(
-                                &mut self.containers,
-                                &mut self.builder,
-                            );
-                        }
-                        paragraphs::append_paragraph_line(
-                            &mut self.containers,
-                            &mut self.builder,
+                    // active paragraph — or a list item's still-buffered
+                    // content — without a blank line. Pandoc folds
+                    // `1. a\n|\n::: note\n` into the item's `Plain`.
+                    if parser_name == "fenced_div_open"
+                        && (self.is_paragraph_open() || self.is_list_item_content_open())
+                    {
+                        self.append_lazy_continuation_line(
                             line_to_append.unwrap_or(self.lines[self.pos]),
-                            self.config,
                         );
                         return LineDispatch::consumed(1);
                     }
