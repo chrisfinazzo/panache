@@ -408,6 +408,7 @@ golden_test_cases!(
     nested_pipe_table_indent,
     pipe_table,
     pipe_table_unicode,
+    pipe_table_without_body_rows,
     plain_continuation_edge_cases,
     python_markdown_admonitions,
     quarto_code_blocks,

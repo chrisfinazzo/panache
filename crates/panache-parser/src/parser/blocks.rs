@@ -67,6 +67,8 @@ pub mod tests {
     pub mod losslessness;
     #[path = "metadata_guards.rs"]
     pub mod metadata_guards;
+    #[path = "tables.rs"]
+    pub mod tables;
 }
 #[path = "blocks/latex_envs.rs"]
 pub mod latex_envs;

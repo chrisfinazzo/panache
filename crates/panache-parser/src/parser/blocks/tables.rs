@@ -1478,10 +1478,13 @@ pub(crate) fn try_parse_pipe_table(
         end_pos += 1;
     }
 
-    // Must have at least one data row
-    if end_pos <= actual_start + 2 {
-        return None;
-    }
+    // No data-row requirement: pandoc's `pipeTable` reads the rows after the
+    // delimiter with `many`, so a header plus a delimiter row and nothing else
+    // is already a complete table (`a | b\n---|---` is a `Table` with an empty
+    // body). Demanding a body row here also cost the blockquote depth cap its
+    // table claimant — `> > a | b\n> ---|---` is `BlockQuote [Table …]` with
+    // `> a` as the first cell, which only works if `TableParser` claims the
+    // line at the probe depth.
 
     // Check for caption before table (only if we didn't already detect it)
     let caption_before = caption_before.or_else(|| find_caption_before_table(window, actual_start));

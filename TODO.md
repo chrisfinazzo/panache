@@ -227,11 +227,15 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   win by default (`> > a\n: b\n` keeps both quotes in pandoc).
   Pandoc-dialect only --- CommonMark reads the surplus `>` as a real
   container, not as text.
-- [ ] Under Pandoc, `> > a | b\n> ---|---\n` should be `BlockQuote [Table …]`
+- [x] Under Pandoc, `> > a | b\n> ---|---\n` should be `BlockQuote [Table …]`
   with `> a` as the first cell (`table` outranks `blockQuote`, so the depth
-  cap above applies); panache gives `BlockQuote [BlockQuote [Para]]` because
-  `TableParser` does not claim the line at the probe depth. Same root cause
-  as the setext case, different claimant.
+  cap above applies); panache gave `BlockQuote [BlockQuote [Para]]`. Not the
+  depth cap after all: `try_parse_pipe_table` required at least one row
+  after the delimiter, so it declined at every depth. Pandoc reads those
+  rows with `many`, so a header plus a delimiter row is already a whole
+  table --- the requirement is dropped, which also makes top-level
+  `a | b\n---|---\n` and `| a\n|---\n` (previously a `LineBlock`) tables, as
+  pandoc has them.
 - [ ] Under Pandoc, `> > a\n: b\n` should be
   `BlockQuote [BlockQuote [DefinitionList [(a, [[Plain b]])]]]`; panache
   drops the definition body and lets `: b` escape the quotes entirely as a
