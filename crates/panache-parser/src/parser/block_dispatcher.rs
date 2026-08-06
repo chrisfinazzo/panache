@@ -2452,17 +2452,18 @@ impl BlockParser for FencedDivOpenParser {
         let (content_before_newline, newline_str) = strip_newline(after_colons);
 
         if !div_fence.attributes.is_empty() {
-            // Optional space before attributes
-            let has_leading_space = content_before_newline.starts_with(' ');
-            if has_leading_space {
-                builder.token(SyntaxKind::WHITESPACE.into(), " ");
+            // Optional whitespace before attributes. Detection trims the whole
+            // run (`trim_start`), so emit the whole run here too --- consuming
+            // only one space would leave the rest to be re-emitted as a
+            // duplicated attribute suffix.
+            let content_after_space = content_before_newline.trim_start();
+            let leading_space_len = content_before_newline.len() - content_after_space.len();
+            if leading_space_len > 0 {
+                builder.token(
+                    SyntaxKind::WHITESPACE.into(),
+                    &content_before_newline[..leading_space_len],
+                );
             }
-
-            let content_after_space = if has_leading_space {
-                &content_before_newline[1..]
-            } else {
-                content_before_newline
-            };
 
             // Attributes — structure the Pandoc `{...}` body into ATTR_*
             // children (bare-word/empty bodies stay one opaque TEXT token).

@@ -62,6 +62,24 @@ fn test_losslessness_fenced_div_open_with_trailing_space() {
 }
 
 #[test]
+fn test_losslessness_fenced_div_open_whitespace_run_before_label() {
+    // The opener emitter used to consume a single space before the label while
+    // detection had trimmed the whole whitespace run, so the leftover run was
+    // re-emitted as a duplicated label suffix (`:::  te` -> `::: tee`).
+    for input in [
+        ":::  te\nbody\n:::\n\npara\n",
+        ":::: \ty\n:::\n::::\n\npara\n",
+        "::::     outer\n::: inner\nbody\n:::\n::::\n",
+        ":::\t{.note}\nbody\n:::\n",
+    ] {
+        let config = ParserOptions::default();
+        let parser = Parser::new(input, &config);
+        let tree = parser.parse();
+        assert_eq!(tree.text().to_string(), input, "input: {input:?}");
+    }
+}
+
+#[test]
 fn test_losslessness_blockquote_list_continuation_lines() {
     let input = "> practical skills in:\n> \n> - Developing and integrating custom formats\n>   while reducing repetition across projects.\n> - Implementing filters to automate and streamline content\n>   transformation.\n";
     let config = ParserOptions::default();

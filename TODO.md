@@ -175,12 +175,16 @@ Round-trip failures (`input` -> lossy output):
   dollar run while `emit_display_math` only wrote back an opener-length
   marker. Both delimiters are now exactly `$$` (pandoc's
   `mathDisplayWith "$$" "$$"`), so surplus dollars stay content or text.
-- [ ] Fenced-div opener mangles the whitespace run before its label, and
+- [x] Fenced-div opener mangles the whitespace run before its label, and
   duplicates part of the label: `:::  te\nbody\n:::\n\npara\n` ->
   `::: tee\nbody\n:::\n\npara\n`; `:::: \ty\n:::\n::::\n\npara\n` ->
   `:::: yy\n:::\n::::\n\npara\n`;
   `::::     outer\n::: inner\nbody\n:::\n::::\n` ->
-  `:::: outeruter\n::: inner\nbody\n:::\n::::\n`.
+  `:::: outeruter\n::: inner\nbody\n:::\n::::\n`. Detection trims the whole
+  whitespace run after the colons, but `emit` consumed a single space before
+  slicing the label off the rest, so the leftover run shifted the slice and
+  the tail was re-emitted as a label suffix. `emit` now consumes the same
+  run.
 
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
