@@ -34,7 +34,8 @@ use super::utils::text_buffer;
 use super::blocks::blockquotes::strip_n_blockquote_markers;
 use super::utils::continuation::ContinuationPolicy;
 use container_stack::{
-    Container, ContainerStack, byte_index_at_column, gobbled_indent_prefix_len, leading_indent,
+    Container, ContainerStack, FOOTNOTE_INDENT_COLUMNS, byte_index_at_column,
+    gobbled_indent_prefix_len, leading_indent,
 };
 use definition_lists::{emit_definition_marker, emit_term};
 use line_blocks::{parse_line_block, try_parse_line_block_start};
@@ -1242,7 +1243,7 @@ impl<'a> Parser<'a> {
             .map(|p| p.content_start)
             .unwrap_or(0);
 
-        let content_col = 4;
+        let content_col = FOOTNOTE_INDENT_COLUMNS;
         self.containers
             .push(Container::FootnoteDefinition { content_col });
 
@@ -4395,6 +4396,30 @@ impl<'a> Parser<'a> {
         let content_indent = self.content_container_indent_to_strip();
         let (stripped_content, indent_to_emit) = strip_content_indent(content, content_indent);
 
+        // Pandoc re-reads a content container's body from its content column:
+        // `noteBlock` strips `indentSpaces` (4) off every continuation line of
+        // a footnote definition before parsing the body, the same rule
+        // `listLine` applies inside a list item and `defListIndent` inside a
+        // definition body. Hold those bytes out of the text handed to the
+        // inline parser so a construct that preserves interior whitespace
+        // (a code span, inline math) measures from the content column instead
+        // of from column 0; they are spliced back as `WHITESPACE` at emission,
+        // so the parse stays byte-lossless.
+        //
+        // A *lazy* line never reaches the content column and pandoc takes
+        // nothing off it, so its whitespace stays payload. A tab straddling
+        // the content column has no byte boundary to split on, so it stays in
+        // the payload whole and the projector subtracts its gobbled columns
+        // by column instead.
+        let paragraph_held = {
+            let append_line = line_to_append.unwrap_or(self.lines[self.pos]);
+            if content_indent > 0 && leading_indent(content).0 >= content_indent {
+                gobbled_indent_prefix_len(append_line, content_indent)
+            } else {
+                0
+            }
+        };
+
         if self.config.extensions.alerts
             && self.current_blockquote_depth() > 0
             && !self.in_active_alert()
@@ -4657,10 +4682,11 @@ impl<'a> Parser<'a> {
             && (paragraphs::has_open_inline_math_environment(&self.containers)
                 || paragraphs::has_open_display_math(&self.containers))
         {
-            paragraphs::append_paragraph_line(
+            paragraphs::append_paragraph_line_gobbling(
                 &mut self.containers,
                 &mut self.builder,
                 line_to_append.unwrap_or(self.lines[self.pos]),
+                paragraph_held,
                 self.config,
             );
             return LineDispatch::consumed(1);
@@ -4864,10 +4890,11 @@ impl<'a> Parser<'a> {
                 if !self.is_paragraph_open() {
                     paragraphs::start_paragraph_if_needed(&mut self.containers, &mut self.builder);
                 }
-                paragraphs::append_paragraph_line(
+                paragraphs::append_paragraph_line_gobbling(
                     &mut self.containers,
                     &mut self.builder,
                     line_to_append.unwrap_or(self.lines[self.pos]),
+                    paragraph_held,
                     self.config,
                 );
                 return LineDispatch::consumed(1);
@@ -4983,10 +5010,11 @@ impl<'a> Parser<'a> {
                                 &mut self.builder,
                             );
                         }
-                        paragraphs::append_paragraph_line(
+                        paragraphs::append_paragraph_line_gobbling(
                             &mut self.containers,
                             &mut self.builder,
                             line_to_append.unwrap_or(self.lines[self.pos]),
+                            paragraph_held,
                             self.config,
                         );
                         return LineDispatch::consumed(1);
@@ -5024,10 +5052,11 @@ impl<'a> Parser<'a> {
                                 }
                             };
                         if !allow_interrupt {
-                            paragraphs::append_paragraph_line(
+                            paragraphs::append_paragraph_line_gobbling(
                                 &mut self.containers,
                                 &mut self.builder,
                                 line_to_append.unwrap_or(self.lines[self.pos]),
+                                paragraph_held,
                                 self.config,
                             );
                             return LineDispatch::consumed(1);
@@ -5291,10 +5320,11 @@ impl<'a> Parser<'a> {
         // For lossless parsing: use line_to_append if provided (e.g., for blockquotes
         // where markers have been stripped), otherwise use the original line
         let line = line_to_append.unwrap_or(self.lines[self.pos]);
-        paragraphs::append_paragraph_line(
+        paragraphs::append_paragraph_line_gobbling(
             &mut self.containers,
             &mut self.builder,
             line,
+            paragraph_held,
             self.config,
         );
         LineDispatch::consumed(1)

@@ -144,14 +144,17 @@ DOCUMENT@0..1240
     PARAGRAPH@433..500
       TEXT@433..462 "This is a multi-line  ..."
       NEWLINE@462..463 "\n"
-      TEXT@463..499 "    that continues on ..."
+      WHITESPACE@463..467 "    "
+      TEXT@467..499 "that continues on the ..."
       NEWLINE@499..500 "\n"
     BLANK_LINE@500..501
       BLANK_LINE@500..501 "\n"
     PARAGRAPH@501..571
-      TEXT@501..541 "    It can even have  ..."
+      WHITESPACE@501..505 "    "
+      TEXT@505..541 "It can even have mult ..."
       NEWLINE@541..542 "\n"
-      TEXT@542..570 "    with proper inden ..."
+      WHITESPACE@542..546 "    "
+      TEXT@546..570 "with proper indentation."
       NEWLINE@570..571 "\n"
     BLANK_LINE@571..572
       BLANK_LINE@571..572 "\n"
@@ -173,7 +176,8 @@ DOCUMENT@0..1240
     BLANK_LINE@614..615
       BLANK_LINE@614..615 "\n"
     PARAGRAPH@615..645
-      TEXT@615..644 "    All indented by 4 ..."
+      WHITESPACE@615..619 "    "
+      TEXT@619..644 "All indented by 4 spa ..."
       NEWLINE@644..645 "\n"
   BLANK_LINE@645..646
     BLANK_LINE@645..646 "\n"
@@ -189,7 +193,8 @@ DOCUMENT@0..1240
     BLANK_LINE@692..693
       BLANK_LINE@692..693 "\n"
     PARAGRAPH@693..783
-      TEXT@693..749 "    Subsequent paragr ..."
+      WHITESPACE@693..697 "    "
+      TEXT@697..749 "Subsequent paragraphs ..."
       NEWLINE@749..750 "\n"
       TEXT@750..782 "belong to the previou ..."
       NEWLINE@782..783 "\n"
@@ -203,11 +208,14 @@ DOCUMENT@0..1240
     BLANK_LINE@806..807
       BLANK_LINE@806..807 "\n"
     PARAGRAPH@807..958
-      TEXT@807..865 "    The whole paragra ..."
+      WHITESPACE@807..811 "    "
+      TEXT@811..865 "The whole paragraph c ..."
       NEWLINE@865..866 "\n"
-      TEXT@866..925 "    line.  In this wa ..."
+      WHITESPACE@866..870 "    "
+      TEXT@870..925 "line.  In this way, m ..."
       NEWLINE@925..926 "\n"
-      TEXT@926..957 "    multi-paragraph l ..."
+      WHITESPACE@926..930 "    "
+      TEXT@930..957 "multi-paragraph list  ..."
       NEWLINE@957..958 "\n"
   BLANK_LINE@958..959
     BLANK_LINE@958..959 "\n"
@@ -236,7 +244,9 @@ DOCUMENT@0..1240
     PARAGRAPH@1051..1240
       TEXT@1051..1099 "This is typically the ..."
       NEWLINE@1099..1100 "\n"
-      TEXT@1100..1176 "    regularization pa ..."
+      WHITESPACE@1100..1104 "    "
+      TEXT@1104..1176 "regularization path.  ..."
       NEWLINE@1176..1177 "\n"
-      TEXT@1177..1239 "    every coefficient ..."
+      WHITESPACE@1177..1181 "    "
+      TEXT@1181..1239 "every coefficient zer ..."
       NEWLINE@1239..1240 "\n"

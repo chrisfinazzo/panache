@@ -53,6 +53,8 @@ pub mod tests {
     pub mod blockquotes;
     #[path = "code_blocks.rs"]
     pub mod code_blocks;
+    #[path = "content_containers.rs"]
+    pub mod content_containers;
     #[path = "definition_lists.rs"]
     pub mod definition_lists;
     #[path = "figures.rs"]

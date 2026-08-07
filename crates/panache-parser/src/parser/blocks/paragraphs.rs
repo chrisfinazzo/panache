@@ -160,8 +160,31 @@ pub(in crate::parser) fn start_paragraph_if_needed(
 /// Append a line to the current paragraph (preserving losslessness).
 pub(in crate::parser) fn append_paragraph_line(
     containers: &mut ContainerStack,
+    builder: &mut GreenNodeBuilder<'static>,
+    line: &str,
+    config: &ParserOptions,
+) {
+    append_paragraph_line_gobbling(containers, builder, line, 0, config);
+}
+
+/// Append a line to the current paragraph, holding its leading `held` bytes
+/// out of the text the inline parser sees.
+///
+/// Those bytes are a content container's continuation indent — the columns
+/// pandoc strips off the line before the body is parsed (`noteBlock`'s
+/// `indentSpaces` for a footnote, the same rule `listLine` applies in a list
+/// item). They are buffered as an `Indent` segment and spliced back as
+/// `WHITESPACE` at emission, so the parse stays byte-lossless while an inline
+/// construct that preserves interior whitespace measures from the content
+/// column instead of from column 0.
+///
+/// `held` must be a byte offset into `line` at a character boundary; pass 0 to
+/// buffer the line verbatim.
+pub(in crate::parser) fn append_paragraph_line_gobbling(
+    containers: &mut ContainerStack,
     _builder: &mut GreenNodeBuilder<'static>,
     line: &str,
+    held: usize,
     config: &ParserOptions,
 ) {
     // Buffer the line (with newline for losslessness)
@@ -173,7 +196,12 @@ pub(in crate::parser) fn append_paragraph_line(
         ..
     }) = containers.stack.last_mut()
     {
-        buffer.push_text(line);
+        if held > 0 {
+            buffer.push_indent(&line[..held]);
+            buffer.push_text(&line[held..]);
+        } else {
+            buffer.push_text(line);
+        }
 
         let line_no_newline = trim_end_newlines(line);
         // Track display-math delimiter lines (`$$`, and `\[`/`\]` when the

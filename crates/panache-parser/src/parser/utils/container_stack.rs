@@ -106,6 +106,14 @@ pub(crate) struct ContainerStack {
 
 const TAB_STOP: usize = 4;
 
+/// Columns a footnote definition's body is indented by.
+///
+/// Pandoc's `noteBlock` strips a fixed `indentSpaces` from every continuation
+/// line of a footnote body, independent of how wide the `[^label]:` marker is,
+/// so this is the container's content column and the gobble applied to its
+/// continuation lines.
+pub(crate) const FOOTNOTE_INDENT_COLUMNS: usize = 4;
+
 impl ContainerStack {
     pub(crate) fn new() -> Self {
         Self { stack: Vec::new() }

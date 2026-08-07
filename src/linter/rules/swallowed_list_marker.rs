@@ -178,20 +178,12 @@ fn escaped_marker(marker: &str) -> String {
 /// The blockquote case still works, because `BLOCK_QUOTE_MARKER` and its
 /// `WHITESPACE` are direct children of the enclosing `PARAGRAPH`.
 fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
-    // Footnote-definition bodies bake their four-column continuation indent
-    // into the `TEXT` token itself, so indent has to be measured relative to
-    // that. No other container needs a baseline: blockquote prefixes are
-    // separate tokens, and list items and definition lists strip their own
+    // Every container's continuation indent is its own token, so a marker's
+    // indent is already measured from the container's content column and needs
+    // no baseline: blockquote prefixes are separate tokens, footnote
+    // definitions and admonitions hold their content indent out as
+    // `WHITESPACE`, and list items and definition lists strip their own
     // container indent (which also means a nested list there parses for real).
-    let baseline = if node
-        .ancestors()
-        .any(|a| a.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
-    {
-        4
-    } else {
-        0
-    };
-
     let mut line_idx = 0usize;
     // Set by a newline and preserved across container prefixes, so that
     // `> text\n> - item` still registers `- item` as a line start.
@@ -217,7 +209,7 @@ fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
                 let text = token.text();
                 if at_line_start
                     && seen_content
-                    && let Some((mstart, mend)) = marker_shape(text, baseline)
+                    && let Some((mstart, mend)) = marker_shape(text)
                     && has_content_after(&elem, &text[mend..])
                 {
                     let base = token.text_range().start();
@@ -271,7 +263,7 @@ fn has_content_after(elem: &SyntaxElement, tail: &str) -> bool {
 /// `stray-fenced-div-markers` makes, and this one is deliberately narrower than
 /// the parser (no alpha, roman, or example-list markers, and no long numbers)
 /// because those shapes are common in ordinary prose.
-fn marker_shape(text: &str, baseline: usize) -> Option<(usize, usize)> {
+fn marker_shape(text: &str) -> Option<(usize, usize)> {
     let bytes = text.as_bytes();
 
     let mut col = 0usize;
@@ -284,7 +276,7 @@ fn marker_shape(text: &str, baseline: usize) -> Option<(usize, usize)> {
         }
         i += 1;
     }
-    if col.checked_sub(baseline)? > MAX_MARKER_INDENT {
+    if col > MAX_MARKER_INDENT {
         return None;
     }
 
@@ -405,7 +397,8 @@ mod tests {
 
     #[test]
     fn flags_inside_footnote_definition() {
-        // The four-space continuation indent lives inside the TEXT token.
+        // The four-space continuation indent is held out as its own
+        // `WHITESPACE` token, so the marker sits at the TEXT token's start.
         let diagnostics = parse_and_lint("[^1]: text\n    - item\n");
         assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
         assert_eq!(diagnostics[0].location.line, 2);

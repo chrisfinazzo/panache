@@ -45,5 +45,6 @@ DOCUMENT@0..95
     BLANK_LINE@68..69
       BLANK_LINE@68..69 "\n"
     PARAGRAPH@69..95
-      TEXT@69..94 "    Continuing paragr ..."
+      WHITESPACE@69..73 "    "
+      TEXT@73..94 "Continuing paragraph."
       NEWLINE@94..95 "\n"

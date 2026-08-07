@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..240
@@ -42,7 +41,8 @@ DOCUMENT@0..240
     PARAGRAPH@88..220
       TEXT@88..150 "First sentence of the ..."
       NEWLINE@150..151 "\n"
-      TEXT@151..219 "    will wrap it onto ..."
+      WHITESPACE@151..155 "    "
+      TEXT@155..219 "will wrap it onto a c ..."
       NEWLINE@219..220 "\n"
   BLANK_LINE@220..221
     BLANK_LINE@220..221 "\n"

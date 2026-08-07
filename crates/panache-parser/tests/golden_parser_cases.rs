@@ -309,6 +309,8 @@ golden_test_cases!(
     fenced_div_close_grid_table,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
+    footnote_continuation_indent_stripped_pandoc,
+    footnote_continuation_tab_indent_pandoc,
     footnote_def_paragraph,
     footnote_definition_list,
     footnote_fenced_code_indent,

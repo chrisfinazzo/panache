@@ -579,18 +579,70 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
     against pandoc individually and one
     (`blockquote_no_interrupt_def_plain_continuation_pandoc`) is a payload fix,
     `Code "{{< include >}}"` where it used to be five spaces.
-- [ ] A **footnote** definition's continuation indent is not gobbled either:
+- [x] A **footnote** definition's continuation indent is not gobbled either:
   ``x[^1]\n\n[^1]: d\n    `x\n    y` `` is `Code "x y"` in pandoc but
   `Code "x     y"` here. Same bug as the definition-list item above and the
   list-item one before it, but a third code path --- a footnote body's
   continuation lines land in a `Container::Paragraph`'s `ParagraphBuffer`
-  via `append_paragraph_line`, which buffers the *raw* line, so there is no
-  `indent_to_emit` at hand to hold out. `ParagraphBuffer` already carries
-  the `Indent` segment and the projector's gobble is now keyed on the
-  innermost `LIST_ITEM`/`DEFINITION` ancestor, so both would need a
-  `FOOTNOTE_DEFINITION` arm. `Container::Admonition` shares the same
-  `content_col` machinery and is presumably affected too, unchecked. Found
-  while fixing the definition-list item. Not in the corpus.
+  via `append_paragraph_line`, which buffers the *raw* line. Fixed in three
+  parts:
+  - `parse_inner_content` now computes the gobble once, next to the existing
+    `strip_content_indent` call, and hands it to a new
+    `append_paragraph_line_gobbling`, which holds those bytes out as an `Indent`
+    segment instead of buffering the line verbatim. Keying it on
+    `content_indent` (the sum `content_container_indent_to_strip` already
+    maintains) means `Container::Admonition` and `Container::Definition` are
+    covered by the same change --- the admonition half was unverified in the
+    original note and is now pinned by unit tests, since python-markdown
+    admonitions have no pandoc oracle.
+  - A *lazy* line never reaches the content column and pandoc takes nothing off
+    it, so its whitespace stays payload; the guard is
+    `leading_indent(content).0 >= content_indent`.
+  - The projector's `list_gobble_columns` grew a `FOOTNOTE_DEFINITION` arm. It
+    cannot reuse the marker-width rule the other two share: `noteBlock` strips a
+    fixed `indentSpaces` regardless of how wide `[^label]:` is, so the column is
+    the definition's start column plus 4 (`FOOTNOTE_INDENT_COLUMNS`, now shared
+    with the parser's container push).
+  - Removing the indent from the `TEXT` token made the linter's
+    `swallowed-list-marker` `baseline = 4` hack obsolete --- it existed only
+    because footnote bodies used to bake the indent into `TEXT`. Dropped; marker
+    indent is now measured from the content column for every container
+    uniformly.
+  - Verified against pandoc 3.9.0.2 over 20 probe cases (marker-line spans,
+    surplus indent, lazy lines, second paragraphs, blockquote nesting, math,
+    multiple notes, and all four tab shapes --- note that no tab can straddle a
+    content column of 4, since a tab starting before column 4 always stops
+    exactly there): 18 of 20 match where 4 did before. The two that remain are
+    separate defects, filed below. Parser fixtures
+    `footnote_continuation_indent_stripped_pandoc` and
+    `footnote_continuation_tab_indent_pandoc`, plus payload unit tests in
+    `parser/blocks/tests/content_containers.rs`. Formatter output is unchanged ---
+    no golden expectation moved, and the losslessness/idempotency sweep over all
+    1073 fixtures has the same seven pre-existing failures, byte for byte. The
+    10 CST snapshots that moved are all `TEXT` retagged as `WHITESPACE` over
+    identical byte ranges, in footnote and admonition bodies.
+- [ ] A footnote definition inside a **list item** is not recognized as a
+  footnote definition at all: `- x[^1]\n\n  [^1]: d\n` is
+  `Plain [Str "x", Note ...]` in pandoc but two `Para`s here, with the
+  marker left as literal text (`Str "[^1]:"`). This is block *detection*,
+  not the indent gobble --- the definition never opens, so no
+  `FOOTNOTE_DEFINITION` node exists. Found while fixing the footnote indent
+  above. Not in the corpus.
+- [ ] A list nested inside a footnote body gobbles the wrong number of columns:
+  `x[^1]\n\n[^1]: d\n\n    - a\n      `x\n y\`\` is `Code "x y"` in pandoc
+  but `Code "x     y"` here. The footnote's own 4 columns are gobbled
+  correctly now, but the item's continuation lines go through
+  `ListItemBuffer::to_paragraph_buffer`, which is handed the list item's
+  `content_col` --- and that column is \*relative\* to the content the
+  footnote already stripped (2, not the absolute 6), while the buffered
+  lines are raw. So 2 of the 6 columns are held out and 4 leak into the
+  payload. Fixing it means passing `content_col` plus the enclosing
+  content-container indent, but that same value also feeds `emit_as_block`'s
+  ATX-heading, thematic-rule and HTML-block-lift detection, so it needs its
+  own verification pass rather than a one-line change. Note the projector
+  already reports 6 here, since `list_gobble_columns` measures the marker's
+  absolute source column. Found while fixing the footnote indent above. Not
+  in the corpus.
 - [ ] The formatter expands a code span's tabs from column 0 of the span's own
   content rather than from its source column, so it rewrites `` a`x\ty`b ``
   to `` a`x   y`b `` --- pandoc reads 1 space in the input and 3 in the

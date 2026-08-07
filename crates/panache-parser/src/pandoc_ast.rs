@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::SyntaxNode;
 use crate::parser::utils::attributes::decode_html_attr_entities;
+use crate::parser::utils::container_stack::FOOTNOTE_INDENT_COLUMNS;
 use crate::syntax::{SyntaxKind, SyntaxToken};
 use rowan::NodeOrToken;
 use serde_json::{Value, json};
@@ -4845,13 +4846,26 @@ fn advance_columns(text: &str, mut col: usize) -> usize {
 /// shape: a marker token, optionally its trailing spaces, then the content
 /// column. The innermost one wins, and because the column is absolute, an
 /// enclosing container's own gobble is already folded into it.
+///
+/// A footnote definition gobbles by the same rule but computes its column
+/// differently: `noteBlock` strips a fixed `indentSpaces` (4) from every
+/// continuation line regardless of how wide the `[^label]:` marker is, so the
+/// column is the definition's own start column plus 4 — not the marker width.
 fn list_gobble_columns(node: &SyntaxNode) -> usize {
-    let Some(item) = node
-        .ancestors()
-        .find(|a| matches!(a.kind(), SyntaxKind::LIST_ITEM | SyntaxKind::DEFINITION))
-    else {
+    let Some(item) = node.ancestors().find(|a| {
+        matches!(
+            a.kind(),
+            SyntaxKind::LIST_ITEM | SyntaxKind::DEFINITION | SyntaxKind::FOOTNOTE_DEFINITION
+        )
+    }) else {
         return 0;
     };
+    if item.kind() == SyntaxKind::FOOTNOTE_DEFINITION {
+        let Some(first) = item.first_token() else {
+            return 0;
+        };
+        return token_line_context(&first).0 + FOOTNOTE_INDENT_COLUMNS;
+    }
     let marker_kind = if item.kind() == SyntaxKind::DEFINITION {
         SyntaxKind::DEFINITION_MARKER
     } else {

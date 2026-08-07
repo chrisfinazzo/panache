@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..100
@@ -30,5 +29,6 @@ DOCUMENT@0..100
     BLANK_LINE@79..80
       BLANK_LINE@79..80 "\n"
     PARAGRAPH@80..100
-      TEXT@80..99 "    Tail paragraph."
+      WHITESPACE@80..84 "    "
+      TEXT@84..99 "Tail paragraph."
       NEWLINE@99..100 "\n"

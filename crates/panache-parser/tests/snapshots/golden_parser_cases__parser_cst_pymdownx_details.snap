@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 98
 expression: cst_output
 ---
 DOCUMENT@0..101
@@ -14,7 +13,8 @@ DOCUMENT@0..101
     BLANK_LINE@21..22
       BLANK_LINE@21..22 "\n"
     PARAGRAPH@22..52
-      TEXT@22..51 "    Collapsible body  ..."
+      WHITESPACE@22..26 "    "
+      TEXT@26..51 "Collapsible body cont ..."
       NEWLINE@51..52 "\n"
   BLANK_LINE@52..53
     BLANK_LINE@52..53 "\n"
@@ -24,5 +24,6 @@ DOCUMENT@0..101
     ADMONITION_TYPE@57..64 "warning"
     NEWLINE@64..65 "\n"
     PARAGRAPH@65..101
-      TEXT@65..100 "    Collapsed without ..."
+      WHITESPACE@65..69 "    "
+      TEXT@69..100 "Collapsed without a b ..."
       NEWLINE@100..101 "\n"
