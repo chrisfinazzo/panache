@@ -7,8 +7,11 @@ DOCUMENT@0..32
     LIST_ITEM@0..32
       LIST_MARKER@0..2 "1."
       WHITESPACE@2..3 " "
-      PLAIN@3..32
-        TEXT@3..12 "| a | b |"
-        NEWLINE@12..13 "\n"
+      LINE_BLOCK@3..13
+        LINE_BLOCK_LINE@3..13
+          LINE_BLOCK_MARKER@3..5 "| "
+          TEXT@5..12 "a | b |"
+          NEWLINE@12..13 "\n"
+      PLAIN@13..32
         TEXT@13..31 "   not-a-separator"
         NEWLINE@31..32 "\n"

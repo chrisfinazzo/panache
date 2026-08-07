@@ -711,17 +711,17 @@ impl Formatter {
         }
 
         // Same-line leading-block case: a LIST_ITEM whose first non-blank child
-        // is a FENCED_DIV or CODE_BLOCK (no preceding PLAIN/PARAGRAPH).
-        // Examples: `- ::: note`, ``- ```rust``. Without this the item has no
-        // content node, so the generic path below never emits the marker and
-        // the block swallows it (issue #439). Emit the outer marker, then format
-        // the block at indent=0 so its opening fence abuts the marker; splice
-        // the outer item's hanging indent into subsequent lines. Mirrors the
-        // leading-BQ path.
+        // is a FENCED_DIV, CODE_BLOCK, or LINE_BLOCK (no preceding
+        // PLAIN/PARAGRAPH). Examples: `- ::: note`, ``- ```rust``, `- | a`.
+        // Without this the item has no content node, so the generic path below
+        // never emits the marker and the block swallows it (issue #439). Emit
+        // the outer marker, then format the block at indent=0 so its first line
+        // abuts the marker; splice the outer item's hanging indent into
+        // subsequent lines. Mirrors the leading-BQ path.
         if let Some(leading_block) = first_non_blank_child.as_ref()
             && matches!(
                 leading_block.kind(),
-                SyntaxKind::FENCED_DIV | SyntaxKind::CODE_BLOCK
+                SyntaxKind::FENCED_DIV | SyntaxKind::CODE_BLOCK | SyntaxKind::LINE_BLOCK
             )
             && Self::find_content_node(node).is_none()
         {

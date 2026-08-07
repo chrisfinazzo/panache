@@ -331,6 +331,21 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   trimmed start is `| ` --- pandoc's rule looks at nothing but the leading
   space. The blockquote-laziness guard (`lazy_in_quote`) still runs first,
   so `> | a\n  | b\n` stays two lines. Corpus 509.
+- [x] A line block opening on a list-marker line was read as literal text:
+  `- | a\n  | b\n` is `BulletList [[LineBlock [[a], [b]]]]` in pandoc, which
+  parses an item's content as a fresh block sequence, but panache buffered
+  the post-marker text and emitted a `PLAIN` of two `|` lines. The
+  dispatcher's `LineBlockParser` never sees the marker line --- the list
+  parser consumes it first --- so the gap is bridged by
+  `maybe_open_line_block_in_new_list_item`, alongside the existing
+  fenced-code and caption-table marker-line helpers. It runs after them and
+  declines when a pipe table starts on the line (tables outrank line blocks
+  in the registry, 10 vs 13, and a header row satisfies
+  `try_parse_line_block_start`), leaving that to the buffer's structural
+  lift. The formatter's same-line leading-block case in `lists.rs` grew
+  `LINE_BLOCK` next to `FENCED_DIV`/`CODE_BLOCK`, without which the item's
+  marker was dropped. Fixed two parser fixtures that had pinned the old
+  divergence (`*_pipe_table_*_no_separator_pandoc`). Corpus 510.
 - [ ] The blockquote fold reaches one line at a time, so a *multi-line*
   construct opened on a lazy line keeps the indent on its body lines:
   ````> # h\n ```\n code\n ``` ```` is `CodeBlock " code"` where pandoc has

@@ -564,6 +564,70 @@ impl<'a> Parser<'a> {
         Some(new_pos.saturating_sub(self.pos).saturating_sub(1))
     }
 
+    /// When a new list item's marker line opens a line block (`- | a`), emit
+    /// the line block as the item's content instead of buffering the line as
+    /// text.
+    ///
+    /// Pandoc parses a list item's content as a fresh block sequence, so
+    /// `lineBlock` sees `| a` at the item's content column and claims it:
+    /// `- | a\n  | b` is `BulletList [[LineBlock [[a], [b]]]]`. The
+    /// dispatcher's `LineBlockParser` never gets the marker line — the list
+    /// parser consumes it first and buffers the post-marker text — so the
+    /// item read as a `PLAIN` of two literal `|` lines. Bridge that gap here,
+    /// mirroring [`Self::maybe_open_fenced_code_in_new_list_item`].
+    ///
+    /// Runs *after* the marker-line table helpers: `- | a | b |` is a pipe
+    /// table row, and a table start also satisfies `try_parse_line_block_start`.
+    ///
+    /// Returns the number of source lines consumed beyond the marker line.
+    fn maybe_open_line_block_in_new_list_item(&mut self) -> Option<usize> {
+        if !self.config.extensions.line_blocks {
+            return None;
+        }
+        let Some(Container::ListItem {
+            content_col,
+            buffer,
+            ..
+        }) = self.containers.stack.last()
+        else {
+            return None;
+        };
+        // Only the marker line is buffered so far; a multi-segment buffer
+        // means this is not a fresh marker line.
+        if buffer.segment_count() != 1 {
+            return None;
+        }
+        try_parse_line_block_start(buffer.first_text()?)?;
+        let content_col = *content_col;
+        let bq_depth = self.current_blockquote_depth();
+
+        // Marker-line dispatch: the list marker + indent were emitted
+        // upstream (`list_marker_consumed_on_line_0 = true`); blockquotes,
+        // if any, are outer of the list.
+        let prefix = ContainerPrefix::from_scalars(bq_depth, content_col, bq_depth > 0, 0, true);
+        let window = StrippedLines::new(&self.lines, self.pos, &prefix);
+
+        // Tables outrank line blocks in the registry (10 vs 13), and a pipe
+        // table's header row satisfies `try_parse_line_block_start`. Probe
+        // into a throwaway builder and decline on a hit, leaving the
+        // marker-line table to the buffer's structural lift at item close.
+        // Only pipe tables can collide: grid tables open on `+`, and simple
+        // and multiline tables never open on `|`.
+        if self.config.extensions.pipe_tables {
+            let mut probe = GreenNodeBuilder::new();
+            if tables::try_parse_pipe_table(&window, &mut probe, self.config).is_some() {
+                return None;
+            }
+        }
+
+        if let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last_mut() {
+            buffer.clear();
+        }
+        // Always commits the marker line, so this cannot report zero progress.
+        let new_pos = parse_line_block(&window, &mut self.builder, self.config);
+        Some(new_pos.saturating_sub(self.pos).saturating_sub(1))
+    }
+
     /// When a new list item's marker-line content is a table caption that a
     /// table follows (`- Table: cap\n\n  | a | b |\n  …`), emit the whole
     /// caption-led table as the item's content instead of leaving the caption
@@ -1377,6 +1441,9 @@ impl<'a> Parser<'a> {
                     {
                         return extras;
                     }
+                    if let Some(extras) = self.maybe_open_line_block_in_new_list_item() {
+                        return extras;
+                    }
                     self.maybe_open_indented_code_in_new_list_item();
                     return self.dispatch_bq_after_list_item(finish);
                 }
@@ -1399,6 +1466,9 @@ impl<'a> Parser<'a> {
                 return extras;
             }
             if let Some(extras) = self.maybe_open_table_with_trailing_caption_in_new_list_item() {
+                return extras;
+            }
+            if let Some(extras) = self.maybe_open_line_block_in_new_list_item() {
                 return extras;
             }
             self.maybe_open_indented_code_in_new_list_item();
@@ -1444,6 +1514,9 @@ impl<'a> Parser<'a> {
                 return extras;
             }
             if let Some(extras) = self.maybe_open_table_with_trailing_caption_in_new_list_item() {
+                return extras;
+            }
+            if let Some(extras) = self.maybe_open_line_block_in_new_list_item() {
                 return extras;
             }
             self.maybe_open_indented_code_in_new_list_item();
@@ -1495,6 +1568,9 @@ impl<'a> Parser<'a> {
             return extras;
         }
         if let Some(extras) = self.maybe_open_table_with_trailing_caption_in_new_list_item() {
+            return extras;
+        }
+        if let Some(extras) = self.maybe_open_line_block_in_new_list_item() {
             return extras;
         }
         self.maybe_open_indented_code_in_new_list_item();
@@ -3857,6 +3933,8 @@ impl<'a> Parser<'a> {
                     } else if let Some(extras) =
                         self.maybe_open_table_with_trailing_caption_in_new_list_item()
                     {
+                        extras
+                    } else if let Some(extras) = self.maybe_open_line_block_in_new_list_item() {
                         extras
                     } else {
                         self.maybe_open_indented_code_in_new_list_item();
