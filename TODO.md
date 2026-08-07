@@ -367,11 +367,27 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   body line indented four columns became an indented code block where pandoc
   reads a paragraph. Corpus 511; 512 and 513 are blocked (see below and
   `tests/pandoc/blocked.txt`).
-- [ ] A lazy line that gives a quoted list item a second block leaves the list
-  tight: `> - item\n # head` under `-blank_before_header` is
-  `BulletList [[Plain item, Header]]` where pandoc has `Para`, because an
-  item holding more than one block makes the list loose. Orthogonal to the
-  fold --- the looseness rule is what is missing.
+- [x] A lazy line that gives a quoted list item a second block left the list
+  tight: `> - item\n # head` under `-blank_before_header` was
+  `BulletList [[Plain item, Header]]` where pandoc has `Para`. The looseness
+  rule was indeed what was missing, but not the one guessed here --- "an
+  item holding more than one block" is wrong, since `- a\n  - n` keeps two
+  blocks and stays tight. Reading `para` in pandoc's `Readers/Markdown.hs`
+  gives the real rule: a paragraph is a `Plain` unless it is terminated by a
+  blank line or by one of the block starts `para` looks ahead for --- a
+  fenced code block (`+backtick_code_blocks`), an ATX header
+  (`-blank_before_header`), or a blockquote (`-blank_before_blockquote`).
+  One such `Para` anywhere makes the whole list loose. Fixed in the
+  projector (`has_paragraph_broken_by_block`), which is where panache
+  already derives looseness; no `ParserOptions` needed, because none of
+  those blocks can exist as a sibling after a `PLAIN` unless its gate is on ---
+  the CST answers the question. The `listStart` alternative is excluded
+  because pandoc suppresses it when already `inList`, and the `</div>` /
+  `:::` ones because they are never visible while pandoc reparses an item's
+  extracted content; definition lists do not share the promotion at all.
+  Also fixed the blank-line-free fence twin
+  (````- a\n  ```\n  c\n  ```\n- b````, corpus 514), which diverged under
+  default extensions.
 - [ ] Found while checking the fold, pre-existing and unrelated: a fenced code
   block inside a blockquote keeps the `>` markers in its content ---
   ````> ```\n> code\n> ``` ```` projects `CodeBlock "> code"`. `code_block`

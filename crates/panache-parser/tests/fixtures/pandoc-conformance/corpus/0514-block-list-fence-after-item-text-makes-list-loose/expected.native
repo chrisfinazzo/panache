@@ -1,0 +1,5 @@
+[ BulletList
+    [ [ Para [ Str "a" ] , CodeBlock ( "" , [] , [] ) "c" ]
+    , [ Para [ Str "b" ] ]
+    ]
+]

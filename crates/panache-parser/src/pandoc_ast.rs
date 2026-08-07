@@ -3683,8 +3683,69 @@ fn is_loose_list(node: &SyntaxNode) -> bool {
         if has_internal_blank_between_blocks(&item) {
             return true;
         }
+        if has_paragraph_broken_by_block(&item) {
+            return true;
+        }
     }
     false
+}
+
+/// True if some paragraph inside `item` is terminated by a block that pandoc's
+/// `para` parser looks ahead for, with no blank line between the two.
+///
+/// A blank line is the *usual* way a paragraph becomes a `Para` rather than a
+/// `Plain`, but pandoc's `para` also accepts a short list of block starts that
+/// may interrupt a paragraph outright: a fenced code block (`backtick_code_
+/// blocks`), an ATX header (`-blank_before_header`), and a blockquote
+/// (`-blank_before_blockquote`). Hitting one of those promotes the paragraph
+/// to `Para`, and a single `Para` anywhere in the list makes the whole list
+/// loose --- which is why this is checked per item but answers for the list.
+///
+/// So `> - item` / ` # head` is loose: the lazy line de-indents into the quote
+/// and opens a header right after the item's text. No blank line in sight.
+///
+/// The gates need no `ParserOptions` here, because the CST already answers
+/// them. None of these blocks can *exist* as a sibling directly after a
+/// `PLAIN` unless the extension that lets it interrupt a paragraph is on ---
+/// otherwise the parser would have swallowed the line as a lazy continuation
+/// of the paragraph itself.
+///
+/// `para` has three more alternatives that cannot fire inside a list item, so
+/// they are deliberately excluded (all verified against pandoc):
+///   - `+lists_without_preceding_blankline` + `listStart`, which pandoc
+///     explicitly suppresses when already `inList` ("Avoid creating a
+///     paragraph in a nested list"), so `- a` / `  - n` stays tight;
+///   - a closing `</div>` (`+native_divs`) or `:::` fence end
+///     (`+fenced_divs`), neither of which is visible while pandoc reparses
+///     the item's extracted content --- a list closing a div stays tight.
+///
+/// Html blocks, pipe tables, and fenced divs are not terminators either, and
+/// a tilde fence does not interrupt a paragraph at all.
+fn has_paragraph_broken_by_block(item: &SyntaxNode) -> bool {
+    let mut after_paragraph_text = false;
+    for child in item.children() {
+        match child.kind() {
+            // A bare-marker line emits an empty PLAIN, which is not a
+            // paragraph pandoc could promote.
+            SyntaxKind::PLAIN => after_paragraph_text = !child_is_empty_plain(&child),
+            kind if after_paragraph_text && interrupts_paragraph(kind, &child) => return true,
+            _ => after_paragraph_text = false,
+        }
+    }
+    false
+}
+
+/// Whether a block of this shape is one of `para`'s lookahead terminators.
+/// Only *fenced* code counts: an indented code block cannot follow paragraph
+/// text without an intervening blank line, which is the other looseness rule.
+fn interrupts_paragraph(kind: SyntaxKind, node: &SyntaxNode) -> bool {
+    match kind {
+        SyntaxKind::HEADING | SyntaxKind::BLOCK_QUOTE => true,
+        SyntaxKind::CODE_BLOCK => node
+            .children()
+            .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN),
+        _ => false,
+    }
 }
 
 fn has_internal_blank_between_blocks(item: &SyntaxNode) -> bool {
@@ -6026,5 +6087,80 @@ mod tests {
         assert_eq!(attr[0], "foo");
         assert_eq!(attr[1], serde_json::json!(["bar"]));
         assert_eq!(attr[2], serde_json::json!([["key", "val"]]));
+    }
+
+    // ----- list looseness: pandoc's `para` terminators -------------------
+
+    fn no_blank_before_header_options() -> crate::options::ParserOptions {
+        let mut opts = pandoc_options();
+        opts.extensions.blank_before_header = false;
+        opts
+    }
+
+    fn native(input: &str, opts: crate::options::ParserOptions) -> String {
+        to_pandoc_ast(&parse(input, Some(opts)))
+    }
+
+    #[test]
+    fn lazy_header_in_quoted_item_makes_list_loose() {
+        // `> - item` / ` # head` under `-blank_before_header`: the lazy line
+        // de-indents into the quote and opens a header inside the item, which
+        // terminates the item's paragraph. Pandoc yields `Para`, not `Plain`.
+        let out = native("> - item\n # head\n", no_blank_before_header_options());
+        assert!(
+            out.contains("Para [ Str \"item\" ]"),
+            "header after item text must make the list loose, got: {out}"
+        );
+        assert!(
+            !out.contains("Plain"),
+            "no `Plain` should survive in a loose list, got: {out}"
+        );
+    }
+
+    #[test]
+    fn fenced_code_after_item_text_makes_list_loose() {
+        // A backtick fence breaks a paragraph with no blank line in sight
+        // (`backtick_code_blocks`), so the item's text is a `Para` and the
+        // looseness spreads to every sibling item.
+        let out = native("- a\n  ```\n  c\n  ```\n- b\n", pandoc_options());
+        assert!(
+            out.contains("Para [ Str \"a\" ]") && out.contains("Para [ Str \"b\" ]"),
+            "a fence after item text must make the whole list loose, got: {out}"
+        );
+        assert!(!out.contains("Plain"), "expected no `Plain`, got: {out}");
+    }
+
+    #[test]
+    fn nested_list_after_item_text_keeps_list_tight() {
+        // `lists_without_preceding_blankline` is off, and even with it on
+        // pandoc keeps `- a` / `  - n` tight: a list start is *not* one of
+        // `para`'s terminators. Guards against the promotion overfiring on
+        // any second block.
+        let out = native("- a\n  - n\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"a\" ]") && out.contains("Plain [ Str \"n\" ]"),
+            "a nested list must not make the outer list loose, got: {out}"
+        );
+    }
+
+    #[test]
+    fn html_block_after_item_text_keeps_list_tight() {
+        // A `<div>` is not a `para` terminator either.
+        let out = native("- a\n  <div>\nx\n</div>\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"a\" ]"),
+            "an html block must not make the list loose, got: {out}"
+        );
+    }
+
+    #[test]
+    fn header_after_definition_text_keeps_definition_tight() {
+        // Definition lists do *not* share the promotion: pandoc reads
+        // `term` / `:   def` / `    # h` as `Plain def`, `Header`.
+        let out = native("term\n:   def\n    # h\n", no_blank_before_header_options());
+        assert!(
+            out.contains("Plain [ Str \"def\" ]"),
+            "a definition must stay tight, got: {out}"
+        );
     }
 }

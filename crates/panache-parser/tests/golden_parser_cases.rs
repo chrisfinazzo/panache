@@ -588,6 +588,7 @@ golden_test_cases!(
     list_item_blockquote_nested_list_issue_292,
     list_item_empty_marker_indented_code_next_line,
     list_item_empty_marker_setext_blocked_commonmark,
+    list_item_fence_after_text_pandoc,
     list_item_fenced_code_first_line_commonmark,
     list_item_fenced_div_marker_line_pandoc,
     list_item_fenced_div_marker_line_unclosed_pandoc,
