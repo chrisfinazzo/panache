@@ -4836,22 +4836,32 @@ fn advance_columns(text: &str, mut col: usize) -> usize {
     col
 }
 
-/// Columns pandoc's `listLine` gobbles off every continuation line of the
-/// innermost list item containing `node` — the content column of that item,
-/// measured in the source line so nesting and blockquote prefixes are already
-/// counted. Zero when no list item encloses `node`.
+/// Columns pandoc gobbles off every continuation line of the innermost
+/// marker-introduced container holding `node` — that container's content
+/// column, measured in the source line so nesting and blockquote prefixes are
+/// already counted. Zero when no such container encloses `node`.
+///
+/// A list item (`listLine`) and a definition body share the rule and the
+/// shape: a marker token, optionally its trailing spaces, then the content
+/// column. The innermost one wins, and because the column is absolute, an
+/// enclosing container's own gobble is already folded into it.
 fn list_gobble_columns(node: &SyntaxNode) -> usize {
-    let Some(item) = node.ancestors().find(|a| a.kind() == SyntaxKind::LIST_ITEM) else {
+    let Some(item) = node
+        .ancestors()
+        .find(|a| matches!(a.kind(), SyntaxKind::LIST_ITEM | SyntaxKind::DEFINITION))
+    else {
         return 0;
+    };
+    let marker_kind = if item.kind() == SyntaxKind::DEFINITION {
+        SyntaxKind::DEFINITION_MARKER
+    } else {
+        SyntaxKind::LIST_MARKER
     };
     let tokens: Vec<SyntaxToken> = item
         .children_with_tokens()
         .filter_map(|el| el.into_token())
         .collect();
-    let Some(i) = tokens
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::LIST_MARKER)
-    else {
+    let Some(i) = tokens.iter().position(|t| t.kind() == marker_kind) else {
         return 0;
     };
     let marker = &tokens[i];
@@ -6661,5 +6671,73 @@ mod tests {
         // out of the span and the projector keeps the rest.
         assert_inline_code_payload("- a\n   `x\n   y`\n", "x  y");
         assert_inline_code_payload("- a\n  `x\n  y`\n", "x y");
+    }
+
+    /// Assert the projected payload of the document's first display `Math`.
+    fn assert_display_math_payload(input: &str, expected: &str) {
+        let out = native(input, pandoc_options());
+        let needle = format!("Math DisplayMath {expected:?}");
+        assert!(
+            out.contains(&needle),
+            "expected an inline {needle}, got: {out}"
+        );
+    }
+
+    #[test]
+    fn definition_body_continuation_indent_is_gobbled() {
+        // Pandoc re-reads a definition body from its content column, the same
+        // rule `listLine` applies to a list item, so an inline construct that
+        // preserves interior whitespace measures from there and not from
+        // column 0.
+        assert_inline_code_payload("a\n:   d\n    `x\n    y`\n", "x y");
+        // The content column follows the marker's own spacing.
+        assert_inline_code_payload("a\n: d\n  `x\n  y`\n", "x y");
+        assert_inline_code_payload("a\n~   d\n    `x\n    y`\n", "x y");
+        // Only the content column is gobbled; the surplus is payload.
+        assert_inline_code_payload("a\n:   d\n      `x\n      y`\n", "x   y");
+        assert_inline_code_payload("a\n:   d\n        `x\n        y`\n", "x     y");
+        // Three lines gobble on every continuation line, not just the first.
+        assert_inline_code_payload("a\n:   d\n    `x\n    y\n    z`\n", "x y z");
+        // A body that reopens after a blank line gobbles from line one.
+        assert_inline_code_payload("a\n:   d\n\n    `x\n    y`\n", "x y");
+        // So does one that follows a heading in the same body.
+        assert_inline_code_payload("a\n:   # H\n    `x\n    y`\n", "x y");
+    }
+
+    #[test]
+    fn definition_body_straddling_tab_loses_the_gobbled_columns() {
+        // `tabFilter` expands the marker's own tab before the reader runs, so
+        // `:\t` reaches the stop at column 4 — a content column of 4, not 5.
+        assert_inline_code_payload("a\n:\td\n\t`x\n\ty`\n", "x y");
+        // A space after that tab pushes the content column to 5, and the
+        // continuation line's `\t ` reaches exactly that.
+        assert_inline_code_payload("a\n:\t d\n\t `x\n\t y`\n", "x y");
+        // A tab covering columns 0-4 straddles a content column of 2 or 3. It
+        // is one byte and the CST is byte-lossless, so the parser leaves it in
+        // the payload and the projector accounts for the gobble by column.
+        assert_inline_code_payload("a\n: d\n\t`x\n\ty`\n", "x   y");
+        assert_inline_code_payload("a\n:  d\n\t`x\n\ty`\n", "x  y");
+        assert_inline_code_payload("a\n: d\n \t`x\n \ty`\n", "x   y");
+        // Past the content column there is nothing left to gobble.
+        assert_inline_code_payload("a\n:   d\n\t `x\n\t y`\n", "x  y");
+        assert_inline_code_payload("a\n:   d\n\t\t`x\n\t\ty`\n", "x     y");
+        assert_inline_code_payload("a\n:   d\n    `x\ty`\n", "x  y");
+    }
+
+    #[test]
+    fn definition_body_lazy_continuation_gobbles_nothing() {
+        // An under-indented continuation line never reaches the content
+        // column, and pandoc takes no columns off it at all.
+        assert_inline_code_payload("a\n:   d\n`x\ny`\n", "x y");
+        assert_inline_code_payload("a\n:   d\n  `x\n  y`\n", "x   y");
+        assert_inline_code_payload("a\n:   d\n   `x\n   y`\n", "x    y");
+    }
+
+    #[test]
+    fn definition_body_gobble_survives_into_display_math() {
+        // Display math keeps its interior newlines and spaces verbatim, so it
+        // shows the gobble where a code span (newline to space) cannot.
+        assert_display_math_payload("a\n:   d\n    $$x\n    y$$\n", "x\ny");
+        assert_display_math_payload("a\n:   d\n      $$x\n      y$$\n", "x\n  y");
     }
 }

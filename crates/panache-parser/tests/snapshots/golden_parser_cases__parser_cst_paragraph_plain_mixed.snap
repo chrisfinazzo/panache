@@ -39,7 +39,8 @@ DOCUMENT@0..471
         PLAIN@155..202
           TEXT@155..181 "Definition content (P ..."
           NEWLINE@181..182 "\n"
-          TEXT@182..201 "    continues here."
+          WHITESPACE@182..186 "    "
+          TEXT@186..201 "continues here."
           NEWLINE@201..202 "\n"
   BLANK_LINE@202..203
     BLANK_LINE@202..203 "\n"
@@ -77,7 +78,8 @@ DOCUMENT@0..471
         PLAIN@326..362
           TEXT@326..346 "Definition A (PLAIN)"
           NEWLINE@346..347 "\n"
-          TEXT@347..361 "    continues."
+          WHITESPACE@347..351 "    "
+          TEXT@351..361 "continues."
           NEWLINE@361..362 "\n"
   BLANK_LINE@362..363
     BLANK_LINE@362..363 "\n"
@@ -99,7 +101,8 @@ DOCUMENT@0..471
         PLAIN@400..436
           TEXT@400..420 "Definition B (PLAIN)"
           NEWLINE@420..421 "\n"
-          TEXT@421..435 "    continues."
+          WHITESPACE@421..425 "    "
+          TEXT@425..435 "continues."
           NEWLINE@435..436 "\n"
   BLANK_LINE@436..437
     BLANK_LINE@436..437 "\n"

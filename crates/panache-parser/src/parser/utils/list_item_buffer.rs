@@ -14,7 +14,9 @@ use crate::parser::blocks::html_blocks::{
     HtmlBlockType, count_tag_balance, is_pandoc_matched_pair_tag, try_parse_html_block_start,
 };
 use crate::parser::blocks::paragraphs::update_display_math_state;
-use crate::parser::utils::container_stack::OpenDisplayMath;
+use crate::parser::utils::container_stack::{
+    OpenDisplayMath, gobbled_indent_prefix_len as item_indent_prefix_len,
+};
 use crate::parser::utils::helpers::trim_end_newlines;
 use crate::parser::utils::inline_emission;
 use crate::parser::utils::text_buffer::ParagraphBuffer;
@@ -670,34 +672,6 @@ fn graft_node_retag_root(
 /// untouched — its leading columns are owned by the list marker and
 /// its post-marker spaces. Returns the stripped text plus a per-line
 /// prefix vector for losslessness re-injection during graft.
-/// Number of leading bytes covering up to `content_col` columns of
-/// list-item indentation (spaces, or tabs on 4-column stops).
-fn item_indent_prefix_len(line: &str, content_col: usize) -> usize {
-    let mut consumed = 0usize;
-    let mut col = 0usize;
-    for &b in line.as_bytes() {
-        if col >= content_col {
-            break;
-        }
-        match b {
-            b' ' => {
-                col += 1;
-                consumed += 1;
-            }
-            b'\t' => {
-                let next = (col / 4 + 1) * 4;
-                if next > content_col {
-                    break;
-                }
-                col = next;
-                consumed += 1;
-            }
-            _ => break,
-        }
-    }
-    consumed
-}
-
 fn strip_list_item_indent(text: &str, content_col: usize) -> (String, Vec<String>) {
     let mut stripped = String::with_capacity(text.len());
     let mut prefixes: Vec<String> = Vec::new();

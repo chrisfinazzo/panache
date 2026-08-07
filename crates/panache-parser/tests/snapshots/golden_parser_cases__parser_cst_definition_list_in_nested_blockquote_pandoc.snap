@@ -34,5 +34,6 @@ DOCUMENT@0..53
             BLOCK_QUOTE_MARKER@34..35 ">"
             WHITESPACE@35..36 " "
             PLAIN@36..53
-              TEXT@36..52 "    Second block"
+              WHITESPACE@36..40 "    "
+              TEXT@40..52 "Second block"
               NEWLINE@52..53 "\n"

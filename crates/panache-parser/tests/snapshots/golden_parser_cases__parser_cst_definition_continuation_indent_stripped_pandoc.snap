@@ -1,0 +1,78 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..72
+  DEFINITION_LIST@0..72
+    DEFINITION_ITEM@0..16
+      TERM@0..2
+        TEXT@0..1 "a"
+        NEWLINE@1..2 "\n"
+      DEFINITION@2..16
+        DEFINITION_MARKER@2..3 ":"
+        WHITESPACE@3..6 "   "
+        PLAIN@6..16
+          INLINE_CODE@6..15
+            INLINE_CODE_MARKER@6..7 "`"
+            INLINE_CODE_CONTENT@7..9 "x\n"
+            WHITESPACE@9..13 "    "
+            INLINE_CODE_CONTENT@13..14 "y"
+            INLINE_CODE_MARKER@14..15 "`"
+          NEWLINE@15..16 "\n"
+    BLANK_LINE@16..17
+      BLANK_LINE@16..17 "\n"
+    DEFINITION_ITEM@17..37
+      TERM@17..19
+        TEXT@17..18 "b"
+        NEWLINE@18..19 "\n"
+      DEFINITION@19..37
+        DEFINITION_MARKER@19..20 ":"
+        WHITESPACE@20..23 "   "
+        PLAIN@23..37
+          DISPLAY_MATH@23..36
+            DISPLAY_MATH_MARKER@23..25 "$$"
+            MATH_CONTENT@25..34
+              MATH_TEXT@25..26 "m"
+              MATH_NEWLINE@26..27 "\n"
+              WHITESPACE@27..31 "    "
+              MATH_SPACE@31..33 "  "
+              MATH_TEXT@33..34 "n"
+            DISPLAY_MATH_MARKER@34..36 "$$"
+          NEWLINE@36..37 "\n"
+    BLANK_LINE@37..38
+      BLANK_LINE@37..38 "\n"
+    DEFINITION_ITEM@38..54
+      TERM@38..40
+        TEXT@38..39 "c"
+        NEWLINE@39..40 "\n"
+      DEFINITION@40..54
+        DEFINITION_MARKER@40..41 ":"
+        WHITESPACE@41..42 " "
+        PLAIN@42..54
+          TEXT@42..43 "d"
+          NEWLINE@43..44 "\n"
+          WHITESPACE@44..46 "  "
+          INLINE_CODE@46..53
+            INLINE_CODE_MARKER@46..47 "`"
+            INLINE_CODE_CONTENT@47..49 "p\n"
+            WHITESPACE@49..51 "  "
+            INLINE_CODE_CONTENT@51..52 "q"
+            INLINE_CODE_MARKER@52..53 "`"
+          NEWLINE@53..54 "\n"
+    BLANK_LINE@54..55
+      BLANK_LINE@54..55 "\n"
+    DEFINITION_ITEM@55..72
+      TERM@55..57
+        TEXT@55..56 "e"
+        NEWLINE@56..57 "\n"
+      DEFINITION@57..72
+        DEFINITION_MARKER@57..58 ":"
+        WHITESPACE@58..61 "   "
+        PLAIN@61..72
+          TEXT@61..62 "f"
+          NEWLINE@62..63 "\n"
+          INLINE_CODE@63..71
+            INLINE_CODE_MARKER@63..64 "`"
+            INLINE_CODE_CONTENT@64..70 "lazy\ny"
+            INLINE_CODE_MARKER@70..71 "`"
+          NEWLINE@71..72 "\n"

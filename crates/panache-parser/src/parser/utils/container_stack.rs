@@ -1,5 +1,5 @@
 use super::list_item_buffer::ListItemBuffer;
-use super::text_buffer::{ParagraphBuffer, TextBuffer};
+use super::text_buffer::ParagraphBuffer;
 use crate::parser::blocks::lists::ListMarker;
 use rowan::Checkpoint;
 
@@ -80,7 +80,11 @@ pub(crate) enum Container {
     Definition {
         content_col: usize,
         plain_open: bool,
-        plain_buffer: TextBuffer, // Buffer for accumulating PLAIN content
+        /// Buffer for accumulating PLAIN content. Interleaved (rather than a
+        /// flat text buffer) so each continuation line's gobbled
+        /// `content_col` indent can be held *out* of the text handed to the
+        /// inline parser and re-injected as `WHITESPACE` at emission.
+        plain_buffer: ParagraphBuffer,
     },
     Paragraph {
         buffer: ParagraphBuffer, // Interleaved buffer for paragraph content with markers
@@ -148,6 +152,45 @@ pub(crate) fn leading_indent_from(line: &str, start_col: usize) -> (usize, usize
         }
     }
     (cols, bytes)
+}
+
+/// Number of leading bytes of `line` covering up to `content_col` columns of
+/// container indentation — spaces, or tabs landing on a stop at or before it.
+///
+/// This is the gobble pandoc applies to a container's continuation lines
+/// (`listLine` for a list item, the definition-body indent for a definition),
+/// expressed in bytes so the caller can hold exactly those out of the text it
+/// hands to the inline parser.
+///
+/// Unlike [`byte_index_at_column`], a tab that would *overshoot* `content_col`
+/// stops the walk instead of being consumed whole. The CST is byte-lossless,
+/// so a tab straddling the content column has no boundary to split on; leaving
+/// it in the payload keeps all its columns, and the ones it should have lost to
+/// the gobble are subtracted downstream by column.
+pub(crate) fn gobbled_indent_prefix_len(line: &str, content_col: usize) -> usize {
+    let mut consumed = 0usize;
+    let mut col = 0usize;
+    for &b in line.as_bytes() {
+        if col >= content_col {
+            break;
+        }
+        match b {
+            b' ' => {
+                col += 1;
+                consumed += 1;
+            }
+            b'\t' => {
+                let next = (col / TAB_STOP + 1) * TAB_STOP;
+                if next > content_col {
+                    break;
+                }
+                col = next;
+                consumed += 1;
+            }
+            _ => break,
+        }
+    }
+    consumed
 }
 
 /// Return byte index at a given column (tabs = 4).

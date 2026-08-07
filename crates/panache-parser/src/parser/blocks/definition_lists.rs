@@ -2,7 +2,7 @@ use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
-use crate::parser::utils::container_stack::leading_indent;
+use crate::parser::utils::container_stack::{leading_indent, leading_indent_from};
 use crate::parser::utils::helpers::strip_newline;
 use crate::parser::utils::inline_emission;
 
@@ -57,7 +57,11 @@ pub(crate) fn try_parse_definition_marker(line: &str) -> Option<(char, usize, us
         return None;
     }
 
-    let (spaces_after_cols, spaces_after_bytes) = leading_indent(after_marker);
+    // Seed the column counter past the marker's own column, so a tab after
+    // the marker expands to the stop it actually reaches: `:\td` puts the tab
+    // at column 1, reaching column 4 (a content column of 4), not column 5.
+    let (spaces_after_cols, spaces_after_bytes) =
+        leading_indent_from(after_marker, indent_cols + 1);
 
     Some((marker, indent_cols, spaces_after_cols, spaces_after_bytes))
 }

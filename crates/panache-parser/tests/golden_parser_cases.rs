@@ -241,6 +241,8 @@ golden_test_cases!(
     citation_prefix_paren_escape_278,
     dedented_fence_closes_list_commonmark,
     dedented_fence_closes_list_pandoc,
+    definition_continuation_indent_stripped_pandoc,
+    definition_continuation_tab_indent_pandoc,
     definition_list,
     definition_list_bare_marker_pandoc,
     definition_list_blockquote_continuation,

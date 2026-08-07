@@ -227,9 +227,11 @@ DOCUMENT@0..1703
         PLAIN@718..896
           TEXT@718..796 "Definition 2 { some c ..."
           NEWLINE@796..797 "\n"
-          TEXT@797..881 "    2, quite long so  ..."
+          WHITESPACE@797..801 "    "
+          TEXT@801..881 "2, quite long so that ..."
           NEWLINE@881..882 "\n"
-          TEXT@882..895 "    properly."
+          WHITESPACE@882..886 "    "
+          TEXT@886..895 "properly."
           NEWLINE@895..896 "\n"
     BLANK_LINE@896..897
       BLANK_LINE@896..897 "\n"

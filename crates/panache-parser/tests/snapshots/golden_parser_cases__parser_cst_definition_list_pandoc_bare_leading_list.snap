@@ -35,7 +35,8 @@ DOCUMENT@0..63
         BLANK_LINE@32..33
           BLANK_LINE@32..33 "\n"
         PLAIN@33..48
-          TEXT@33..47 "  Continuation"
+          WHITESPACE@33..35 "  "
+          TEXT@35..47 "Continuation"
           NEWLINE@47..48 "\n"
     BLANK_LINE@48..49
       BLANK_LINE@48..49 "\n"

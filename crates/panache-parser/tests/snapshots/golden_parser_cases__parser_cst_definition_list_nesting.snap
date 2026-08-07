@@ -19,7 +19,8 @@ DOCUMENT@0..499
         BLANK_LINE@23..24
           BLANK_LINE@23..24 "\n"
         PLAIN@24..42
-          TEXT@24..41 "    Another list:"
+          WHITESPACE@24..28 "    "
+          TEXT@28..41 "Another list:"
           NEWLINE@41..42 "\n"
         BLANK_LINE@42..43
           BLANK_LINE@42..43 "\n"
@@ -129,11 +130,11 @@ DOCUMENT@0..499
               CODE_LANGUAGE@418..426 "markdown"
             NEWLINE@426..427 "\n"
           CODE_CONTENT@427..445
-            WHITESPACE@427..429 "\t\t"
-            TEXT@429..434 "\tcode"
+            WHITESPACE@427..428 "\t"
+            TEXT@428..434 "\t\tcode"
             NEWLINE@434..435 "\n"
-            WHITESPACE@435..437 "\t\t"
-            TEXT@437..444 "\ta <- 1"
+            WHITESPACE@435..436 "\t"
+            TEXT@436..444 "\t\ta <- 1"
             NEWLINE@444..445 "\n"
           WHITESPACE@445..446 "\t"
           CODE_FENCE_CLOSE@446..450

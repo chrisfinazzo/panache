@@ -28,13 +28,14 @@ use super::utils::container_stack;
 use super::utils::helpers::{
     is_blank_line, split_lines_inclusive, strip_leading_spaces_n, strip_newline,
 };
-use super::utils::inline_emission;
 use super::utils::marker_utils;
 use super::utils::text_buffer;
 
 use super::blocks::blockquotes::strip_n_blockquote_markers;
 use super::utils::continuation::ContinuationPolicy;
-use container_stack::{Container, ContainerStack, byte_index_at_column, leading_indent};
+use container_stack::{
+    Container, ContainerStack, byte_index_at_column, gobbled_indent_prefix_len, leading_indent,
+};
 use definition_lists::{emit_definition_marker, emit_term};
 use line_blocks::{parse_line_block, try_parse_line_block_start};
 use lists::{
@@ -42,7 +43,7 @@ use lists::{
     try_parse_list_marker,
 };
 use marker_utils::{count_blockquote_markers, parse_blockquote_marker_info};
-use text_buffer::TextBuffer;
+use text_buffer::ParagraphBuffer;
 
 const GITHUB_ALERT_MARKERS: [&str; 5] = [
     "[!TIP]",
@@ -304,11 +305,11 @@ impl<'a> Parser<'a> {
                     plain_buffer,
                     ..
                 }) if !plain_buffer.is_empty() => {
-                    let text = plain_buffer.get_accumulated_text();
+                    let buffer = plain_buffer.clone();
                     let suppress_footnote_refs = self.in_footnote_definition();
                     emit_definition_plain_or_heading(
                         &mut self.builder,
-                        &text,
+                        &buffer,
                         self.config,
                         suppress_footnote_refs,
                     );
@@ -367,11 +368,11 @@ impl<'a> Parser<'a> {
         }) = self.containers.stack.last()
             && !plain_buffer.is_empty()
         {
-            let text = plain_buffer.get_accumulated_text();
+            let buffer = plain_buffer.clone();
             let suppress_footnote_refs = self.in_footnote_definition();
             emit_definition_plain_or_heading(
                 &mut self.builder,
-                &text,
+                &buffer,
                 self.config,
                 suppress_footnote_refs,
             );
@@ -2314,7 +2315,7 @@ impl<'a> Parser<'a> {
                 let content_col = *indent + 1 + *spaces_after_cols;
                 let content_start_bytes = indent_bytes + 1 + *spaces_after;
                 let after_marker_and_spaces = content.get(content_start_bytes..).unwrap_or("");
-                let mut plain_buffer = TextBuffer::new();
+                let mut plain_buffer = ParagraphBuffer::new();
                 let mut definition_pushed = false;
 
                 if *has_content {
@@ -2352,7 +2353,7 @@ impl<'a> Parser<'a> {
                         self.containers.push(Container::Definition {
                             content_col,
                             plain_open: false,
-                            plain_buffer: TextBuffer::new(),
+                            plain_buffer: ParagraphBuffer::new(),
                         });
                         definition_pushed = true;
 
@@ -2393,7 +2394,7 @@ impl<'a> Parser<'a> {
                         self.containers.push(Container::Definition {
                             content_col,
                             plain_open: false,
-                            plain_buffer: TextBuffer::new(),
+                            plain_buffer: ParagraphBuffer::new(),
                         });
                         definition_pushed = true;
 
@@ -2443,7 +2444,7 @@ impl<'a> Parser<'a> {
                         self.containers.push(Container::Definition {
                             content_col,
                             plain_open: false,
-                            plain_buffer: TextBuffer::new(),
+                            plain_buffer: ParagraphBuffer::new(),
                         });
                         definition_pushed = true;
 
@@ -2492,23 +2493,18 @@ impl<'a> Parser<'a> {
                         self.containers.push(Container::Definition {
                             content_col,
                             plain_open: false,
-                            plain_buffer: TextBuffer::new(),
+                            plain_buffer: ParagraphBuffer::new(),
                         });
                         definition_pushed = true;
                         extras = html_extras;
                     } else {
                         let (_, newline_str) = strip_newline(current_line);
                         let (content_without_newline, _) = strip_newline(after_marker_and_spaces);
-                        if content_without_newline.is_empty() {
-                            plain_buffer.push_line(newline_str);
-                        } else {
-                            let line_with_newline = if !newline_str.is_empty() {
-                                format!("{}{}", content_without_newline, newline_str)
-                            } else {
-                                content_without_newline.to_string()
-                            };
-                            plain_buffer.push_line(line_with_newline);
-                        }
+                        // The marker line's leading columns are owned by the
+                        // marker and its trailing spaces, already emitted, so
+                        // there is nothing to hold out here.
+                        plain_buffer.push_text(content_without_newline);
+                        plain_buffer.push_text(newline_str);
                     }
                 }
 
@@ -4486,7 +4482,26 @@ impl<'a> Parser<'a> {
                     } else {
                         ""
                     };
-                    let content_line = format!("{}{}", indent_prefix, text_without_newline);
+
+                    // Pandoc re-reads a definition body from its content
+                    // column — `defListIndent` gobbles those columns off every
+                    // continuation line before the body is parsed, the same
+                    // rule `listLine` applies inside a list item. Hold them out
+                    // of the text handed to the inline parser so a construct
+                    // that preserves interior whitespace measures from the
+                    // content column instead of from column 0; they are
+                    // spliced back as `WHITESPACE` at emission, so the parse
+                    // stays byte-lossless.
+                    //
+                    // A *lazy* line never reaches the content column and pandoc
+                    // takes nothing off it, so its whitespace stays payload.
+                    let reaches_content_col =
+                        content_indent > 0 && leading_indent(content).0 >= content_indent;
+                    let held = if reaches_content_col {
+                        gobbled_indent_prefix_len(indent_prefix, content_indent)
+                    } else {
+                        0
+                    };
 
                     if let Some(Container::Definition {
                         plain_open,
@@ -4494,12 +4509,13 @@ impl<'a> Parser<'a> {
                         ..
                     }) = self.containers.stack.last_mut()
                     {
-                        let line_with_newline = if !newline_str.is_empty() {
-                            format!("{}{}", content_line, newline_str)
-                        } else {
-                            content_line
-                        };
-                        plain_buffer.push_line(line_with_newline);
+                        plain_buffer.push_indent(&indent_prefix[..held]);
+                        // A tab straddling the content column has no byte
+                        // boundary to split on, so it stays in the payload and
+                        // the projector subtracts its gobbled columns instead.
+                        plain_buffer.push_text(&indent_prefix[held..]);
+                        plain_buffer.push_text(text_without_newline);
+                        plain_buffer.push_text(newline_str);
                         *plain_open = true;
                     }
 
@@ -5492,12 +5508,21 @@ fn marker_line_html_block_wrapper_kind(
     }
 }
 
+/// Emit a definition body's buffered PLAIN content.
+///
+/// Block-shape tests (ATX heading, standalone image) read the buffer's *raw*
+/// bytes, so they are measured on the original line the way they always were.
+/// The inline emission goes through the buffer instead, so a continuation
+/// line's gobbled indent stays out of the text the inline parser sees and is
+/// spliced back as `WHITESPACE`.
 fn emit_definition_plain_or_heading(
     builder: &mut GreenNodeBuilder<'static>,
-    text: &str,
+    buffer: &ParagraphBuffer,
     config: &ParserOptions,
     suppress_footnote_refs: bool,
 ) {
+    let text = buffer.raw_text();
+    let text = text.as_str();
     let line_without_newline = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'));
@@ -5520,7 +5545,11 @@ fn emit_definition_plain_or_heading(
             let heading_bytes = &text[..first_nl + 1];
             emit_atx_heading(builder, heading_bytes, level, config);
             builder.start_node(SyntaxKind::PLAIN.into());
-            inline_emission::emit_inlines(builder, after_first, config, suppress_footnote_refs);
+            buffer.split_at_raw(first_nl + 1).emit_with_inlines(
+                builder,
+                config,
+                suppress_footnote_refs,
+            );
             builder.finish_node();
             return;
         }
@@ -5534,7 +5563,7 @@ fn emit_definition_plain_or_heading(
         SyntaxKind::PLAIN
     };
     builder.start_node(block_kind.into());
-    inline_emission::emit_inlines(builder, text, config, suppress_footnote_refs);
+    buffer.emit_with_inlines(builder, config, suppress_footnote_refs);
     builder.finish_node();
 }
 

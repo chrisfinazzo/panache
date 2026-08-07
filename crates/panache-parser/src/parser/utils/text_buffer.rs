@@ -1,145 +1,15 @@
-//! Text buffer for accumulating multi-line block content.
+//! Interleaved buffer for accumulating multi-line block content.
 //!
 //! Used during paragraph and plain text parsing to collect lines before
-//! emitting them with inline parsing applied.
+//! emitting them with inline parsing applied. Structural bytes that must stay
+//! out of the text handed to the inline parser (a blockquote marker, a
+//! continuation line's gobbled container indent) are buffered as their own
+//! segments and spliced back at emission.
 
 use super::inline_emission;
 use crate::options::ParserOptions;
 use crate::parser::inlines::sink::{InjectedMarker, MarkerInjectingSink};
 use rowan::GreenNodeBuilder;
-
-/// Buffer for accumulating text lines before emission.
-///
-/// Designed for minimal allocation overhead - reuses the same buffer
-/// across multiple paragraph/plain blocks by clearing between uses.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct TextBuffer {
-    /// Accumulated lines (stored WITH trailing newlines if they had them in source).
-    lines: Vec<String>,
-}
-
-impl TextBuffer {
-    /// Create a new empty text buffer.
-    pub(crate) fn new() -> Self {
-        Self { lines: Vec::new() }
-    }
-
-    /// Push a line of text to the buffer.
-    ///
-    /// The line should include its trailing newline if it had one in the source.
-    pub(crate) fn push_line(&mut self, text: impl Into<String>) {
-        self.lines.push(text.into());
-    }
-
-    /// Get the accumulated text by concatenating all lines.
-    ///
-    /// Returns empty string if buffer is empty.
-    /// Lines are concatenated as-is (they should include their own newlines if needed).
-    pub(crate) fn get_accumulated_text(&self) -> String {
-        self.lines.concat()
-    }
-
-    /// Clear the buffer for reuse.
-    pub(crate) fn clear(&mut self) {
-        self.lines.clear();
-    }
-
-    /// Check if buffer is empty.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.lines.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new_buffer_is_empty() {
-        let buffer = TextBuffer::new();
-        assert!(buffer.is_empty());
-        assert!(buffer.is_empty());
-        assert_eq!(buffer.get_accumulated_text(), "");
-    }
-
-    #[test]
-    fn test_push_single_line() {
-        let mut buffer = TextBuffer::new();
-        buffer.push_line("Hello, world!");
-        assert!(!buffer.is_empty());
-        assert_eq!(buffer.get_accumulated_text(), "Hello, world!");
-    }
-
-    #[test]
-    fn test_push_multiple_lines() {
-        let mut buffer = TextBuffer::new();
-        buffer.push_line("Line 1\n");
-        buffer.push_line("Line 2\n");
-        buffer.push_line("Line 3");
-        assert_eq!(buffer.get_accumulated_text(), "Line 1\nLine 2\nLine 3");
-    }
-
-    #[test]
-    fn test_clear_buffer() {
-        let mut buffer = TextBuffer::new();
-        buffer.push_line("Line 1");
-        buffer.push_line("Line 2");
-        buffer.clear();
-        assert!(buffer.is_empty());
-        assert_eq!(buffer.get_accumulated_text(), "");
-    }
-
-    #[test]
-    fn test_reuse_after_clear() {
-        let mut buffer = TextBuffer::new();
-
-        // First use
-        buffer.push_line("First paragraph\n");
-        buffer.push_line("continues here");
-        assert_eq!(
-            buffer.get_accumulated_text(),
-            "First paragraph\ncontinues here"
-        );
-
-        // Clear and reuse
-        buffer.clear();
-        buffer.push_line("Second paragraph\n");
-        buffer.push_line("also continues");
-        assert_eq!(
-            buffer.get_accumulated_text(),
-            "Second paragraph\nalso continues"
-        );
-    }
-
-    #[test]
-    fn test_empty_lines() {
-        let mut buffer = TextBuffer::new();
-        buffer.push_line("\n");
-        buffer.push_line("Non-empty\n");
-        buffer.push_line("");
-        assert!(!buffer.is_empty());
-        assert_eq!(buffer.get_accumulated_text(), "\nNon-empty\n");
-    }
-
-    #[test]
-    fn test_whitespace_preserved() {
-        let mut buffer = TextBuffer::new();
-        buffer.push_line("  Leading spaces\n");
-        buffer.push_line("Trailing spaces  \n");
-        buffer.push_line("\tTab at start");
-        assert_eq!(
-            buffer.get_accumulated_text(),
-            "  Leading spaces\nTrailing spaces  \n\tTab at start"
-        );
-    }
-
-    #[test]
-    fn test_default_is_empty() {
-        let buffer = TextBuffer::default();
-        assert!(buffer.is_empty());
-        assert_eq!(buffer.get_accumulated_text(), "");
-    }
-}
 
 // ============================================================================
 // ParagraphBuffer - Interleaved buffer for paragraphs with structural markers
@@ -155,9 +25,24 @@ pub(crate) enum ParagraphSegment {
         leading_spaces: usize,
         has_trailing_space: bool,
     },
-    /// A list item's continuation indent, stripped off the buffered text so
-    /// the inline parser sees the line from its content column.
+    /// A list item's or definition body's continuation indent, stripped off
+    /// the buffered text so the inline parser sees the line from its content
+    /// column.
     Indent(String),
+}
+
+impl ParagraphSegment {
+    /// Bytes this segment contributes to [`ParagraphBuffer::raw_text`].
+    fn raw_len(&self) -> usize {
+        match self {
+            ParagraphSegment::Text(text) => text.len(),
+            ParagraphSegment::Indent(indent) => indent.len(),
+            ParagraphSegment::BlockquoteMarker {
+                leading_spaces,
+                has_trailing_space,
+            } => leading_spaces + 1 + usize::from(*has_trailing_space),
+        }
+    }
 }
 
 /// Buffer for accumulating paragraph content with interleaved structural markers.
@@ -225,6 +110,61 @@ impl ParagraphBuffer {
             }
         }
         result
+    }
+
+    /// The buffered bytes as they appear in the source — held-out indents and
+    /// blockquote markers included.
+    ///
+    /// [`Self::get_text_for_parsing`] deliberately omits those, since the
+    /// point of holding them out is to keep them away from the inline parser.
+    /// A *block*-shape test (is this line an ATX heading?) is measured on the
+    /// original line instead, so it reads this view.
+    pub(crate) fn raw_text(&self) -> String {
+        let mut result = String::new();
+        for segment in &self.segments {
+            match segment {
+                ParagraphSegment::Text(text) => result.push_str(text),
+                ParagraphSegment::Indent(indent) => result.push_str(indent),
+                ParagraphSegment::BlockquoteMarker {
+                    leading_spaces,
+                    has_trailing_space,
+                } => {
+                    for _ in 0..*leading_spaces {
+                        result.push(' ');
+                    }
+                    result.push('>');
+                    if *has_trailing_space {
+                        result.push(' ');
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Split off everything from `raw_offset` (a byte offset into
+    /// [`Self::raw_text`]) onward, leaving `self` untouched.
+    ///
+    /// Used when a block-shape test on the raw text claims a leading run of
+    /// bytes — an ATX heading on the buffer's first line — and the remainder
+    /// still has to be emitted as inlines with its indents re-injected.
+    /// A cut that lands inside an indent or a marker keeps that segment whole:
+    /// callers cut at a line boundary, where no such segment straddles.
+    pub(crate) fn split_at_raw(&self, raw_offset: usize) -> ParagraphBuffer {
+        let mut tail = ParagraphBuffer::new();
+        let mut consumed = 0usize;
+        for segment in &self.segments {
+            let len = segment.raw_len();
+            if consumed >= raw_offset {
+                tail.segments.push(segment.clone());
+            } else if let ParagraphSegment::Text(text) = segment
+                && consumed + len > raw_offset
+            {
+                tail.push_text(&text[raw_offset - consumed..]);
+            }
+            consumed += len;
+        }
+        tail
     }
 
     /// Get the byte positions where markers should be inserted in the concatenated text.
@@ -316,6 +256,11 @@ impl ParagraphBuffer {
     /// Check if buffer is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.segments.is_empty()
+    }
+
+    /// Clear the buffer for reuse.
+    pub(crate) fn clear(&mut self) {
+        self.segments.clear();
     }
 }
 

@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..393
@@ -43,7 +42,8 @@ DOCUMENT@0..393
         BLANK_LINE@143..144
           BLANK_LINE@143..144 "\n"
         PLAIN@144..189
-          TEXT@144..188 "    contains seeds, c ..."
+          WHITESPACE@144..148 "    "
+          TEXT@148..188 "contains seeds, crisp ..."
           NEWLINE@188..189 "\n"
     BLANK_LINE@189..190
       BLANK_LINE@189..190 "\n"

@@ -1,0 +1,36 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..23
+  DEFINITION_LIST@0..23
+    DEFINITION_ITEM@0..11
+      TERM@0..2
+        TEXT@0..1 "a"
+        NEWLINE@1..2 "\n"
+      DEFINITION@2..11
+        DEFINITION_MARKER@2..3 ":"
+        WHITESPACE@3..4 "\t"
+        PLAIN@4..11
+          INLINE_CODE@4..10
+            INLINE_CODE_MARKER@4..5 "`"
+            INLINE_CODE_CONTENT@5..7 "x\n"
+            WHITESPACE@7..8 "\t"
+            INLINE_CODE_CONTENT@8..9 "y"
+            INLINE_CODE_MARKER@9..10 "`"
+          NEWLINE@10..11 "\n"
+    BLANK_LINE@11..12
+      BLANK_LINE@11..12 "\n"
+    DEFINITION_ITEM@12..23
+      TERM@12..14
+        TEXT@12..13 "b"
+        NEWLINE@13..14 "\n"
+      DEFINITION@14..23
+        DEFINITION_MARKER@14..15 ":"
+        WHITESPACE@15..16 " "
+        PLAIN@16..23
+          INLINE_CODE@16..22
+            INLINE_CODE_MARKER@16..17 "`"
+            INLINE_CODE_CONTENT@17..21 "p\n\tq"
+            INLINE_CODE_MARKER@21..22 "`"
+          NEWLINE@22..23 "\n"

@@ -29,5 +29,6 @@ DOCUMENT@0..42
         DEFINITION_MARKER@29..30 ":"
         NEWLINE@30..31 "\n"
         PLAIN@31..42
-          TEXT@31..41 "    # Head"
+          WHITESPACE@31..32 " "
+          TEXT@32..41 "   # Head"
           NEWLINE@41..42 "\n"

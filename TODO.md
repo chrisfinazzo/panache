@@ -537,17 +537,60 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   projector leans on; unit tests in `pandoc_ast.rs` pin the payloads against
   pandoc 3.9.0.2. Corpus unchanged (no case has a tab in a code span). Split
   out of the item above.
-- [ ] A definition body's continuation indent is not gobbled at all, so
+- [x] A definition body's continuation indent is not gobbled at all, so
   ``a\n:   d\n    `x\n    y` `` is `Code "x y"` in pandoc but
   `Code "x     y"` here --- pandoc's `defListIndent` gobble is the
   definition's content column, the same rule `listLine` applies. This is the
-  definition-list twin of the list-item indent bug fixed above, and it wants
-  the same parser fix (hold the indent out of the text handed to the inline
-  parser, re-inject it as `WHITESPACE` at emission), *not* a floor in the
-  projector --- that would paper over a real parser gap. Found while fixing
-  the tab item above; the tab variants (`:\t d`, where pandoc gobbles
-  nothing) need their own study against `Readers/Markdown.hs`. Not in the
-  corpus.
+  definition-list twin of the list-item indent bug fixed above, and it
+  wanted the same parser fix (hold the indent out of the text handed to the
+  inline parser, re-inject it as `WHITESPACE` at emission), *not* a floor in
+  the projector --- that would paper over a real parser gap. Found while
+  fixing the tab item above. Not in the corpus. Fixed in three parts:
+  - `Container::Definition`'s `plain_buffer` is now a `ParagraphBuffer` instead
+    of a `TextBuffer`, so `parse_inner_content` can hold each continuation
+    line's `content_col` indent out of the buffered text as an `Indent` segment
+    rather than re-prepending it. A *lazy* line never reaches the content column
+    and pandoc takes nothing off it, so its whitespace stays payload --- that
+    case already matched and still does. `emit_definition_plain_or_heading`
+    keeps reading the buffer's *raw* bytes for its block-shape tests (ATX
+    heading, standalone image), so block structure is untouched; only the inline
+    emission changed. `TextBuffer` had no other caller left and was deleted.
+  - The tab variants turned out to be two separate defects, both fixed here
+    rather than deferred. `try_parse_definition_marker` measured the post-marker
+    whitespace with `leading_indent` (column 0), so `:\td` got a content column
+    of 5 where `tabFilter` reaches the stop at 4; it now uses
+    `leading_indent_from(after_marker, indent_cols + 1)`. And a tab *straddling*
+    the content column still cannot be split (one byte, lossless CST), so
+    `list_gobble_columns` in the projector was generalized from `LIST_ITEM` to
+    "innermost `LIST_ITEM` or `DEFINITION`" --- the two share the
+    marker/trailing-space/content-column shape, and the column is absolute, so a
+    definition nested in a list item folds in automatically.
+  - Verified against pandoc 3.9.0.2 across marker widths, surplus indent, lazy
+    lines, `~` markers, bodies reopening after a blank line or a heading,
+    definitions nested in a list item, and all seven tab shapes: 17 of 18 probe
+    cases now match where 13 diverged before. Parser fixtures
+    `definition_continuation_indent_stripped_pandoc` (space indents, display
+    math, lazy) and `definition_continuation_tab_indent_pandoc` (the two CST
+    shapes the projector leans on); payload unit tests in `pandoc_ast.rs`.
+    Formatter output is unchanged --- no golden expectation moved, and the
+    losslessness/idempotency sweep over all 1070 fixtures has the same seven
+    pre-existing failures as before. The other 11 CST snapshots that moved are
+    `TEXT` retagged as `WHITESPACE` over identical byte ranges; two were checked
+    against pandoc individually and one
+    (`blockquote_no_interrupt_def_plain_continuation_pandoc`) is a payload fix,
+    `Code "{{< include >}}"` where it used to be five spaces.
+- [ ] A **footnote** definition's continuation indent is not gobbled either:
+  ``x[^1]\n\n[^1]: d\n    `x\n    y` `` is `Code "x y"` in pandoc but
+  `Code "x     y"` here. Same bug as the definition-list item above and the
+  list-item one before it, but a third code path --- a footnote body's
+  continuation lines land in a `Container::Paragraph`'s `ParagraphBuffer`
+  via `append_paragraph_line`, which buffers the *raw* line, so there is no
+  `indent_to_emit` at hand to hold out. `ParagraphBuffer` already carries
+  the `Indent` segment and the projector's gobble is now keyed on the
+  innermost `LIST_ITEM`/`DEFINITION` ancestor, so both would need a
+  `FOOTNOTE_DEFINITION` arm. `Container::Admonition` shares the same
+  `content_col` machinery and is presumably affected too, unchecked. Found
+  while fixing the definition-list item. Not in the corpus.
 - [ ] The formatter expands a code span's tabs from column 0 of the span's own
   content rather than from its source column, so it rewrites `` a`x\ty`b ``
   to `` a`x   y`b `` --- pandoc reads 1 space in the input and 3 in the
