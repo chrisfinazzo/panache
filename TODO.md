@@ -437,16 +437,33 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `debug format --checks idempotency` now passes on the shape (it used to
   re-quote the lines as `>   >   c`). Corpus 513; block 39 -> 40, total 518
   -> 519 (100%).
-- [ ] Formatting a fence that a lazy fold opened rewrites its payload:
-  ````> # h\n   ```\n   c\n   ``` ```` is `CodeBlock "c"` but formats to
-  ````> ```\n>    c\n> ``` ````, i.e. `CodeBlock "   c"`. Pre-dates the 513
+- [x] Formatting a fence that a lazy fold opened rewrote its payload:
+  ````> # h\n   ```\n   c\n   ``` ```` is `CodeBlock "c"` but formatted to
+  ````> ```\n>    c\n> ``` ````, i.e. `CodeBlock "   c"`. Pre-dated the 513
   work, which only made one more input reach it. `parse_fenced_code_block`
   emits a *content* line's gobbled prefix bytes inside `CODE_CONTENT` (via
-  `window.emit_prefix_at`) while the closing fence's prefix is a sibling of
-  `CODE_FENCE_CLOSE`; the projector compensates in `code_content_text`, the
-  formatter does not. Hoisting the prefix out of `CODE_CONTENT`, the way the
-  closer's already is, would fix both consumers at once. Lossless and
-  idempotent, so `--checks all` does not catch it.
+  `window.emit_prefix_at`), and the formatter fed those bytes to its
+  column-based `strip_indent_columns` with a base of 0 --- the fold consumes
+  the fence's indent upstream, so from `CODE_BLOCK`'s view the fence sits at
+  column 0 and there is no base to strip against. Hoisting the prefix out of
+  `CODE_CONTENT` was the first idea but does not survive contact with the
+  shape: `CODE_CONTENT` is one node over *all* content lines, so only line
+  one's prefix could become a sibling. Fixed instead by mirroring the
+  projector's `fenced_in_blockquote` rule in the formatter --- for a fenced
+  block whose parent is a `BLOCK_QUOTE` the whole line-start `WHITESPACE`
+  token is container syntax (marker padding or the lazy gobble) and drops
+  token-wise; everywhere else the tab-inexact token boundary still forces
+  the column strip. Golden case `blockquote_lazy_fence_payload`.
+- [ ] Nobody strips the *opening fence's indent* from a fenced block's payload,
+  in the formatter or the projector: ````   ```\n   c\n   ``` ```` is
+  `CodeBlock "c"` in pandoc but `"   c"` in both, and
+  ````>   ```\n>   c\n>   ``` ```` is `"c"` but comes out `"  c"`. The
+  emitter leaves a content line's share of that indent inside the line's
+  `TEXT` token (`TEXT@6..12 "     c"`), so the formatter's
+  `base_indent_cols` machinery has nothing to bite on even when it does know
+  the fence indent. The CommonMark twin below is the same root cause, and
+  the pandoc corpus has no indented-fence case to catch it. Lossless and
+  idempotent, so `--checks all` does not catch it either.
 - [ ] An *over*-indented fence after a list item is lazy text in pandoc:
   ````- a\n   ```\n   c\n   ``` ```` (indent 3, content column 2) is
   `Plain [a, SoftBreak, Code "c"]`, because `listLine` gobbles only

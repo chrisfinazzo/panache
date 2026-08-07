@@ -190,6 +190,25 @@ fn indent_columns(indent: &str) -> usize {
     cols
 }
 
+/// A fenced code block whose immediate container is a blockquote — the one
+/// place a line-start `WHITESPACE` inside `CODE_CONTENT` can be dropped
+/// token-wise rather than by column.
+///
+/// The parser re-emits each continuation line's container prefix inside
+/// `CODE_CONTENT` for losslessness. Inside a blockquote that prefix is either a
+/// marker's padding or pandoc's lazy-line gobble, both of which the emitter
+/// reproduces exactly, so the whole token is container syntax. Everywhere else
+/// the token boundary is not column-exact once tabs are involved (a `:\t`
+/// definition marker at content column 4 peels `"\t\t"`, eight columns), so the
+/// indent has to come off by column via [`strip_indent_columns`] instead.
+///
+/// Mirrors `fenced_in_blockquote` in the pandoc-native projector
+/// (`panache_parser::to_pandoc_ast`); the two must agree on what a code block's
+/// payload is.
+fn fenced_in_blockquote(node: &SyntaxNode, has_fence: bool) -> bool {
+    has_fence && node.parent().map(|p| p.kind()) == Some(SyntaxKind::BLOCK_QUOTE)
+}
+
 fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<String>, String) {
     let mut info_node: Option<SyntaxNode> = None;
     let mut language: Option<String> = None;
@@ -197,6 +216,11 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
     let mut has_fence = false;
     let mut fence_indent = String::new();
     let mut fence_indent_cols = 0usize;
+    let drop_container_indent = fenced_in_blockquote(
+        node,
+        node.children()
+            .any(|child| child.kind() == SyntaxKind::CODE_FENCE_OPEN),
+    );
 
     for child in node.children_with_tokens() {
         match child {
@@ -241,7 +265,14 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                                     saw_blockquote_marker = true;
                                 }
                                 SyntaxKind::WHITESPACE if at_line_start => {
-                                    if saw_blockquote_marker {
+                                    if drop_container_indent {
+                                        // Whole token is container syntax — see
+                                        // `fenced_in_blockquote`. Covers a lazy
+                                        // line gobbled into the quote, whose
+                                        // indent arrives with no marker of its
+                                        // own to hang the strip off.
+                                        saw_blockquote_marker = false;
+                                    } else if saw_blockquote_marker {
                                         let ws = t.text();
                                         if let Some(stripped) = ws.strip_prefix(' ') {
                                             line_indent.push_str(stripped);

@@ -163,6 +163,7 @@ golden_test_cases!(
     blockquote_depth_change,
     blockquote_html_block,
     blockquote_lazy_line_folds,
+    blockquote_lazy_fence_payload,
     blockquote_in_fenced_div_idempotency_310,
     blockquote_list_blanks,
     blockquote_list_blockquote,
