@@ -2493,6 +2493,7 @@ impl<'a> Parser<'a> {
             ),
             list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
             paragraph_open: self.is_paragraph_open(),
+            list_item_content_open: self.is_list_item_content_open(),
             next_line: (self.pos + 1 < self.lines.len())
                 .then(|| count_blockquote_markers(self.lines[self.pos + 1]).1),
             open_alpha_hint: lists::open_list_hint_at_indent(
@@ -2940,6 +2941,7 @@ impl<'a> Parser<'a> {
                 ),
                 list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
                 paragraph_open: self.is_paragraph_open(),
+                list_item_content_open: self.is_list_item_content_open(),
                 next_line: if self.pos + 1 < self.lines.len() {
                     Some(self.lines[self.pos + 1])
                 } else {
@@ -4248,6 +4250,7 @@ impl<'a> Parser<'a> {
                         ),
                         list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
                         paragraph_open: self.is_paragraph_open(),
+                        list_item_content_open: self.is_list_item_content_open(),
                         next_line: if self.pos + 1 < self.lines.len() {
                             Some(self.lines[self.pos + 1])
                         } else {
@@ -4533,6 +4536,7 @@ impl<'a> Parser<'a> {
             ),
             list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
             paragraph_open: self.is_paragraph_open(),
+            list_item_content_open: self.is_list_item_content_open(),
             next_line,
             open_alpha_hint: lists::open_list_hint_at_indent(
                 &self.containers,

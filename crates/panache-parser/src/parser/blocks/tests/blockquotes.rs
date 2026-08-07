@@ -499,6 +499,7 @@ fn dispatcher_blockquote_detection() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -542,6 +543,7 @@ fn dispatcher_blockquote_requires_blank_before() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -591,6 +593,7 @@ fn dispatcher_blockquote_payload_basic() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -637,6 +640,7 @@ fn dispatcher_blockquote_payload_nested_requires_blank() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -681,6 +685,7 @@ fn dispatcher_blockquote_ignored_inside_blockquote() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -721,6 +726,7 @@ fn dispatcher_blockquote_payload_nested_with_blank() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };
@@ -765,6 +771,7 @@ fn dispatcher_blockquote_payload_nested_after_blank_line() {
         in_marker_only_list_item: false,
         list_item_unclosed_html_block_tag: None,
         paragraph_open: false,
+        list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
     };

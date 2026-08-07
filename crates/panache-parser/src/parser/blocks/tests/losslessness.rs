@@ -1,4 +1,4 @@
-use super::helpers::{find_first, parse_blocks_gfm};
+use super::helpers::{find_all, find_first, parse_blocks_gfm};
 use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::parser::Parser;
 use crate::syntax::SyntaxKind;
@@ -521,4 +521,91 @@ fn test_losslessness_capped_blockquote_inside_open_quote() {
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
     assert_eq!(tree.text().to_string(), input);
+}
+
+/// Parse under the Pandoc dialect and assert byte-identity plus "no HEADING
+/// anywhere in the tree".
+///
+/// Shared by the setext-after-setext cases below: the underline lookback in
+/// `SetextHeadingParser::detect_prepared` is purely textual, so it used to fire
+/// on lines the parser had actually absorbed as paragraph text, emitting the
+/// HEADING *before* those still-buffered bytes and reordering the CST.
+fn assert_pandoc_lossless_without_heading(input: &str) {
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert!(
+        find_first(&tree, SyntaxKind::HEADING).is_none(),
+        "pandoc keeps this whole run as one paragraph, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_losslessness_setext_underline_after_multiline_paragraph_underline() {
+    // `pandoc -f markdown -t native` gives a single
+    // `Para [a, SoftBreak, b, SoftBreak, ---, SoftBreak, c, SoftBreak, ---]`:
+    // setext content must be a single line, so the first `---` is paragraph
+    // text, and setext never interrupts a paragraph under Pandoc. The textual
+    // lookback saw `b\n---` and let the second underline through as a
+    // "consecutive setext heading" while `a\nb\n---` was still buffered.
+    assert_pandoc_lossless_without_heading("a\nb\n---\nc\n---\n");
+}
+
+#[test]
+fn test_losslessness_setext_equals_underline_after_multiline_paragraph() {
+    // Same shape with `=` underlines; pandoc again gives one `Para`.
+    assert_pandoc_lossless_without_heading("a\nb\n===\nc\n===\n");
+}
+
+#[test]
+fn test_losslessness_setext_pair_after_unterminated_fence() {
+    // An unterminated fence is paragraph text under Pandoc, so the lookback
+    // matched `x\n---` inside that text. pandoc gives one `Para` starting with
+    // `Str "```"`.
+    assert_pandoc_lossless_without_heading("```\nx\n---\ny\n---\n");
+}
+
+#[test]
+fn test_losslessness_setext_underline_after_multiline_paragraph_in_blockquote() {
+    // `BlockQuote [Para [...]]` per pandoc -- the quoted paragraph buffers the
+    // same way, so the reorder happened inside the blockquote.
+    assert_pandoc_lossless_without_heading("> a\n> b\n> ---\n> c\n> ---\n");
+}
+
+#[test]
+fn test_losslessness_setext_underline_after_multiline_list_item_content() {
+    // `BulletList [[Plain [...]]]` per pandoc. Here the open buffer is the list
+    // item's, not a paragraph's -- `is_paragraph_open` alone does not see it.
+    assert_pandoc_lossless_without_heading("- a\n  b\n  ---\n  c\n  ---\n");
+}
+
+#[test]
+fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
+    // The live use of the `follows_setext_heading` escape: inside a list item
+    // `has_blank_before` is false even once the item's buffer has been flushed,
+    // so without the escape the second heading would not form. pandoc gives
+    // `BulletList [[Header 2 "a", Header 2 "c"]]`.
+    let input = "- a\n  ---\n  c\n  ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::HEADING).len(),
+        2,
+        "expected two setext headings inside the list item, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_consecutive_top_level_setext_headings_still_form_headings() {
+    // pandoc gives three `Header 2`s with no intervening blank lines.
+    let input = "a\n---\nc\n---\ne\n---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::HEADING).len(),
+        3,
+        "expected three consecutive setext headings, got:\n{tree:#?}"
+    );
 }

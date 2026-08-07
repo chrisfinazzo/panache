@@ -318,6 +318,7 @@ golden_test_cases!(
     hr_interrupts_lazy_blockquote_paragraph_pandoc,
     hr_interrupts_reduced_marker_lazy_blockquote_commonmark,
     setext_headings,
+    setext_after_setext_multiline_paragraph_pandoc,
     setext_heading_in_list_item_commonmark,
     setext_mid_paragraph_no_blank_before_header,
     setext_multiline_commonmark,

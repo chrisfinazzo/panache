@@ -262,6 +262,7 @@ golden_test_cases!(
     headings,
     heading_in_list_item,
     setext_headings,
+    setext_after_setext_pandoc,
     setext_heading_in_list_item,
     setext_multiline_commonmark,
     indented_code_after_atx_heading_commonmark,

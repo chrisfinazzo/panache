@@ -182,6 +182,13 @@ pub(crate) struct BlockContext<'a> {
     /// not as a "terminal one-liner" that opens a new section.
     pub paragraph_open: bool,
 
+    /// Whether the innermost container is a `Container::ListItem` whose content
+    /// is still buffered. That buffer holds bytes not yet written to the green
+    /// builder, so it is the analogue of an open paragraph: detectors that must
+    /// not emit a sibling block ahead of already-consumed text have to consult
+    /// this alongside [`Self::paragraph_open`].
+    pub list_item_content_open: bool,
+
     /// Next line content for lookahead (used by setext headings)
     pub next_line: Option<&'a str>,
 
@@ -3512,13 +3519,25 @@ impl BlockParser for SetextHeadingParser {
         let next_line_raw = lines.get(line_pos + 1).copied();
         // Setext headings usually require blank line before (unless at document start),
         // but Pandoc also allows consecutive setext headings without an intervening blank line.
-        let follows_setext_heading = if line_pos >= 2 {
-            let prev_text = count_blockquote_markers(lines[line_pos - 2]).1;
-            let prev_underline = count_blockquote_markers(lines[line_pos - 1]).1;
-            try_parse_setext_heading(&[prev_text, prev_underline], 0).is_some()
-        } else {
-            false
-        };
+        //
+        // The lookback is purely textual: it re-lexes two raw source lines and
+        // so cannot tell "the parser emitted a HEADING there" from "the parser
+        // absorbed those bytes as text". An open paragraph — or a list item
+        // whose content is still buffered — means the latter, and letting the
+        // escape through would return `Yes` with those bytes unflushed, so the
+        // core would emit the heading *before* them and reorder the CST (see
+        // the contract in `parser/core.rs`). `a\nb\n---\nc\n---\n` is the
+        // canonical case: multi-line setext content is not a heading under
+        // Pandoc, so the first `---` is paragraph text, yet it shape-matched
+        // against `b` and let the second underline through.
+        let follows_setext_heading =
+            if line_pos >= 2 && !ctx.paragraph_open && !ctx.list_item_content_open {
+                let prev_text = count_blockquote_markers(lines[line_pos - 2]).1;
+                let prev_underline = count_blockquote_markers(lines[line_pos - 1]).1;
+                try_parse_setext_heading(&[prev_text, prev_underline], 0).is_some()
+            } else {
+                false
+            };
 
         // Pandoc never forms a setext heading mid-paragraph, even with
         // `blank_before_header` disabled (`markdown-blank_before_header` keeps

@@ -187,27 +187,29 @@ Round-trip failures (`input` -> lossy output):
   the tail was re-emitted as a label suffix. `emit` now consumes the same
   run.
 
-- [ ] A setext underline directly after a setext heading breaks the block
-  dispatcher's open-paragraph contract. Both `a\nb\n---\nc\n---\n` and
-  ```` ```\nx\n---\ny\n---\n ```` trip the `debug_assert!` in
+- [x] A setext underline directly after a setext-*shaped* pair of lines broke
+  the block dispatcher's open-paragraph contract. Both `a\nb\n---\nc\n---\n`
+  and ```` ```\nx\n---\ny\n---\n ```` tripped the `debug_assert!` in
   `parser/core.rs` ("block parser `setext_heading` returned `Yes` while a
-  paragraph or buffered list-item content is open").
-  `SetextHeadingParser::detect_prepared` takes its `follows_setext_heading`
-  escape while the *next* paragraph is still buffered, so the heading is
-  emitted before those bytes and the CST reorders. Debug builds panic on the
-  contract; release builds do the reordering silently, with the assert
-  compiled out, which makes this a losslessness bug rather than only an
-  assertion failure. The fix the contract itself names is to return
-  `YesCanInterrupt` (which flushes the buffers first) or to gate the escape.
-  Pandoc-dialect only --- CommonMark folds the open paragraph into the
-  heading, and a single-line paragraph (`a\n---\nc\n---\n`) is fine, so the
-  trigger is a *multi-line* paragraph before the first underline.
+  paragraph or buffered list-item content is open"); so did the blockquote
+  and list-item forms. `SetextHeadingParser::detect_prepared` computed its
+  `follows_setext_heading` escape by re-lexing two *raw source lines*, so it
+  could not tell "the parser emitted a HEADING there" from "the parser
+  absorbed those bytes as text" --- it fired while the paragraph was still
+  buffered, and the heading was emitted before those bytes. Debug builds
+  panicked; release builds reordered silently, making this a losslessness
+  bug rather than only an assertion failure. The escape is now gated on
+  `!ctx.paragraph_open && !ctx.list_item_content_open` (the latter is a new
+  `BlockContext` field), which leaves its one live case --- consecutive
+  setext headings inside a list item, where the item's buffer is already
+  flushed --- intact. All five shapes now match
+  `pandoc -f markdown -t native`.
   - Surfaced on `feat/incremental-parsing-graduation` by the flavor-tiered fuzz
     harness, once `---\nk: v\n---\n` entered its insert alphabet. Both shapes
     are pinned `#[ignore]`d there in `incremental_regressions.rs` as
     `full_parse_lossless_setext_underline_after_setext_heading` and
     `full_parse_lossless_setext_pair_after_unterminated_fence`; un-ignore them
-    when this lands and that branch rebases.
+    when that branch rebases onto this fix.
 
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
