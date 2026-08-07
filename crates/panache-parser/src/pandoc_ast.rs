@@ -4479,18 +4479,10 @@ fn inline_from_node(node: &SyntaxNode) -> Inline {
         SyntaxKind::SUBSCRIPT => {
             Inline::Subscript(coalesce_inlines_keep_edges(inlines_from_marked(node)))
         }
-        SyntaxKind::INLINE_CODE => {
-            let content: String = node
-                .children_with_tokens()
-                .filter_map(|el| el.into_token())
-                .filter(|t| t.kind() == SyntaxKind::INLINE_CODE_CONTENT)
-                .map(|t| t.text().to_string())
-                .collect();
-            Inline::Code(
-                extract_attr_from_node(node),
-                strip_inline_code_padding(&content),
-            )
-        }
+        SyntaxKind::INLINE_CODE => Inline::Code(
+            extract_attr_from_node(node),
+            strip_inline_code_padding(&inline_code_payload(node)),
+        ),
         SyntaxKind::LINK | SyntaxKind::IMAGE_LINK | SyntaxKind::UNRESOLVED_REFERENCE => {
             // LINK / IMAGE_LINK / UNRESOLVED_REFERENCE render through
             // `push_inline_node` so reference resolution can emit
@@ -4706,6 +4698,173 @@ fn render_image_inline(node: &SyntaxNode, out: &mut Vec<Inline>) {
         "]".to_string()
     };
     out.push(Inline::Str(suffix));
+}
+
+/// Rebuild a code span's payload from its `INLINE_CODE_CONTENT` children,
+/// dropping the container prefixes the emitter interleaves there and
+/// expanding tabs the way pandoc's `tabFilter` does.
+///
+/// `tabFilter` runs over the whole source *before* the reader, so a tab is
+/// worth however many columns it takes to reach the next 4-column stop **from
+/// its column in the original line** — counting any container prefix, since
+/// none of it has been stripped yet. A code span therefore cannot be read
+/// token-text-wise: `` a`x\ty`b `` is `Code "x y"` (the tab starts at column 3)
+/// while `` `x\n\ty` `` is `Code "x     y"` (it starts at column 0).
+///
+/// `gobble` closes the one gap the CST cannot express. Pandoc's `listLine`
+/// takes the item's content column off every continuation line, and the parser
+/// mirrors that by holding those bytes out of the span as `WHITESPACE`. A tab
+/// straddling the content column has no byte boundary to split on — the CST is
+/// byte-lossless, so the parser must leave it whole in the payload — and the
+/// columns it loses to the gobble are subtracted here instead.
+fn inline_code_payload(node: &SyntaxNode) -> String {
+    let Some(first) = node.first_token() else {
+        return String::new();
+    };
+    let (mut col, mut in_indent) = token_line_context(&first);
+    let gobble = list_gobble_columns(node);
+    let mut out = String::new();
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) => {
+                let expanded = expand_span_tabs(t.text(), &mut col, &mut in_indent, gobble);
+                if t.kind() == SyntaxKind::INLINE_CODE_CONTENT {
+                    out.push_str(&expanded);
+                }
+                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
+                    // A `>` re-injected on a continuation line is container
+                    // syntax; the line's indent run continues past it.
+                    in_indent = true;
+                }
+            }
+            NodeOrToken::Node(n) => {
+                // Only an `ATTRIBUTE` nests here, and it follows the closing
+                // marker — walked for its columns, never for payload.
+                expand_span_tabs(&n.text().to_string(), &mut col, &mut in_indent, gobble);
+            }
+        }
+    }
+    out
+}
+
+/// Expand the tabs in `text` from column `*col`, leaving `*col` on the column
+/// the expansion ended on and `*in_indent` set for whether the line is still
+/// in its leading indent run.
+///
+/// While in that run, a tab's columns below `gobble` belong to the enclosing
+/// list item's content indent and are dropped — see [`inline_code_payload`].
+/// Spaces never need that treatment: the parser already peels every gobbled
+/// space out of the payload, so a space that survives into it is past the
+/// content column by construction.
+fn expand_span_tabs(text: &str, col: &mut usize, in_indent: &mut bool, gobble: usize) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\t' => {
+                let next = (*col / 4 + 1) * 4;
+                let from = if *in_indent { (*col).max(gobble) } else { *col };
+                for _ in from..next {
+                    out.push(' ');
+                }
+                *col = next;
+            }
+            '\n' => {
+                out.push(c);
+                *col = 0;
+                *in_indent = true;
+            }
+            '\r' => out.push(c),
+            ' ' => {
+                out.push(c);
+                *col += 1;
+            }
+            _ => {
+                out.push(c);
+                *col += 1;
+                *in_indent = false;
+            }
+        }
+    }
+    out
+}
+
+/// Column `token` starts on in its source line (tabs expanded to 4-column
+/// stops), plus whether everything before it on that line is indent —
+/// whitespace, or a blockquote marker the emitter re-injected.
+fn token_line_context(token: &SyntaxToken) -> (usize, bool) {
+    let mut pieces: Vec<String> = Vec::new();
+    let mut in_indent = true;
+    let mut cur = token.prev_token();
+    while let Some(t) = cur {
+        let text = t.text();
+        if let Some(idx) = text.rfind('\n') {
+            let tail = &text[idx + 1..];
+            if !is_indent_run(tail) {
+                in_indent = false;
+            }
+            pieces.push(tail.to_string());
+            break;
+        }
+        if t.kind() != SyntaxKind::BLOCK_QUOTE_MARKER && !is_indent_run(text) {
+            in_indent = false;
+        }
+        pieces.push(text.to_string());
+        cur = t.prev_token();
+    }
+    let col = pieces
+        .iter()
+        .rev()
+        .fold(0usize, |col, piece| advance_columns(piece, col));
+    (col, in_indent)
+}
+
+fn is_indent_run(s: &str) -> bool {
+    s.chars().all(|c| c == ' ' || c == '\t')
+}
+
+/// Column reached by `text` starting from `col`, with tabs expanded to
+/// 4-column stops. The column-only twin of [`expand_tabs_from_col`].
+fn advance_columns(text: &str, mut col: usize) -> usize {
+    for c in text.chars() {
+        match c {
+            '\t' => col = (col / 4 + 1) * 4,
+            '\n' => col = 0,
+            '\r' => {}
+            _ => col += 1,
+        }
+    }
+    col
+}
+
+/// Columns pandoc's `listLine` gobbles off every continuation line of the
+/// innermost list item containing `node` — the content column of that item,
+/// measured in the source line so nesting and blockquote prefixes are already
+/// counted. Zero when no list item encloses `node`.
+fn list_gobble_columns(node: &SyntaxNode) -> usize {
+    let Some(item) = node.ancestors().find(|a| a.kind() == SyntaxKind::LIST_ITEM) else {
+        return 0;
+    };
+    let tokens: Vec<SyntaxToken> = item
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .collect();
+    let Some(i) = tokens
+        .iter()
+        .position(|t| t.kind() == SyntaxKind::LIST_MARKER)
+    else {
+        return 0;
+    };
+    let marker = &tokens[i];
+    let mut col = advance_columns(marker.text(), token_line_context(marker).0);
+    // A bare marker (content starting on a later line) owns no trailing space,
+    // and its content column is the marker width — pandoc's own fallback.
+    if let Some(ws) = tokens.get(i + 1)
+        && ws.kind() == SyntaxKind::WHITESPACE
+        && !ws.text().contains('\n')
+    {
+        col = advance_columns(ws.text(), col);
+    }
+    col
 }
 
 /// Pandoc's inline code reader (`Markdown.hs::code`) replaces internal
@@ -6427,5 +6586,80 @@ mod tests {
             "Text[^1]\n\n[^1]: note\n\n      ```\n        deep\n      ```\n",
             "  deep",
         );
+    }
+
+    /// Assert the projected payload of the document's first `Code` inline.
+    ///
+    /// Pandoc's `tabFilter` expands every tab to a 4-column stop *before* the
+    /// reader runs, so a code span's payload is measured in columns of the
+    /// original line. Every expectation is `pandoc 3.9.0.2 -f markdown
+    /// -t native` output.
+    fn assert_inline_code_payload(input: &str, expected: &str) {
+        let out = native(input, pandoc_options());
+        let needle = format!("Code ( \"\" , [] , [] ) {expected:?}");
+        assert!(
+            out.contains(&needle),
+            "expected an inline {needle}, got: {out}"
+        );
+    }
+
+    #[test]
+    fn code_span_tab_expands_from_its_own_column() {
+        // The tab sits at column 3, so it reaches the stop at column 4 — one
+        // space, not four.
+        assert_inline_code_payload("a`x\ty`b\n", "x y");
+        // At column 0 of a continuation line it reaches column 4.
+        assert_inline_code_payload("`x\n\ty`\n", "x     y");
+    }
+
+    #[test]
+    fn code_span_tab_expands_past_a_blockquote_marker() {
+        // `tabFilter` runs before `> ` is stripped, so the tab starts from
+        // column 2 and only two of its columns survive.
+        assert_inline_code_payload("> a\n> \t`x\n> \ty`\n", "x   y");
+    }
+
+    #[test]
+    fn list_item_straddling_tab_loses_the_gobbled_columns() {
+        // `listLine` gobbles the item's content column off every continuation
+        // line. A tab covering columns 0-4 straddles a content column of 2, so
+        // two of its four columns are indent and two are payload. The tab is
+        // one byte and the CST is byte-lossless, so the split cannot happen in
+        // the parser — the projector accounts for it by column.
+        assert_inline_code_payload("- a\n\t`x\n\ty`\n", "x   y");
+        // Same content column, reached with spaces before the tab: the parser
+        // gobbles the spaces it can, and the tab expands from where they end.
+        assert_inline_code_payload("- a\n \t`x\n \ty`\n", "x   y");
+        assert_inline_code_payload("- a\n  \t`x\n  \ty`\n", "x   y");
+        assert_inline_code_payload("- a\n   \t`x\n   \ty`\n", "x   y");
+        // Only the first tab straddles; the second is payload in full.
+        assert_inline_code_payload("- a\n\t\t`x\n\t\ty`\n", "x       y");
+        // A content column of 4 consumes the tab exactly — no residue.
+        assert_inline_code_payload("1.  a\n\t`x\n\ty`\n", "x y");
+        // The gobble is the *innermost* item's content column.
+        assert_inline_code_payload("- - a\n\t\t`x\n\t\ty`\n", "x     y");
+        // A quoted list gobbles from the column past its own marker.
+        assert_inline_code_payload("> - a\n> \t`x\n> \ty`\n", "x y");
+        // A loose item and a lazy first line reach the same content column.
+        assert_inline_code_payload("- a\n\n  `x\n  \ty`\n", "x   y");
+        assert_inline_code_payload("- a\n`x\n\ty`\n", "x   y");
+    }
+
+    #[test]
+    fn list_item_interior_tab_keeps_every_column() {
+        // Past the content column there is nothing left to gobble.
+        assert_inline_code_payload("- `x\ty`\n", "x    y");
+        assert_inline_code_payload("- a\n  `x\ty`\n", "x    y");
+        // A lazy continuation line has no indent to gobble, so the tab keeps
+        // all the columns it reaches from where the lazy text left off.
+        assert_inline_code_payload("- a\nb\t`x\ty`\n", "x  y");
+    }
+
+    #[test]
+    fn list_item_space_indent_still_strips_by_token() {
+        // The no-tab path is unchanged: the parser holds the gobbled spaces
+        // out of the span and the projector keeps the rest.
+        assert_inline_code_payload("- a\n   `x\n   y`\n", "x  y");
+        assert_inline_code_payload("- a\n  `x\n  y`\n", "x y");
     }
 }

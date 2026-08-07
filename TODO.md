@@ -513,15 +513,50 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   fixtures was display math in a list item, which now matches pandoc too
   (`Math DisplayMath "\n\\begin{bmatrix}...\n"`, indent no longer baked in).
   Parser case `list_continuation_indent_stripped_pandoc`.
-- [ ] A **tab** straddling a list item's content column is not gobbled at all,
-  so ``- a\n\t`x\n\ty` `` is `Code "x \ty"` here but `Code "x   y"` in
+- [x] A **tab** straddling a list item's content column is not gobbled at all,
+  so ``- a\n\t`x\n\ty` `` was `Code "x \ty"` here but `Code "x   y"` in
   pandoc, which expands the tab to a 4-column stop and eats 2 of those
-  columns. Same for `  \t` at `content_col` 2. Splitting the tab means
-  emitting residual *spaces* that do not exist in the source, which
-  byte-losslessness forbids, so this needs a virtual-token concept (or an
-  expand-tabs pre-pass panache deliberately does not have) rather than a
-  tweak to `item_indent_prefix_len`. Split out of the item above; not in the
+  columns. Splitting the tab means emitting residual *spaces* that do not
+  exist in the source, which byte-losslessness forbids, so no parser change
+  can fix it: both byte attributions are wrong (leaving the tab in the
+  payload keeps 4 columns, gobbling it whole keeps 0, pandoc keeps 2), and
+  the CST cannot hold a string the source does not contain. Fixed a layer
+  down instead --- pandoc's `tabFilter` is a *pre-reader* pass over the
+  whole input, so the projector is where panache models it.
+  `inline_code_payload` now rebuilds a code span by walking its tokens with
+  a running source column, expanding tabs to 4-column stops from that
+  column, and subtracting the enclosing item's content column from a tab
+  still inside the line's indent run (`list_gobble_columns`). That also
+  fixed the tab expansion the projector never did at all: ``a`x\ty`b `` is
+  `Code "x y"` (the tab starts at column 3), `` `x\n\ty` `` is
+  `Code "x     y"`, and `` > a\n> \t`x\n> \ty` `` counts the `> ` prefix
+  `tabFilter` had not yet stripped. Spaces need no such treatment --- the
+  parser already peels every gobbled space out of the payload, so the floor
+  only ever compensates for the unsplittable tab. Parser fixture
+  `list_continuation_tab_indent_pandoc` pins the two CST shapes the
+  projector leans on; unit tests in `pandoc_ast.rs` pin the payloads against
+  pandoc 3.9.0.2. Corpus unchanged (no case has a tab in a code span). Split
+  out of the item above.
+- [ ] A definition body's continuation indent is not gobbled at all, so
+  ``a\n:   d\n    `x\n    y` `` is `Code "x y"` in pandoc but
+  `Code "x     y"` here --- pandoc's `defListIndent` gobble is the
+  definition's content column, the same rule `listLine` applies. This is the
+  definition-list twin of the list-item indent bug fixed above, and it wants
+  the same parser fix (hold the indent out of the text handed to the inline
+  parser, re-inject it as `WHITESPACE` at emission), *not* a floor in the
+  projector --- that would paper over a real parser gap. Found while fixing
+  the tab item above; the tab variants (`:\t d`, where pandoc gobbles
+  nothing) need their own study against `Readers/Markdown.hs`. Not in the
   corpus.
+- [ ] The formatter expands a code span's tabs from column 0 of the span's own
+  content rather than from its source column, so it rewrites `` a`x\ty`b ``
+  to `` a`x   y`b `` --- pandoc reads 1 space in the input and 3 in the
+  output, i.e. formatting changes the document's meaning.
+  `expand_tabs_code_span` needs the code span's starting column, the way the
+  projector's `inline_code_payload` now takes it. The list cases happen to
+  come out right today (the joined `"x "` prefix is exactly the content
+  column that was gobbled), which is why this never surfaced. Found while
+  fixing the tab item above.
 - [ ] `has_matching_closer` scans for a fence's closer past the end of the
   enclosing list item, so a top-level fence adopts an item's paragraph text:
   ````- a ```\n  c\n  ```\n\nb ```r\nc\n``` ```` is two `Plain`/`Para` runs
