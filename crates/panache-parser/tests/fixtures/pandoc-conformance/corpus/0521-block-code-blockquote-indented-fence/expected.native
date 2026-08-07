@@ -1,0 +1,4 @@
+[ BlockQuote [ CodeBlock ( "" , [] , [] ) "c" ]
+, Para [ Str "text" ]
+, BlockQuote [ CodeBlock ( "" , [] , [] ) "    deep" ]
+]

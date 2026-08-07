@@ -458,8 +458,12 @@ impl Formatter {
                 self.output.push_str(content_prefix);
                 if let Some(indent) = leading_indent
                     && !indent.is_empty()
-                    && !line.starts_with([' ', '\t'])
                 {
+                    // Uniformly, including lines that already start indented.
+                    // For a code block this indent is the opening fence's, and
+                    // the payload is rendered relative to the fence — re-adding
+                    // it to the fence lines alone would shift the payload two
+                    // columns down the fence and lose them on the next parse.
                     self.output.push_str(indent);
                 }
                 self.output.push_str(line);

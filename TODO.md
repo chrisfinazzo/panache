@@ -454,16 +454,27 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   token is container syntax (marker padding or the lazy gobble) and drops
   token-wise; everywhere else the tab-inexact token boundary still forces
   the column strip. Golden case `blockquote_lazy_fence_payload`.
-- [ ] Nobody strips the *opening fence's indent* from a fenced block's payload,
-  in the formatter or the projector: ````   ```\n   c\n   ``` ```` is
-  `CodeBlock "c"` in pandoc but `"   c"` in both, and
-  ````>   ```\n>   c\n>   ``` ```` is `"c"` but comes out `"  c"`. The
-  emitter leaves a content line's share of that indent inside the line's
-  `TEXT` token (`TEXT@6..12 "     c"`), so the formatter's
-  `base_indent_cols` machinery has nothing to bite on even when it does know
-  the fence indent. The CommonMark twin below is the same root cause, and
-  the pandoc corpus has no indented-fence case to catch it. Lossless and
-  idempotent, so `--checks all` does not catch it either.
+- [x] Nobody stripped the *opening fence's indent* from a fenced block's
+  payload, in the formatter or the projector: ````   ```\n   c\n   ``` ````
+  is `CodeBlock "c"` in pandoc but was `"   c"` in both, and
+  ````>   ```\n>   c\n>   ``` ```` is `"c"` but came out `"  c"`. Unlike a
+  container prefix, the emitter leaves a content line's share of that indent
+  inside the line's `TEXT` token, so it can only come off by column. Both
+  consumers already had the machinery and only needed the number: the
+  `WHITESPACE` run before `CODE_FENCE_OPEN`, which is whatever host indent
+  the parser left in the block *followed by* the fence's own (a list item at
+  content column 2 whose fence is indented one further emits `"  "` then
+  `" "`). Projector callers take the larger of that run and the host indent
+  they already know, rather than summing, because the parser peels the host
+  indent into the container's own tokens in some shapes and leaves it here
+  in others; the formatter spends the same count as a budget, against the
+  line's `WHITESPACE` first and then its `TEXT`. That in turn exposed
+  `append_blockquote_prefixed_block` skipping its re-indent on already-
+  indented lines: with a correct payload that shifts the body down the fence
+  and loses the columns on the next parse, so the re-indent is now uniform.
+  Corpus 520/521, golden case `fenced_code_indented_fence`. The CommonMark
+  twin below was the same root cause and is fixed with it --- the spec suite
+  has its own §4.5-correct renderer, which is why it never saw the bug.
 - [ ] An *over*-indented fence after a list item is lazy text in pandoc:
   ````- a\n   ```\n   c\n   ``` ```` (indent 3, content column 2) is
   `Plain [a, SoftBreak, Code "c"]`, because `listLine` gobbles only
@@ -476,11 +487,13 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   (`has_info || has_matching_closer`, plus the transcript/list contexts in
   `FencedCodeBlockParser::detect_prepared`), so changing it means
   re-deciding that heuristic rather than fixing a bug. Not in the corpus.
-- [ ] Under `flavor = "commonmark"` a lazy quoted fence keeps its indent in the
+- [x] Under `flavor = "commonmark"` a lazy quoted fence kept its indent in the
   payload: ````> - a\n   ```\n   c\n   ``` ```` ends the quote (correct) but
-  yields `CodeBlock "   c"` where CommonMark strips up to the opening
-  fence's indent and gives `"c"`. Pinned as-is by
-  `blockquote_lazy_fence_ends_quoted_list_item_commonmark`.
+  yielded `CodeBlock "   c"` where CommonMark strips up to the opening
+  fence's indent and gives `"c"`. Same root cause as the entry above and
+  fixed with it; the CST that
+  `blockquote_lazy_fence_ends_quoted_list_item_commonmark` pins is
+  unchanged, and the formatter now emits ````> - a\n```\nc\n``` ````.
 
 ### Architecture
 

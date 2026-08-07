@@ -217,6 +217,7 @@ golden_test_cases!(
     escapes,
     exec_code_in_list,
     fenced_code,
+    fenced_code_indented_fence,
     fenced_code_quarto,
     fenced_code_unclosed_commonmark,
     fenced_divs,

@@ -157,6 +157,17 @@ fn expand_tabs_with_width(text: &str, tab_width: usize) -> String {
 }
 
 fn strip_indent_columns(indent: &str, columns: usize) -> String {
+    strip_indent_columns_budget(indent, columns).0.to_string()
+}
+
+/// Peel up to `columns` columns of leading indentation off `indent`, returning
+/// the tail and the columns left unspent.
+///
+/// The leftover matters because a code line's strippable indent can be split
+/// across two tokens: the emitter peels a container prefix into `WHITESPACE`
+/// but leaves the opening fence's own indent inside the line's `TEXT`, so a
+/// budget that outlives the `WHITESPACE` still has work to do.
+fn strip_indent_columns_budget(indent: &str, columns: usize) -> (&str, usize) {
     let mut remaining = columns;
     let mut idx = 0;
     for (i, ch) in indent.char_indices() {
@@ -165,7 +176,7 @@ fn strip_indent_columns(indent: &str, columns: usize) -> String {
         }
         match ch {
             ' ' => {
-                remaining = remaining.saturating_sub(1);
+                remaining -= 1;
                 idx = i + 1;
             }
             '\t' => {
@@ -175,7 +186,17 @@ fn strip_indent_columns(indent: &str, columns: usize) -> String {
             _ => break,
         }
     }
-    indent[idx..].to_string()
+    (&indent[idx..], remaining)
+}
+
+/// Spend a leftover indent budget against a code line's own leading spaces.
+///
+/// Spaces only: a tab is worth four columns at a four-column stop but fewer
+/// mid-stop, and dropping one for a smaller budget would delete code bytes the
+/// formatter has no way to put back. Leaving it is the lossless direction.
+fn strip_leading_spaces_budget(text: &str, columns: usize) -> &str {
+    let n = text.chars().take(columns).take_while(|&c| c == ' ').count();
+    &text[n..]
 }
 
 fn indent_columns(indent: &str) -> usize {
@@ -226,7 +247,12 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
         match child {
             NodeOrToken::Token(t) => {
                 if t.kind() == SyntaxKind::WHITESPACE && !has_fence {
-                    fence_indent = t.text().to_string();
+                    // The pre-fence run is whatever host indent the parser left
+                    // in the block followed by the fence's own indent (a list
+                    // item at content column 2 whose fence is indented one
+                    // further emits `"  "` then `" "`). Both come off the
+                    // payload, so accumulate rather than overwrite.
+                    fence_indent.push_str(t.text());
                 }
             }
             NodeOrToken::Node(n) => match n.kind() {
@@ -289,15 +315,24 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                                     if at_line_start && t.text().is_empty() {
                                         continue;
                                     }
+                                    let mut text = t.text();
                                     if at_line_start {
-                                        line_content.push_str(&strip_indent_columns(
+                                        let (kept, budget) = strip_indent_columns_budget(
                                             &line_indent,
                                             base_indent_cols,
-                                        ));
+                                        );
+                                        // Only once the prefix token is fully
+                                        // spent does the rest of the budget
+                                        // reach the fence indent still sitting
+                                        // in this line's own text.
+                                        if kept.is_empty() && budget > 0 {
+                                            text = strip_leading_spaces_budget(text, budget);
+                                        }
+                                        line_content.push_str(kept);
                                         line_indent.clear();
                                         at_line_start = false;
                                     }
-                                    line_content.push_str(t.text());
+                                    line_content.push_str(text);
                                 }
                                 SyntaxKind::NEWLINE => {
                                     saw_blockquote_marker = false;

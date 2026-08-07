@@ -423,7 +423,16 @@ fn code_block_with_extra_strip(node: &SyntaxNode, extra: usize) -> Block {
     while content.ends_with('\n') {
         content.pop();
     }
-    content = strip_leading_spaces_per_line(&content, extra);
+    // A fenced block also loses its opening fence's indent. That indent shares
+    // the pre-fence `WHITESPACE` run with whatever host indent the parser left
+    // in the block, so the run already covers `extra` when it covers anything —
+    // see [`pre_fence_indent_columns`].
+    let strip = if is_fenced {
+        extra.max(pre_fence_indent_columns(node))
+    } else {
+        extra
+    };
+    content = strip_leading_spaces_per_line(&content, strip);
     if !is_fenced {
         content = strip_indented_code_indent(&content);
     }
@@ -431,6 +440,39 @@ fn code_block_with_extra_strip(node: &SyntaxNode, extra: usize) -> Block {
         return Block::RawBlock(fmt, content);
     }
     Block::CodeBlock(attr, content)
+}
+
+/// Columns of indentation standing between the start of a fenced block and its
+/// opening fence.
+///
+/// Pandoc's `codeBlockFenced` reads the fence after `nonindentSpaces` and then
+/// gobbles at most that many spaces off every body line, so the fence's own
+/// indent is never payload. Unlike a container prefix, the emitter does *not*
+/// peel a body line's share of it into a token — it stays inside that line's
+/// `TEXT` — so the strip cannot fall out of [`code_content_text`] and has to
+/// happen by column here.
+///
+/// The `WHITESPACE` run before `CODE_FENCE_OPEN` is whatever host indent the
+/// parser left inside the block, *followed by* the fence's own indent (a list
+/// item at content column 2 whose fence is indented one further emits `"  "`
+/// then `" "`). The run is therefore `host + fence` when the parser left the
+/// host indent here and `fence` alone when it peeled it into the container's
+/// own tokens — which is why callers take the larger of this and the host
+/// indent they already know about, rather than summing.
+fn pre_fence_indent_columns(node: &SyntaxNode) -> usize {
+    let mut cols = 0usize;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) if t.kind() == SyntaxKind::WHITESPACE => {
+                // `nonindentSpaces` and the container peels are space-only
+                // here, so the byte count is the column count.
+                cols += t.text().chars().take_while(|&c| c == ' ').count();
+            }
+            NodeOrToken::Node(n) if n.kind() == SyntaxKind::CODE_FENCE_OPEN => return cols,
+            _ => {}
+        }
+    }
+    0
 }
 
 fn strip_leading_spaces_per_line(s: &str, n: usize) -> String {
@@ -877,7 +919,9 @@ fn code_block(node: &SyntaxNode) -> Block {
     while content.ends_with('\n') {
         content.pop();
     }
-    if !is_fenced {
+    if is_fenced {
+        content = strip_leading_spaces_per_line(&content, pre_fence_indent_columns(node));
+    } else {
         content = strip_indented_code_indent(&content);
     }
     if let Some(fmt) = raw_format {
@@ -6352,6 +6396,36 @@ mod tests {
         assert_code_payload(
             "Indented with tabs\n\n:\t```markdown\n\t\t\tcode\n\t\t\ta <- 1\n\t```\n",
             "        code\n        a <- 1",
+        );
+    }
+
+    #[test]
+    fn indented_fence_body_strips_the_fence_indent() {
+        // `codeBlockFenced` gobbles at most the opening fence's own indent
+        // off every body line, so a body indented no further than the fence
+        // has no code indent left.
+        assert_code_payload("   ```\n   c\n   ```\n", "c");
+        // Only the fence's share comes off; the rest is code.
+        assert_code_payload("   ```\n      c\n   ```\n", "   c");
+        // `gobbleAtMostSpaces` — an under-indented line loses only what it has.
+        assert_code_payload("   ```\n c\n   ```\n", "c");
+        // Tabs expand before the gobble: `\t` is four columns, two survive.
+        assert_code_payload("  ```\n\tc\n  ```\n", "  c");
+    }
+
+    #[test]
+    fn quoted_indented_fence_body_strips_the_fence_indent() {
+        // The fence indent is measured inside the quote, after `> ` comes off.
+        assert_code_payload(">   ```\n>   c\n>   ```\n", "c");
+        assert_code_payload(">   ```\n>       c\n>   ```\n", "    c");
+    }
+
+    #[test]
+    fn footnote_indented_fence_strips_the_body_and_fence_indents() {
+        // Four columns of footnote body plus the fence's own two.
+        assert_code_payload(
+            "Text[^1]\n\n[^1]: note\n\n      ```\n        deep\n      ```\n",
+            "  deep",
         );
     }
 }

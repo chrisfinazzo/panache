@@ -1,0 +1,5 @@
+[ CodeBlock ( "" , [] , [] ) "c"
+, Para [ Str "text" ]
+, CodeBlock ( "" , [] , [] ) "   deep"
+, CodeBlock ( "" , [] , [] ) "  c"
+]

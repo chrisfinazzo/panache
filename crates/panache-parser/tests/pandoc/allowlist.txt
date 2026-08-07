@@ -717,6 +717,16 @@
 518
 519
 
+# `codeBlockFenced` reads its fence after `nonindentSpaces` and then gobbles at
+# most that many spaces off every body line, so the opening fence's own indent
+# is never payload. Unlike a container prefix the emitter leaves each body
+# line's share inside that line's `TEXT`, so the strip is by column against the
+# `WHITESPACE` run before `CODE_FENCE_OPEN`. 0520 is the bare form (plus the
+# over-indented body that keeps its surplus, and a tab that expands before the
+# gobble); 0521 the quoted twin, where the indent is measured after `> `.
+520
+521
+
 # Pandoc's `para` yields a `Plain` unless the paragraph is terminated by a
 # blank line or by one of the block starts it looks ahead for: a fenced code
 # block, an ATX header under `-blank_before_header`, or a blockquote under
