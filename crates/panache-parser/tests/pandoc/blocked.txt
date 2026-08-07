@@ -41,12 +41,11 @@
 # terminators are pandoc's own `endline` guards, anchored at byte 0 of the
 # raw line (`Parser::blockquote_gobble_ends_at`).
 
-# Line-block continuation lines that need indent rules panache does not
-# model yet (verified against pandoc 3.9.0.2, 2026-08-06):
-#   509 `| a\n  | b` — pandoc tries `many (char ' ' >> anyLine)` *before* the
-#       next `| ` marker line, so an indented marker line continues the line
-#       above (`[[a, |, b]]`). Panache checks for a marker first. The
-#       blockquote rule 508 wanted is in place now (inside a quote the lazy
-#       line's indent is dropped, so `> | a\n  | b` stays two lines), so
-#       this is a line-block-parser ordering change.
-509
+# FIXED 2026-08-07 (corpus 509): line-block continuation now beats the
+# marker. `parse_line_block` tests `continues_previous_line` before
+# `parse_line_block_line_marker`, matching pandoc's `lineBlockLine`, which
+# runs `many (try (char ' ' >> anyLine))` inside the line it just read.
+# An indented marker line therefore folds into the line above
+# (`| a\n  | b` -> `[[a, |, b]]`). The blockquote-laziness guard keeps
+# `> | a\n  | b` at two lines, since the quote reader drops the lazy
+# line's indent before `lineBlockLine` ever sees it.

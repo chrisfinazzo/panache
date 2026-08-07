@@ -555,6 +555,7 @@ golden_test_cases!(
     lazy_continuation_deep,
     leading_blanklines,
     line_block_continuation_line,
+    line_block_indented_marker_continues,
     line_block_in_list_blockquote,
     line_block_in_list_item_lazy_pipe_line,
     line_blocks,

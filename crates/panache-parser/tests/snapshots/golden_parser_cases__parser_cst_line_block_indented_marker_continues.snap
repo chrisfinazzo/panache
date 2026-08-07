@@ -1,0 +1,88 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..80
+  LINE_BLOCK@0..14
+    LINE_BLOCK_LINE@0..4
+      LINE_BLOCK_MARKER@0..2 "| "
+      TEXT@2..3 "a"
+      NEWLINE@3..4 "\n"
+    LINE_BLOCK_LINE@4..10
+      TEXT@4..9 "  | b"
+      NEWLINE@9..10 "\n"
+    LINE_BLOCK_LINE@10..14
+      LINE_BLOCK_MARKER@10..12 "| "
+      TEXT@12..13 "c"
+      NEWLINE@13..14 "\n"
+  BLANK_LINE@14..15
+    BLANK_LINE@14..15 "\n"
+  BLOCK_QUOTE@15..29
+    BLOCK_QUOTE_MARKER@15..16 ">"
+    WHITESPACE@16..17 " "
+    LINE_BLOCK@17..29
+      LINE_BLOCK_LINE@17..21
+        LINE_BLOCK_MARKER@17..19 "| "
+        TEXT@19..20 "d"
+        NEWLINE@20..21 "\n"
+      LINE_BLOCK_LINE@21..29
+        BLOCK_QUOTE_MARKER@21..22 ">"
+        WHITESPACE@22..23 " "
+        TEXT@23..28 "  | e"
+        NEWLINE@28..29 "\n"
+  BLANK_LINE@29..30
+    BLANK_LINE@29..30 "\n"
+  BLOCK_QUOTE@30..42
+    BLOCK_QUOTE_MARKER@30..31 ">"
+    WHITESPACE@31..32 " "
+    LINE_BLOCK@32..42
+      LINE_BLOCK_LINE@32..36
+        LINE_BLOCK_MARKER@32..34 "| "
+        TEXT@34..35 "f"
+        NEWLINE@35..36 "\n"
+      LINE_BLOCK_LINE@36..42
+        LINE_BLOCK_MARKER@36..40 "  | "
+        TEXT@40..41 "g"
+        NEWLINE@41..42 "\n"
+  BLANK_LINE@42..43
+    BLANK_LINE@42..43 "\n"
+  LIST@43..80
+    LIST_ITEM@43..62
+      LIST_MARKER@43..44 "-"
+      WHITESPACE@44..45 " "
+      PLAIN@45..47
+        TEXT@45..46 "x"
+        NEWLINE@46..47 "\n"
+      BLANK_LINE@47..48
+        BLANK_LINE@47..48 "\n"
+      LINE_BLOCK@48..62
+        LINE_BLOCK_LINE@48..54
+          WHITESPACE@48..50 "  "
+          LINE_BLOCK_MARKER@50..52 "| "
+          TEXT@52..53 "h"
+          NEWLINE@53..54 "\n"
+        LINE_BLOCK_LINE@54..62
+          WHITESPACE@54..56 "  "
+          TEXT@56..61 "  | i"
+          NEWLINE@61..62 "\n"
+    BLANK_LINE@62..63
+      BLANK_LINE@62..63 "\n"
+    LIST_ITEM@63..80
+      LIST_MARKER@63..64 "-"
+      WHITESPACE@64..65 " "
+      PLAIN@65..67
+        TEXT@65..66 "x"
+        NEWLINE@66..67 "\n"
+      BLANK_LINE@67..68
+        BLANK_LINE@67..68 "\n"
+      LINE_BLOCK@68..80
+        LINE_BLOCK_LINE@68..74
+          WHITESPACE@68..70 "  "
+          LINE_BLOCK_MARKER@70..72 "| "
+          TEXT@72..73 "j"
+          NEWLINE@73..74 "\n"
+        LINE_BLOCK_LINE@74..80
+          WHITESPACE@74..76 "  "
+          LINE_BLOCK_MARKER@76..78 "| "
+          TEXT@78..79 "k"
+          NEWLINE@79..80 "\n"

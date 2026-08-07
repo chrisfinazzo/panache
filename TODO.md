@@ -322,13 +322,15 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   ends the quote under `-blank_before_header` but `> para\n # head` does
   not. `LineKind::Continuation` now declines a lazy line for the same
   reason. Corpus 508.
-- [ ] Pandoc tries `many (char ' ' >> anyLine)` *before* the next `| ` marker
+- [x] Pandoc tries `many (char ' ' >> anyLine)` *before* the next `| ` marker
   line, so an indented marker line continues the line above: `| a\n  | b\n`
-  is one `LineBlock [[a, |, b]]`. Panache checks for a marker first and
-  reads two lines. The blockquote rule this waited on is in place now
-  (inside a quote the lazy line's indent is dropped, so `> | a\n  | b\n`
-  stays two lines), so this is a line-block-parser ordering change. Corpus
-  509, blocked.
+  is one `LineBlock [[a, |, b]]`. Panache checked for a marker first and
+  read two lines. Fixed by the ordering swap in `parse_line_block`:
+  `continues_previous_line` is consulted before
+  `parse_line_block_line_marker`, and it no longer excludes lines whose
+  trimmed start is `| ` --- pandoc's rule looks at nothing but the leading
+  space. The blockquote-laziness guard (`lazy_in_quote`) still runs first,
+  so `> | a\n  | b\n` stays two lines. Corpus 509.
 - [ ] The blockquote fold reaches one line at a time, so a *multi-line*
   construct opened on a lazy line keeps the indent on its body lines:
   ````> # h\n ```\n code\n ``` ```` is `CodeBlock " code"` where pandoc has

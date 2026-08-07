@@ -75,10 +75,15 @@ pub(crate) fn parse_line_block(
             // it folds the line back in — so by the time `lineBlockLine` sees
             // it there is no leading space left to continue with.
             let lazy_in_quote = bq_depth > 0 && count_blockquote_markers(raw_line).0 < bq_depth;
-            if parse_line_block_line_marker(peek).is_some() {
-                LineKind::Marker
-            } else if !lazy_in_quote && continues_previous_line(peek, raw_line, list_content_col) {
+            // Continuation before marker: pandoc's `lineBlockLine` runs
+            // `many (try (char ' ' >> anyLine))` *inside* the line it just
+            // read, so the continuation gobble wins over the next
+            // `lineBlockLine` attempt. An indented marker line therefore
+            // folds into the line above instead of opening one of its own.
+            if !lazy_in_quote && continues_previous_line(peek, raw_line, list_content_col) {
                 LineKind::Continuation
+            } else if parse_line_block_line_marker(peek).is_some() {
+                LineKind::Marker
             } else {
                 break;
             }
@@ -156,6 +161,11 @@ enum LineKind {
 /// text left after the enclosing containers have taken their prefix. `peek`
 /// is that text, so it decides the ordinary cases.
 ///
+/// The rule looks at nothing but that leading space: a line that *also*
+/// carries a `| ` marker still folds in, because the gobble runs before the
+/// next `lineBlockLine` gets a chance. `| a\n  | b` is one line reading
+/// `a | b`, and the caller checks this predicate before the marker.
+///
 /// The list case needs the raw line too. Pandoc gobbles a list item's
 /// continuation indent all-or-nothing (`optional (gobbleSpaces n)`): a lazy
 /// line indented *less* than the content column keeps every leading space it
@@ -169,7 +179,7 @@ enum LineKind {
 /// continuation, which is also what pandoc does — `| a\n  \n| b` is one line
 /// block of two lines, not two line blocks.
 fn continues_previous_line(peek: &str, raw_line: &str, list_content_col: usize) -> bool {
-    if peek.starts_with(' ') && !peek.trim_start().starts_with("| ") {
+    if peek.starts_with(' ') {
         return true;
     }
     list_content_col > 0
@@ -357,6 +367,41 @@ mod tests {
         // A whitespace-only line reads as an empty continuation, matching
         // pandoc: `| a\n  \n| b` is one line block of two lines.
         assert!(continues_previous_line("   \n", "   \n", 0));
+    }
+
+    #[test]
+    fn indented_marker_line_continues_the_line_above() {
+        // Pandoc's continuation gobble beats the next `lineBlockLine`, so a
+        // marker that carries any leading space folds into the line above:
+        // `| a\n  | b` is one line reading `a | b`.
+        assert!(continues_previous_line("  | b", "  | b", 0));
+        assert!(continues_previous_line(" | b", " | b", 0));
+        // Bare `|` and a marker with no space after it fold in the same way.
+        assert!(continues_previous_line("  |\n", "  |\n", 0));
+        assert!(continues_previous_line("  |b", "  |b", 0));
+        // Flush against the margin it opens a line of its own.
+        assert!(!continues_previous_line("| b", "| b", 0));
+    }
+
+    #[test]
+    fn indented_marker_folds_in_at_top_level() {
+        let input = vec!["| a", "  | b", "| c"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let new_pos = parse_line_block(&window, &mut builder, &ParserOptions::default());
+
+        assert_eq!(new_pos, 3);
+        // A continuation keeps its own LINE_BLOCK_LINE node but carries no
+        // LINE_BLOCK_MARKER, so the marker count is the count of logical
+        // lines: two, not three — `  | b` folds into `| a`.
+        let node = crate::syntax::SyntaxNode::new_root(builder.finish());
+        let markers = node
+            .descendants_with_tokens()
+            .filter(|e| e.kind() == SyntaxKind::LINE_BLOCK_MARKER)
+            .count();
+        assert_eq!(markers, 2);
     }
 
     #[test]

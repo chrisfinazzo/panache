@@ -1,10 +1,10 @@
 Pandoc-native conformance report (pandoc 3.9.0.2)
-508 / 509 cases passing (99.8%)
-1 failing
+509 / 509 cases passing (100.0%)
+0 failing
 1 blocked-list entries
 
 === Per-section pass / fail ===
-  block: 29 pass / 1 fail
+  block: 30 pass / 0 fail
   citation: 1 pass / 0 fail
   html: 300 pass / 0 fail
   imported: 162 pass / 0 fail
@@ -519,6 +519,7 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 506
 507
 508
+509
 
 === Passing cases grouped by section ===
 # block
@@ -551,6 +552,7 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 506
 507
 508
+509
 
 # citation
 334
@@ -1038,9 +1040,4 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 190
 191
 457
-
-=== Failing case slugs (with rendered diff hint) ===
-# 509 (block-line-block-indented-marker-continues)
-  expected: [ LineBlock [ [ Str "a" , Space , Str "|" , Space , Str "b" ] ] ]
-  got:      [ LineBlock [ [ Str "a" ] , [ Str "b" ] ] ]
 
