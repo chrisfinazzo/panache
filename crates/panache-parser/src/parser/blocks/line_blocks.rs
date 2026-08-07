@@ -2,7 +2,7 @@ use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
-use super::blockquotes::strip_n_blockquote_markers;
+use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
 use super::container_prefix::{
     StrippedLines, advance_columns, bq_outer_of_list, strip_list_indent,
 };
@@ -70,9 +70,14 @@ pub(crate) fn parse_line_block(
             // lazy line like `" b |"` it hands back `" |"` and the trailing
             // pipe reads as a marker the emitter will not find.
             let peek = window.peek_prefix_at(pos);
+            // A line carrying fewer `>` markers than the quote is open at is
+            // lazy, and pandoc's blockquote reader drops its indentation when
+            // it folds the line back in — so by the time `lineBlockLine` sees
+            // it there is no leading space left to continue with.
+            let lazy_in_quote = bq_depth > 0 && count_blockquote_markers(raw_line).0 < bq_depth;
             if parse_line_block_line_marker(peek).is_some() {
                 LineKind::Marker
-            } else if continues_previous_line(peek, raw_line, list_content_col) {
+            } else if !lazy_in_quote && continues_previous_line(peek, raw_line, list_content_col) {
                 LineKind::Continuation
             } else {
                 break;

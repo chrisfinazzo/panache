@@ -1727,7 +1727,14 @@ impl BlockParser for FencedCodeBlockParser {
                     .unwrap_or(0);
             for raw_line in lines.iter().skip(line_pos + 1) {
                 let (line_bq_depth, inner) = count_blockquote_markers(raw_line);
-                if line_bq_depth < ctx.blockquote_depth {
+                // Under Pandoc a non-blank line with fewer `>` markers is
+                // gobbled back into the quote, so the closer may still be
+                // ahead of it. A blank line carries no markers and so ends
+                // the scan here, which is also where it ends the quote.
+                let gobbled_lazily = ctx.config.dialect == crate::options::Dialect::Pandoc
+                    && ctx.blockquote_depth > 0
+                    && !raw_line.trim().is_empty();
+                if line_bq_depth < ctx.blockquote_depth && !gobbled_lazily {
                     break;
                 }
                 let candidate = if container_content_col > 0 && !inner.is_empty() {

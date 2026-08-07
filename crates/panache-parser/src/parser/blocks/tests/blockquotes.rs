@@ -860,3 +860,137 @@ fn github_alerts_disabled_by_default_in_pandoc_parser() {
 
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::ALERT), 0);
 }
+
+/// Pandoc's blockquote reader folds every non-blank line into the quote's
+/// raw content, whatever block is open: `> # h` / ` b |` is one quote
+/// holding a header and a paragraph.
+#[test]
+fn pandoc_lazy_line_after_a_heading_stays_in_the_quote() {
+    let input = "> # h\n b |\n";
+    let tree = parse_blocks(input);
+
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HEADING), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}
+
+/// The fold drops the lazy line's indentation, so the line cannot continue
+/// the line block above it: pandoc reads `LineBlock [[a]]` plus `Para`.
+#[test]
+fn pandoc_lazy_line_cannot_continue_a_quoted_line_block() {
+    let input = "> | a\n b |\n";
+    let tree = parse_blocks(input);
+
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1);
+    let lines = find_nodes_of_type(&quotes[0], SyntaxKind::LINE_BLOCK_LINE);
+    assert_eq!(lines.len(), 1, "the lazy line is not a line-block line");
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
+}
+
+/// The same fold at depth two: a one-marker line lands in the inner quote.
+#[test]
+fn pandoc_lazy_line_folds_into_the_innermost_quote() {
+    let input = ">> # h\n> b |\n";
+    let tree = parse_blocks(input);
+
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 2);
+    assert_eq!(count_nodes_of_type(&quotes[1], SyntaxKind::PARAGRAPH), 1);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}
+
+/// CommonMark laziness is paragraph-only (spec 5.1), so the same line ends
+/// the quote and opens a top-level paragraph.
+#[test]
+fn commonmark_lazy_line_after_a_heading_ends_the_quote() {
+    let input = "> # h\n b |\n";
+    let tree = parse_blocks_gfm(input);
+
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 0);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}
+
+/// Pandoc's `endline` guards run against the raw lazy line, so a backtick
+/// fence at byte 0 ends the gobble and the code block forms at the outer
+/// level.
+#[test]
+fn backtick_fence_on_a_lazy_line_ends_the_quote() {
+    let input = "> para\n```\ncode\n```\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE, SyntaxKind::CODE_BLOCK]
+    );
+}
+
+/// The same guard is anchored on a backtick, so a `~~~` fence is gobbled
+/// into the quote instead of ending it.
+#[test]
+fn tilde_fence_on_a_lazy_line_folds_into_the_quote() {
+    let input = "> # h\n~~~\ncode\n~~~\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE]
+    );
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::CODE_BLOCK), 1);
+}
+
+/// `notFollowedBy (inList >> listStart)`: a list marker ends the gobble
+/// only while the quote is itself inside a list item. A list opened inside
+/// the quote is quote content, so the marker line continues it.
+#[test]
+fn list_marker_ends_the_gobble_only_for_a_quote_inside_a_list_item() {
+    let quoted_list = parse_blocks("> - a\n- b\n");
+    let quotes = find_nodes_of_type(&quoted_list, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::LIST_ITEM), 2);
+
+    let quote_in_item = parse_blocks("- > # h\n- item\n");
+    assert_eq!(
+        count_nodes_of_type(&quote_in_item, SyntaxKind::LIST_ITEM),
+        2,
+        "the second marker opens a sibling item, not quote content"
+    );
+    let quotes = find_nodes_of_type(&quote_in_item, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::LIST_ITEM), 0);
+}
+
+/// A fenced div opened *inside* the quote closes inside it: the closer is
+/// part of the quote's raw content, so the quote outlives the div.
+#[test]
+fn div_closer_inside_the_quote_closes_only_the_div() {
+    let input = "> ::: a\n> x\n:::\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE]
+    );
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::FENCED_DIV), 1);
+}
+
+/// A fenced div opened *outside* the quote still terminates it: pandoc's
+/// extraction runs inside the div body, where the closer is not quote
+/// content (issue #310).
+#[test]
+fn div_closer_outside_the_quote_still_ends_it() {
+    let input = "::: a\n> text\n:::\n";
+    let tree = parse_blocks(input);
+
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}

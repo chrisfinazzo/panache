@@ -138,6 +138,34 @@ fn atx_interrupts_lazy_blockquote_line_when_extension_disabled() {
 }
 
 #[test]
+fn indented_atx_on_a_lazy_blockquote_line_folds_into_the_quote() {
+    // pandoc -f markdown-blank_before_header: BlockQuote [Para "para",
+    // Header 1 "head"]. The guard that ends the quote's gobble is a bare
+    // `notFollowedBy (char '#')` on the raw line, so one space of indent is
+    // enough to keep the heading inside the quote — the fold then drops that
+    // indent before the heading parses.
+    let mut config = ParserOptions::default();
+    config.extensions.blank_before_header = false;
+    let input = "> para\n # head\n";
+    let node = Parser::new(input, &config).parse();
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        node.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE]
+    );
+    let quote = node.children().next().unwrap();
+    assert_eq!(
+        quote.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::PARAGRAPH, SyntaxKind::HEADING]
+    );
+}
+
+#[test]
 fn atx_interrupts_lazy_blockquote_line_commonmark() {
     // pandoc -f commonmark agrees: an ATX heading is never paragraph
     // continuation text, so the lazy line ends the quote (CommonMark §5.1).

@@ -2002,8 +2002,15 @@ pub(crate) fn parse_html_block_with_wrapper(
         let line = lines[current_pos];
         let (line_bq_depth, inner) = count_blockquote_markers(line);
 
-        // Only process lines at the same or deeper blockquote depth
-        if line_bq_depth < bq_depth {
+        // Only process lines at the same or deeper blockquote depth — except
+        // under Pandoc, where the blockquote reader gobbles a non-blank lazy
+        // line back into the quote's raw content, so it is still body. The
+        // blank line that ends the quote also ends this scan, via the depth
+        // check (a blank line carries no markers).
+        let gobbled_lazily = config.dialect == crate::options::Dialect::Pandoc
+            && bq_depth > 0
+            && !line.trim().is_empty();
+        if line_bq_depth < bq_depth && !gobbled_lazily {
             break;
         }
 

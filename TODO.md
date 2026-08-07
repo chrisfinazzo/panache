@@ -303,22 +303,48 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   rendered line in the formatter's `LINE_BLOCK` arm, which previously gave
   the continuation its own `|` and so turned one line into two. Corpus 506
   and 507.
-- [ ] Pandoc drops a lazy line's indentation when its blockquote reader folds it
+- [x] Pandoc drops a lazy line's indentation when its blockquote reader folds it
   back into the quote, so the line cannot continue a line block:
-  `> | a\n b |\n` is `BlockQuote [LineBlock [[a]], Para [b, |]]`, and
-  `> | a\n  | b\n` is two line-block lines, not one folded line. Panache
-  keeps the leading space and reads a continuation in both. Classifying the
-  lazy line is easy; keeping it inside the quote is not --- panache only
-  holds a quote open across a lazy line for an open `Paragraph`, `ListItem`,
-  or `DEFINITION_LIST`, so the same gap already shows up after a heading
-  (`> # h\n b |\n` lets `b |` escape to the top level). Wants the general
-  pandoc-dialect blockquote-laziness rule. Corpus 508, blocked.
+  `> | a\n b |\n` is `BlockQuote [LineBlock [[a]], Para [b, |]]`. Panache
+  kept the leading space and read a continuation, and it only held a quote
+  open across a lazy line for an open `Paragraph`, `ListItem`, or
+  `DEFINITION_LIST`, so the same gap showed up after a heading
+  (`> # h\n b |\n` let `b |` escape to the top level). Fixed by the general
+  pandoc-dialect blockquote-laziness rule:
+  `Parser::fold_lazy_line_into_blockquote` gobbles every non-blank lazy line
+  back into the open quote with its indentation dropped (kept in the tree as
+  a `WHITESPACE` token, and taken off `self.lines[self.pos]` so the
+  container-prefix window and the dispatcher see the same text), and
+  `Parser::blockquote_gobble_ends_at` holds pandoc's `endline` guards ---
+  each anchored at byte 0 of the raw line, which is why `> para\n# head`
+  ends the quote under `-blank_before_header` but `> para\n # head` does
+  not. `LineKind::Continuation` now declines a lazy line for the same
+  reason. Corpus 508.
 - [ ] Pandoc tries `many (char ' ' >> anyLine)` *before* the next `| ` marker
   line, so an indented marker line continues the line above: `| a\n  | b\n`
   is one `LineBlock [[a, |, b]]`. Panache checks for a marker first and
-  reads two lines. Swapping the order needs the blockquote rule above first,
-  since inside a quote the lazy line's indent is dropped and
-  `> | a\n  | b\n` must stay two lines. Corpus 509, blocked.
+  reads two lines. The blockquote rule this waited on is in place now
+  (inside a quote the lazy line's indent is dropped, so `> | a\n  | b\n`
+  stays two lines), so this is a line-block-parser ordering change. Corpus
+  509, blocked.
+- [ ] The blockquote fold reaches one line at a time, so a *multi-line*
+  construct opened on a lazy line keeps the indent on its body lines:
+  ````> # h\n ```\n code\n ``` ```` is `CodeBlock " code"` where pandoc has
+  `"code"`. The dispatch line is de-indented by rewriting `self.lines`, but
+  the body lines are read straight out of `self.lines` by the construct's
+  own forward scan. Doing this properly wants the fold to live in
+  `ContainerPrefix` as a strip op, so every line of the construct carries
+  it. The forward scans in `code_blocks.rs` / `html_blocks.rs` /
+  `block_dispatcher.rs` are already lazy-aware; `parse_fenced_math_block` is
+  not, because no dialect is plumbed into it.
+- [ ] A lazy line that gives a quoted list item a second block leaves the list
+  tight: `> - item\n # head` under `-blank_before_header` is
+  `BulletList [[Plain item, Header]]` where pandoc has `Para`, because an
+  item holding more than one block makes the list loose. Orthogonal to the
+  fold --- the looseness rule is what is missing.
+- [ ] Found while checking the fold, pre-existing and unrelated: a fenced code
+  block inside a blockquote keeps the `>` markers in its content ---
+  ````> ```\n> code\n> ``` ```` projects `CodeBlock "> code"`.
 
 ### Architecture
 

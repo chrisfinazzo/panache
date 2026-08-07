@@ -76,6 +76,23 @@ impl LineDispatch {
     }
 }
 
+/// The line being folded back into an open blockquote by pandoc's laziness
+/// rule, plus the marker bookkeeping `marker_info_for_line` needs to re-emit
+/// the `>` run this line does carry. Grouped because the fold is one step of
+/// `handle_blockquote_line` and would otherwise take seven positional
+/// arguments.
+struct LazyFold<'l> {
+    /// The raw source line, markers and all.
+    line: &'l str,
+    /// `line` with `bq_depth` markers stripped.
+    inner_content: &'l str,
+    /// How many `>` markers the line carries (below the open depth).
+    bq_depth: usize,
+    bq_marker_line: &'l str,
+    shifted_bq_prefix: &'l str,
+    used_shifted_bq: bool,
+}
+
 pub struct Parser<'a> {
     lines: Vec<&'a str>,
     pos: usize,
@@ -2647,6 +2664,158 @@ impl<'a> Parser<'a> {
         blockquotes::current_blockquote_depth(&self.containers)
     }
 
+    /// Whether pandoc's blockquote gobble stops at this line instead of
+    /// folding it into the quote.
+    ///
+    /// `emailBlockQuote` keeps eating lines through the reader's `endline`
+    /// guards, and those guards run against the raw next line — *before* the
+    /// leading whitespace the fold otherwise skips. So each guard here is
+    /// anchored at byte 0 even where the construct itself tolerates up to
+    /// three spaces of indent, which is why `> para` / `# head` ends the
+    /// quote under `-blank_before_header` while `> para` / ` # head` does
+    /// not.
+    ///
+    /// `notFollowedBy emailBlockQuoteStart` (the `-blank_before_blockquote`
+    /// guard) has no counterpart below: a line whose markers this branch has
+    /// not already consumed cannot start with `>`.
+    fn blockquote_gobble_ends_at(&self, line: &str, inner_content: &str) -> bool {
+        // `notFollowedBy (inList >> listStart)`: a list start ends the gobble
+        // only while the quote is itself being read inside a list item — on
+        // the stack, a ListItem *below* the innermost quote. A list opened
+        // inside the quote is quote content, so `> - a` / `- b` is one list.
+        // `Ext_lists_without_preceding_blankline` drops the `inList` half.
+        let quote_is_in_list_item = self
+            .containers
+            .stack
+            .iter()
+            .rposition(|c| matches!(c, Container::BlockQuote { .. }))
+            .is_some_and(|quote| {
+                self.containers.stack[..quote]
+                    .iter()
+                    .any(|c| matches!(c, Container::ListItem { .. }))
+            });
+        if (self.config.extensions.lists_without_preceding_blankline || quote_is_in_list_item)
+            && try_parse_list_marker(
+                inner_content,
+                self.config,
+                lists::open_list_hint_at_indent(&self.containers, leading_indent(inner_content).0),
+            )
+            .is_some()
+        {
+            return true;
+        }
+
+        // `guardEnabled Ext_blank_before_header <|> (notFollowedBy . char =<< atxChar)`.
+        if !self.config.extensions.blank_before_header && inner_content.starts_with('#') {
+            return true;
+        }
+
+        // `guardDisabled Ext_backtick_code_blocks <|> notFollowedBy
+        // (lookAhead (char '`') >> codeBlockFenced)` — backtick-anchored, so
+        // a `~~~` fence on the lazy line, or an indented backtick one, is
+        // gobbled into the quote instead of ending it.
+        if self.config.extensions.backtick_code_blocks
+            && inner_content.starts_with('`')
+            && code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
+        {
+            return true;
+        }
+
+        self.div_closer_ends_blockquote(line)
+    }
+
+    /// Whether a fenced-div closing fence ends the open blockquote rather
+    /// than closing a div inside it.
+    ///
+    /// Pandoc extracts a quote's raw content from wherever the quote starts,
+    /// so a `:::` line is quote content only when the div it closes was
+    /// opened inside the quote. A div opened *outside* it is still open at
+    /// extraction time and its closer ends the quote: `::: a` / `> text` /
+    /// `:::` closes the div at the top level and leaves the quote holding
+    /// just the paragraph (issue #310). `> ::: a` / `> x` / `:::` is the
+    /// other way round — the div lives in the quote, so its closer does too.
+    fn div_closer_ends_blockquote(&self, line: &str) -> bool {
+        if !self.config.extensions.fenced_divs || !fenced_divs::is_div_closing_fence(line) {
+            return false;
+        }
+        let innermost_div = self
+            .containers
+            .stack
+            .iter()
+            .rposition(|c| matches!(c, Container::FencedDiv { .. }));
+        let innermost_quote = self
+            .containers
+            .stack
+            .iter()
+            .rposition(|c| matches!(c, Container::BlockQuote { .. }));
+        match (innermost_div, innermost_quote) {
+            (Some(div), Some(quote)) => div < quote,
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
+    }
+
+    /// Fold a lazy line back into the open blockquote, pandoc-style.
+    ///
+    /// Emits the `>` markers the line carries, then the leading whitespace
+    /// pandoc's gobble skips as a bare `WHITESPACE` token, and parses what is
+    /// left one level down. Dropping the indent before the inner parse is the
+    /// point: the quote's raw content never sees it, so it can neither
+    /// continue a line block nor open an indented code block.
+    fn fold_lazy_line_into_blockquote(
+        &mut self,
+        fold: LazyFold<'a>,
+        blockquote_payload: Option<&BlockQuotePrepared>,
+    ) -> LineDispatch {
+        // The gates above already ruled this line out as a continuation of the
+        // open paragraph, so close it — inside the quote, not around it.
+        if matches!(self.containers.last(), Some(Container::Paragraph { .. })) {
+            self.close_containers_to(self.containers.depth() - 1);
+        }
+
+        if fold.bq_depth > 0 {
+            let marker_info = self.marker_info_for_line(
+                blockquote_payload,
+                fold.line,
+                fold.bq_marker_line,
+                fold.shifted_bq_prefix,
+                fold.used_shifted_bq,
+            );
+            for i in 0..fold.bq_depth {
+                if let Some(info) = marker_info.get(i) {
+                    self.emit_or_buffer_blockquote_marker(
+                        info.leading_spaces,
+                        info.has_trailing_space,
+                    );
+                }
+            }
+        }
+
+        let rest = fold.inner_content.trim_start_matches([' ', '\t']);
+        let indent = &fold.inner_content[..fold.inner_content.len() - rest.len()];
+        if !indent.is_empty() {
+            // A list item still buffering its first line would otherwise take
+            // these bytes out of source order; flush it the way a new block
+            // inside the item does.
+            if matches!(self.containers.last(), Some(Container::ListItem { .. })) {
+                self.emit_list_item_buffer_if_needed();
+            }
+            self.builder.token(SyntaxKind::WHITESPACE.into(), indent);
+        }
+
+        // `parse_inner_content` hands the dispatcher `rest`, but the block
+        // parsers that need a multi-line view build it from `self.lines`
+        // through the container prefix, which knows nothing about a fold. Put
+        // the gobbled line back so both views agree — otherwise `> # h` /
+        // `    indented` reaches the window still indented and is claimed as
+        // an indented code block whose content the dispatcher never emits.
+        // The bytes taken out are already in the tree as the marker and
+        // whitespace tokens above.
+        self.lines[self.pos] = rest;
+
+        self.parse_inner_content(rest, Some(rest))
+    }
+
     /// Look up the immediate enclosing `Container::ListItem`'s buffer for an
     /// unclosed Pandoc matched-pair HTML open tag. See
     /// [`crate::parser::utils::list_item_buffer::ListItemBuffer::unclosed_pandoc_matched_pair_tag`]
@@ -2724,7 +2893,7 @@ impl<'a> Parser<'a> {
     /// Dispatch a single source line. Returns `LineDispatch::Consumed(n)`
     /// when the line was claimed and `n` lines should be committed, or
     /// `LineDispatch::Rejected` for the outer loop to advance by 1.
-    fn parse_line(&mut self, line: &str) -> LineDispatch {
+    fn parse_line(&mut self, line: &'a str) -> LineDispatch {
         // Count blockquote markers on this line. Inside list items, blockquotes can begin
         // at the list content column (e.g. `    > ...` after `1. `), not at column 0.
         let (mut bq_depth, mut inner_content) = count_blockquote_markers(line);
@@ -3239,26 +3408,47 @@ impl<'a> Parser<'a> {
                 // and under Pandoc when `blank_before_header` is disabled
                 // (`markdown-blank_before_header`) — the same predicate as
                 // `can_interrupt` in `AtxHeadingParser::detect_prepared`. A
-                // heading-shaped lazy line then ends the quote instead of
-                // being swallowed as paragraph text (issue #428).
+                // heading-shaped lazy line then ends the paragraph rather
+                // than being swallowed as its text (issue #428).
+                //
+                // This is a separate question from whether the *quote* ends:
+                // CommonMark asks it of the line as written, Pandoc of the
+                // line the fold below hands to the quote, indent dropped. So
+                // under `-blank_before_header` both `# head` and ` # head`
+                // end the paragraph, but only the unindented one also ends
+                // the quote (`blockquote_gobble_ends_at`).
                 let heading_can_interrupt =
                     is_commonmark || !self.config.extensions.blank_before_header;
+                let heading_probe = if is_commonmark {
+                    inner_content
+                } else {
+                    inner_content.trim_start_matches([' ', '\t'])
+                };
                 let interrupts_via_heading =
-                    heading_can_interrupt && try_parse_atx_heading(inner_content).is_some();
-                // A fenced-div closing fence terminates the blockquote rather
-                // than being swallowed as lazy paragraph text — but only while
-                // we're actually inside an open div. At the top level a lone
-                // `:::` is just text, which is what pandoc does (issue #310).
+                    heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
+                // A fenced-div closing fence terminates the paragraph rather
+                // than being swallowed as lazy text — but only while we're
+                // actually inside an open div. At the top level a lone `:::`
+                // is just text, which is what pandoc does (issue #310). Note
+                // this says nothing about the *quote*: a div opened inside it
+                // closes inside it, which the fold below works out.
                 // This one stays on the raw `line`: the #310 shape was
                 // calibrated against zero-marker lines and the reduced-marker
                 // form is unverified against pandoc.
                 let interrupts_via_div_close = self.config.extensions.fenced_divs
                     && self.in_fenced_div()
                     && fenced_divs::is_div_closing_fence(line);
+                // Under Pandoc the rest of the question is the one the fold
+                // below asks: does the reader's gobble stop here? An ATX
+                // heading with `blank_before_header` off and a backtick code
+                // fence both end it, and neither is lazy paragraph text.
+                let ends_gobble =
+                    !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
                 if !interrupts_via_hr
                     && !interrupts_via_fence
                     && !interrupts_via_heading
                     && !interrupts_via_div_close
+                    && !ends_gobble
                 {
                     if bq_depth > 0 {
                         // Buffer the explicit `>` markers we have into the
@@ -3326,9 +3516,20 @@ impl<'a> Parser<'a> {
                         .is_some();
                 let heading_can_interrupt =
                     is_commonmark || !self.config.extensions.blank_before_header;
+                let heading_probe = if is_commonmark {
+                    inner_content
+                } else {
+                    inner_content.trim_start_matches([' ', '\t'])
+                };
                 let interrupts_via_heading =
-                    heading_can_interrupt && try_parse_atx_heading(inner_content).is_some();
-                if !interrupts_via_hr && !interrupts_via_fence && !interrupts_via_heading {
+                    heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
+                let ends_gobble =
+                    !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
+                if !interrupts_via_hr
+                    && !interrupts_via_fence
+                    && !interrupts_via_heading
+                    && !ends_gobble
+                {
                     if bq_depth > 0 {
                         let marker_info = self.marker_info_for_line(
                             blockquote_payload.as_ref(),
@@ -3471,6 +3672,39 @@ impl<'a> Parser<'a> {
                         return LineDispatch::consumed(1 + extras);
                     }
                 }
+            }
+
+            // General pandoc blockquote laziness. Pandoc's reader gobbles every
+            // non-blank line into the quote's raw content and only stops at a
+            // blank line, so whatever block is open inside, the line stays in
+            // the quote: `> # h` / ` b |` is one quote holding a `Header` and a
+            // `Para`, not a quote followed by a top-level paragraph. The gates
+            // above are the cases where the line joins an *open* block; this is
+            // the rest, where it opens a new block one level down.
+            //
+            // The gobble skips the lazy line's leading whitespace, so the
+            // indentation is gone before the inner parse sees it: an
+            // under-indented line cannot continue a line block, and four
+            // leading spaces are not an indented code block. Only the bytes
+            // survive, as a `WHITESPACE` token inside the quote.
+            //
+            // CommonMark laziness is paragraph-only (spec §5.1), so this is
+            // dialect-gated, not extension-gated.
+            if self.config.dialect != crate::options::Dialect::CommonMark
+                && !is_blank_line(inner_content)
+                && !self.blockquote_gobble_ends_at(line, inner_content)
+            {
+                return self.fold_lazy_line_into_blockquote(
+                    LazyFold {
+                        line,
+                        inner_content,
+                        bq_depth,
+                        bq_marker_line,
+                        shifted_bq_prefix,
+                        used_shifted_bq,
+                    },
+                    blockquote_payload.as_ref(),
+                );
             }
 
             // Not lazy continuation - close paragraph if open

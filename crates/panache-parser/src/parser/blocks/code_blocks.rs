@@ -1185,7 +1185,15 @@ pub(crate) fn parse_fenced_code_block(
             strip_list_indent(line, list_content_col)
         };
         let (line_bq_depth, _) = count_blockquote_markers(probe);
-        if line_bq_depth < bq_depth {
+        // Under Pandoc a non-blank line with fewer `>` markers is gobbled
+        // back into the quote, so it is still fence body. A blank line
+        // carries no markers and ends the scan here, where it also ends the
+        // quote. `parse_fenced_math_block` keeps the plain depth break: a
+        // `$$` fence has no dialect plumbed through to gate this on.
+        let gobbled_lazily = Dialect::for_flavor(flavor) == crate::options::Dialect::Pandoc
+            && bq_depth > 0
+            && !line.trim().is_empty();
+        if line_bq_depth < bq_depth && !gobbled_lazily {
             break;
         }
 

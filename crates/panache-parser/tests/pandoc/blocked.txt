@@ -34,21 +34,19 @@
 # suspends the `</div>` close match while a fence is open, so the `</div>`
 # lifts into the fence body via the implicit-close path.
 
-# Line-block continuation lines that need blockquote/indent rules panache
-# does not model yet (verified against pandoc 3.9.0.2, 2026-08-06):
-#   508 `> | a\n b |` — pandoc's blockquote reader folds a lazy line into
-#       the quote's raw content with its indentation dropped, so the line
-#       cannot continue the line block and lands as a `Para` *inside* the
-#       quote. Panache keeps the leading space and reads a continuation.
-#       Classifying the lazy line correctly is easy; keeping it inside the
-#       quote is not -- panache only holds a quote open across a lazy line
-#       for an open Paragraph/ListItem/DefinitionList, so the same gap shows
-#       up after a heading (`> # h\n b |`). Wants the general pandoc-dialect
-#       blockquote-laziness rule, not a line-block patch.
+# FIXED 2026-08-07 (corpus 508): the general pandoc blockquote-laziness
+# rule. `handle_blockquote_line` now gobbles every non-blank lazy line back
+# into the open quote with its indentation dropped, instead of only holding
+# the quote open for an open Paragraph/ListItem/DefinitionList. The
+# terminators are pandoc's own `endline` guards, anchored at byte 0 of the
+# raw line (`Parser::blockquote_gobble_ends_at`).
+
+# Line-block continuation lines that need indent rules panache does not
+# model yet (verified against pandoc 3.9.0.2, 2026-08-06):
 #   509 `| a\n  | b` — pandoc tries `many (char ' ' >> anyLine)` *before* the
 #       next `| ` marker line, so an indented marker line continues the line
-#       above (`[[a, |, b]]`). Panache checks for a marker first. Swapping
-#       the order needs 508's blockquote rule first: inside a quote the lazy
-#       line's indent is dropped, so `> | a\n  | b` must stay two lines.
-508
+#       above (`[[a, |, b]]`). Panache checks for a marker first. The
+#       blockquote rule 508 wanted is in place now (inside a quote the lazy
+#       line's indent is dropped, so `> | a\n  | b` stays two lines), so
+#       this is a line-block-parser ordering change.
 509
