@@ -43,17 +43,35 @@ impl InlineSink for GreenNodeBuilder<'_> {
     }
 }
 
-/// An [`InlineSink`] that forwards into a real [`GreenNodeBuilder`] while
-/// splicing blockquote markers at recorded byte offsets.
+/// Container bytes that were stripped off a continuation line before inline
+/// parsing and must be spliced back into the emitted stream.
 ///
-/// `marker_positions` is a sorted list of `(byte_offset, leading_spaces,
-/// has_trailing_space)` tuples, where `byte_offset` is relative to the start of
-/// the text fed to the inline parser. `offset` tracks how many bytes of that
-/// text have been emitted so far; it advances *only* on [`token`](Self::token),
-/// since node boundaries carry zero bytes.
+/// Both variants exist so the inline parser measures interior whitespace from
+/// the *content* column rather than from column 0 — otherwise a construct that
+/// preserves interior whitespace (a code span, say) bakes the container's
+/// leading columns into its content.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InjectedMarker<'a> {
+    /// A blockquote's `>` plus the whitespace around it.
+    BlockQuote {
+        leading_spaces: usize,
+        has_trailing_space: bool,
+    },
+    /// A list item's continuation indent, up to its content column.
+    Indent(&'a str),
+}
+
+/// An [`InlineSink`] that forwards into a real [`GreenNodeBuilder`] while
+/// splicing container markers back in at recorded byte offsets.
+///
+/// `marker_positions` is a sorted list of `(byte_offset, marker)` pairs, where
+/// `byte_offset` is relative to the start of the text fed to the inline parser.
+/// `offset` tracks how many bytes of that text have been emitted so far; it
+/// advances *only* on [`token`](Self::token), since node boundaries carry zero
+/// bytes.
 pub(crate) struct MarkerInjectingSink<'a, 'b> {
     inner: &'a mut GreenNodeBuilder<'static>,
-    marker_positions: &'b [(usize, usize, bool)],
+    marker_positions: &'b [(usize, InjectedMarker<'b>)],
     /// Index of the next marker to emit.
     idx: usize,
     /// Bytes of source text emitted so far.
@@ -63,7 +81,7 @@ pub(crate) struct MarkerInjectingSink<'a, 'b> {
 impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
     pub(crate) fn new(
         inner: &'a mut GreenNodeBuilder<'static>,
-        marker_positions: &'b [(usize, usize, bool)],
+        marker_positions: &'b [(usize, InjectedMarker<'b>)],
     ) -> Self {
         Self {
             inner,
@@ -75,17 +93,26 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
 
     /// Emit any markers whose offset equals the current byte position.
     fn emit_markers_at_current(&mut self) {
-        while let Some(&(byte_offset, leading_spaces, has_trailing_space)) =
-            self.marker_positions.get(self.idx)
+        while let Some(&(byte_offset, marker)) = self.marker_positions.get(self.idx)
             && byte_offset == self.offset
         {
-            if leading_spaces > 0 {
-                self.inner
-                    .token(SyntaxKind::WHITESPACE.into(), &" ".repeat(leading_spaces));
-            }
-            self.inner.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-            if has_trailing_space {
-                self.inner.token(SyntaxKind::WHITESPACE.into(), " ");
+            match marker {
+                InjectedMarker::BlockQuote {
+                    leading_spaces,
+                    has_trailing_space,
+                } => {
+                    if leading_spaces > 0 {
+                        self.inner
+                            .token(SyntaxKind::WHITESPACE.into(), &" ".repeat(leading_spaces));
+                    }
+                    self.inner.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
+                    if has_trailing_space {
+                        self.inner.token(SyntaxKind::WHITESPACE.into(), " ");
+                    }
+                }
+                InjectedMarker::Indent(indent) => {
+                    self.inner.token(SyntaxKind::WHITESPACE.into(), indent);
+                }
             }
             self.idx += 1;
         }
@@ -109,7 +136,7 @@ impl InlineSink for MarkerInjectingSink<'_, '_> {
             let next_marker_offset = self
                 .marker_positions
                 .get(self.idx)
-                .map(|(byte_offset, _, _)| *byte_offset);
+                .map(|(byte_offset, _)| *byte_offset);
 
             // If a marker falls strictly inside this token, split it there.
             if let Some(next) = next_marker_offset

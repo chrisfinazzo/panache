@@ -178,15 +178,49 @@ impl ListItemBuffer {
         result
     }
 
-    fn to_paragraph_buffer(&self) -> ParagraphBuffer {
+    /// Build the inline-parsing buffer, holding each continuation line's
+    /// item indent out of the text as an [`ParagraphBuffer::push_indent`]
+    /// segment.
+    ///
+    /// Pandoc's `listLine` gobbles `content_col` columns off every line after
+    /// the marker line before the item's raw text is reparsed, so interior
+    /// whitespace inside an inline construct is measured from the content
+    /// column: ``- a\n   `x\n   y` `` is `Code "x  y"`, not `Code "x    y"`.
+    /// Buffering the raw line would bake those columns into the code span.
+    /// The held-out bytes are spliced back as `WHITESPACE` tokens at emission,
+    /// mirroring how the blockquote path re-injects its `>` markers.
+    fn to_paragraph_buffer(&self, content_col: usize) -> ParagraphBuffer {
         let mut paragraph_buffer = ParagraphBuffer::new();
+        // The buffer's first line is the marker line: its leading columns are
+        // owned by the marker and its trailing spaces, already emitted.
+        let mut at_line_start = false;
         for segment in &self.segments {
             match segment {
-                ListItemContent::Text(text) => paragraph_buffer.push_text(text),
+                ListItemContent::Text(text) => {
+                    if content_col == 0 || (!at_line_start && !text.contains('\n')) {
+                        paragraph_buffer.push_text(text);
+                        continue;
+                    }
+                    for line in text.split_inclusive('\n') {
+                        if at_line_start {
+                            let consumed = item_indent_prefix_len(line, content_col);
+                            paragraph_buffer.push_indent(&line[..consumed]);
+                            paragraph_buffer.push_text(&line[consumed..]);
+                        } else {
+                            paragraph_buffer.push_text(line);
+                        }
+                        at_line_start = line.ends_with('\n');
+                    }
+                }
                 ListItemContent::BlockquoteMarker {
                     leading_spaces,
                     has_trailing_space,
-                } => paragraph_buffer.push_marker(*leading_spaces, *has_trailing_space),
+                } => {
+                    paragraph_buffer.push_marker(*leading_spaces, *has_trailing_space);
+                    // The marker segment carries the line's leading columns
+                    // itself, so the text that follows is already stripped.
+                    at_line_start = false;
+                }
             }
         }
         paragraph_buffer
@@ -347,7 +381,7 @@ impl ListItemBuffer {
 
         builder.start_node(block_kind.into());
 
-        let paragraph_buffer = self.to_paragraph_buffer();
+        let paragraph_buffer = self.to_paragraph_buffer(content_col);
         if !paragraph_buffer.is_empty() {
             paragraph_buffer.emit_with_inlines(builder, config, suppress_footnote_refs);
         } else if !text.is_empty() {

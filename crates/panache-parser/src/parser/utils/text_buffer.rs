@@ -5,7 +5,7 @@
 
 use super::inline_emission;
 use crate::options::ParserOptions;
-use crate::parser::inlines::sink::MarkerInjectingSink;
+use crate::parser::inlines::sink::{InjectedMarker, MarkerInjectingSink};
 use rowan::GreenNodeBuilder;
 
 /// Buffer for accumulating text lines before emission.
@@ -155,6 +155,9 @@ pub(crate) enum ParagraphSegment {
         leading_spaces: usize,
         has_trailing_space: bool,
     },
+    /// A list item's continuation indent, stripped off the buffered text so
+    /// the inline parser sees the line from its content column.
+    Indent(String),
 }
 
 /// Buffer for accumulating paragraph content with interleaved structural markers.
@@ -192,6 +195,19 @@ impl ParagraphBuffer {
         }
     }
 
+    /// Push a stripped list-item continuation indent to the buffer.
+    ///
+    /// The bytes are held out of the text handed to the inline parser and
+    /// re-emitted as a `WHITESPACE` token at the same offset, so the parse
+    /// stays lossless while inline constructs measure from the content column.
+    pub(crate) fn push_indent(&mut self, indent: &str) {
+        if indent.is_empty() {
+            return;
+        }
+        self.segments
+            .push(ParagraphSegment::Indent(indent.to_string()));
+    }
+
     /// Push a blockquote marker to the buffer.
     pub(crate) fn push_marker(&mut self, leading_spaces: usize, has_trailing_space: bool) {
         self.segments.push(ParagraphSegment::BlockquoteMarker {
@@ -213,8 +229,8 @@ impl ParagraphBuffer {
 
     /// Get the byte positions where markers should be inserted in the concatenated text.
     ///
-    /// Returns a list of (byte_offset, marker_info) pairs.
-    fn get_marker_positions(&self) -> Vec<(usize, usize, bool)> {
+    /// Returns a list of `(byte_offset, marker)` pairs.
+    fn get_marker_positions(&self) -> Vec<(usize, InjectedMarker<'_>)> {
         let mut positions = Vec::new();
         let mut byte_offset = 0;
 
@@ -227,7 +243,16 @@ impl ParagraphBuffer {
                     leading_spaces,
                     has_trailing_space,
                 } => {
-                    positions.push((byte_offset, *leading_spaces, *has_trailing_space));
+                    positions.push((
+                        byte_offset,
+                        InjectedMarker::BlockQuote {
+                            leading_spaces: *leading_spaces,
+                            has_trailing_space: *has_trailing_space,
+                        },
+                    ));
+                }
+                ParagraphSegment::Indent(indent) => {
+                    positions.push((byte_offset, InjectedMarker::Indent(indent.as_str())));
                 }
             }
         }
@@ -279,7 +304,7 @@ impl ParagraphBuffer {
         &self,
         builder: &mut GreenNodeBuilder<'static>,
         text: &str,
-        marker_positions: &[(usize, usize, bool)],
+        marker_positions: &[(usize, InjectedMarker<'_>)],
         config: &ParserOptions,
         suppress_footnote_refs: bool,
     ) {
@@ -344,7 +369,16 @@ mod paragraph_buffer_tests {
 
         let positions = buffer.get_marker_positions();
         assert_eq!(positions.len(), 1);
-        assert_eq!(positions[0], (7, 0, true)); // marker at byte 7
+        assert!(matches!(
+            positions[0],
+            (
+                7, // marker at byte 7
+                InjectedMarker::BlockQuote {
+                    leading_spaces: 0,
+                    has_trailing_space: true
+                }
+            )
+        ));
     }
 
     #[test]
@@ -358,8 +392,26 @@ mod paragraph_buffer_tests {
 
         let positions = buffer.get_marker_positions();
         assert_eq!(positions.len(), 2);
-        assert_eq!(positions[0], (2, 0, true)); // first marker at byte 2
-        assert_eq!(positions[1], (4, 1, false)); // second marker at byte 4
+        assert!(matches!(
+            positions[0],
+            (
+                2, // first marker at byte 2
+                InjectedMarker::BlockQuote {
+                    leading_spaces: 0,
+                    has_trailing_space: true
+                }
+            )
+        ));
+        assert!(matches!(
+            positions[1],
+            (
+                4, // second marker at byte 4
+                InjectedMarker::BlockQuote {
+                    leading_spaces: 1,
+                    has_trailing_space: false
+                }
+            )
+        ));
     }
 
     #[test]

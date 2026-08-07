@@ -585,6 +585,7 @@ golden_test_cases!(
     link_text_skips_raw_html_commonmark,
     link_text_skips_raw_html_pandoc,
     links,
+    list_continuation_indent_stripped_pandoc,
     list_deep_marker_no_blank_is_lazy,
     list_interrupts_paragraph_commonmark,
     list_interrupts_paragraph_pandoc,

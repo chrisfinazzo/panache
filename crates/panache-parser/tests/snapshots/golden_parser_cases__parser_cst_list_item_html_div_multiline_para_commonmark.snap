@@ -11,7 +11,8 @@ DOCUMENT@0..24
         INLINE_HTML@2..7
           INLINE_HTML_CONTENT@2..7 "<div>"
         NEWLINE@7..8 "\n"
-        TEXT@8..14 "  body"
+        WHITESPACE@8..10 "  "
+        TEXT@10..14 "body"
         NEWLINE@14..15 "\n"
       HTML_BLOCK@15..24
         HTML_BLOCK_TAG@15..24

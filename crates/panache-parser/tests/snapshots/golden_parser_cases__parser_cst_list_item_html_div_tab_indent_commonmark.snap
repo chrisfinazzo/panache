@@ -11,9 +11,10 @@ DOCUMENT@0..23
         INLINE_HTML@2..7
           INLINE_HTML_CONTENT@2..7 "<div>"
         NEWLINE@7..8 "\n"
-        TEXT@8..14 "\thello"
+        WHITESPACE@8..9 "\t"
+        TEXT@9..14 "hello"
         NEWLINE@14..15 "\n"
-        TEXT@15..16 "\t"
+        WHITESPACE@15..16 "\t"
         INLINE_HTML@16..22
           INLINE_HTML_CONTENT@16..22 "</div>"
         NEWLINE@22..23 "\n"

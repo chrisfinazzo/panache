@@ -31,5 +31,6 @@ DOCUMENT@0..30
       PLAIN@20..30
         TEXT@20..21 "d"
         NEWLINE@21..22 "\n"
-        TEXT@22..29 "    - e"
+        WHITESPACE@22..26 "    "
+        TEXT@26..29 "- e"
         NEWLINE@29..30 "\n"

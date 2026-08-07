@@ -10,7 +10,8 @@ DOCUMENT@0..119
       PLAIN@2..74
         TEXT@2..27 "Item line continues h ..."
         NEWLINE@27..28 "\n"
-        TEXT@28..73 "  Still same paragrap ..."
+        WHITESPACE@28..30 "  "
+        TEXT@30..73 "Still same paragraph; ..."
         NEWLINE@73..74 "\n"
       BLANK_LINE@74..75
         BLANK_LINE@74..75 "\n"

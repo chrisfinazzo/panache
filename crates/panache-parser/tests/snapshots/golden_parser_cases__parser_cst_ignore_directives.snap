@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..773
@@ -86,13 +85,14 @@ DOCUMENT@0..773
       PLAIN@626..752
         TEXT@626..637 "List item 2"
         NEWLINE@637..638 "\n"
-        TEXT@638..640 "  "
+        WHITESPACE@638..640 "  "
         INLINE_HTML@640..676
           INLINE_HTML_CONTENT@640..676 "<!-- panache-ignore-f ..."
         NEWLINE@676..677 "\n"
-        TEXT@677..714 "  Nested    content   ..."
+        WHITESPACE@677..679 "  "
+        TEXT@679..714 "Nested    content   w ..."
         NEWLINE@714..715 "\n"
-        TEXT@715..717 "  "
+        WHITESPACE@715..717 "  "
         INLINE_HTML@717..751
           INLINE_HTML_CONTENT@717..751 "<!-- panache-ignore-f ..."
         NEWLINE@751..752 "\n"

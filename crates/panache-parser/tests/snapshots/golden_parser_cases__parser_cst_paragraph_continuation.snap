@@ -185,7 +185,8 @@ DOCUMENT@0..1133
       PLAIN@834..886
         TEXT@834..867 "  Indented paragraph  ..."
         NEWLINE@867..868 "\n"
-        TEXT@868..885 "  continues here."
+        WHITESPACE@868..870 "  "
+        TEXT@870..885 "continues here."
         NEWLINE@885..886 "\n"
     BLANK_LINE@886..889
       BLANK_LINE@886..889 "  \n"

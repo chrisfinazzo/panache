@@ -10,5 +10,6 @@ DOCUMENT@0..14
       PLAIN@2..14
         TEXT@2..3 "a"
         NEWLINE@3..4 "\n"
-        TEXT@4..13 "      - c"
+        WHITESPACE@4..6 "  "
+        TEXT@6..13 "    - c"
         NEWLINE@13..14 "\n"

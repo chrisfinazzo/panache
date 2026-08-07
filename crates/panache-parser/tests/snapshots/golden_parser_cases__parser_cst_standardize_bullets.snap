@@ -211,7 +211,8 @@ DOCUMENT@0..1226
       PLAIN@731..821
         TEXT@731..805 "List item with more t ..."
         NEWLINE@805..806 "\n"
-        TEXT@806..820 "  processes it"
+        WHITESPACE@806..808 "  "
+        TEXT@808..820 "processes it"
         NEWLINE@820..821 "\n"
       BLANK_LINE@821..824
         BLANK_LINE@821..824 "  \n"

@@ -8,7 +8,8 @@ DOCUMENT@0..10
       LIST_MARKER@0..1 "-"
       PLAIN@1..8
         NEWLINE@1..2 "\n"
-        TEXT@2..7 "  foo"
+        WHITESPACE@2..3 " "
+        TEXT@3..7 " foo"
         NEWLINE@7..8 "\n"
     LIST_ITEM@8..10
       LIST_MARKER@8..9 "-"

@@ -748,3 +748,21 @@ fn horizontal_rule_four_extra_spaces_in_list_item_is_not_a_rule() {
         "rule at content_col + 4 must not parse as HORIZONTAL_RULE"
     );
 }
+
+#[test]
+fn continuation_indent_is_stripped_from_inline_code_content() {
+    // pandoc's `listLine` gobbles the item's content column off every
+    // continuation line, so the code span reads `x  y` (one space from the
+    // newline, one left over from the 3-column indent), not `x    y`.
+    let input = "- a\n   `x\n   y`\n";
+    let tree = parse_blocks(input);
+    let code = find_first(&tree, SyntaxKind::INLINE_CODE).expect("should find inline code");
+    let content: String = code
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| t.kind() == SyntaxKind::INLINE_CODE_CONTENT)
+        .map(|t| t.text().to_string())
+        .collect();
+    assert_eq!(content, "x\n y");
+    assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+}

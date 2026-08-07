@@ -20,7 +20,8 @@ DOCUMENT@0..74
             PLAIN@12..44
               TEXT@12..16 "List"
               NEWLINE@16..17 "\n"
-              TEXT@17..43 "    with lazy continu ..."
+              WHITESPACE@17..19 "  "
+              TEXT@19..43 "  with lazy continuation"
               NEWLINE@43..44 "\n"
           WHITESPACE@44..48 "    "
           LIST_ITEM@48..74

@@ -29,7 +29,8 @@ DOCUMENT@0..472
       PLAIN@92..132
         TEXT@92..111 "this is a list item"
         NEWLINE@111..112 "\n"
-        TEXT@112..131 "\tindented with tabs"
+        WHITESPACE@112..113 "\t"
+        TEXT@113..131 "indented with tabs"
         NEWLINE@131..132 "\n"
     BLANK_LINE@132..133
       BLANK_LINE@132..133 "\n"
@@ -39,7 +40,8 @@ DOCUMENT@0..472
       PLAIN@137..182
         TEXT@137..156 "this is a list item"
         NEWLINE@156..157 "\n"
-        TEXT@157..181 "    indented with spaces"
+        WHITESPACE@157..161 "    "
+        TEXT@161..181 "indented with spaces"
         NEWLINE@181..182 "\n"
     BLANK_LINE@182..183
       BLANK_LINE@182..183 "\n"
@@ -49,7 +51,8 @@ DOCUMENT@0..472
       PLAIN@185..234
         TEXT@185..213 "this is an example li ..."
         NEWLINE@213..214 "\n"
-        TEXT@214..233 "\tindented with tabs"
+        WHITESPACE@214..215 "\t"
+        TEXT@215..233 "indented with tabs"
         NEWLINE@233..234 "\n"
     BLANK_LINE@234..235
       BLANK_LINE@234..235 "\n"
@@ -59,7 +62,8 @@ DOCUMENT@0..472
       PLAIN@239..293
         TEXT@239..267 "this is an example li ..."
         NEWLINE@267..268 "\n"
-        TEXT@268..292 "    indented with spaces"
+        WHITESPACE@268..272 "    "
+        TEXT@272..292 "indented with spaces"
         NEWLINE@292..293 "\n"
   BLANK_LINE@293..294
     BLANK_LINE@293..294 "\n"

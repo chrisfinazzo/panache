@@ -496,13 +496,31 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `overindented_fence_after_paragraph_is_lazy_pandoc`; golden case
   `overindented_fence_stays_paragraph_text`. Two adjacent defects surfaced
   and are filed separately below.
-- [ ] A lazy continuation line inside a list item keeps its *full* indent in the
+- [x] A lazy continuation line inside a list item kept its *full* indent in the
   inline text instead of being gobbled to the content column, which is
   invisible until an inline construct preserves interior whitespace:
   ``- a\n   `x\n   y` `` is `Code "x  y"` in pandoc (`listLine` eats the 2
-  continuation columns, leaving one space per line) but `Code "x    y"`
-  here. The blockquote path already strips correctly, so this is the list
-  path only. Pre-dates the over-indented-fence work above; not in the
+  continuation columns, leaving one space per line) but was `Code "x    y"`
+  here. The blockquote path already stripped correctly, so this was the list
+  path only. Pre-dated the over-indented-fence work above; not in the
+  corpus. Fixed in `ListItemBuffer::to_paragraph_buffer`, which now holds
+  each continuation line's `content_col` indent *out* of the text handed to
+  the inline parser and re-injects it as a `WHITESPACE` token at emission ---
+  the same trick the blockquote path uses for its `>` markers, so the parse
+  stays byte-lossless. `MarkerInjectingSink` grew an `InjectedMarker` enum
+  to carry both marker kinds. Verified against pandoc for indents 1--5
+  columns past the content column; the only AST change across all 677 parser
+  fixtures was display math in a list item, which now matches pandoc too
+  (`Math DisplayMath "\n\\begin{bmatrix}...\n"`, indent no longer baked in).
+  Parser case `list_continuation_indent_stripped_pandoc`.
+- [ ] A **tab** straddling a list item's content column is not gobbled at all,
+  so ``- a\n\t`x\n\ty` `` is `Code "x \ty"` here but `Code "x   y"` in
+  pandoc, which expands the tab to a 4-column stop and eats 2 of those
+  columns. Same for `  \t` at `content_col` 2. Splitting the tab means
+  emitting residual *spaces* that do not exist in the source, which
+  byte-losslessness forbids, so this needs a virtual-token concept (or an
+  expand-tabs pre-pass panache deliberately does not have) rather than a
+  tweak to `item_indent_prefix_len`. Split out of the item above; not in the
   corpus.
 - [ ] `has_matching_closer` scans for a fence's closer past the end of the
   enclosing list item, so a top-level fence adopts an item's paragraph text:

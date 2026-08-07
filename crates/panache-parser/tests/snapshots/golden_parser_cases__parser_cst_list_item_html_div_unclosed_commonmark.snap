@@ -11,5 +11,6 @@ DOCUMENT@0..19
         INLINE_HTML@2..14
           INLINE_HTML_CONTENT@2..14 "<div id=\"d\">"
         NEWLINE@14..15 "\n"
-        TEXT@15..18 "  x"
+        WHITESPACE@15..17 "  "
+        TEXT@17..18 "x"
         NEWLINE@18..19 "\n"

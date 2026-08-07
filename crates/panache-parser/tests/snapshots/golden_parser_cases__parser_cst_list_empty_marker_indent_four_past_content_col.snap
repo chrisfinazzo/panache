@@ -10,5 +10,6 @@ DOCUMENT@0..24
       PLAIN@2..24
         TEXT@2..15 "Bullet point."
         NEWLINE@15..16 "\n"
-        TEXT@16..23 "      -"
+        WHITESPACE@16..18 "  "
+        TEXT@18..23 "    -"
         NEWLINE@23..24 "\n"
