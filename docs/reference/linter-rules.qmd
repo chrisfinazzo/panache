@@ -812,7 +812,7 @@ If `jones2021` doesn't exist in `refs.bib`:
 
 ```
 warning[missing-bibliography-key]: Citation key 'jones2021' not found in bibliography
-  --> document.qmd:5:17
+  --> document.qmd:5:20
 ```
 
 **Example violation (bibliography load error):**

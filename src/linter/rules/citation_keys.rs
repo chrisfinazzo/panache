@@ -245,17 +245,62 @@ mod tests {
         let diagnostics = parse_and_lint(input, Some(metadata));
         assert_eq!(diagnostics.len(), 1);
 
-        // The citation [@missing] starts at position 5 (after "Text ")
-        // But we report it at the CITATION node level which includes brackets
-        // Line 1, column 6 (1-indexed, pointing to '[')
+        // The span covers `@missing` --- the offending key with its marker ---
+        // not the surrounding brackets. Line 1, column 7 (1-indexed, '@').
         assert_eq!(diagnostics[0].location.line, 1);
-        assert_eq!(diagnostics[0].location.column, 6);
+        assert_eq!(diagnostics[0].location.column, 7);
 
-        // The range should cover the entire citation including brackets
         let start: usize = diagnostics[0].location.range.start().into();
         let end: usize = diagnostics[0].location.range.end().into();
-        assert_eq!(start, 5); // Position of '['
-        assert_eq!(end, 15); // Position after ']'
+        assert_eq!(start, input.find("@missing").unwrap());
+        assert_eq!(end, input.find(']').unwrap());
+    }
+
+    #[test]
+    fn missing_key_underlines_only_the_offending_key() {
+        // `[@known; @missing]`: only the second key is unresolved, so only that
+        // key may be underlined --- not the whole bracketed citation group.
+        let input = "Text [@known; @missing].";
+        let mut entries = std::collections::HashMap::new();
+        entries.insert(
+            "known".to_string(),
+            crate::bib::BibEntry {
+                key: "known".to_string(),
+                entry_type: Some("article".to_string()),
+                fields: std::collections::HashMap::new(),
+                source_file: std::path::PathBuf::from("test.bib"),
+                span: crate::bib::Span { start: 0, end: 0 },
+                format: crate::bib::BibFormat::BibTeX,
+            },
+        );
+        let metadata = crate::metadata::DocumentMetadata {
+            source_path: std::path::PathBuf::from("test.qmd"),
+            bibliography: None,
+            metadata_files: Vec::new(),
+            bibliography_parse: Some(crate::metadata::BibliographyParse {
+                index: crate::bib::BibIndex {
+                    entries,
+                    duplicates: Vec::new(),
+                    errors: Vec::new(),
+                    load_errors: Vec::new(),
+                },
+                parse_errors: Vec::new(),
+            }),
+            inline_references: Vec::new(),
+            citations: crate::metadata::CitationInfo {
+                keys: vec!["known".to_string(), "missing".to_string()],
+            },
+            title: None,
+            raw_yaml: String::new(),
+        };
+
+        let diagnostics = parse_and_lint(input, Some(metadata));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "missing-bibliography-key");
+
+        let start: usize = diagnostics[0].location.range.start().into();
+        let end: usize = diagnostics[0].location.range.end().into();
+        assert_eq!(&input[start..end], "@missing");
     }
 
     #[test]

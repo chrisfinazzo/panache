@@ -590,7 +590,11 @@ pub struct BuiltInLintPlan {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SymbolUsageIndex {
+    /// Bare key text ranges --- what a rename edit replaces.
     citation_usages: HashMap<String, Vec<rowan::TextRange>>,
+    /// Key ranges including the `@` marker and any braces --- what a
+    /// diagnostic underlines, so a key inside `[@a; @b]` points at itself
+    /// rather than the whole bracketed group.
     citation_references: HashMap<String, Vec<rowan::TextRange>>,
     crossref_usages: HashMap<String, Vec<rowan::TextRange>>,
     example_label_usages: HashMap<String, Vec<rowan::TextRange>>,
@@ -1348,7 +1352,7 @@ fn collect_block_local_symbols(
                 .citation_references
                 .entry(normalize_label(&key.text()))
                 .or_default()
-                .push(citation.syntax().text_range());
+                .push(key.marked_range());
         }
     }
 
