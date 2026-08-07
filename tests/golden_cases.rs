@@ -408,6 +408,7 @@ golden_test_cases!(
     nested_headings_in_containers,
     multiline_table_single_row,
     mmd_header_identifiers,
+    overindented_fence_stays_paragraph_text,
     pandoc_title_block,
     paragraph_continuation,
     paragraph_plain_mixed,

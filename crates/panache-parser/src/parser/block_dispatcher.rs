@@ -1693,6 +1693,25 @@ impl BlockParser for FencedCodeBlockParser {
             return None;
         }
 
+        // Pandoc anchors a paragraph-interrupting fence on the fence character
+        // itself: `endline` only stops continuing the paragraph when the very
+        // next character after the container prefix is a backtick or tilde, so
+        // one leftover column of indent is enough to keep the fence inside the
+        // paragraph as lazy text. ```` - a\n   ```\n   c\n   ``` ```` (content
+        // column 2, fence at column 3) is `Plain [a, SoftBreak, Code "c"]`, not
+        // an item-nested `CodeBlock`, and the same holds at the top level and
+        // in a blockquote. CommonMark instead lets a fence interrupt from up to
+        // three columns of indent (§4.5), so this is dialect-gated. Only the
+        // interruption path is affected: with a blank line before, an indented
+        // fence still opens a code block.
+        if ctx.config.dialect == crate::options::Dialect::Pandoc
+            && !ctx.has_blank_before
+            && (ctx.paragraph_open || ctx.list_item_content_open)
+            && content_to_check.starts_with([' ', '\t'])
+        {
+            return None;
+        }
+
         // Brace-delimited info strings (`{...}`) carry Pandoc attribute
         // semantics — executable chunks, raw blocks, and attribute lists — each
         // gated behind its extension. In the CommonMark dialect braces have no

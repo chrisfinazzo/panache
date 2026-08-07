@@ -475,12 +475,45 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   Corpus 520/521, golden case `fenced_code_indented_fence`. The CommonMark
   twin below was the same root cause and is fixed with it --- the spec suite
   has its own §4.5-correct renderer, which is why it never saw the bug.
-- [ ] An *over*-indented fence after a list item is lazy text in pandoc:
+- [x] An *over*-indented fence after a list item is lazy text in pandoc:
   ````- a\n   ```\n   c\n   ``` ```` (indent 3, content column 2) is
   `Plain [a, SoftBreak, Code "c"]`, because `listLine` gobbles only
   `continuationIndent` columns and the leftover space defeats `endline`'s
-  backtick anchor. Panache nests a `CodeBlock` in the item. Not in the
+  backtick anchor. Panache nested a `CodeBlock` in the item. The rule turned
+  out not to be list-specific at all --- `endline` anchors on the fence
+  *character*, so any leftover column keeps the fence inside the paragraph,
+  and ````a\n ```r\nc\n``` ```` and ````> a\n>  ```r\n> c\n> ``` ```` were
+  wrong the same way (the top-level bare-fence case only looked right
+  because the bare-fence heuristic declined it for an unrelated reason).
+  Fixed in `FencedCodeBlockParser::detect_prepared`: under Pandoc, with no
+  blank line before and a paragraph or list-item buffer open, a fence whose
+  container-stripped line still starts with whitespace declines detection
+  and stays paragraph text. CommonMark keeps interrupting from up to three
+  columns (§4.5), so the gate is dialect-scoped, and a blank line before
+  still opens the block. Corpus 521/521. Parser cases
+  `list_item_overindented_fence_is_lazy_pandoc`,
+  `list_item_overindented_fence_interrupts_commonmark`,
+  `overindented_fence_after_paragraph_is_lazy_pandoc`; golden case
+  `overindented_fence_stays_paragraph_text`. Two adjacent defects surfaced
+  and are filed separately below.
+- [ ] A lazy continuation line inside a list item keeps its *full* indent in the
+  inline text instead of being gobbled to the content column, which is
+  invisible until an inline construct preserves interior whitespace:
+  ``- a\n   `x\n   y` `` is `Code "x  y"` in pandoc (`listLine` eats the 2
+  continuation columns, leaving one space per line) but `Code "x    y"`
+  here. The blockquote path already strips correctly, so this is the list
+  path only. Pre-dates the over-indented-fence work above; not in the
   corpus.
+- [ ] `has_matching_closer` scans for a fence's closer past the end of the
+  enclosing list item, so a top-level fence adopts an item's paragraph text:
+  ````- a ```\n  c\n  ```\n\nb ```r\nc\n``` ```` is two `Plain`/`Para` runs
+  of inline code in pandoc, but here the item's third line opens a
+  `CodeBlock` that swallows ````\nb ```r\nc````. The forward scan in
+  `FencedCodeBlockParser::detect_prepared` breaks only on a *blockquote*
+  depth drop --- nothing ends it when the list item does, and the column
+  slice it applies to candidate lines does not stand in for that. Shows up
+  as an idempotency failure, since panache's own output for the entry above
+  is exactly this shape. Not in the corpus.
 - [ ] A bare closed fence after a plain paragraph does not interrupt it:
   ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but one
   inline-code `Para` here. This is panache's deliberate bare-fence heuristic
