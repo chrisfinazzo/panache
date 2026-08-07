@@ -1,0 +1,8 @@
+[ Para
+    [ Str "Text"
+    , Note
+        [ Para [ Str "note" ]
+        , CodeBlock ( "" , [] , [] ) "    deep"
+        ]
+    ]
+]

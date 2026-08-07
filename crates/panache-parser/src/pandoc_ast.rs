@@ -390,15 +390,11 @@ fn parse_footnote_def(node: &SyntaxNode) -> Option<(String, Vec<Block>)> {
         // The CST keeps each footnote-body line at its full raw indentation
         // (the 4-space body indent plus any nested-block indent). Most blocks
         // recover transparently because `coalesce_inlines` trims leading
-        // spaces on paragraph content, but indented code blocks preserve all
-        // leading whitespace — strip the 4 footnote-body spaces in addition
-        // to the code block's own 4.
-        if child.kind() == SyntaxKind::CODE_BLOCK
-            && !child
-                .children()
-                .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN)
-        {
-            blocks.push(indented_code_block_with_extra_strip(&child, 4));
+        // spaces on paragraph content, but code blocks preserve all leading
+        // whitespace — strip the 4 footnote-body columns, on top of which the
+        // helper removes an indented block's own 4.
+        if child.kind() == SyntaxKind::CODE_BLOCK {
+            blocks.push(code_block_with_extra_strip(&child, 4));
         } else {
             collect_block(&child, &mut blocks);
         }
@@ -406,30 +402,27 @@ fn parse_footnote_def(node: &SyntaxNode) -> Option<(String, Vec<Block>)> {
     Some((label, blocks))
 }
 
-fn indented_code_block_with_extra_strip(node: &SyntaxNode, extra: usize) -> Block {
+/// Project a code block whose body carries `extra` columns of host indent on
+/// every line (footnote body, definition body, list item content).
+///
+/// The host indent comes off by column rather than by token: the emitter's
+/// prefix token is not column-exact when tabs are in play (see
+/// [`fenced_in_blockquote`]), so `code_content_text` leaves it in the string
+/// for [`strip_leading_spaces_per_line`] to measure. Blockquote markers are
+/// still dropped token-wise — nothing here compensates for a `>`.
+fn code_block_with_extra_strip(node: &SyntaxNode, extra: usize) -> Block {
     let raw_format = code_block_raw_format(node);
     let attr = code_block_attr(node);
     let is_fenced = node
         .children()
         .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN);
-    let mut content = String::new();
-    for child in node.children() {
-        if child.kind() == SyntaxKind::CODE_CONTENT {
-            content.push_str(&child.text().to_string());
-        }
-    }
+    // Tab expansion happens inside `code_content_text`, before any strip, so
+    // a `:\t` marker followed by `\t\t\tcode` correctly becomes
+    // `"        code"` once the 4-col definition-content offset comes off.
+    let mut content = code_content_text(node, false);
     while content.ends_with('\n') {
         content.pop();
     }
-    // Pandoc expands tabs (4-col stops) on code-block bodies before any
-    // indent stripping, so a `:\t` marker followed by `\t\t\tcode` correctly
-    // becomes `"        code"` after the 4-col definition-content offset is
-    // stripped. Apply expansion first, then strip.
-    content = content
-        .split('\n')
-        .map(expand_tabs_to_4)
-        .collect::<Vec<_>>()
-        .join("\n");
     content = strip_leading_spaces_per_line(&content, extra);
     if !is_fenced {
         content = strip_indented_code_indent(&content);
@@ -876,27 +869,15 @@ fn code_block(node: &SyntaxNode) -> Block {
     let is_fenced = node
         .children()
         .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN);
-    let mut content = String::new();
-    for child in node.children() {
-        if child.kind() == SyntaxKind::CODE_CONTENT {
-            content.push_str(&child.text().to_string());
-        }
-    }
+    // `code_content_text` already tab-expands (pandoc expands code-block
+    // bodies before emission) and drops any container prefix the emitter
+    // interleaved into `CODE_CONTENT`.
+    let mut content = code_content_text(node, fenced_in_blockquote(node, is_fenced));
     // Pandoc strips the trailing newline that closes the block.
     while content.ends_with('\n') {
         content.pop();
     }
-    if is_fenced {
-        // Pandoc tab-expands code-block bodies before emission. For indented
-        // code, the expansion happens inside `strip_indented_code_indent`
-        // before the 4-col strip; for fenced code there is no strip, so do
-        // it directly here.
-        content = content
-            .split('\n')
-            .map(expand_tabs_to_4)
-            .collect::<Vec<_>>()
-            .join("\n");
-    } else {
+    if !is_fenced {
         content = strip_indented_code_indent(&content);
     }
     if let Some(fmt) = raw_format {
@@ -1038,18 +1019,148 @@ fn strip_indented_code_indent(s: &str) -> String {
 /// of `line`. Pandoc applies this to indented code blocks before stripping
 /// the leading 4-column indent so the body byte-equals what pandoc emits.
 fn expand_tabs_to_4(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
     let mut col = 0usize;
-    for c in line.chars() {
-        if c == '\t' {
-            let next = (col / 4 + 1) * 4;
-            for _ in col..next {
-                out.push(' ');
+    expand_tabs_from_col(line, &mut col)
+}
+
+/// Column-carrying twin of [`expand_tabs_to_4`]: expands `text` starting at
+/// `*col` and leaves `*col` at the column the expansion ended on (reset by
+/// any newline).
+///
+/// Needed when a line is expanded piecewise, token by token — pandoc's
+/// `tabFilter` runs over the whole source line before any container prefix
+/// is stripped, so a tab inside a quoted code body has to reach the tab stop
+/// it would reach counting the `> ` marker.
+fn expand_tabs_from_col(text: &str, col: &mut usize) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\t' => {
+                let next = (*col / 4 + 1) * 4;
+                for _ in *col..next {
+                    out.push(' ');
+                }
+                *col = next;
             }
-            col = next;
-        } else {
-            out.push(c);
-            col += 1;
+            '\n' => {
+                out.push(c);
+                *col = 0;
+            }
+            _ => {
+                out.push(c);
+                *col += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A fenced code block whose immediate container is a blockquote — the one
+/// place a line-start `WHITESPACE` inside `CODE_CONTENT` can be dropped
+/// token-wise.
+///
+/// Everywhere else the host indent has to come off by *column*
+/// ([`strip_leading_spaces_per_line`]), because the emitter's token boundary
+/// is not column-exact once tabs are involved: for a `:\t` definition marker
+/// (content column 4) the emitter peels `"\t\t"` — 8 columns — into the
+/// prefix token, and dropping that whole token loses 4 columns of code
+/// (corpus 44). Inside a blockquote there is no such column arithmetic: the
+/// whitespace is either a marker's padding or pandoc's own lazy-line gobble,
+/// both of which the emitter reproduces exactly.
+///
+/// Restricted to fenced blocks because an indented block's line-start
+/// whitespace is its significant indent, emitted as a token of its own after
+/// any marker.
+fn fenced_in_blockquote(node: &SyntaxNode, is_fenced: bool) -> bool {
+    is_fenced && node.parent().map(|p| p.kind()) == Some(SyntaxKind::BLOCK_QUOTE)
+}
+
+/// Rebuild a code block's payload from its `CODE_CONTENT` children, dropping
+/// the container prefix the emitters interleave there.
+///
+/// For losslessness a block parser re-emits each *continuation* line's
+/// container prefix inside `CODE_CONTENT` — `BLOCK_QUOTE_MARKER` for `>`,
+/// `WHITESPACE` for the space after it and for list/content indent — so the
+/// node's raw text is the source line, not the code. Pandoc sees only what
+/// survives container stripping.
+///
+/// `BLOCK_QUOTE_MARKER`s (and the single space each one owns) are always
+/// dropped: a `>` is never code, and no caller compensates for one.
+///
+/// The remaining line-start `WHITESPACE` is host indent, and `drop_indent`
+/// says whether to drop it here or leave it for the caller's column-based
+/// [`strip_leading_spaces_per_line`]. Only [`fenced_in_blockquote`] sets it —
+/// see that function for why the token boundary is trustworthy there and
+/// nowhere else. With it clear, an indented block keeps its significant
+/// indent and a fenced one keeps a host indent the caller will strip by
+/// column.
+fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
+    let mut out = String::new();
+    for content in node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::CODE_CONTENT)
+    {
+        let elements: Vec<crate::syntax::SyntaxElement> = content.children_with_tokens().collect();
+        let mut col = 0usize;
+        // `in_prefix` is the line-start container-prefix run; `saw_bq` marks
+        // that the previous element was a `>` whose one padding space is not
+        // code.
+        let mut in_prefix = true;
+        let mut saw_bq = false;
+        for (i, el) in elements.iter().enumerate() {
+            let Some(token) = el.as_token() else {
+                // Only `HASHPIPE_YAML_PREAMBLE` nests here, and its subtree
+                // uses the YAML token vocabulary, which this walk cannot
+                // classify. Take it verbatim, as this projection always has.
+                // (Hashpipe is Quarto/RMarkdown-only; under `Flavor::Pandoc`
+                // a ```` ```{r} ```` fence never reaches the fenced code-block
+                // parser, so no conformance case exercises it. A hashpipe
+                // preamble inside a container therefore still leaks its
+                // prefix — a pre-existing, separately scoped gap.)
+                let text = el.as_node().expect("element is a node").text().to_string();
+                let expanded = expand_tabs_from_col(&text, &mut col);
+                in_prefix = expanded.ends_with('\n');
+                saw_bq = false;
+                out.push_str(&expanded);
+                continue;
+            };
+            if matches!(token.kind(), SyntaxKind::NEWLINE | SyntaxKind::BLANK_LINE) {
+                out.push_str(token.text());
+                col = 0;
+                in_prefix = true;
+                saw_bq = false;
+                continue;
+            }
+            let expanded = expand_tabs_from_col(token.text(), &mut col);
+            if !in_prefix {
+                out.push_str(&expanded);
+                continue;
+            }
+            match token.kind() {
+                SyntaxKind::BLOCK_QUOTE_MARKER => saw_bq = true,
+                SyntaxKind::WHITESPACE => {
+                    let next_is_marker = elements.get(i + 1).map(|e| e.kind())
+                        == Some(SyntaxKind::BLOCK_QUOTE_MARKER);
+                    // Exactly one space after a `>` belongs to the marker;
+                    // anything past it is host indent.
+                    let rest = if saw_bq {
+                        expanded.strip_prefix(' ').unwrap_or(&expanded)
+                    } else {
+                        expanded.as_str()
+                    };
+                    saw_bq = false;
+                    // Leading padding the following `>` owns is never code.
+                    if next_is_marker || drop_indent || rest.is_empty() {
+                        continue;
+                    }
+                    out.push_str(rest);
+                    in_prefix = false;
+                }
+                _ => {
+                    in_prefix = false;
+                    out.push_str(&expanded);
+                }
+            }
         }
     }
     out
@@ -2354,7 +2465,7 @@ fn definition_blocks(def_node: &SyntaxNode, loose: bool) -> Vec<Block> {
                 out.push(Block::Para(coalesce_inlines(inlines_from(&child))));
             }
             SyntaxKind::CODE_BLOCK if extra > 0 => {
-                out.push(indented_code_block_with_extra_strip(&child, extra));
+                out.push(code_block_with_extra_strip(&child, extra));
             }
             _ => collect_block(&child, &mut out),
         }
@@ -3563,9 +3674,8 @@ fn list_item_blocks(item: &SyntaxNode, loose: bool) -> Vec<Block> {
                 // CST. Strip that offset so pandoc sees the same body it
                 // would in a flat document. (For indented code, the helper
                 // also strips the 4-space code-block indent on top of the
-                // item offset; for fenced code, the offset strip alone is
-                // sufficient.)
-                out.push(indented_code_block_with_extra_strip(&child, item_indent));
+                // item offset.)
+                out.push(code_block_with_extra_strip(&child, item_indent));
             }
             _ => collect_block(&child, &mut out),
         }
@@ -6161,6 +6271,87 @@ mod tests {
         assert!(
             out.contains("Plain [ Str \"def\" ]"),
             "a definition must stay tight, got: {out}"
+        );
+    }
+
+    /// Assert the projected payload of the document's first `CodeBlock`.
+    ///
+    /// The CST re-emits each continuation line's container prefix inside
+    /// `CODE_CONTENT` for losslessness, so these pin that the projector peels
+    /// it back off. Every expectation is `pandoc 3.9.0.2 -f markdown
+    /// -t native` output.
+    fn assert_code_payload(input: &str, expected: &str) {
+        let out = native(input, pandoc_options());
+        let needle = format!("{expected:?}");
+        assert!(
+            out.contains(&needle),
+            "expected a CodeBlock payload of {needle}, got: {out}"
+        );
+    }
+
+    #[test]
+    fn quoted_fence_body_drops_blockquote_marker() {
+        assert_code_payload("> ```\n> code\n> ```\n", "code");
+    }
+
+    #[test]
+    fn quoted_fence_body_keeps_significant_indent() {
+        // Only the marker and its one padding space are container syntax;
+        // the four columns past them are code.
+        assert_code_payload("> ```\n>     code\n> ```\n", "    code");
+    }
+
+    #[test]
+    fn quoted_fence_body_expands_tabs_from_the_raw_column() {
+        // Pandoc's `tabFilter` runs over the source line *before* the quote
+        // marker is stripped, so the tab starts from column 2 and reaches the
+        // stop at column 4 — two spaces, not four.
+        assert_code_payload("> ```\n> \tcode\n> ```\n", "  code");
+    }
+
+    #[test]
+    fn lazy_quoted_fence_body_drops_the_gobbled_indent() {
+        // Corpus 512. A lazy body line carries no marker; pandoc's blockquote
+        // reader gobbles its whole leading indent into the quote's raw
+        // content, so none of it is code.
+        assert_code_payload("> ```\n code\n> ```\n", "code");
+        assert_code_payload("> # h\n ```\n     deep\n ```\n", "deep");
+    }
+
+    #[test]
+    fn nested_quoted_fence_body_drops_every_marker() {
+        assert_code_payload("> > ```\n> >     x\n> > ```\n", "    x");
+    }
+
+    #[test]
+    fn quoted_indented_code_drops_markers_but_keeps_indent() {
+        // The indented emitter splits marker padding and significant indent
+        // into separate `WHITESPACE` tokens, which is what lets the two be
+        // told apart on a continuation line.
+        assert_code_payload("> text\n>\n>     line1\n>     line2\n", "line1\nline2");
+    }
+
+    #[test]
+    fn fence_in_quote_in_list_item_drops_both_prefixes() {
+        assert_code_payload("- > ```\n  >     x\n  > ```\n", "    x");
+    }
+
+    #[test]
+    fn footnote_fenced_body_strips_the_footnote_indent() {
+        assert_code_payload(
+            "Text[^1]\n\n[^1]: note\n\n    ```\n        deep\n    ```\n",
+            "    deep",
+        );
+    }
+
+    #[test]
+    fn tab_indented_definition_fence_body_strips_by_column_not_token() {
+        // Corpus 44. For a `:\t` marker (content column 4) the emitter peels
+        // `"\t\t"` — 8 columns — into the prefix token, so the host indent
+        // has to come off by column: 12 columns of body minus 4 leaves 8.
+        assert_code_payload(
+            "Indented with tabs\n\n:\t```markdown\n\t\t\tcode\n\t\t\ta <- 1\n\t```\n",
+            "        code\n        a <- 1",
         );
     }
 }

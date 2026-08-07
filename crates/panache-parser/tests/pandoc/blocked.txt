@@ -50,19 +50,31 @@
 # `> | a\n  | b` at two lines, since the quote reader drops the lazy
 # line's indent before `lineBlockLine` ever sees it.
 
-# 512 — blocked on a PROJECTOR gap, not a parser one. The CST is correct:
-# `> ```` ``` ````/` code`/`> ```` ``` ```` peels the gobbled indent into a
-# `WHITESPACE` token inside `CODE_CONTENT`, exactly as it peels the `> `
-# markers of a non-lazy body line (pinned by the parser golden
-# `blockquote_lazy_fence_body_deindents_pandoc`). `pandoc_ast::code_block`
-# then rebuilds the payload from `CODE_CONTENT`'s raw text, so every
-# container-prefix token lands back in the `CodeBlock` string:
-# `> ```` ``` ````/`> code`/`> ```` ``` ```` has always projected
-# `CodeBlock "> code"` where pandoc reads `"code"`. Unblock by teaching the
-# projector to skip the container prefix; the ambiguity to resolve first is
-# that a line-leading `WHITESPACE` token inside `CODE_CONTENT` is a container
-# prefix for a fenced block but the significant indent of an indented one.
-512
+# FIXED 2026-08-07 (corpus 512): the projector no longer rebuilds a code
+# block's payload from `CODE_CONTENT`'s raw text, which used to put every
+# container-prefix token the emitter peeled off back into the `CodeBlock`
+# string. `pandoc_ast::code_content_text` walks the tokens instead.
+#
+# The recorded ambiguity — a line-leading `WHITESPACE` inside `CODE_CONTENT`
+# is a container prefix for a fenced block but the significant indent of an
+# indented one — resolves from the emitters, but the split is NOT
+# fenced-vs-indented:
+#
+#   - `BLOCK_QUOTE_MARKER` and the one space it owns are always prefix.
+#   - Remaining line-start whitespace is dropped token-wise only for a fenced
+#     block directly inside a blockquote (`fenced_in_blockquote`), where the
+#     emitter's consumption is exactly pandoc's: marker padding, or the
+#     lazy-line gobble.
+#   - Everywhere else the host indent comes off by COLUMN
+#     (`strip_leading_spaces_per_line`), because the emitter's token boundary
+#     is not column-exact once tabs are involved: for a `:\t` definition
+#     marker (content column 4) it peels `"\t\t"` — 8 columns — into the
+#     prefix token, and dropping that whole token loses 4 columns of code.
+#     Corpus 44 is the guard; it regressed on the first (token-only) attempt.
+#
+# Tabs are expanded against the raw line column, before the prefix comes off,
+# mirroring pandoc's `tabFilter`: `> \tcode` is `"  code"`, not `"    code"`.
+# See 0515-0519 for the shapes this pinned.
 
 # 513 - blocked on a PARSER gap in the fold's *entry* condition, distinct from
 # the body-line gobble above. `> - a`/`   ```` ``` ````/`   c`/`   ```` ``` ````

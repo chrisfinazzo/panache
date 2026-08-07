@@ -1,9 +1,9 @@
 {
-  "blocked": 2,
-  "failing": 2,
+  "blocked": 1,
+  "failing": 1,
   "pandoc_version": "3.9.0.2",
-  "pass_pct": 99.6,
-  "passing": 512,
+  "pass_pct": 99.8,
+  "passing": 518,
   "passing_ids": [
     1,
     2,
@@ -516,13 +516,19 @@
     509,
     510,
     511,
-    514
+    512,
+    514,
+    515,
+    516,
+    517,
+    518,
+    519
   ],
   "sections": [
     {
-      "fail": 2,
+      "fail": 1,
       "name": "block",
-      "pass": 33
+      "pass": 39
     },
     {
       "fail": 0,
@@ -545,5 +551,5 @@
       "pass": 16
     }
   ],
-  "total_cases": 514
+  "total_cases": 519
 }

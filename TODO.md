@@ -388,15 +388,29 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   Also fixed the blank-line-free fence twin
   (````- a\n  ```\n  c\n  ```\n- b````, corpus 514), which diverged under
   default extensions.
-- [ ] Found while checking the fold, pre-existing and unrelated: a fenced code
+- [x] Found while checking the fold, pre-existing and unrelated: a fenced code
   block inside a blockquote keeps the `>` markers in its content ---
   ````> ```\n> code\n> ``` ```` projects `CodeBlock "> code"`. `code_block`
   rebuilds the payload from `CODE_CONTENT`'s raw text, so every
   container-prefix token the emitter peeled off lands back in the string.
-  This is what blocks corpus 512, where the CST is already correct. The
-  ambiguity to settle first: a line-leading `WHITESPACE` token inside
+  This is what blocks corpus 512, where the CST is already correct. Fixed in
+  the projector: `code_content_text` walks the tokens instead of taking the
+  node's text. The recorded ambiguity --- a line-leading `WHITESPACE` inside
   `CODE_CONTENT` is a container prefix for a fenced block but the
-  significant indent of an indented one.
+  significant indent of an indented one --- does resolve from the emitters,
+  but the split is not fenced-vs-indented. `BLOCK_QUOTE_MARKER` and its one
+  padding space are always prefix; remaining line-start whitespace is
+  dropped token-wise only for a fenced block directly inside a blockquote,
+  where the emitter consumes exactly what pandoc does (marker padding, or
+  the lazy-line gobble). Everywhere else the host indent has to come off by
+  *column*, since the emitter's token boundary is not column-exact with
+  tabs: for a `:\t` definition marker (content column 4) it peels `"\t\t"` ---
+  8 columns --- into the prefix token, so dropping the token loses 4 columns
+  of code (corpus 44 caught this). Tabs expand against the raw line column
+  before the prefix comes off, mirroring pandoc's `tabFilter`, so
+  ````> ```\n> \tcode```` is `"  code"`. Also cured the same leak in
+  indented code inside a quote, fenced code in a footnote body, and a quote
+  nested in a list item. Corpus 512 + new 515-519; total 512 -> 518 passing.
 - [ ] The fold declines *entry* inside a quoted list item, so a construct opened
   on such a lazy line never forms: ````> - a\n   ```\n   c\n   ``` ```` is
   `BlockQuote [BulletList [[Plain a]], CodeBlock "c"]` in pandoc, but the

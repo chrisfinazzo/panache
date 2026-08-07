@@ -1,10 +1,10 @@
 Pandoc-native conformance report (pandoc 3.9.0.2)
-512 / 514 cases passing (99.6%)
-2 failing
-2 blocked-list entries
+518 / 519 cases passing (99.8%)
+1 failing
+1 blocked-list entries
 
 === Per-section pass / fail ===
-  block: 33 pass / 2 fail
+  block: 39 pass / 1 fail
   citation: 1 pass / 0 fail
   html: 300 pass / 0 fail
   imported: 162 pass / 0 fail
@@ -522,7 +522,13 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 509
 510
 511
+512
 514
+515
+516
+517
+518
+519
 
 === Passing cases grouped by section ===
 # block
@@ -558,7 +564,13 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 509
 510
 511
+512
 514
+515
+516
+517
+518
+519
 
 # citation
 334
@@ -1048,9 +1060,6 @@ Pandoc-native conformance report (pandoc 3.9.0.2)
 457
 
 === Failing case slugs (with rendered diff hint) ===
-# 512 (block-code-blockquote-lazy-fence-body)
-  expected: [ BlockQuote [ CodeBlock ( "" , [ ] , [ ] ) "code" ] , BlockQuote [ Header 1 ( "h" , [ ] , [ ] ) [ Str "h" ] , CodeBlock ( "" , [ ] , [ ] ) "deep" ] ]
-  got:      [ BlockQuote [ CodeBlock ( "" , [ ] , [ ] ) " code" ] , BlockQuote [ Header 1 ( "h" , [ ] , [ ] ) [ Str "h" ] , CodeBlock ( "" , [ ] , [ ] ) "     deep" ] ]
 # 513 (block-code-blockquote-lazy-fence-in-list-item)
   expected: [ BlockQuote [ BulletList [ [ Plain [ Str "a" ] ] ] , CodeBlock ( "" , [ ] , [ ] ) "c" ] ]
   got:      [ BlockQuote [ BulletList [ [ Plain [ Str "a" , SoftBreak , Code ( "" , [ ] , [ ] ) "c" ] ] ] ] ]

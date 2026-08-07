@@ -696,9 +696,26 @@
 # de-indent too, not just the line that opened it. 0511 pins the `<div>` body
 # case: a lazy line indented four columns is a paragraph inside the div, not an
 # indented code block. `StripOp::BlockQuoteMarker` carries the gobble, so the
-# same strip reaches every block parser. The fenced-code twin is 0512, blocked
-# on a projector gap (see blocked.txt).
+# same strip reaches every block parser. The fenced-code twin is 0512, whose
+# projector gap is now fixed (see below).
 511
+
+# The projector rebuilt a code block's payload from `CODE_CONTENT`'s raw text,
+# so every container-prefix token the emitter peeled off for losslessness --- a
+# `>` marker, its padding space, a lazy line's gobbled indent --- landed back
+# in the `CodeBlock` string. `code_content_text` now peels them again on the
+# way out. 0512 is the lazy-gobble form; 0515 pins that only the marker's one
+# padding space comes off (deeper indent is code); 0516 pins that tabs expand
+# against the *raw* line column, before the marker is stripped; 0517 the
+# indented-code twin, where marker padding and significant indent are separate
+# `WHITESPACE` tokens; 0518/0519 the footnote and list-item hosts, whose indent
+# comes off by column rather than by token.
+512
+515
+516
+517
+518
+519
 
 # Pandoc's `para` yields a `Plain` unless the paragraph is terminated by a
 # blank line or by one of the block starts it looks ahead for: a fenced code
