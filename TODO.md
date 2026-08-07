@@ -175,6 +175,7 @@ Round-trip failures (`input` -> lossy output):
   dollar run while `emit_display_math` only wrote back an opener-length
   marker. Both delimiters are now exactly `$$` (pandoc's
   `mathDisplayWith "$$" "$$"`), so surplus dollars stay content or text.
+
 - [x] Fenced-div opener mangles the whitespace run before its label, and
   duplicates part of the label: `:::  te\nbody\n:::\n\npara\n` ->
   `::: tee\nbody\n:::\n\npara\n`; `:::: \ty\n:::\n::::\n\npara\n` ->
@@ -185,6 +186,28 @@ Round-trip failures (`input` -> lossy output):
   slicing the label off the rest, so the leftover run shifted the slice and
   the tail was re-emitted as a label suffix. `emit` now consumes the same
   run.
+
+- [ ] A setext underline directly after a setext heading breaks the block
+  dispatcher's open-paragraph contract. Both `a\nb\n---\nc\n---\n` and
+  ```` ```\nx\n---\ny\n---\n ```` trip the `debug_assert!` in
+  `parser/core.rs` ("block parser `setext_heading` returned `Yes` while a
+  paragraph or buffered list-item content is open").
+  `SetextHeadingParser::detect_prepared` takes its `follows_setext_heading`
+  escape while the *next* paragraph is still buffered, so the heading is
+  emitted before those bytes and the CST reorders. Debug builds panic on the
+  contract; release builds do the reordering silently, with the assert
+  compiled out, which makes this a losslessness bug rather than only an
+  assertion failure. The fix the contract itself names is to return
+  `YesCanInterrupt` (which flushes the buffers first) or to gate the escape.
+  Pandoc-dialect only --- CommonMark folds the open paragraph into the
+  heading, and a single-line paragraph (`a\n---\nc\n---\n`) is fine, so the
+  trigger is a *multi-line* paragraph before the first underline.
+  - Surfaced on `feat/incremental-parsing-graduation` by the flavor-tiered fuzz
+    harness, once `---\nk: v\n---\n` entered its insert alphabet. Both shapes
+    are pinned `#[ignore]`d there in `incremental_regressions.rs` as
+    `full_parse_lossless_setext_underline_after_setext_heading` and
+    `full_parse_lossless_setext_pair_after_unterminated_fence`; un-ignore them
+    when this lands and that branch rebases.
 
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
