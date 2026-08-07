@@ -49,3 +49,33 @@
 # (`| a\n  | b` -> `[[a, |, b]]`). The blockquote-laziness guard keeps
 # `> | a\n  | b` at two lines, since the quote reader drops the lazy
 # line's indent before `lineBlockLine` ever sees it.
+
+# 512 — blocked on a PROJECTOR gap, not a parser one. The CST is correct:
+# `> ```` ``` ````/` code`/`> ```` ``` ```` peels the gobbled indent into a
+# `WHITESPACE` token inside `CODE_CONTENT`, exactly as it peels the `> `
+# markers of a non-lazy body line (pinned by the parser golden
+# `blockquote_lazy_fence_body_deindents_pandoc`). `pandoc_ast::code_block`
+# then rebuilds the payload from `CODE_CONTENT`'s raw text, so every
+# container-prefix token lands back in the `CodeBlock` string:
+# `> ```` ``` ````/`> code`/`> ```` ``` ```` has always projected
+# `CodeBlock "> code"` where pandoc reads `"code"`. Unblock by teaching the
+# projector to skip the container prefix; the ambiguity to resolve first is
+# that a line-leading `WHITESPACE` token inside `CODE_CONTENT` is a container
+# prefix for a fenced block but the significant indent of an indented one.
+512
+
+# 513 - blocked on a PARSER gap in the fold's *entry* condition, distinct from
+# the body-line gobble above. `> - a`/`   ```` ``` ````/`   c`/`   ```` ``` ````
+# never reaches `fold_lazy_line_into_blockquote`: the lazy-list-continuation
+# gate in `handle_blockquote_line` runs first and hands the line to the open
+# list item, which buffers it as PLAIN text (the fence degrades to an
+# `INLINE_CODE` span). Pandoc drops the indent instead, so the fence opens at
+# column 0 and lands as a sibling of the list inside the quote. Unblocking means
+# ordering that gate against `blockquote_gobble_ends_at`, which governs every
+# `> - a`/`  b` shape - too wide to fold into the body-line fix.
+#
+# This shape also fails `panache debug format --checks idempotency` (the second
+# pass re-quotes the buffered lines as `>   >   c`), byte-identically before and
+# after the body-line gobble landed. Worth fixing ahead of the conformance
+# delta.
+513

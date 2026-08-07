@@ -7,7 +7,7 @@ use crate::syntax::SyntaxKind;
 use rowan::{GreenNodeBuilder, TextRange};
 
 use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
-use super::container_prefix::{StrippedLines, advance_columns};
+use super::container_prefix::{StrippedLines, advance_columns, content_line_prefix_tail};
 use crate::options::{Dialect, Flavor};
 use crate::parser::utils::container_stack::byte_index_at_column;
 use crate::parser::utils::tree_copy::copy_green_children;
@@ -682,37 +682,6 @@ fn prepare_fence_open_line<'a>(
     (first_trimmed, s)
 }
 
-fn strip_content_line_prefixes(
-    content_line: &str,
-    bq_depth: usize,
-    list_content_col: usize,
-    bq_outer: bool,
-    content_indent: usize,
-) -> &str {
-    let after_bq_and_list = if bq_outer {
-        let after_bq = if bq_depth > 0 {
-            strip_n_blockquote_markers(content_line, bq_depth)
-        } else {
-            content_line
-        };
-        strip_list_indent(after_bq, list_content_col)
-    } else {
-        let after_list = strip_list_indent(content_line, list_content_col);
-        if bq_depth > 0 {
-            strip_n_blockquote_markers(after_list, bq_depth)
-        } else {
-            after_list
-        }
-    };
-
-    let indent_bytes = byte_index_at_column(after_bq_and_list, content_indent);
-    if content_indent > 0 && after_bq_and_list.len() >= indent_bytes {
-        &after_bq_and_list[indent_bytes..]
-    } else {
-        after_bq_and_list
-    }
-}
-
 pub(crate) fn compute_hashpipe_preamble_line_count(
     content_lines: &[&str],
     prefix: &str,
@@ -720,11 +689,18 @@ pub(crate) fn compute_hashpipe_preamble_line_count(
     list_content_col: usize,
     bq_outer: bool,
     content_indent: usize,
+    lazy_gobble: bool,
 ) -> usize {
     let preview = |idx: usize| -> Option<&str> {
         let line = content_lines.get(idx)?;
-        let after_indent =
-            strip_content_line_prefixes(line, bq_depth, list_content_col, bq_outer, content_indent);
+        let after_indent = content_line_prefix_tail(
+            line,
+            bq_depth,
+            list_content_col,
+            bq_outer,
+            content_indent,
+            lazy_gobble,
+        );
         Some(strip_newline(after_indent).0)
     };
 
@@ -770,13 +746,15 @@ fn hashpipe_composite_marker<'a>(
     list_content_col: usize,
     bq_outer: bool,
     content_indent: usize,
+    lazy_gobble: bool,
 ) -> &'a str {
-    let after_container = strip_content_line_prefixes(
+    let after_container = content_line_prefix_tail(
         first_line,
         bq_depth,
         list_content_col,
         bq_outer,
         content_indent,
+        lazy_gobble,
     );
     let container_len = first_line.len() - after_container.len();
     let ws_before = after_container.len() - trim_start_spaces_tabs(after_container).len();
@@ -1124,6 +1102,7 @@ pub(crate) fn parse_fenced_code_block(
     let list_marker_consumed_on_line_0 = prefix.list_marker_consumed_on_line_0;
     let bq_outer = bq_outer_of_list(prefix);
     let content_indent = prefix.content_indent();
+    let lazy_gobble = prefix.lazy_blockquote_gobble;
 
     // Start code block
     builder.start_node(SyntaxKind::CODE_BLOCK.into());
@@ -1188,8 +1167,8 @@ pub(crate) fn parse_fenced_code_block(
         // Under Pandoc a non-blank line with fewer `>` markers is gobbled
         // back into the quote, so it is still fence body. A blank line
         // carries no markers and ends the scan here, where it also ends the
-        // quote. `parse_fenced_math_block` keeps the plain depth break: a
-        // `$$` fence has no dialect plumbed through to gate this on.
+        // quote. The prefix strip then de-indents the gobbled line, so the
+        // body sees what pandoc's raw content holds.
         let gobbled_lazily = Dialect::for_flavor(flavor) == crate::options::Dialect::Pandoc
             && bq_depth > 0
             && !line.trim().is_empty();
@@ -1201,8 +1180,14 @@ pub(crate) fn parse_fenced_code_block(
         // strip the emission path applies via `emit_content_line_prefixes`
         // / `emit_prefix_at`, kept here rather than `strip_at` (a per-op
         // walk) to stay byte-identical in interleaved nesting.
-        let inner_stripped =
-            strip_content_line_prefixes(line, bq_depth, list_content_col, bq_outer, content_indent);
+        let inner_stripped = content_line_prefix_tail(
+            line,
+            bq_depth,
+            list_content_col,
+            bq_outer,
+            content_indent,
+            lazy_gobble,
+        );
 
         if is_closing_fence(inner_stripped, &fence) {
             found_closing = true;
@@ -1231,6 +1216,7 @@ pub(crate) fn parse_fenced_code_block(
                 list_content_col,
                 bq_outer,
                 content_indent,
+                lazy_gobble,
             );
             if prepared_hashpipe_lines > 0 {
                 builder.start_node(SyntaxKind::HASHPIPE_YAML_PREAMBLE.into());
@@ -1250,6 +1236,7 @@ pub(crate) fn parse_fenced_code_block(
                     list_content_col,
                     bq_outer,
                     content_indent,
+                    lazy_gobble,
                 );
 
                 let yaml_ctx = YamlValidationContext::hashpipe(flavor);
@@ -1366,6 +1353,7 @@ pub(crate) fn parse_fenced_math_block(
     window: &StrippedLines<'_, '_>,
     fence: FenceInfo,
     first_line_override: Option<&str>,
+    dialect: Dialect,
 ) -> usize {
     let lines = window.raw();
     let start_pos = window.pos();
@@ -1375,6 +1363,7 @@ pub(crate) fn parse_fenced_math_block(
     let list_marker_consumed_on_line_0 = prefix.list_marker_consumed_on_line_0;
     let bq_outer = bq_outer_of_list(prefix);
     let content_indent = prefix.content_indent();
+    let lazy_gobble = prefix.lazy_blockquote_gobble;
 
     builder.start_node(SyntaxKind::DISPLAY_MATH.into());
 
@@ -1405,20 +1394,28 @@ pub(crate) fn parse_fenced_math_block(
         let line = lines[current_pos];
 
         // Forward-scan termination on blockquote depth — stays inline (no
-        // `StrippedLines` equivalent), mirroring `parse_fenced_code_block`.
+        // `StrippedLines` equivalent), mirroring `parse_fenced_code_block`
+        // down to the Pandoc lazy-gobble exemption.
         let probe = if bq_outer {
             line
         } else {
             strip_list_indent(line, list_content_col)
         };
         let (line_bq_depth, _) = count_blockquote_markers(probe);
-        if line_bq_depth < bq_depth {
+        let gobbled_lazily = dialect == Dialect::Pandoc && bq_depth > 0 && !line.trim().is_empty();
+        if line_bq_depth < bq_depth && !gobbled_lazily {
             break;
         }
 
         // Detection only (emits nothing): same 2-bucket strip as emission.
-        let inner_stripped =
-            strip_content_line_prefixes(line, bq_depth, list_content_col, bq_outer, content_indent);
+        let inner_stripped = content_line_prefix_tail(
+            line,
+            bq_depth,
+            list_content_col,
+            bq_outer,
+            content_indent,
+            lazy_gobble,
+        );
 
         if is_closing_fence(inner_stripped, &fence) {
             found_closing = true;
@@ -1529,7 +1526,7 @@ mod tests {
             "plot(1)\n",
         ];
         assert_eq!(
-            compute_hashpipe_preamble_line_count(&lines, "#|", 0, 0, false, 0),
+            compute_hashpipe_preamble_line_count(&lines, "#|", 0, 0, false, 0, false),
             4
         );
     }
@@ -2041,21 +2038,24 @@ mod tests {
             "#|   spanning lines\n",
             "a <- 1\n",
         ];
-        let count = compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0);
+        let count =
+            compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0, false);
         assert_eq!(count, 3);
     }
 
     #[test]
     fn test_compute_hashpipe_preamble_line_count_stops_at_non_option() {
         let content_lines = vec!["#| label: fig-plot\n", "plot(1:10)\n", "#| echo: false\n"];
-        let count = compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0);
+        let count =
+            compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0, false);
         assert_eq!(count, 1);
     }
 
     #[test]
     fn test_compute_hashpipe_preamble_line_count_stops_at_standalone_prefix() {
         let content_lines = vec!["#| label: fig-plot\n", "#|\n", "plot(1:10)\n"];
-        let count = compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0);
+        let count =
+            compute_hashpipe_preamble_line_count(&content_lines, "#|", 0, 0, false, 0, false);
         assert_eq!(count, 1);
     }
 }

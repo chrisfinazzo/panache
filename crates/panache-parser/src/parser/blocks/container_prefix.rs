@@ -27,11 +27,12 @@
 use rowan::GreenNodeBuilder;
 use smallvec::SmallVec;
 
+use crate::options::Dialect;
 use crate::syntax::SyntaxKind;
 
 use super::super::block_dispatcher::BlockContext;
 use super::super::utils::container_stack::{Container, byte_index_at_column, leading_indent};
-use super::blockquotes::strip_n_blockquote_markers;
+use super::blockquotes::{strip_blockquote_markers_counted, strip_n_blockquote_markers};
 
 /// A single strip operation applied during the dispatcher's
 /// container-stack walk. Ops are applied in order; each consumes some
@@ -85,6 +86,17 @@ pub(crate) struct ContainerPrefix {
     /// Affects only the line-0 strip semantics. Lookahead helpers and
     /// the continuation-line strip always apply every op.
     pub list_marker_consumed_on_line_0: bool,
+    /// True under the Pandoc dialect, where the blockquote reader extracts
+    /// the quote's raw content line by line and skips the leading
+    /// whitespace of every *lazy* line — one carrying fewer `>` markers
+    /// than the quote is deep. See [`lazy_gobble_trim`].
+    ///
+    /// This is the multi-line counterpart of
+    /// `Parser::fold_lazy_line_into_blockquote`, which drops the indent of
+    /// the single line it dispatches. A construct opened on a lazy line
+    /// reads its body straight out of `lines[..]` through this prefix, so
+    /// without the gobble here only its first line is de-indented.
+    pub lazy_blockquote_gobble: bool,
 }
 
 impl ContainerPrefix {
@@ -101,7 +113,11 @@ impl ContainerPrefix {
     /// same-section lists (inner.content_col is cumulative) while still
     /// applying outer-section list strips before an intervening
     /// blockquote or content-indent container.
-    pub fn from_stack(stack: &[Container], list_marker_consumed_on_line_0: bool) -> Self {
+    pub fn from_stack(
+        stack: &[Container],
+        list_marker_consumed_on_line_0: bool,
+        dialect: Dialect,
+    ) -> Self {
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
         let mut pending_list_advance: Option<u32> = None;
         for c in stack {
@@ -134,6 +150,7 @@ impl ContainerPrefix {
         Self {
             ops,
             list_marker_consumed_on_line_0,
+            lazy_blockquote_gobble: dialect == Dialect::Pandoc,
         }
     }
 
@@ -174,10 +191,13 @@ impl ContainerPrefix {
         Self {
             ops,
             list_marker_consumed_on_line_0: false,
+            lazy_blockquote_gobble: ctx.config.dialect == Dialect::Pandoc,
         }
     }
 
     /// Bq-only convenience for callers that don't have a `BlockContext`.
+    /// The Pandoc lazy gobble is off; callers needing it build from a stack
+    /// or a `BlockContext`.
     #[allow(dead_code)]
     pub fn bq_only(bq_depth: usize) -> Self {
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
@@ -187,6 +207,7 @@ impl ContainerPrefix {
         Self {
             ops,
             list_marker_consumed_on_line_0: false,
+            lazy_blockquote_gobble: false,
         }
     }
 
@@ -229,6 +250,7 @@ impl ContainerPrefix {
         bq_outer: bool,
         content_indent: usize,
         list_marker_consumed_on_line_0: bool,
+        dialect: Dialect,
     ) -> Self {
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
         if bq_outer {
@@ -252,6 +274,7 @@ impl ContainerPrefix {
         Self {
             ops,
             list_marker_consumed_on_line_0,
+            lazy_blockquote_gobble: dialect == Dialect::Pandoc,
         }
     }
 
@@ -304,6 +327,7 @@ impl ContainerPrefix {
         Self {
             ops: SmallVec::from_slice(ops_slice),
             list_marker_consumed_on_line_0,
+            lazy_blockquote_gobble: false,
         }
     }
 
@@ -311,9 +335,24 @@ impl ContainerPrefix {
     /// in multi-line lookahead and for callers that need the full
     /// strip regardless of the line-0 marker flag.
     pub fn strip<'a>(&self, line: &'a str) -> &'a str {
+        let ops = self.ops();
         let mut s = line;
-        for op in self.ops() {
-            s = apply_op(s, *op);
+        let mut i = 0;
+        while i < ops.len() {
+            match ops[i] {
+                // Walk the whole contiguous blockquote run at once: the lazy
+                // gobble fires on the run, not on each marker, so a line that
+                // is lazy at *some* level de-indents exactly once.
+                StripOp::BlockQuoteMarker => {
+                    let run = blockquote_run_len(&ops[i..]);
+                    s = strip_bq_with_gobble(s, run, self.lazy_blockquote_gobble);
+                    i += run;
+                }
+                op => {
+                    s = apply_op(s, op);
+                    i += 1;
+                }
+            }
         }
         s
     }
@@ -338,27 +377,33 @@ impl ContainerPrefix {
             .ops()
             .iter()
             .rposition(|op| matches!(op, StripOp::ListAdvance(_)));
+        let ops = self.ops();
         let mut s = line;
         let mut emit: Option<&'a str> = None;
-        for (i, op) in self.ops().iter().enumerate() {
-            match op {
+        let mut i = 0;
+        while i < ops.len() {
+            match ops[i] {
                 StripOp::ListAdvance(n) => {
                     if Some(i) == last_list_idx && !self.list_marker_consumed_on_line_0 {
                         // Preserve list-indent on the dispatch line
                         // when the marker wasn't upstream-emitted.
                     } else {
-                        s = advance_columns(s, *n as usize);
+                        s = advance_columns(s, n as usize);
                     }
+                    i += 1;
                 }
                 StripOp::BlockQuoteMarker => {
-                    s = strip_n_blockquote_markers(s, 1);
+                    let run = blockquote_run_len(&ops[i..]);
+                    s = strip_bq_with_gobble(s, run, self.lazy_blockquote_gobble);
+                    i += run;
                 }
                 StripOp::ContentIndent(n) => {
-                    let (next, e) = strip_content_indent(s, *n as usize);
+                    let (next, e) = strip_content_indent(s, n as usize);
                     s = next;
                     if e.is_some() {
                         emit = e;
                     }
+                    i += 1;
                 }
             }
         }
@@ -375,11 +420,20 @@ impl ContainerPrefix {
     /// Note: this split mirrors the legacy `(list_indent, bq_prefix,
     /// inner)` shape and does NOT account for `ContentIndent` ops
     /// (graft helpers operate on outer-container prefixes only).
+    ///
+    /// The Pandoc lazy gobble lands in `bq_prefix`: on a line short of
+    /// its `>` markers the skipped whitespace is prefix, not content, so
+    /// the graft re-injects it as prefix tokens instead of handing it to
+    /// the reparse. Keeping it in the reparse would turn a lazy `<div>`
+    /// body line indented four columns into an indented code block where
+    /// pandoc reads a paragraph.
     #[allow(dead_code)]
     pub fn split<'a>(&self, line: &'a str) -> (&'a str, &'a str, &'a str) {
         let mut s = line;
         let mut list_consumed = 0usize;
         let mut bq_consumed = 0usize;
+        let mut bq_requested = 0usize;
+        let mut bq_matched = 0usize;
         let mut phase = 0; // 0 = looking for list, 1 = consuming bqs, 2 = done
         for op in self.ops() {
             match op {
@@ -390,8 +444,10 @@ impl ContainerPrefix {
                     phase = 1;
                 }
                 StripOp::BlockQuoteMarker if phase <= 1 => {
-                    let after = strip_n_blockquote_markers(s, 1);
+                    let (after, consumed) = strip_blockquote_markers_counted(s, 1);
                     bq_consumed += s.len() - after.len();
+                    bq_requested += 1;
+                    bq_matched += consumed;
                     s = after;
                     phase = 1;
                 }
@@ -402,6 +458,11 @@ impl ContainerPrefix {
             }
         }
         let _ = phase;
+        if self.lazy_blockquote_gobble && bq_matched < bq_requested {
+            let gobbled = lazy_gobble_trim(s);
+            bq_consumed += s.len() - gobbled.len();
+            s = gobbled;
+        }
         (
             &line[..list_consumed],
             &line[list_consumed..list_consumed + bq_consumed],
@@ -415,6 +476,46 @@ fn apply_op(line: &str, op: StripOp) -> &str {
         StripOp::ListAdvance(n) => advance_columns(line, n as usize),
         StripOp::BlockQuoteMarker => strip_n_blockquote_markers(line, 1),
         StripOp::ContentIndent(n) => strip_content_indent(line, n as usize).0,
+    }
+}
+
+/// Skip the leading whitespace pandoc's blockquote gobble drops from a lazy
+/// line — one carrying fewer `>` markers than the quote is deep.
+///
+/// Unbounded, and covers tabs: `pandoc -f markdown -t native` on
+/// ``> ``` `` / `         deep` / ``> ``` `` yields `CodeBlock "deep"`, so
+/// the skip is not capped at the three columns a block construct tolerates.
+/// Mirrors `Parser::fold_lazy_line_into_blockquote`'s
+/// `trim_start_matches([' ', '\t'])` on the dispatch line.
+///
+/// A blank line is left alone: it carries no markers, so it would look lazy
+/// to every caller, but in pandoc's reader it ends the quote instead of
+/// being gobbled into it.
+fn lazy_gobble_trim(line: &str) -> &str {
+    if line.trim().is_empty() {
+        return line;
+    }
+    line.trim_start_matches([' ', '\t'])
+}
+
+/// Length of the leading run of `BlockQuoteMarker` ops in `ops`.
+fn blockquote_run_len(ops: &[StripOp]) -> usize {
+    ops.iter()
+        .take_while(|op| matches!(op, StripOp::BlockQuoteMarker))
+        .count()
+}
+
+/// The tail after the blockquote bucket, with the lazy gobble applied when
+/// `lazy_gobble` is set and fewer than `bq_depth` markers were consumed.
+fn strip_bq_with_gobble(line: &str, bq_depth: usize, lazy_gobble: bool) -> &str {
+    if bq_depth == 0 {
+        return line;
+    }
+    let (rest, consumed) = strip_blockquote_markers_counted(line, bq_depth);
+    if lazy_gobble && consumed < bq_depth {
+        lazy_gobble_trim(rest)
+    } else {
+        rest
     }
 }
 
@@ -609,6 +710,7 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
             self.prefix.list_content_col(),
             bq_outer_of_list(self.prefix),
             self.prefix.content_indent(),
+            self.prefix.lazy_blockquote_gobble,
         )
     }
 
@@ -629,6 +731,7 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
             self.prefix.list_content_col(),
             bq_outer_of_list(self.prefix),
             self.prefix.content_indent(),
+            self.prefix.lazy_blockquote_gobble,
         )
     }
 
@@ -720,6 +823,7 @@ pub(crate) fn content_line_prefix_tail<'a>(
     list_content_col: usize,
     bq_outer: bool,
     content_indent: usize,
+    lazy_gobble: bool,
 ) -> &'a str {
     let mut s = content_line;
 
@@ -730,7 +834,7 @@ pub(crate) fn content_line_prefix_tail<'a>(
     };
     let strip_bq = |s: &mut &'a str| {
         if bq_depth > 0 {
-            *s = strip_n_blockquote_markers(s, bq_depth);
+            *s = strip_bq_with_gobble(s, bq_depth, lazy_gobble);
         }
     };
 
@@ -759,6 +863,7 @@ pub(crate) fn emit_content_line_prefixes<'a>(
     list_content_col: usize,
     bq_outer: bool,
     content_indent: usize,
+    lazy_gobble: bool,
 ) -> &'a str {
     // Strip and emit content-line (1+) prefixes in container-stack
     // order:
@@ -810,12 +915,26 @@ pub(crate) fn emit_content_line_prefixes<'a>(
         }
         let current_offset = content_line.len() - s.len();
         flush_ws(builder, pending, current_offset);
-        let stripped = strip_n_blockquote_markers(s, bq_depth);
+        let (stripped, consumed) = strip_blockquote_markers_counted(s, bq_depth);
         let prefix_len = s.len() - stripped.len();
         if prefix_len > 0 {
             emit_blockquote_prefix_tokens(builder, &s[..prefix_len]);
         }
         *s = stripped;
+        // Pandoc's gobble: a lazy line loses its indent to the quote's raw
+        // content. Hand the bytes to the pending WHITESPACE run rather than
+        // leaving them in the construct's content — that is what keeps the
+        // tree lossless while the block sees a de-indented line.
+        if lazy_gobble && consumed < bq_depth {
+            let gobbled = lazy_gobble_trim(stripped);
+            if gobbled.len() < stripped.len() {
+                let start = content_line.len() - stripped.len();
+                if pending.is_none() {
+                    *pending = Some(start);
+                }
+                *s = gobbled;
+            }
+        }
     };
 
     if bq_outer {
@@ -846,7 +965,8 @@ pub(crate) fn emit_content_line_prefixes<'a>(
             bq_depth,
             list_content_col,
             bq_outer,
-            content_indent
+            content_indent,
+            lazy_gobble
         ),
         "the peek twin must strip exactly what emission strips"
     );
@@ -930,8 +1050,11 @@ pub(crate) struct ContainerPrefixLine {
     /// List-indent bytes — emitted as a single `WHITESPACE` token at
     /// line start when non-empty.
     pub list_indent: String,
-    /// Blockquote prefix bytes (mix of `>` and inter-marker whitespace).
-    /// Emitted byte-by-byte after the list-indent token.
+    /// Blockquote prefix bytes (mix of `>` and inter-marker whitespace),
+    /// plus any whitespace the Pandoc lazy gobble skipped on a line short
+    /// of its markers. Emitted byte-by-byte after the list-indent token,
+    /// except for the run trailing the last `>` — see
+    /// [`emit_container_prefix_tokens`].
     pub bq_prefix: String,
 }
 
@@ -958,6 +1081,12 @@ impl ContainerPrefixLine {
 /// Emit a captured per-line container prefix as kind-tagged tokens.
 /// List-indent (if any) goes out as one `WHITESPACE`; bq prefix bytes
 /// go out byte-by-byte as `BLOCK_QUOTE_MARKER` / `WHITESPACE`.
+///
+/// The byte-by-byte split is load-bearing, not cosmetic: the formatter
+/// reads these tokens back when rebuilding a quoted line, and coalescing
+/// the run into one `WHITESPACE` makes it drop the whole run rather than
+/// the marker's own space (see the
+/// `html_block_div_definition_body_later_line_blockquote` golden case).
 pub(crate) fn emit_container_prefix_tokens(
     builder: &mut GreenNodeBuilder<'static>,
     line: &ContainerPrefixLine,
@@ -990,7 +1119,8 @@ mod tests {
 
     #[test]
     fn with_extra_blockquotes_matches_a_deeper_stack() {
-        let base = ContainerPrefix::from_stack(&[Container::BlockQuote {}], false);
+        let base =
+            ContainerPrefix::from_stack(&[Container::BlockQuote {}], false, Dialect::CommonMark);
         let deeper = base.with_extra_blockquotes(1);
         assert_eq!(deeper.bq_depth(), 2);
         assert_eq!(deeper.strip("> > a"), "a");
@@ -1002,6 +1132,7 @@ mod tests {
         let from_stack = ContainerPrefix::from_stack(
             &[Container::BlockQuote {}, Container::BlockQuote {}],
             false,
+            Dialect::CommonMark,
         );
         assert_eq!(deeper.ops().len(), from_stack.ops().len());
         assert_eq!(deeper.bq_depth(), from_stack.bq_depth());
@@ -1015,7 +1146,7 @@ mod tests {
         // which passes `bq_outer = bq_depth > 0`.
         let check = |bq: usize, lcc: usize, ci: usize, lmc0: bool| {
             let bq_outer = bq > 0;
-            let p = ContainerPrefix::from_scalars(bq, lcc, bq_outer, ci, lmc0);
+            let p = ContainerPrefix::from_scalars(bq, lcc, bq_outer, ci, lmc0, Dialect::CommonMark);
             assert_eq!(p.bq_depth(), bq, "bq_depth");
             assert_eq!(p.list_content_col(), lcc, "list_content_col");
             assert_eq!(p.content_indent(), ci, "content_indent");
@@ -1246,6 +1377,7 @@ mod tests {
                 prefix.list_content_col(),
                 bq_outer_of_list(&prefix),
                 prefix.content_indent(),
+                prefix.lazy_blockquote_gobble,
             )
         );
     }
@@ -1366,7 +1498,7 @@ mod tests {
                 virtual_marker_space: false,
             },
         ];
-        let p = ContainerPrefix::from_stack(&stack, false);
+        let p = ContainerPrefix::from_stack(&stack, false, Dialect::CommonMark);
         // Only the innermost (content_col=4) is applied.
         assert_eq!(p.strip("- - foo"), "foo");
     }

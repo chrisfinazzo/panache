@@ -41,7 +41,8 @@ DOCUMENT@0..80
         TEXT@34..35 "f"
         NEWLINE@35..36 "\n"
       LINE_BLOCK_LINE@36..42
-        LINE_BLOCK_MARKER@36..40 "  | "
+        WHITESPACE@36..38 "  "
+        LINE_BLOCK_MARKER@38..40 "| "
         TEXT@40..41 "g"
         NEWLINE@41..42 "\n"
   BLANK_LINE@42..43

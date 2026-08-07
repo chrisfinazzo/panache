@@ -690,3 +690,12 @@
 508
 509
 510
+
+# Pandoc's blockquote gobble drops the leading whitespace of every lazy line
+# while extracting the quote's raw content, so a construct's *body* lines
+# de-indent too, not just the line that opened it. 0511 pins the `<div>` body
+# case: a lazy line indented four columns is a paragraph inside the div, not an
+# indented code block. `StripOp::BlockQuoteMarker` carries the gobble, so the
+# same strip reaches every block parser. The fenced-code twin is 0512, blocked
+# on a projector gap (see blocked.txt).
+511

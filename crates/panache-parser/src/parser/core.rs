@@ -551,7 +551,14 @@ impl<'a> Parser<'a> {
         // Marker-line dispatch: the list marker + indent were emitted
         // upstream (`list_marker_consumed_on_line_0 = true`); blockquotes,
         // if any, are outer of the list.
-        let prefix = ContainerPrefix::from_scalars(bq_depth, content_col, bq_depth > 0, 0, true);
+        let prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            content_col,
+            bq_depth > 0,
+            0,
+            true,
+            self.config.dialect,
+        );
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
         let new_pos = code_blocks::parse_fenced_code_block(
             &mut self.builder,
@@ -604,7 +611,14 @@ impl<'a> Parser<'a> {
         // Marker-line dispatch: the list marker + indent were emitted
         // upstream (`list_marker_consumed_on_line_0 = true`); blockquotes,
         // if any, are outer of the list.
-        let prefix = ContainerPrefix::from_scalars(bq_depth, content_col, bq_depth > 0, 0, true);
+        let prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            content_col,
+            bq_depth > 0,
+            0,
+            true,
+            self.config.dialect,
+        );
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
 
         // Tables outrank line blocks in the registry (10 vs 13), and a pipe
@@ -672,7 +686,14 @@ impl<'a> Parser<'a> {
         // and its lookahead through the list-content strip (`content_col`).
         // Bail otherwise, leaving the line buffered for paragraph handling.
         let bq_depth = self.current_blockquote_depth();
-        let prefix = ContainerPrefix::from_scalars(bq_depth, content_col, bq_depth > 0, 0, true);
+        let prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            content_col,
+            bq_depth > 0,
+            0,
+            true,
+            self.config.dialect,
+        );
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
         if !tables::is_caption_followed_by_table(&window, self.pos) {
             return None;
@@ -766,7 +787,14 @@ impl<'a> Parser<'a> {
         let content_col = *content_col;
 
         let bq_depth = self.current_blockquote_depth();
-        let prefix = ContainerPrefix::from_scalars(bq_depth, content_col, bq_depth > 0, 0, true);
+        let prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            content_col,
+            bq_depth > 0,
+            0,
+            true,
+            self.config.dialect,
+        );
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
 
         // A caption-led table (`- : cap` / `- Table: cap` then table) is the
@@ -1615,8 +1643,14 @@ impl<'a> Parser<'a> {
         // continuation lines carry their outer container prefix; strip it so
         // the probe sees the same content the real dispatch would.
         let bq_depth = self.current_blockquote_depth();
-        let content_prefix =
-            ContainerPrefix::from_scalars(bq_depth, 0, bq_depth > 0, content_col, false);
+        let content_prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            0,
+            bq_depth > 0,
+            content_col,
+            false,
+            self.config.dialect,
+        );
         let probe_consumed = {
             let mut synthetic: Vec<&str> = Vec::with_capacity(self.lines.len() - self.pos);
             synthetic.push(content_line);
@@ -1757,7 +1791,8 @@ impl<'a> Parser<'a> {
         // Probe how many lines the block spans by reparsing a synthetic window
         // (line 0 already dedented, continuation lines content-indent-stripped)
         // into a throwaway builder.
-        let content_prefix = ContainerPrefix::from_scalars(0, 0, false, content_col, false);
+        let content_prefix =
+            ContainerPrefix::from_scalars(0, 0, false, content_col, false, self.config.dialect);
         let probe_consumed = {
             let mut synthetic: Vec<&str> = Vec::with_capacity(self.lines.len() - self.pos);
             synthetic.push(stripped_content);
@@ -1876,7 +1911,14 @@ impl<'a> Parser<'a> {
 
         // Strip the full container prefix (bq markers outermost, then the
         // content indent) from continuation lines.
-        let content_prefix = ContainerPrefix::from_scalars(bq_depth, 0, true, content_col, false);
+        let content_prefix = ContainerPrefix::from_scalars(
+            bq_depth,
+            0,
+            true,
+            content_col,
+            false,
+            self.config.dialect,
+        );
 
         // Probe how many lines the block spans by reparsing a synthetic
         // window (line 0 already dedented, continuation lines fully stripped).
@@ -2067,8 +2109,14 @@ impl<'a> Parser<'a> {
         // the footnote's 4-space content indent) into a throwaway builder.
         let closes_on_marker_line = {
             let bq_depth = self.current_blockquote_depth();
-            let prefix =
-                ContainerPrefix::from_scalars(bq_depth, 0, bq_depth > 0, content_col, false);
+            let prefix = ContainerPrefix::from_scalars(
+                bq_depth,
+                0,
+                bq_depth > 0,
+                content_col,
+                false,
+                self.config.dialect,
+            );
             let mut synthetic: Vec<&str> = Vec::with_capacity(self.lines.len() - self.pos);
             synthetic.push(first_line_content);
             for line in &self.lines[self.pos + 1..] {
@@ -2364,6 +2412,7 @@ impl<'a> Parser<'a> {
                             bq_depth > 0,
                             content_col,
                             false,
+                            self.config.dialect,
                         );
                         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
                         let new_pos = if self.config.extensions.tex_math_gfm
@@ -2374,6 +2423,7 @@ impl<'a> Parser<'a> {
                                 &window,
                                 fence,
                                 Some(&fence_line),
+                                self.config.dialect,
                             )
                         } else {
                             code_blocks::parse_fenced_code_block(
@@ -2618,8 +2668,11 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        let base =
-            ContainerPrefix::from_stack(&self.containers.stack, self.dispatch_list_marker_consumed);
+        let base = ContainerPrefix::from_stack(
+            &self.containers.stack,
+            self.dispatch_list_marker_consumed,
+            self.config.dialect,
+        );
         for k in current_bq_depth.max(1)..bq_depth {
             let prefix = base.with_extra_blockquotes(k - current_bq_depth);
             let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
@@ -4632,8 +4685,11 @@ impl<'a> Parser<'a> {
         // the parser's `dispatch_list_marker_consumed` field — it never
         // lived on `BlockContext` after the trait migration since no
         // `BlockParser` impl reads it.
-        let dispatcher_prefix =
-            ContainerPrefix::from_stack(&self.containers.stack, self.dispatch_list_marker_consumed);
+        let dispatcher_prefix = ContainerPrefix::from_stack(
+            &self.containers.stack,
+            self.dispatch_list_marker_consumed,
+            self.config.dialect,
+        );
 
         // Setext heading folded over a list item's buffered first-line text.
         // Must run before block detection so that an HR-shaped underline like

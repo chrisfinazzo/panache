@@ -1844,7 +1844,7 @@ impl BlockParser for FencedCodeBlockParser {
         // parse functions derive `bq_depth`/`list_content_col`/`bq_outer`/
         // `content_indent`/`list_marker_consumed_on_line_0` from it.
         let new_pos = if ctx.config.extensions.tex_math_gfm && is_gfm_math_fence(&fence) {
-            parse_fenced_math_block(builder, lines, fence, None)
+            parse_fenced_math_block(builder, lines, fence, None, ctx.config.dialect)
         } else {
             parse_fenced_code_block(builder, lines, fence, None, &ctx.diags, ctx.config.flavor)
         };

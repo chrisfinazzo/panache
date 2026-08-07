@@ -988,6 +988,138 @@ fn div_closer_inside_the_quote_closes_only_the_div() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::FENCED_DIV), 1);
 }
 
+/// The code a fenced block actually holds: the TEXT and NEWLINE tokens of
+/// the first `CODE_CONTENT`, leaving out the container-prefix tokens
+/// (`BLOCK_QUOTE_MARKER` / `WHITESPACE`) the emitter peels off around them.
+/// That split is the whole point of the lazy gobble, so assert on it rather
+/// than on `CODE_CONTENT`'s raw text, which is byte-identical either way.
+fn fenced_code_text(root: &crate::syntax::SyntaxNode) -> String {
+    find_nodes_of_type(root, SyntaxKind::CODE_CONTENT)
+        .first()
+        .map(|content| {
+            content
+                .children_with_tokens()
+                .filter_map(|element| element.into_token())
+                .filter(|token| matches!(token.kind(), SyntaxKind::TEXT | SyntaxKind::NEWLINE))
+                .map(|token| token.text().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Assert a quoted fence's body, after checking losslessness. `expected` is
+/// the `CodeBlock` payload `pandoc -f markdown -t native` reports, plus the
+/// trailing newline the CST keeps and pandoc drops.
+fn assert_quoted_fence_body(input: &str, expected: &str) {
+    let tree = parse_blocks(input);
+    assert_eq!(
+        tree.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        fenced_code_text(&tree),
+        expected,
+        "fence body for {input:?}"
+    );
+}
+
+/// Pandoc's quote reader drops the leading whitespace of *every* lazy line
+/// while extracting the raw content, not just the one that opened a block.
+/// A fence opened on a lazy line therefore holds de-indented body lines:
+/// `CodeBlock "code"`, not `CodeBlock " code"`.
+#[test]
+fn lazy_fence_opened_by_a_fold_deindents_its_body() {
+    // pandoc -f markdown -t native:
+    //   [ BlockQuote [ Header 1 .., CodeBlock ("", [], []) "code" ] ]
+    assert_quoted_fence_body("> # h\n ```\n code\n ```\n", "code\n");
+}
+
+/// The same de-indent with no fold in sight: the fence opens on a line that
+/// carries its `>` marker and only the body line is lazy.
+#[test]
+fn lazy_body_line_deindents_inside_a_quoted_fence() {
+    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code" ] ]
+    assert_quoted_fence_body("> ```\n code\n> ```\n", "code\n");
+}
+
+/// The gobble skips *all* leading whitespace, not the three columns a block
+/// construct would tolerate — nine spaces do not make an indented code block
+/// inside the fence.
+#[test]
+fn lazy_body_line_deindent_is_unbounded() {
+    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "deep" ] ]
+    assert_quoted_fence_body("> ```\n         deep\n> ```\n", "deep\n");
+}
+
+/// Tabs are skipped alongside spaces, matching
+/// `fold_lazy_line_into_blockquote`'s `trim_start_matches([' ', '\t'])`.
+#[test]
+fn lazy_body_line_deindent_skips_tabs() {
+    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code" ] ]
+    assert_quoted_fence_body("> ```\n\t code\n> ```\n", "code\n");
+}
+
+/// The closing fence may itself be lazy: de-indented it matches, so the code
+/// block ends there and the quote carries on with the next line.
+#[test]
+fn lazy_closing_fence_closes_the_quoted_code_block() {
+    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code", Para [ Str "after" ] ] ]
+    let input = "> ```\n code\n ```\n> after\n";
+    assert_quoted_fence_body(input, "code\n");
+
+    let tree = parse_blocks(input);
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(
+        quotes[0]
+            .children()
+            .map(|node| node.kind())
+            .collect::<Vec<_>>(),
+        vec![SyntaxKind::CODE_BLOCK, SyntaxKind::PARAGRAPH]
+    );
+}
+
+/// Each quote level de-indents its own lazy lines: the outer quote strips one
+/// marker off `> code`, and the inner one finds a marker-less line and drops
+/// the (empty) indent.
+#[test]
+fn lazy_body_line_deindents_at_each_quote_level() {
+    // pandoc: [ BlockQuote [ BlockQuote [ CodeBlock ("", [], []) "code" ] ] ]
+    let input = ">> ```\n> code\n>> ```\n";
+    assert_quoted_fence_body(input, "code\n");
+
+    let tree = parse_blocks(input);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
+}
+
+/// With the list *outside* the quote the list-content strip runs first and the
+/// gobble then finds nothing left to drop.
+#[test]
+fn lazy_body_line_keeps_list_content_indent_when_the_list_is_outer() {
+    // pandoc: [ BulletList [ [ BlockQuote [ CodeBlock ("", [], []) "code" ] ] ] ]
+    assert_quoted_fence_body("- > ```\n  code\n  > ```\n", "code\n");
+}
+
+/// CommonMark laziness is paragraph-only, so the lazy line ends the quote and
+/// the fence forms at the top level with its own indent rules. The gobble must
+/// stay off in that dialect.
+#[test]
+fn commonmark_lazy_line_ends_the_quote_before_a_fence() {
+    let input = "> # h\n ```\n code\n ```\n";
+    let tree = parse_blocks_gfm(input);
+
+    assert_eq!(
+        tree.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE, SyntaxKind::CODE_BLOCK]
+    );
+}
+
 /// A fenced div opened *outside* the quote still terminates it: pandoc's
 /// extraction runs inside the div body, where the closer is not quote
 /// content (issue #310).

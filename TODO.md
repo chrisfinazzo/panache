@@ -346,16 +346,27 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `LINE_BLOCK` next to `FENCED_DIV`/`CODE_BLOCK`, without which the item's
   marker was dropped. Fixed two parser fixtures that had pinned the old
   divergence (`*_pipe_table_*_no_separator_pandoc`). Corpus 510.
-- [ ] The blockquote fold reaches one line at a time, so a *multi-line*
-  construct opened on a lazy line keeps the indent on its body lines:
-  ````> # h\n ```\n code\n ``` ```` is `CodeBlock " code"` where pandoc has
-  `"code"`. The dispatch line is de-indented by rewriting `self.lines`, but
-  the body lines are read straight out of `self.lines` by the construct's
-  own forward scan. Doing this properly wants the fold to live in
-  `ContainerPrefix` as a strip op, so every line of the construct carries
-  it. The forward scans in `code_blocks.rs` / `html_blocks.rs` /
-  `block_dispatcher.rs` are already lazy-aware; `parse_fenced_math_block` is
-  not, because no dialect is plumbed into it.
+- [x] The blockquote fold reached one line at a time, so a *multi-line*
+  construct opened on a lazy line kept the indent on its body lines:
+  ````> # h\n ```\n code\n ``` ```` was `CodeBlock " code"` where pandoc has
+  `"code"`. Checking it showed the fold was never the whole story --- the
+  de-indent is a property of pandoc's quote reader, which skips the leading
+  whitespace of every lazy line while extracting the raw content, so
+  ````> ```\n code\n> ``` ```` diverged too with no fold in sight. Fixed by
+  moving the gobble into `ContainerPrefix`: a `lazy_blockquote_gobble` flag
+  set from the dialect makes the blockquote strip drop the leading
+  whitespace of any line short of its `>` markers, and every block parser
+  inherits it through the one strip (`strip`, `strip_line_0_*`, `split`, and
+  the `content_line_prefix_tail` / `emit_content_line_prefixes` pair, which
+  hands the bytes to the pending `WHITESPACE` run so the tree stays
+  lossless). The trim is unbounded and covers tabs, per
+  ````> ```\n         deep\n> ``` ```` -> `CodeBlock "deep"`.
+  `parse_fenced_math_block` grew the `dialect` parameter its forward scan
+  needed for the same `gobbled_lazily` exemption the other scans had. The
+  html body-lift path needed `split` taught too, otherwise a lazy `<div>`
+  body line indented four columns became an indented code block where pandoc
+  reads a paragraph. Corpus 511; 512 and 513 are blocked (see below and
+  `tests/pandoc/blocked.txt`).
 - [ ] A lazy line that gives a quoted list item a second block leaves the list
   tight: `> - item\n # head` under `-blank_before_header` is
   `BulletList [[Plain item, Header]]` where pandoc has `Para`, because an
@@ -363,7 +374,23 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   fold --- the looseness rule is what is missing.
 - [ ] Found while checking the fold, pre-existing and unrelated: a fenced code
   block inside a blockquote keeps the `>` markers in its content ---
-  ````> ```\n> code\n> ``` ```` projects `CodeBlock "> code"`.
+  ````> ```\n> code\n> ``` ```` projects `CodeBlock "> code"`. `code_block`
+  rebuilds the payload from `CODE_CONTENT`'s raw text, so every
+  container-prefix token the emitter peeled off lands back in the string.
+  This is what blocks corpus 512, where the CST is already correct. The
+  ambiguity to settle first: a line-leading `WHITESPACE` token inside
+  `CODE_CONTENT` is a container prefix for a fenced block but the
+  significant indent of an indented one.
+- [ ] The fold declines *entry* inside a quoted list item, so a construct opened
+  on such a lazy line never forms: ````> - a\n   ```\n   c\n   ``` ```` is
+  `BlockQuote [BulletList [[Plain a]], CodeBlock "c"]` in pandoc, but the
+  lazy-list-continuation gate in `handle_blockquote_line` runs ahead of
+  `fold_lazy_line_into_blockquote` and buffers the lines as `PLAIN`, so the
+  fence degrades to an `INLINE_CODE` span. The shape also fails
+  `debug format --checks idempotency` (the second pass re-quotes them as
+  `>   >   c`). Fixing it means ordering that gate against
+  `blockquote_gobble_ends_at`, which governs every `> - a\n  b` shape.
+  Corpus 513, blocked.
 
 ### Architecture
 

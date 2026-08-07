@@ -54,15 +54,28 @@ pub(in crate::parser) fn current_blockquote_depth(containers: &ContainerStack) -
 
 /// Strip exactly n blockquote markers from a line, returning the rest.
 pub(in crate::parser) fn strip_n_blockquote_markers(line: &str, n: usize) -> &str {
+    strip_blockquote_markers_counted(line, n).0
+}
+
+/// Strip up to `n` blockquote markers, returning the rest and how many were
+/// actually consumed.
+///
+/// A count below `n` means the line is *lazy* at that depth — it carries
+/// fewer `>` markers than the open quote. Callers that implement pandoc's
+/// gobble need that distinction, which the plain
+/// [`strip_n_blockquote_markers`] hides by returning the line unchanged.
+pub(in crate::parser) fn strip_blockquote_markers_counted(line: &str, n: usize) -> (&str, usize) {
     let mut remaining = line;
+    let mut consumed = 0usize;
     for _ in 0..n {
         if let Some((_, content_start)) = try_parse_blockquote_marker(remaining) {
             remaining = &remaining[content_start..];
+            consumed += 1;
         } else {
             break;
         }
     }
-    remaining
+    (remaining, consumed)
 }
 
 /// Emit one blockquote marker with its whitespace.

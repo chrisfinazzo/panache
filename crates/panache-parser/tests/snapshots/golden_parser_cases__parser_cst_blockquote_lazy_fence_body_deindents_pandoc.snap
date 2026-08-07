@@ -1,0 +1,68 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..66
+  BLOCK_QUOTE@0..18
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    CODE_BLOCK@2..18
+      CODE_FENCE_OPEN@2..6
+        CODE_FENCE_MARKER@2..5 "```"
+        NEWLINE@5..6 "\n"
+      CODE_CONTENT@6..12
+        WHITESPACE@6..7 " "
+        TEXT@7..11 "code"
+        NEWLINE@11..12 "\n"
+      BLOCK_QUOTE_MARKER@12..13 ">"
+      WHITESPACE@13..14 " "
+      CODE_FENCE_CLOSE@14..18
+        CODE_FENCE_MARKER@14..17 "```"
+        NEWLINE@17..18 "\n"
+  BLANK_LINE@18..19
+    BLANK_LINE@18..19 "\n"
+  BLOCK_QUOTE@19..42
+    BLOCK_QUOTE_MARKER@19..20 ">"
+    WHITESPACE@20..21 " "
+    HEADING@21..25
+      ATX_HEADING_MARKER@21..22
+        ATX_HEADING_MARKER@21..22 "#"
+      WHITESPACE@22..23 " "
+      HEADING_CONTENT@23..24
+        TEXT@23..24 "h"
+      NEWLINE@24..25 "\n"
+    WHITESPACE@25..26 " "
+    CODE_BLOCK@26..42
+      CODE_FENCE_OPEN@26..30
+        CODE_FENCE_MARKER@26..29 "```"
+        NEWLINE@29..30 "\n"
+      CODE_CONTENT@30..37
+        WHITESPACE@30..32 "\t "
+        TEXT@32..36 "deep"
+        NEWLINE@36..37 "\n"
+      WHITESPACE@37..38 " "
+      CODE_FENCE_CLOSE@38..42
+        CODE_FENCE_MARKER@38..41 "```"
+        NEWLINE@41..42 "\n"
+  BLANK_LINE@42..43
+    BLANK_LINE@42..43 "\n"
+  BLOCK_QUOTE@43..66
+    BLOCK_QUOTE_MARKER@43..44 ">"
+    BLOCK_QUOTE@44..66
+      BLOCK_QUOTE_MARKER@44..45 ">"
+      WHITESPACE@45..46 " "
+      CODE_BLOCK@46..66
+        CODE_FENCE_OPEN@46..50
+          CODE_FENCE_MARKER@46..49 "```"
+          NEWLINE@49..50 "\n"
+        CODE_CONTENT@50..59
+          BLOCK_QUOTE_MARKER@50..51 ">"
+          WHITESPACE@51..52 " "
+          TEXT@52..58 "nested"
+          NEWLINE@58..59 "\n"
+        BLOCK_QUOTE_MARKER@59..60 ">"
+        BLOCK_QUOTE_MARKER@60..61 ">"
+        WHITESPACE@61..62 " "
+        CODE_FENCE_CLOSE@62..66
+          CODE_FENCE_MARKER@62..65 "```"
+          NEWLINE@65..66 "\n"
