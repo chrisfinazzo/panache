@@ -1744,7 +1744,14 @@ impl BlockParser for FencedCodeBlockParser {
                 if line_bq_depth < ctx.blockquote_depth && !gobbled_lazily {
                     break;
                 }
-                let candidate = if container_content_col > 0 && !inner.is_empty() {
+                // A line the gobble takes back loses *all* its leading
+                // whitespace (`lazy_gobble_trim`), not the three columns
+                // `is_closing_fence` tolerates — so ` `` ` at four spaces is
+                // still this fence's closer. Strip it here or the scan
+                // declines the fence and it degrades to paragraph text.
+                let candidate = if line_bq_depth < ctx.blockquote_depth {
+                    inner.trim_start_matches([' ', '\t'])
+                } else if container_content_col > 0 && !inner.is_empty() {
                     let idx = byte_index_at_column(inner, container_content_col);
                     if idx <= inner.len() {
                         &inner[idx..]

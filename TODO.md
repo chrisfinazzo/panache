@@ -411,16 +411,59 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   ````> ```\n> \tcode```` is `"  code"`. Also cured the same leak in
   indented code inside a quote, fenced code in a footnote body, and a quote
   nested in a list item. Corpus 512 + new 515-519; total 512 -> 518 passing.
-- [ ] The fold declines *entry* inside a quoted list item, so a construct opened
-  on such a lazy line never forms: ````> - a\n   ```\n   c\n   ``` ```` is
+- [x] The fold declined *entry* inside a quoted list item, so a construct opened
+  on such a lazy line never formed: ````> - a\n   ```\n   c\n   ``` ```` is
   `BlockQuote [BulletList [[Plain a]], CodeBlock "c"]` in pandoc, but the
-  lazy-list-continuation gate in `handle_blockquote_line` runs ahead of
-  `fold_lazy_line_into_blockquote` and buffers the lines as `PLAIN`, so the
-  fence degrades to an `INLINE_CODE` span. The shape also fails
-  `debug format --checks idempotency` (the second pass re-quotes them as
-  `>   >   c`). Fixing it means ordering that gate against
-  `blockquote_gobble_ends_at`, which governs every `> - a\n  b` shape.
-  Corpus 513, blocked.
+  lazy gates in `parse_line` ran ahead of `fold_lazy_line_into_blockquote`
+  and buffered the lines as `PLAIN`, so the fence degraded to an
+  `INLINE_CODE` span. The gap was two-sided. Pandoc's `rawListItem` stops
+  collecting at a line `codeBlockFenced` would claim, so a fence ends the
+  item where a heading or thematic break is still swallowed as lazy item
+  text (`> - item\n # head` keeps the `Header` *inside* the item) --- that
+  asymmetry is why `close_lists_above_indent` is now gated on the
+  fenced-code parser under Pandoc instead of CommonMark's wider `!OpenList`,
+  which also fixed the unquoted twin ````- a\n```rust\nc\n``` ````. And both
+  lazy gates had to stop claiming the line: the paragraph one declines for a
+  backtick fence only (`endline`'s guard is backtick-anchored, so
+  `> a\n   ~~~` stays lazy text), the list one for any fence. Both probe the
+  *de-indented* content and require a matching closer, since
+  `codeBlockFenced` fails without one and an info string is no substitute.
+  The fold closes the list itself, before emitting the gobbled indent ---
+  forced, not cosmetic: a `~~~` fence only detects as a block when
+  `has_blank_before`, true for a `BlockQuote` on the stack but false for a
+  `ListItem`. The dispatcher's closer scan also had to drop a gobbled line's
+  whole indent, not the three columns `is_closing_fence` tolerates, or a
+  fence at four spaces declined and fell back to a paragraph.
+  `debug format --checks idempotency` now passes on the shape (it used to
+  re-quote the lines as `>   >   c`). Corpus 513; block 39 -> 40, total 518
+  -> 519 (100%).
+- [ ] Formatting a fence that a lazy fold opened rewrites its payload:
+  ````> # h\n   ```\n   c\n   ``` ```` is `CodeBlock "c"` but formats to
+  ````> ```\n>    c\n> ``` ````, i.e. `CodeBlock "   c"`. Pre-dates the 513
+  work, which only made one more input reach it. `parse_fenced_code_block`
+  emits a *content* line's gobbled prefix bytes inside `CODE_CONTENT` (via
+  `window.emit_prefix_at`) while the closing fence's prefix is a sibling of
+  `CODE_FENCE_CLOSE`; the projector compensates in `code_content_text`, the
+  formatter does not. Hoisting the prefix out of `CODE_CONTENT`, the way the
+  closer's already is, would fix both consumers at once. Lossless and
+  idempotent, so `--checks all` does not catch it.
+- [ ] An *over*-indented fence after a list item is lazy text in pandoc:
+  ````- a\n   ```\n   c\n   ``` ```` (indent 3, content column 2) is
+  `Plain [a, SoftBreak, Code "c"]`, because `listLine` gobbles only
+  `continuationIndent` columns and the leftover space defeats `endline`'s
+  backtick anchor. Panache nests a `CodeBlock` in the item. Not in the
+  corpus.
+- [ ] A bare closed fence after a plain paragraph does not interrupt it:
+  ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but one
+  inline-code `Para` here. This is panache's deliberate bare-fence heuristic
+  (`has_info || has_matching_closer`, plus the transcript/list contexts in
+  `FencedCodeBlockParser::detect_prepared`), so changing it means
+  re-deciding that heuristic rather than fixing a bug. Not in the corpus.
+- [ ] Under `flavor = "commonmark"` a lazy quoted fence keeps its indent in the
+  payload: ````> - a\n   ```\n   c\n   ``` ```` ends the quote (correct) but
+  yields `CodeBlock "   c"` where CommonMark strips up to the opening
+  fence's indent and gives `"c"`. Pinned as-is by
+  `blockquote_lazy_fence_ends_quoted_list_item_commonmark`.
 
 ### Architecture
 

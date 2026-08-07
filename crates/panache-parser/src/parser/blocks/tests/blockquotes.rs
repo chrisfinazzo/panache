@@ -1120,6 +1120,160 @@ fn commonmark_lazy_line_ends_the_quote_before_a_fence() {
     );
 }
 
+/// The kinds of `BLOCK_QUOTE`'s element children, for the shape assertions
+/// below. Tokens are skipped: the gobbled indent rides along as a bare
+/// `WHITESPACE` token and says nothing about block structure.
+fn quote_block_kinds(input: &str) -> Vec<SyntaxKind> {
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 1, "expected exactly one quote for {input:?}");
+    quotes[0].children().map(|node| node.kind()).collect()
+}
+
+/// Corpus 513. The gobble drops the lazy line's indent, so from the quote's
+/// view the fence opens at column 0 and cannot continue an item whose content
+/// column is 2 — the code block is the *list's* sibling.
+#[test]
+fn lazy_fence_after_a_quoted_list_item_is_the_lists_sibling() {
+    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a"]]]
+    //                      , CodeBlock ("", [], []) "c" ] ]
+    let input = "> - a\n   ```\n   c\n   ```\n";
+    assert_eq!(
+        quote_block_kinds(input),
+        vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK]
+    );
+    assert_quoted_fence_body(input, "c\n");
+
+    let tree = parse_blocks(input);
+    let items = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM);
+    assert_eq!(items.len(), 1);
+    assert_eq!(count_nodes_of_type(&items[0], SyntaxKind::PLAIN), 1);
+    assert_eq!(
+        count_nodes_of_type(&items[0], SyntaxKind::CODE_BLOCK),
+        0,
+        "the fence left the item, it did not stay in it"
+    );
+}
+
+/// The gobble is unbounded, so the boundary does not move with the indent:
+/// one space, four spaces and a tab all read the same.
+#[test]
+fn lazy_fence_after_a_quoted_list_item_is_indent_agnostic() {
+    for indent in [" ", "    ", "\t"] {
+        let input = format!("> - a\n{indent}```\n{indent}c\n{indent}```\n");
+        assert_eq!(
+            quote_block_kinds(&input),
+            vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK],
+            "for indent {indent:?}"
+        );
+        assert_quoted_fence_body(&input, "c\n");
+    }
+}
+
+/// The *list* boundary is fence-char agnostic, unlike the paragraph guard in
+/// `endline`: `~~~` ends the item too.
+#[test]
+fn lazy_tilde_fence_after_a_quoted_list_item_is_the_lists_sibling() {
+    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a"]]]
+    //                      , CodeBlock ("", [], []) "c" ] ]
+    let input = "> - a\n   ~~~\n   c\n   ~~~\n";
+    assert_eq!(
+        quote_block_kinds(input),
+        vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK]
+    );
+    assert_quoted_fence_body(input, "c\n");
+}
+
+/// A fence with no closer is not a fence: `codeBlockFenced` fails, so the lines
+/// stay lazy item text in a single `PLAIN`.
+#[test]
+fn lazy_fence_without_a_closer_stays_one_plain() {
+    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a", SoftBreak
+    //                      , Str "```", SoftBreak, Str "c"]]] ] ]
+    let input = "> - a\n   ```\n   c\n";
+    assert_eq!(quote_block_kinds(input), vec![SyntaxKind::LIST]);
+
+    let tree = parse_blocks(input);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PLAIN), 1);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::CODE_BLOCK), 0);
+}
+
+/// A blank line ends the quote's raw content, so a closer beyond it is not the
+/// opener's closer and the fence never forms.
+#[test]
+fn a_closer_past_a_blank_line_does_not_complete_the_lazy_fence() {
+    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a", SoftBreak
+    //                      , Str "```"]]] ], Para [ Str "```" ] ]
+    let input = "> - a\n   ```\n\n   ```\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::CODE_BLOCK), 0);
+    assert_eq!(
+        tree.children()
+            .map(|node| node.kind())
+            .collect::<Vec<_>>()
+            .first(),
+        Some(&SyntaxKind::BLOCK_QUOTE)
+    );
+}
+
+/// A heading is *not* a fence: pandoc's `rawListItem` swallows it as item
+/// content, so it stays inside the item the fence would have left. This is the
+/// asymmetry the fence-only close has to preserve.
+#[test]
+fn lazy_heading_stays_in_the_quoted_list_item() {
+    // pandoc -f markdown-blank_before_header:
+    //   [ BlockQuote [ BulletList [[Para [Str "item"], Header 1 ..]] ] ]
+    let mut config = ParserOptions::default();
+    config.extensions.blank_before_header = false;
+    let input = "> - item\n # head\n";
+    let tree = parse_blocks_with_config(input, &config);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    let items = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM);
+    assert_eq!(items.len(), 1);
+    assert_eq!(count_nodes_of_type(&items[0], SyntaxKind::HEADING), 1);
+}
+
+/// The quoted-paragraph half of the same rule: the quote's content is
+/// de-indented before `endline` runs, so its backtick lookahead succeeds at
+/// column 0 and the fence breaks the paragraph. Cf.
+/// `backtick_fence_on_a_lazy_line_ends_the_quote`, where a byte-0 fence ends
+/// the *quote* instead of opening a block inside it.
+#[test]
+fn indented_lazy_backtick_fence_breaks_the_quoted_paragraph() {
+    // pandoc: [ BlockQuote [ Para [ Str "a" ], CodeBlock ("", [], []) "c" ] ]
+    let input = "> a\n   ```\n   c\n   ```\n";
+    assert_eq!(
+        quote_block_kinds(input),
+        vec![SyntaxKind::PARAGRAPH, SyntaxKind::CODE_BLOCK]
+    );
+    assert_quoted_fence_body(input, "c\n");
+}
+
+/// That guard is backtick-anchored, so `~~~` keeps continuing the paragraph
+/// even though it ends a list item.
+#[test]
+fn indented_lazy_tilde_fence_keeps_continuing_the_quoted_paragraph() {
+    // pandoc: [ BlockQuote [ Para [ Str "a", SoftBreak, Subscript [], .. ] ] ]
+    let input = "> a\n   ~~~\n   c\n   ~~~\n";
+    assert_eq!(quote_block_kinds(input), vec![SyntaxKind::PARAGRAPH]);
+    assert_eq!(
+        count_nodes_of_type(&parse_blocks(input), SyntaxKind::CODE_BLOCK),
+        0
+    );
+}
+
+/// No closer, no interruption — the paragraph swallows the backticks.
+#[test]
+fn indented_lazy_fence_without_a_closer_keeps_continuing_the_paragraph() {
+    // pandoc: [ BlockQuote [ Para [ Str "a", SoftBreak, Str "```", .. ] ] ]
+    let input = "> a\n   ```\n   c\n";
+    assert_eq!(quote_block_kinds(input), vec![SyntaxKind::PARAGRAPH]);
+}
+
 /// A fenced div opened *outside* the quote still terminates it: pandoc's
 /// extraction runs inside the div body, where the closer is not quote
 /// content (issue #310).

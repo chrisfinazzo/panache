@@ -724,3 +724,11 @@
 # what makes the whole list loose, so 0514 pins the blank-line-free form ---
 # a backtick fence right after the item's text turns *both* items loose.
 514
+
+# The quote's gobble drops a lazy line's whole indent, so from the quote's view
+# the fence in `> - a`/`   ``` `/`   c`/`   ``` ` opens at column 0 - below the
+# item's content column, where pandoc's `rawListItem` stops collecting. The
+# `CodeBlock` is therefore the *list's* sibling inside the quote, not the item's
+# child. A heading at the same column is not: it stays in the item, which is why
+# the close is gated on the fenced-code parser and not on every interrupter.
+513

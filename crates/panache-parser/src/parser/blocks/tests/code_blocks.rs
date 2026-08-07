@@ -185,6 +185,86 @@ fn bare_fence_in_list_item_with_closing_fence_can_interrupt_paragraph() {
     );
 }
 
+/// The children of `root`, for the shape assertions below.
+fn block_kinds(root: &crate::syntax::SyntaxNode) -> Vec<SyntaxKind> {
+    root.children().map(|node| node.kind()).collect()
+}
+
+/// pandoc: `[ BulletList [ [ Plain [ Str "a" ] ] ], CodeBlock ("",["rust"],[]) "c" ]`.
+///
+/// `rawListItem` stops collecting at a line that opens a fenced code block
+/// below the item's content column, so the block is the list's *sibling*, not
+/// its child. Only a fence does this: a heading or thematic break at the same
+/// column is still item content (see below).
+#[test]
+fn under_indented_fence_closes_the_list_item_pandoc() {
+    let input = "- a\n```rust\nc\n```\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        block_kinds(&node),
+        vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK]
+    );
+    assert_eq!(get_code_content(&node).unwrap(), "c\n");
+}
+
+/// The boundary: at the item's content column the fence *is* item content, so
+/// the code block stays inside and the `Plain` is promoted to `Para` (0514).
+#[test]
+fn fence_at_the_item_content_column_stays_in_the_item() {
+    let input = "- a\n  ```rust\n  c\n  ```\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(block_kinds(&node), vec![SyntaxKind::LIST]);
+    assert!(
+        find_first(&node, SyntaxKind::CODE_BLOCK).is_some(),
+        "the fence at the content column is item content"
+    );
+}
+
+/// Only a *complete* fence ends the item — pandoc's `codeBlockFenced` needs its
+/// closer, so an unterminated one is lazy item text.
+#[test]
+fn under_indented_fence_without_a_closer_stays_lazy_item_text() {
+    let input = "- a\n```rust\nc\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(block_kinds(&node), vec![SyntaxKind::LIST]);
+    assert!(
+        find_first(&node, SyntaxKind::CODE_BLOCK).is_none(),
+        "an unclosed fence is not a fence"
+    );
+}
+
+/// The boundary is the item's content column, so an ordered marker moves it:
+/// `1. a` puts content at 3, and indent 2 is still under-indented.
+#[test]
+fn ordered_item_content_column_sets_the_fence_boundary() {
+    let outside = parse_blocks("1. a\n  ```r\n  c\n  ```\n");
+    assert_eq!(
+        block_kinds(&outside),
+        vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK]
+    );
+
+    let inside = parse_blocks("1. a\n   ```r\n   c\n   ```\n");
+    assert_eq!(block_kinds(&inside), vec![SyntaxKind::LIST]);
+}
+
+/// Neither a heading nor a thematic break ends a pandoc list item — they are
+/// lazy item text, which is why the close is gated on the fenced-code parser
+/// rather than on `!OpenList` the way CommonMark's is.
+#[test]
+fn under_indented_heading_and_rule_stay_lazy_item_text() {
+    for input in ["- a\n# h\n", "- a\n***\n"] {
+        let node = parse_blocks(input);
+        assert_eq!(node.text().to_string(), input, "parser must be lossless");
+        assert_eq!(block_kinds(&node), vec![SyntaxKind::LIST], "for {input:?}");
+    }
+}
+
 #[test]
 fn adjacent_bare_fences_with_command_transcripts_parse_as_two_code_blocks() {
     let input = "```\n% one\n```\n```\n% two\n```\n";

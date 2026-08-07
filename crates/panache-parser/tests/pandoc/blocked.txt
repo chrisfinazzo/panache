@@ -76,18 +76,25 @@
 # mirroring pandoc's `tabFilter`: `> \tcode` is `"  code"`, not `"    code"`.
 # See 0515-0519 for the shapes this pinned.
 
-# 513 - blocked on a PARSER gap in the fold's *entry* condition, distinct from
-# the body-line gobble above. `> - a`/`   ```` ``` ````/`   c`/`   ```` ``` ````
-# never reaches `fold_lazy_line_into_blockquote`: the lazy-list-continuation
-# gate in `handle_blockquote_line` runs first and hands the line to the open
-# list item, which buffers it as PLAIN text (the fence degrades to an
-# `INLINE_CODE` span). Pandoc drops the indent instead, so the fence opens at
-# column 0 and lands as a sibling of the list inside the quote. Unblocking means
-# ordering that gate against `blockquote_gobble_ends_at`, which governs every
-# `> - a`/`  b` shape - too wide to fold into the body-line fix.
+# 513 (the fold's *entry* condition) is FIXED; see allowlist 513. The gap was
+# two-sided. Pandoc's `rawListItem` stops collecting at a line
+# `codeBlockFenced` would claim, so the fence ends the item where a heading or
+# thematic break is still swallowed as lazy item text - that asymmetry is why
+# `close_lists_above_indent` is now gated on the fenced-code parser under
+# Pandoc rather than on CommonMark's wider `!OpenList`. And the two lazy gates
+# in `parse_line` (paragraph, list item) had to stop claiming the line so it
+# reaches `fold_lazy_line_into_blockquote` at all: the paragraph one declines
+# for a backtick fence only (`endline`'s guard is backtick-anchored), the list
+# one for any fence. Both probe the *de-indented* content and require a
+# matching closer, since `codeBlockFenced` fails without one and an info string
+# is no substitute.
 #
-# This shape also fails `panache debug format --checks idempotency` (the second
-# pass re-quotes the buffered lines as `>   >   c`), byte-identically before and
-# after the body-line gobble landed. Worth fixing ahead of the conformance
-# delta.
-513
+# The fold closes the list itself, before emitting the gobbled indent - forced,
+# not cosmetic: a `~~~` fence only detects as a block when `has_blank_before`,
+# which is true for a `BlockQuote` on the stack but false for a `ListItem`.
+#
+# Still divergent, unchanged by that work and not in the corpus: `- a`/`   ```
+# at an indent *above* the item content column is lazy text in pandoc but a
+# `CodeBlock` in the item here; and a bare closed fence after a plain paragraph
+# (`a`/`   ``` `/`c`/`   ``` `) stays one inline-code paragraph by design. See
+# TODO.md.

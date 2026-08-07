@@ -151,15 +151,20 @@ impl<'a> Parser<'a> {
     }
 
     /// Close enclosing list items (and their containing list) whose
-    /// `content_col` exceeds the given indent. Used by CommonMark when an
-    /// interrupting block (HR, ATX heading, fenced code, ...) appears at a
-    /// column shallower than the current list-item content column — per
-    /// §5.2 the line cannot continue the item, so the item and the
-    /// surrounding list close before the new block is emitted at the
-    /// outer level. Pandoc-markdown reaches this branch only when the
-    /// dispatcher already required a blank line before the interrupter,
-    /// at which point the blank-line handler has already closed the list;
-    /// gating on dialect at the call site keeps Pandoc unaffected.
+    /// `content_col` exceeds the given indent. Under CommonMark this covers
+    /// every interrupting block (HR, ATX heading, fenced code, ...): per §5.2
+    /// a line shallower than the item's content column cannot continue the
+    /// item, so the item and the surrounding list close before the new block
+    /// is emitted at the outer level.
+    ///
+    /// Pandoc uses the same close but for fenced code *only* — its
+    /// `rawListItem` stops collecting at a line `codeBlockFenced` would claim
+    /// while still swallowing an under-indented heading or thematic break as
+    /// lazy item text. Which blocks qualify is therefore the call site's
+    /// question, not this helper's.
+    ///
+    /// The loop stops at any non-`ListItem` container, so a list *outside* an
+    /// enclosing blockquote is never reached from inside it.
     fn close_lists_above_indent(&mut self, indent_cols: usize) {
         while let Some(Container::ListItem { content_col, .. }) = self.containers.last() {
             if indent_cols >= *content_col {
@@ -935,6 +940,51 @@ impl<'a> Parser<'a> {
             }
         }
         false
+    }
+
+    /// Whether a fence opened on a *lazy* blockquote line has a matching
+    /// closer inside the quote's raw content.
+    ///
+    /// A lazy twin of [`Self::has_matching_fence_closer`], which breaks on the
+    /// first line with fewer `>` markers and so never sees past the opener
+    /// here. This one mirrors `FencedCodeBlockParser::detect_prepared`'s scan
+    /// instead: a marker-less line keeps the scan alive because the gobble
+    /// folds it back into the quote, while a blank line ends the quote and so
+    /// ends the scan. Candidates are fully de-indented to match
+    /// `lazy_gobble_trim`; `is_closing_fence` tolerates only three spaces of
+    /// its own.
+    fn lazy_fence_has_matching_closer(&self, fence: &code_blocks::FenceInfo) -> bool {
+        self.lines
+            .iter()
+            .skip(self.pos + 1)
+            .take_while(|raw_line| !raw_line.trim().is_empty())
+            .any(|raw_line| {
+                let (_, inner) = count_blockquote_markers(raw_line);
+                code_blocks::is_closing_fence(inner.trim_start_matches([' ', '\t']), fence)
+            })
+    }
+
+    /// Whether de-indented lazy content opens a fenced code block that would
+    /// actually form.
+    ///
+    /// `rest` must already be gobble-trimmed: `try_parse_fence_open` tolerates
+    /// three spaces and no tabs, while the gobble drops every leading byte.
+    /// Extension-gated the way [`Self::maybe_open_fenced_code_in_new_list_item`]
+    /// is, and closer-gated because pandoc's `codeBlockFenced` fails without
+    /// one — `> - a` / `   ``` ` / `   c` stays a single `Plain`. An info
+    /// string is *not* an alternative to the closer here: `- a` / ```` ```rust ````
+    /// / `c` is lazy text under pandoc.
+    fn lazy_content_opens_fence(&self, rest: &str) -> Option<code_blocks::FenceInfo> {
+        let fence = code_blocks::try_parse_fence_open(rest, self.config.dialect)?;
+        let enabled = match fence.fence_char {
+            '`' => self.config.extensions.backtick_code_blocks,
+            '~' => self.config.extensions.fenced_code_blocks,
+            _ => true,
+        };
+        if !enabled || !self.lazy_fence_has_matching_closer(&fence) {
+            return None;
+        }
+        Some(fence)
     }
 
     /// Check if a paragraph is currently open.
@@ -2923,13 +2973,24 @@ impl<'a> Parser<'a> {
 
         let rest = fold.inner_content.trim_start_matches([' ', '\t']);
         let indent = &fold.inner_content[..fold.inner_content.len() - rest.len()];
-        if !indent.is_empty() {
+        if matches!(self.containers.last(), Some(Container::ListItem { .. })) {
             // A list item still buffering its first line would otherwise take
-            // these bytes out of source order; flush it the way a new block
-            // inside the item does.
-            if matches!(self.containers.last(), Some(Container::ListItem { .. })) {
-                self.emit_list_item_buffer_if_needed();
+            // the indent bytes out of source order; flush it the way a new
+            // block inside the item does. This runs first so the item's
+            // Plain-vs-Para choice still comes from `ListItemBuffer`.
+            self.emit_list_item_buffer_if_needed();
+            // The gobble has already dropped this line's indent, so from the
+            // quote's view the fence is at column 0 and every open item sits
+            // below it — pandoc's `rawListItem` stops there. Closing here
+            // rather than in `parse_inner_content` is forced, not cosmetic: a
+            // `~~~` fence only detects as a block when `has_blank_before`,
+            // which is true for a `BlockQuote` on top of the stack but false
+            // for a `ListItem`.
+            if self.lazy_content_opens_fence(rest).is_some() {
+                self.close_lists_above_indent(0);
             }
+        }
+        if !indent.is_empty() {
             self.builder.token(SyntaxKind::WHITESPACE.into(), indent);
         }
 
@@ -3532,9 +3593,23 @@ impl<'a> Parser<'a> {
                 let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
                 let interrupts_via_hr =
                     is_commonmark && try_parse_horizontal_rule(inner_content).is_some();
-                let interrupts_via_fence = is_commonmark
-                    && code_blocks::try_parse_fence_open(inner_content, self.config.dialect)
-                        .is_some();
+                // Under Pandoc this is the `endline` guard
+                // `notFollowedBy (lookAhead (char '`') >> codeBlockFenced)`.
+                // The quote's content is de-indented before it runs, so the
+                // guard sees the *folded* line: `> a` / `   ``` ` breaks the
+                // paragraph even though the source line is indented. It is
+                // anchored on a literal backtick, so `   ~~~` keeps continuing
+                // the paragraph — unlike the list-item gate below, where any
+                // fence ends the item.
+                //
+                // Separate from `blockquote_gobble_ends_at`, which asks
+                // whether the *quote* ends and reads the raw line at byte 0.
+                let interrupts_via_fence = if is_commonmark {
+                    code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
+                } else {
+                    self.lazy_content_opens_fence(inner_content.trim_start_matches([' ', '\t']))
+                        .is_some_and(|fence| fence.fence_char == '`')
+                };
                 // An ATX heading interrupts a paragraph under CommonMark §4.2,
                 // and under Pandoc when `blank_before_header` is disabled
                 // (`markdown-blank_before_header`) — the same predicate as
@@ -3642,9 +3717,17 @@ impl<'a> Parser<'a> {
                 let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
                 let interrupts_via_hr =
                     is_commonmark && try_parse_horizontal_rule(inner_content).is_some();
-                let interrupts_via_fence = is_commonmark
-                    && code_blocks::try_parse_fence_open(inner_content, self.config.dialect)
-                        .is_some();
+                // Pandoc's `rawListItem` stops collecting at a line that opens
+                // a fenced code block, so the fence ends the item instead of
+                // becoming its text. Unlike the paragraph guard above this is
+                // fence-char agnostic — `> - a` / `   ~~~` is a `CodeBlock`
+                // sibling of the list, while `> a` / `   ~~~` is not.
+                let interrupts_via_fence = if is_commonmark {
+                    code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
+                } else {
+                    self.lazy_content_opens_fence(inner_content.trim_start_matches([' ', '\t']))
+                        .is_some()
+                };
                 let heading_can_interrupt =
                     is_commonmark || !self.config.extensions.blank_before_header;
                 let heading_probe = if is_commonmark {
@@ -4962,9 +5045,23 @@ impl<'a> Parser<'a> {
                     // indent — close the surrounding list before emitting.
                     // OpenList is excluded so that a same-level marker still
                     // continues the list rather than closing it.
-                    if self.config.dialect == crate::options::Dialect::CommonMark
-                        && !matches!(block_match.effect, BlockEffect::OpenList)
+                    //
+                    // Pandoc closes on a *fence only*. `rawListItem` stops
+                    // collecting at a line `codeBlockFenced` would claim, so
+                    // `- a` / ```` ```rust ```` is `BulletList [[Plain a]]`
+                    // plus a sibling `CodeBlock`; but a heading or thematic
+                    // break under the content column is lazy item text, which
+                    // is why the CommonMark `!OpenList` predicate is too wide
+                    // here. No closer check is needed: `detect_prepared`
+                    // already declines a closer-less fence under Pandoc, so
+                    // one never reaches this arm.
+                    let closes_list = if self.config.dialect == crate::options::Dialect::CommonMark
                     {
+                        !matches!(block_match.effect, BlockEffect::OpenList)
+                    } else {
+                        parser_name == "fenced_code_block"
+                    };
+                    if closes_list {
                         let (indent_cols, _) = leading_indent(content);
                         self.close_lists_above_indent(indent_cols);
                     }
