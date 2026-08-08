@@ -313,6 +313,7 @@ golden_test_cases!(
     footnote_continuation_tab_indent_pandoc,
     footnote_def_paragraph,
     footnote_definition_list,
+    footnote_definition_in_list_item,
     footnote_fenced_code_indent,
     footnote_paragraph_no_list_interrupt,
     footnote_ref_in_footnote_def_is_text,

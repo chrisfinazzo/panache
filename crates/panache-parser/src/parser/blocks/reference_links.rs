@@ -571,6 +571,79 @@ mod tests {
         assert!(token_kinds.contains(&SyntaxKind::FOOTNOTE_LABEL_COLON));
     }
 
+    /// Pandoc reads a list item's contents from the item's content column, so
+    /// a marker sitting there opens a definition: `- x[^1]` / `  [^1]: d` is
+    /// `Plain [Str "x", Note ...]`, not literal `[^1]:` text.
+    #[test]
+    fn footnote_definition_opens_at_a_list_item_content_column() {
+        let input = "- x[^1]\n\n  [^1]: d\n";
+        let tree = crate::parse(input, Some(crate::ParserOptions::default()));
+        assert_eq!(tree.text().to_string(), input);
+
+        let def = tree
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
+            .expect("footnote definition inside the list item");
+        assert_eq!(def.text().to_string(), "  [^1]: d\n");
+        assert!(
+            def.ancestors().any(|n| n.kind() == SyntaxKind::LIST_ITEM),
+            "definition should be nested in the list item, got:\n{tree}"
+        );
+    }
+
+    /// `noteBlock` accepts `nonindentSpaces` before the marker, in whatever
+    /// frame it is reading — column 0 at the top level, the item's content
+    /// column inside a list. A fourth space is an indented code block instead.
+    #[test]
+    fn footnote_definition_accepts_up_to_three_leading_spaces() {
+        for (indent, prefix) in [(0, ""), (1, " "), (2, "  "), (3, "   ")] {
+            let input = format!("{prefix}[^1]: d\n");
+            let tree = crate::parse(&input, Some(crate::ParserOptions::default()));
+            assert_eq!(tree.text().to_string(), input);
+            assert!(
+                tree.descendants()
+                    .any(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION),
+                "{indent} leading spaces should still open a definition, got:\n{tree}"
+            );
+        }
+
+        let input = "    [^1]: d\n";
+        let tree = crate::parse(input, Some(crate::ParserOptions::default()));
+        assert_eq!(tree.text().to_string(), input);
+        assert!(
+            !tree
+                .descendants()
+                .any(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION),
+            "four leading spaces is an indented code block, got:\n{tree}"
+        );
+    }
+
+    /// The same 0..=3 window, measured from the item's content column: `- ` puts
+    /// content at column 2, so columns 2..=5 open a definition and 6 is code.
+    #[test]
+    fn footnote_definition_indent_window_is_relative_to_the_list_item() {
+        for extra in 0..=3 {
+            let input = format!("- xxxxx[^1]\n\n{:width$}[^1]: d\n", "", width = 2 + extra);
+            let tree = crate::parse(&input, Some(crate::ParserOptions::default()));
+            assert_eq!(tree.text().to_string(), input);
+            assert!(
+                tree.descendants()
+                    .any(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION),
+                "{extra} spaces past the content column should open a definition, got:\n{tree}"
+            );
+        }
+
+        let input = "- xxxxx[^1]\n\n      [^1]: d\n";
+        let tree = crate::parse(input, Some(crate::ParserOptions::default()));
+        assert_eq!(tree.text().to_string(), input);
+        assert!(
+            !tree
+                .descendants()
+                .any(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION),
+            "four spaces past the content column is indented code, got:\n{tree}"
+        );
+    }
+
     #[test]
     fn footnote_multiline_dollar_math_parses_as_display_math_not_tex_block() {
         let input = "[^note]: Intro line before math:\n    $$\n    \\begin{aligned} a &= b \\\\ c &= d \\end{aligned}\n    $$\n";

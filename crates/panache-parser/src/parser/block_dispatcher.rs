@@ -596,6 +596,11 @@ struct ReferenceDefinitionPrepared {
 #[derive(Debug, Clone)]
 pub(crate) struct FootnoteDefinitionPrepared {
     pub content_start: usize,
+    /// Byte length of the whitespace preceding `[^` on the marker line, in the
+    /// container-prefix-stripped frame. Pandoc's `noteBlock` accepts
+    /// `nonindentSpaces` before the marker, and inside a list item it reads the
+    /// body from the item's content column, so both show up here.
+    pub indent_len: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1016,6 +1021,31 @@ impl BlockParser for DefinitionListParser {
     }
 }
 
+/// Byte length of the whitespace a footnote marker may sit behind on `line`,
+/// or `None` when the line is indented past what `noteBlock` accepts.
+///
+/// Two indents stack: the enclosing list item's content column (pandoc reparses
+/// item contents from there) and `nonindentSpaces` — at most 3 further spaces —
+/// before the marker itself. Four would be an indented code block, which the
+/// registry reaches first.
+fn footnote_marker_indent_len(ctx: &BlockContext, line: &str) -> Option<usize> {
+    let base = match ctx.list_indent_info {
+        Some(list_info) if leading_indent(line).0 >= list_info.content_col => {
+            byte_index_at_column(line, list_info.content_col)
+        }
+        _ => 0,
+    };
+
+    let extra = line[base..]
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .count();
+    if extra > 3 {
+        return None;
+    }
+    Some(base + extra)
+}
+
 /// Footnote definition parser ([^id]: content)
 pub(crate) struct FootnoteDefinitionParser;
 
@@ -1033,8 +1063,14 @@ impl BlockParser for FootnoteDefinitionParser {
             return None;
         }
 
-        let content = lines.first();
-        // A footnote def starts with `[^` after no leading indent.
+        let line = lines.first();
+        // Pandoc reads a list item's contents from the item's content column,
+        // so a marker sitting at that column opens a footnote definition inside
+        // the item rather than being literal text. `nonindentSpaces` (up to 3)
+        // is then allowed on top, in that same frame — 4 would be indented code.
+        let indent_len = footnote_marker_indent_len(ctx, line)?;
+        let content = &line[indent_len..];
+        // A footnote def starts with `[^` after that indent.
         if !content.starts_with("[^") {
             return None;
         }
@@ -1042,7 +1078,10 @@ impl BlockParser for FootnoteDefinitionParser {
         let (_id, content_start) = try_parse_footnote_marker(content)?;
         Some((
             BlockDetectionResult::YesCanInterrupt,
-            Some(Box::new(FootnoteDefinitionPrepared { content_start })),
+            Some(Box::new(FootnoteDefinitionPrepared {
+                content_start: indent_len + content_start,
+                indent_len,
+            })),
         ))
     }
 
@@ -1057,9 +1096,15 @@ impl BlockParser for FootnoteDefinitionParser {
 
         let content = lines.first();
         let prepared = payload.and_then(|p| p.downcast_ref::<FootnoteDefinitionPrepared>());
-        let content_start = prepared
-            .map(|p| p.content_start)
-            .or_else(|| try_parse_footnote_marker(content).map(|(_, pos)| pos));
+        let (content_start, indent_len) = match prepared {
+            Some(prepared) => (Some(prepared.content_start), prepared.indent_len),
+            None => {
+                let indent_len = footnote_marker_indent_len(ctx, content).unwrap_or(0);
+                let start = try_parse_footnote_marker(&content[indent_len..])
+                    .map(|(_, pos)| indent_len + pos);
+                (start, indent_len)
+            }
+        };
 
         let Some(content_start) = content_start else {
             return 1;
@@ -1070,7 +1115,10 @@ impl BlockParser for FootnoteDefinitionParser {
         }
 
         builder.start_node(SyntaxKind::FOOTNOTE_DEFINITION.into());
-        let marker_text = &content[..content_start];
+        if indent_len > 0 {
+            builder.token(SyntaxKind::WHITESPACE.into(), &content[..indent_len]);
+        }
+        let marker_text = &content[indent_len..content_start];
         if let Some((id, _)) = try_parse_footnote_marker(marker_text) {
             builder.token(SyntaxKind::FOOTNOTE_LABEL_START.into(), "[^");
             builder.token(SyntaxKind::FOOTNOTE_LABEL_ID.into(), &id);

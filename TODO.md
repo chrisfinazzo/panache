@@ -621,13 +621,49 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
     1073 fixtures has the same seven pre-existing failures, byte for byte. The
     10 CST snapshots that moved are all `TEXT` retagged as `WHITESPACE` over
     identical byte ranges, in footnote and admonition bodies.
-- [ ] A footnote definition inside a **list item** is not recognized as a
+- [x] A footnote definition inside a **list item** is not recognized as a
   footnote definition at all: `- x[^1]\n\n  [^1]: d\n` is
   `Plain [Str "x", Note ...]` in pandoc but two `Para`s here, with the
   marker left as literal text (`Str "[^1]:"`). This is block *detection*,
   not the indent gobble --- the definition never opens, so no
   `FOOTNOTE_DEFINITION` node exists. Found while fixing the footnote indent
-  above. Not in the corpus.
+  above. Not in the corpus. Fixed:
+  - `FootnoteDefinitionParser::detect_prepared` required `[^` at byte 0 of the
+    container-prefix-stripped line, but the dispatcher does not strip a list
+    item's content column --- block parsers handle that themselves (cf.
+    `content_for_fenced_div_detection`). A new `footnote_marker_indent_len` does
+    both halves of what `noteBlock` sees: the item's content column when the
+    line reaches it, plus `nonindentSpaces` (<=3) on top, in that same frame.
+    Four spaces past the frame stays an indented code block, which the registry
+    reaches first anyway.
+  - This also fixes plain `   [^1]: d` at the top level, which pandoc accepts
+    and panache used to leave as paragraph text.
+  - The indent is carried on `FootnoteDefinitionPrepared` and emitted as a
+    leading `WHITESPACE` token inside `FOOTNOTE_DEFINITION`, matching what
+    `REFERENCE_DEFINITION` and `HEADING` do with theirs.
+  - Verified against pandoc over the indent window (0..=3 and 4 at top level,
+    content column +0..=3 and +4 in an item), multi-item lists, and a definition
+    followed by a second paragraph: all match. Parser + formatter fixtures
+    `footnote_definition_in_list_item`, plus three unit tests in
+    `parser/blocks/reference_links.rs`. No existing test moved.
+  - One divergence survives, and it is not footnote-specific: a *single*-item
+    list whose only block is the note's paragraph is `Plain` in pandoc and
+    `Para` here. Pandoc's `compactify` demotes the last item's final `Para` to
+    `Plain` when it is the only `Para` in the whole list, which the projector's
+    list-wide `is_loose_list` cannot express (`- [x]\n\n  [x]: /url\n` misses
+    the same way, and worse). Filed below.
+- [ ] `is_loose_list` cannot express pandoc's `compactify`: pandoc marks each
+  item `Para` when its paragraph is followed by a blank line (the last item
+  getting an implicit trailing one), then demotes the last item's final
+  `Para` to `Plain` iff it is the only `Para` in the entire list. The
+  projector instead answers looseness once for the whole list from
+  blank-line placement, which agrees everywhere a blank-separated item has
+  two real blocks but not when the second "block" produces no output. So
+  `- x[^1]\n\n  [^1]: d\n` is `Plain` in pandoc and `Para` here;
+  `- [x]\n\n  [x]: /url\n` is `Plain [Link ...]` in pandoc and an empty item
+  here (a second, separate defect in the same shape). Fixing this means
+  making looseness per-item and running the demotion after block extraction.
+  Not in the corpus.
 - [ ] A list nested inside a footnote body gobbles the wrong number of columns:
   `x[^1]\n\n[^1]: d\n\n    - a\n      `x\n y\`\` is `Code "x y"` in pandoc
   but `Code "x     y"` here. The footnote's own 4 columns are gobbled

@@ -233,6 +233,7 @@ golden_test_cases!(
     footnote_tex_block_boundary_idempotency_134,
     footnote_def_paragraph,
     footnote_definition_list,
+    footnote_definition_in_list_item,
     footnote_defs_consecutive_no_blanks,
     four_space_rule_bullet,
     four_space_rule_continuation,
