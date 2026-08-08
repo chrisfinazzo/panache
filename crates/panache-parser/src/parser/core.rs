@@ -916,9 +916,15 @@ impl<'a> Parser<'a> {
         bq_depth: usize,
         content_col: usize,
     ) -> bool {
+        let mut container_scan = code_blocks::ContainerExitScan::new(content_col);
         for raw_line in self.lines.iter().skip(self.pos + 1) {
             let (line_bq_depth, inner) = count_blockquote_markers(raw_line);
             if line_bq_depth < bq_depth {
+                break;
+            }
+            // The item this fence opened in ends at a blank line followed by an
+            // under-indented line; a closer past that point is not its own.
+            if container_scan.exits(inner) {
                 break;
             }
             let candidate = if content_col > 0 && !inner.is_empty() {

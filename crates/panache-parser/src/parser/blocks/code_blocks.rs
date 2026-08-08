@@ -9,7 +9,7 @@ use rowan::{GreenNodeBuilder, TextRange};
 use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
 use super::container_prefix::{StrippedLines, advance_columns, content_line_prefix_tail};
 use crate::options::{Dialect, Flavor};
-use crate::parser::utils::container_stack::byte_index_at_column;
+use crate::parser::utils::container_stack::{byte_index_at_column, leading_indent};
 use crate::parser::utils::tree_copy::copy_green_children;
 use crate::parser::yaml::{
     YamlValidationContext, locate_yaml_diagnostic_ctx, parse_stream_with_prefix,
@@ -827,6 +827,48 @@ pub(crate) fn is_closing_fence(content: &str, fence: &FenceInfo) -> bool {
 
     // Rest of line must be empty
     trimmed[closing_count..].trim().is_empty()
+}
+
+/// Tracks how far ahead a forward scan for a fence's closer may look before it
+/// walks out of the container the fence was opened in.
+///
+/// A bare fence only opens a code block when a matching closer follows, so the
+/// scan has to stop where the container does — a closer beyond it belongs to
+/// somebody else. Pandoc's `listItem` gobbles under-indented lines lazily
+/// (`- ``` ` / `  c` / `x` / `  ``` ` is one `CodeBlock "c\nx"`), but a blank
+/// line arms the indent requirement: the next non-blank line must reach the
+/// content column or the item ends there. That is exactly the boundary the
+/// scan must respect, or a top-level fence past the item is mistaken for the
+/// item's closer and adopts everything in between.
+///
+/// `content_col` of 0 means no indent-bearing container, so the scan never
+/// exits. Blockquote depth is handled by the callers, which break on a marker
+/// drop before consulting this.
+pub(crate) struct ContainerExitScan {
+    content_col: usize,
+    blank_seen: bool,
+}
+
+impl ContainerExitScan {
+    pub(crate) fn new(content_col: usize) -> Self {
+        Self {
+            content_col,
+            blank_seen: false,
+        }
+    }
+
+    /// Feed the next line's container-inner text; `true` once the container has
+    /// ended and the scan must stop.
+    pub(crate) fn exits(&mut self, inner: &str) -> bool {
+        if inner.trim().is_empty() {
+            self.blank_seen = true;
+            return false;
+        }
+        let exits =
+            self.blank_seen && self.content_col > 0 && leading_indent(inner).0 < self.content_col;
+        self.blank_seen = false;
+        exits
+    }
 }
 
 /// Emit chunk options as structured CST nodes while preserving all bytes.

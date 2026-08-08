@@ -712,7 +712,7 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   a span the same way. `expand_tabs_code_span` is left owning only the line
   join, which is the one place the two disagree --- the projector trims the
   padding pandoc trims, the formatter preserves it.
-- [ ] `has_matching_closer` scans for a fence's closer past the end of the
+- [x] `has_matching_closer` scans for a fence's closer past the end of the
   enclosing list item, so a top-level fence adopts an item's paragraph text:
   ````- a ```\n  c\n  ```\n\nb ```r\nc\n``` ```` is two `Plain`/`Para` runs
   of inline code in pandoc, but here the item's third line opens a
@@ -721,7 +721,24 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   depth drop --- nothing ends it when the list item does, and the column
   slice it applies to candidate lines does not stand in for that. Shows up
   as an idempotency failure, since panache's own output for the entry above
-  is exactly this shape. Not in the corpus.
+  is exactly this shape. Not in the corpus. Fixed with `ContainerExitScan`
+  in `blocks/code_blocks.rs`, which both closer scans
+  (`FencedCodeBlockParser::detect_prepared` and
+  `Parser::has_matching_fence_closer`) now consult: it reproduces pandoc's
+  `listItem` rule that a blank line arms the indent requirement, so the
+  first non-blank line below the container's content column after a blank
+  ends the scan. Lazy gobbling without an intervening blank is untouched,
+  and the guard only bites for *bare* fences, which are the only ones whose
+  detection consults a closer. Pandoc corpus stayed at 524/524.
+- [ ] The formatter drops the blank line between a nested list and a sibling
+  block in the same item, so `- - x\n\n  b\n` formats to `- - x\n  b\n`,
+  which re-parses with `b` lazily folded into the *inner* item (`- - x b`).
+  Pandoc's own markdown writer keeps that blank line. Purely a formatter
+  defect --- the parse of both shapes already matches pandoc --- and it
+  predates the fence-closer fix above, but that fix makes it reachable for
+  fenced shapes too: the nested-list variant of that item's repro used to
+  pass the idempotency check only because the parse was wrong. Shows up as
+  an idempotency failure. Not in the corpus.
 - [ ] A bare closed fence after a plain paragraph does not interrupt it:
   ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but one
   inline-code `Para` here. This is panache's deliberate bare-fence heuristic

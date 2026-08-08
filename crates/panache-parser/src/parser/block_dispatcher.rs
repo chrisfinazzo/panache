@@ -21,7 +21,7 @@ use super::blocks::blockquotes::{
     strip_n_blockquote_markers,
 };
 use super::blocks::code_blocks::{
-    CodeBlockType, FenceInfo, InfoString, is_closing_fence, is_gfm_math_fence,
+    CodeBlockType, ContainerExitScan, FenceInfo, InfoString, is_closing_fence, is_gfm_math_fence,
     parse_fenced_code_block, parse_fenced_math_block, try_parse_fence_open,
 };
 use super::blocks::container_prefix::{
@@ -1799,6 +1799,7 @@ impl BlockParser for FencedCodeBlockParser {
                     .list_indent_info
                     .map(|list_info| list_info.content_col)
                     .unwrap_or(0);
+            let mut container_scan = ContainerExitScan::new(container_content_col);
             for raw_line in lines.iter().skip(line_pos + 1) {
                 let (line_bq_depth, inner) = count_blockquote_markers(raw_line);
                 // Under Pandoc a non-blank line with fewer `>` markers is
@@ -1809,6 +1810,12 @@ impl BlockParser for FencedCodeBlockParser {
                     && ctx.blockquote_depth > 0
                     && !raw_line.trim().is_empty();
                 if line_bq_depth < ctx.blockquote_depth && !gobbled_lazily {
+                    break;
+                }
+                // A blank line followed by an under-indented line ends the
+                // enclosing list item (or footnote/definition body), and with
+                // it this fence's chance of a closer.
+                if container_scan.exits(inner) {
                     break;
                 }
                 // A line the gobble takes back loses *all* its leading

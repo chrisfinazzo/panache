@@ -288,6 +288,8 @@ golden_test_cases!(
     equation_attributes_no_blank_line,
     equation_attributes_single_line,
     escapes,
+    fence_closer_scan_stops_at_list_item_end_marker_pandoc,
+    fence_closer_scan_stops_at_list_item_end_pandoc,
     fence_interrupts_blockquote_paragraph_commonmark,
     fence_interrupts_reduced_marker_lazy_blockquote_commonmark,
     tilde_fence_mid_paragraph_pandoc,
