@@ -390,6 +390,7 @@ golden_test_cases!(
     lists_ordered,
     lists_task,
     lists_task_nested,
+    lists_task_no_content,
     lists_wrapping_nested,
     lists_wrapping_simple,
     multiline_table_basic,

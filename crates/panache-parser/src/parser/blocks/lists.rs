@@ -833,12 +833,7 @@ pub(in crate::parser) fn emit_list_item(
     // doesn't get parsed as a link.
     let text_to_buffer = if content_start < item.content.len() {
         let rest = &item.content[content_start..];
-        if (rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]"))
-            && rest
-                .as_bytes()
-                .get(3)
-                .is_some_and(|b| (*b as char).is_whitespace())
-        {
+        if is_task_checkbox(rest) {
             builder.token(SyntaxKind::TASK_CHECKBOX.into(), &rest[..3]);
             rest[3..].to_string()
         } else {
@@ -849,6 +844,27 @@ pub(in crate::parser) fn emit_list_item(
     };
 
     (content_col, text_to_buffer)
+}
+
+/// Whether the item content starts with a task-list checkbox.
+///
+/// Pandoc converts task markers *after* inline parsing
+/// (`taskListItemFromAscii` in `Text.Pandoc.Shared`), matching only the inline
+/// sequence `Str "[x]" : Space : rest`. So the marker needs a literal space or
+/// tab on the same line, followed by something. `- [x]` on its own is the
+/// bracket-shape pattern `[x]`, not a checkbox, and `- [x]\n  foo` yields a
+/// `SoftBreak` rather than a `Space`, so it isn't one either. (GFM's spec is
+/// laxer about the continuation-line form; we follow pandoc.)
+fn is_task_checkbox(rest: &str) -> bool {
+    if !(rest.starts_with("[ ]") || rest.starts_with("[x]") || rest.starts_with("[X]")) {
+        return false;
+    }
+    let after = &rest[3..];
+    after.starts_with([' ', '\t'])
+        && after
+            .split('\n')
+            .next()
+            .is_some_and(|line| !line.trim().is_empty())
 }
 
 #[cfg(test)]
