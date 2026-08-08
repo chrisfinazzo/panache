@@ -3411,8 +3411,18 @@ impl<'a> Parser<'a> {
                     })
             {
                 // Can't start blockquote without blank line - treat as paragraph
-                // Flush any pending list-item inline buffer first so this line
-                // stays in source order relative to buffered list text.
+                // text. When a list item's content is still buffered, that
+                // buffer is the open block, so the line is lazy continuation of
+                // it: pandoc reads `- a` / `  > q` as a single
+                // `Plain [Str "a", SoftBreak, Str ">", Space, Str "q"]`.
+                // Flushing the buffer here would emit the item's text as one
+                // block and this line as a sibling.
+                if self.is_list_item_content_open() {
+                    self.append_lazy_continuation_line(line);
+                    return LineDispatch::consumed(1);
+                }
+                // Otherwise flush any pending list-item inline buffer first so
+                // this line stays in source order relative to buffered list text.
                 self.emit_list_item_buffer_if_needed();
                 paragraphs::start_paragraph_if_needed(&mut self.containers, &mut self.builder);
                 paragraphs::append_paragraph_line(

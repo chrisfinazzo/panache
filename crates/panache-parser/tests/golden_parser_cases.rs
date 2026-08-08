@@ -645,6 +645,8 @@ golden_test_cases!(
     ordered_marker_pipe_table_line_no_separator_pandoc,
     list_alpha_roman_continuation_pandoc,
     list_item_blockquote_inner_list,
+    list_item_lazy_blockquote_marker_commonmark,
+    list_item_lazy_blockquote_marker_pandoc,
     list_item_same_line_blockquote_marker_commonmark,
     list_item_same_line_blockquote_marker_pandoc,
     list_bullet_outdent_after_blank_no_outer_list,

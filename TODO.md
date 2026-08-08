@@ -672,16 +672,17 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
     beats the task marker. Panache decides the checkbox structurally in the
     parser, before references resolve, so it emits `Str "\9746"`. Not in the
     corpus.
-- [ ] A lazy `> q` after list-item text opens a real `BLOCK_QUOTE` here but
-  stays text in pandoc: `- a\n  > q\n` is one
+- [x] A lazy `> q` after list-item text became a sibling block here but stays
+  text in pandoc: `- a\n  > q\n` is one
   `Plain [Str "a", SoftBreak, Str ">", Space, Str "q"]` there, two blocks
   here. Pandoc's `blank_before_blockquote` is on by default for `markdown`,
   so a blockquote cannot interrupt a paragraph without a blank line, and the
-  lazy line is a continuation instead. `interrupts_paragraph` in
-  `pandoc_ast.rs` treats `BLOCK_QUOTE` as a `para` terminator
-  unconditionally, which is only right under `-blank_before_blockquote`; the
-  deeper fix is in the parser, which should not open the quote at all. Not
-  in the corpus.
+  lazy line is a continuation instead. Fixed in the parser: the
+  no-blank-before arm now folds the line into the open `ListItemBuffer`
+  instead of flushing it and starting a `PARAGRAPH` sibling. No projector
+  change was needed --- `interrupts_paragraph`'s premise (a `BLOCK_QUOTE`
+  cannot follow a `PLAIN` unless the extension that lets it interrupt is
+  off) holds again.
 - [ ] A list nested inside a footnote body gobbles the wrong number of columns:
   `x[^1]\n\n[^1]: d\n\n    - a\n      `x\n y\`\` is `Code "x y"` in pandoc
   but `Code "x     y"` here. The footnote's own 4 columns are gobbled

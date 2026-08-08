@@ -345,6 +345,51 @@ fn blockquote_can_interrupt_when_blank_before_blockquote_disabled() {
 }
 
 #[test]
+fn list_item_lazy_blockquote_line_stays_item_text() {
+    // Pandoc: `BulletList [[Plain [Str "a", SoftBreak, Str ">", Space, Str "q"]]]`.
+    // `blank_before_blockquote` keeps the quote from interrupting the item's
+    // in-progress text, so the `>` line is lazy continuation of that text, not
+    // a second block.
+    for input in [
+        "- a\n  > q\n",
+        "- a\n> q\n",
+        "1. a\n   > q\n",
+        "- a\n  > q\n  > r\n",
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE),
+            0,
+            "{input:?}"
+        );
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::PLAIN),
+            1,
+            "{input:?}"
+        );
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH),
+            0,
+            "{input:?}"
+        );
+    }
+}
+
+#[test]
+fn list_item_blockquote_after_blank_line_opens_quote() {
+    let tree = parse_blocks("- a\n\n  > q\n");
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
+}
+
+#[test]
+fn list_item_blockquote_interrupts_when_extension_disabled() {
+    let mut config = ParserOptions::default();
+    config.extensions.blank_before_blockquote = false;
+    let tree = parse_blocks_with_config("- a\n  > q\n", &config);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
+}
+
+#[test]
 fn footnote_continuation_blockquote_requires_blank_before_by_default() {
     let input = "[^1]: A long note line\n    continues here\n    >quoted without blank\n";
     let tree = parse_blocks(input);

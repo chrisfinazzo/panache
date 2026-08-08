@@ -247,6 +247,7 @@ golden_test_cases!(
     list_interrupts_paragraph_commonmark,
     list_item_blockquote_inner_list_siblings,
     list_item_blockquote_nested_list_issue_292,
+    list_item_lazy_blockquote_marker,
     list_item_html_comment_trailing_split,
     list_item_html_div_multiline_open,
     list_item_html_div_multiline_para,
