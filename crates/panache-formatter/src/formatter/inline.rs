@@ -3,34 +3,22 @@ use crate::formatter::core::{normalize_attribute_text, normalize_span_attributes
 use crate::formatter::math::{self, MathContext, MathFormatOptions};
 use crate::formatter::shortcodes::format_shortcode;
 use crate::formatter::smart::normalize_smart_punctuation;
-use crate::syntax::{DisplayMath, InlineMath, SyntaxKind, SyntaxNode};
+use crate::syntax::{DisplayMath, InlineMath, SyntaxKind, SyntaxNode, code_span_payload};
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
 
-fn expand_tabs_code_span(text: &str, tab_width: usize) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut col = 0usize;
-    for ch in text.chars() {
-        match ch {
-            '\t' => {
-                let mut spaces = tab_width - (col % tab_width);
-                if col == 0 && spaces == tab_width {
-                    spaces = 1;
-                }
-                out.push_str(&" ".repeat(spaces));
-                col += spaces;
-            }
-            '\n' => {
-                out.push(' ');
-                col += 1;
-            }
-            _ => {
-                out.push(ch);
-                col += 1;
-            }
-        }
-    }
-    out
+/// Expand a code span's tabs and join its lines, the way a reader sees it.
+///
+/// Tabs are expanded before the reader runs, so each one is worth however many
+/// columns it takes to reach the next stop *from its column in the source
+/// line* — `` a`x\ty`b `` is one space, `` `x\ty` `` is two. Measuring from
+/// column 0 of the span's own content instead would rewrite the span to a
+/// different number of spaces, changing what the document means. The column
+/// bookkeeping (container prefixes, list gobble) lives in the parser crate so
+/// the pandoc-native projector and the formatter agree; only the line join is
+/// ours, since the reader turns each internal newline into a single space.
+fn expand_tabs_code_span(node: &SyntaxNode, tab_width: usize) -> String {
+    code_span_payload(node, tab_width).replace('\n', " ")
 }
 
 /// Render a `CITATION` or `CROSSREF` node by concatenating its child tokens.
@@ -219,7 +207,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 if matches!(config.tab_stops, crate::config::TabStopMode::Preserve) {
                     content.replace('\n', " ")
                 } else {
-                    expand_tabs_code_span(&content, config.tab_width)
+                    expand_tabs_code_span(node, config.tab_width)
                 };
             if collapse_block_chunk {
                 normalized_content = normalized_content.trim().to_string();

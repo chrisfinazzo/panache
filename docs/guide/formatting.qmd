@@ -346,6 +346,13 @@ tab-stops = "preserve"
 tab-width = 4
 ```
 
+A tab inside a code span expands from the column it occupies in the source line,
+not from the start of the span's content, because Pandoc expands tabs before it
+reads the document. So `` a`x<TAB>y`b `` becomes `` a`x y`b `` --- the tab sits
+at column 3 and reaches the stop at column 4 --- while the same span at the
+start of a line becomes `` `x  y` ``. Expanding from the content instead would
+change how many spaces the span holds, and with it what the document means.
+
 ### Fenced Code Blocks
 
 Fenced code blocks are formatted with consistent fencing and attributes. We

@@ -699,15 +699,19 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   lines in plain and nested lists too, with no footnote involved. Three
   parser snapshots moved (all toward pandoc); the pandoc corpus stayed at
   524/524.
-- [ ] The formatter expands a code span's tabs from column 0 of the span's own
-  content rather than from its source column, so it rewrites `` a`x\ty`b ``
+- [x] The formatter expanded a code span's tabs from column 0 of the span's own
+  content rather than from its source column, so it rewrote `` a`x\ty`b ``
   to `` a`x   y`b `` --- pandoc reads 1 space in the input and 3 in the
-  output, i.e. formatting changes the document's meaning.
-  `expand_tabs_code_span` needs the code span's starting column, the way the
-  projector's `inline_code_payload` now takes it. The list cases happen to
-  come out right today (the joined `"x "` prefix is exactly the content
-  column that was gobbled), which is why this never surfaced. Found while
-  fixing the tab item above.
+  output, i.e. formatting changed the document's meaning. The list cases
+  happened to come out right (the joined `"x "` prefix is exactly the
+  content column that was gobbled), which is why this never surfaced. Found
+  while fixing the tab item above. Fixed by lifting the projector's column
+  bookkeeping out of `pandoc_ast.rs` into
+  `syntax::code_span::code_span_payload` (tab width is a parameter now: the
+  projector pins pandoc's 4, the formatter passes `tab-width`), so both read
+  a span the same way. `expand_tabs_code_span` is left owning only the line
+  join, which is the one place the two disagree --- the projector trims the
+  padding pandoc trims, the formatter preserves it.
 - [ ] `has_matching_closer` scans for a fence's closer past the end of the
   enclosing list item, so a top-level fence adopts an item's paragraph text:
   ````- a ```\n  c\n  ```\n\nb ```r\nc\n``` ```` is two `Plain`/`Para` runs

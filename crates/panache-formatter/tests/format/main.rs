@@ -15,6 +15,7 @@ mod horizontal_rules;
 mod ignore_directives;
 mod image_attributes;
 mod inline_code_attributes;
+mod inline_code_tabs;
 mod inline_code_whitespace;
 mod inline_executable_code;
 mod inline_footnotes;

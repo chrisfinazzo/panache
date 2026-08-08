@@ -23,4 +23,4 @@ Term
 
 Tab stops in text are normalized.
 
-In inline code tabs are converted to spaces: `tab code`.
+In inline code tabs are converted to spaces: `tab   code`.
