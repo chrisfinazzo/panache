@@ -15,7 +15,7 @@ use crate::parser::blocks::html_blocks::{
 };
 use crate::parser::blocks::paragraphs::update_display_math_state;
 use crate::parser::utils::container_stack::{
-    OpenDisplayMath, gobbled_indent_prefix_len as item_indent_prefix_len,
+    OpenDisplayMath, gobble_chain_prefix_len as item_indent_prefix_len,
 };
 use crate::parser::utils::helpers::trim_end_newlines;
 use crate::parser::utils::inline_emission;
@@ -184,14 +184,19 @@ impl ListItemBuffer {
     /// item indent out of the text as an [`ParagraphBuffer::push_indent`]
     /// segment.
     ///
-    /// Pandoc's `listLine` gobbles `content_col` columns off every line after
-    /// the marker line before the item's raw text is reparsed, so interior
-    /// whitespace inside an inline construct is measured from the content
-    /// column: ``- a\n   `x\n   y` `` is `Code "x  y"`, not `Code "x    y"`.
-    /// Buffering the raw line would bake those columns into the code span.
-    /// The held-out bytes are spliced back as `WHITESPACE` tokens at emission,
-    /// mirroring how the blockquote path re-injects its `>` markers.
-    fn to_paragraph_buffer(&self, content_col: usize) -> ParagraphBuffer {
+    /// Pandoc's `listLine` gobbles the item's content column off every line
+    /// after the marker line before the item's raw text is reparsed, so
+    /// interior whitespace inside an inline construct is measured from the
+    /// content column: ``- a\n   `x\n   y` `` is `Code "x  y"`, not
+    /// `Code "x    y"`. Buffering the raw line would bake those columns into
+    /// the code span. The held-out bytes are spliced back as `WHITESPACE`
+    /// tokens at emission, mirroring how the blockquote path re-injects its
+    /// `>` markers.
+    ///
+    /// `gobble` is the whole enclosing container chain, not just this item's
+    /// column: the buffered lines are raw source, so an enclosing footnote
+    /// definition's or outer item's share has not been taken off them yet.
+    fn to_paragraph_buffer(&self, gobble: &[usize]) -> ParagraphBuffer {
         let mut paragraph_buffer = ParagraphBuffer::new();
         // The buffer's first line is the marker line: its leading columns are
         // owned by the marker and its trailing spaces, already emitted.
@@ -199,13 +204,13 @@ impl ListItemBuffer {
         for segment in &self.segments {
             match segment {
                 ListItemContent::Text(text) => {
-                    if content_col == 0 || (!at_line_start && !text.contains('\n')) {
+                    if gobble.is_empty() || (!at_line_start && !text.contains('\n')) {
                         paragraph_buffer.push_text(text);
                         continue;
                     }
                     for line in text.split_inclusive('\n') {
                         if at_line_start {
-                            let consumed = item_indent_prefix_len(line, content_col);
+                            let consumed = item_indent_prefix_len(line, gobble);
                             paragraph_buffer.push_indent(&line[..consumed]);
                             paragraph_buffer.push_text(&line[consumed..]);
                         } else {
@@ -233,8 +238,8 @@ impl ListItemBuffer {
     /// If `use_paragraph` is true, wraps in PARAGRAPH (loose list).
     /// If false, wraps in PLAIN (tight list).
     ///
-    /// `content_col` is the enclosing list-item's content column (or 0
-    /// outside a list-item). The HTML-block first-line structural lift
+    /// `gobble` is the enclosing container indent chain (empty outside a
+    /// list-item). The HTML-block first-line structural lift
     /// uses it to strip the list-item leading indent from continuation
     /// lines before reparsing the body, so `<div>` body parses as
     /// pandoc's `Para` (matched-pair under stripped indent) instead of
@@ -248,7 +253,7 @@ impl ListItemBuffer {
         builder: &mut GreenNodeBuilder<'static>,
         use_paragraph: bool,
         config: &ParserOptions,
-        content_col: usize,
+        gobble: &[usize],
         suppress_footnote_refs: bool,
         allow_unclosed_div: bool,
     ) {
@@ -273,7 +278,7 @@ impl ListItemBuffer {
                 // item's content column, so a depth-2 rule (4 leading
                 // columns) must not trip the CommonMark 4-space guard.
                 // Emission keeps the original bytes (lossless).
-                let detect_line = &line[item_indent_prefix_len(line, content_col)..];
+                let detect_line = &line[item_indent_prefix_len(line, gobble)..];
                 if let Some(level) = try_parse_atx_heading(detect_line) {
                     emit_atx_heading(builder, &text, level, config);
                     return;
@@ -296,7 +301,7 @@ impl ListItemBuffer {
             {
                 let first_line = &text[..first_nl];
                 let after_first = &text[first_nl + 1..];
-                let detect_first = &first_line[item_indent_prefix_len(first_line, content_col)..];
+                let detect_first = &first_line[item_indent_prefix_len(first_line, gobble)..];
                 if !after_first.is_empty()
                     && let Some(level) = try_parse_atx_heading(detect_first)
                 {
@@ -343,7 +348,7 @@ impl ListItemBuffer {
                     builder,
                     &text,
                     config,
-                    content_col,
+                    gobble,
                     use_paragraph,
                     "",
                     allow_unclosed_div,
@@ -364,7 +369,7 @@ impl ListItemBuffer {
                 .segments
                 .iter()
                 .all(|s| matches!(s, ListItemContent::Text(_)))
-                && try_emit_table_or_div_lift(builder, &text, config, content_col)
+                && try_emit_table_or_div_lift(builder, &text, config, gobble)
             {
                 return;
             }
@@ -383,7 +388,7 @@ impl ListItemBuffer {
 
         builder.start_node(block_kind.into());
 
-        let paragraph_buffer = self.to_paragraph_buffer(content_col);
+        let paragraph_buffer = self.to_paragraph_buffer(gobble);
         if !paragraph_buffer.is_empty() {
             paragraph_buffer.emit_with_inlines(builder, config, suppress_footnote_refs);
         } else if !text.is_empty() {
@@ -411,14 +416,14 @@ impl ListItemBuffer {
 ///
 /// The gate is strict: the inner reparse must produce exactly one
 /// top-level HTML_BLOCK or HTML_BLOCK_DIV that consumes every byte
-/// of `text` (modulo list-item indent stripping — see `content_col`).
+/// of `text` (modulo list-item indent stripping — see `gobble`).
 /// For HTML_BLOCK_DIV, a matched open+close is required (>= 2
 /// `HTML_BLOCK_TAG` children). This avoids lifting unclosed shapes
 /// (where the close tag would live in a separate sibling HTML_BLOCK),
 /// which would produce a structurally incomplete CST.
 ///
-/// When `content_col > 0`, continuation lines have up to `content_col`
-/// leading spaces stripped before the inner reparse, mirroring
+/// When `gobble` is non-empty, continuation lines have that container
+/// indent chain stripped before the inner reparse, mirroring
 /// pandoc's list-item indent normalization. The stripped bytes are
 /// re-injected as `WHITESPACE` tokens at the start of each continuation
 /// line during graft so the result is byte-equal to the original
@@ -435,7 +440,7 @@ pub(crate) fn try_emit_html_block_lift(
     builder: &mut GreenNodeBuilder<'static>,
     text: &str,
     config: &ParserOptions,
-    content_col: usize,
+    gobble: &[usize],
     use_paragraph: bool,
     line0_prefix: &str,
     allow_unclosed_div: bool,
@@ -449,10 +454,10 @@ pub(crate) fn try_emit_html_block_lift(
         return false;
     }
 
-    let (parse_text, mut prefixes) = if content_col > 0 {
-        strip_list_item_indent(text, content_col)
-    } else {
+    let (parse_text, mut prefixes) = if gobble.is_empty() {
         (text.to_string(), Vec::new())
+    } else {
+        strip_list_item_indent(text, gobble)
     };
     if !line0_prefix.is_empty() {
         if prefixes.is_empty() {
@@ -603,7 +608,7 @@ fn try_emit_table_or_div_lift(
     builder: &mut GreenNodeBuilder<'static>,
     text: &str,
     config: &ParserOptions,
-    content_col: usize,
+    gobble: &[usize],
 ) -> bool {
     let first_line = text.split_inclusive('\n').next().unwrap_or(text);
     let first_line_no_nl = first_line
@@ -616,10 +621,10 @@ fn try_emit_table_or_div_lift(
         return false;
     }
 
-    let (parse_text, prefixes) = if content_col > 0 {
-        strip_list_item_indent(text, content_col)
-    } else {
+    let (parse_text, prefixes) = if gobble.is_empty() {
         (text.to_string(), Vec::new())
+    } else {
+        strip_list_item_indent(text, gobble)
     };
 
     let refdefs = config.refdef_labels.clone().unwrap_or_default();
@@ -667,12 +672,12 @@ fn graft_node_retag_root(
     builder.finish_node();
 }
 
-/// Strip up to `content_col` leading-space bytes from each continuation
+/// Strip the container indent chain `gobble` off each continuation
 /// line of `text` (lines after the first). The first line is left
 /// untouched — its leading columns are owned by the list marker and
 /// its post-marker spaces. Returns the stripped text plus a per-line
 /// prefix vector for losslessness re-injection during graft.
-fn strip_list_item_indent(text: &str, content_col: usize) -> (String, Vec<String>) {
+fn strip_list_item_indent(text: &str, gobble: &[usize]) -> (String, Vec<String>) {
     let mut stripped = String::with_capacity(text.len());
     let mut prefixes: Vec<String> = Vec::new();
     for (i, line) in text.split_inclusive('\n').enumerate() {
@@ -681,7 +686,7 @@ fn strip_list_item_indent(text: &str, content_col: usize) -> (String, Vec<String
             stripped.push_str(line);
             continue;
         }
-        let consumed = item_indent_prefix_len(line, content_col);
+        let consumed = item_indent_prefix_len(line, gobble);
         prefixes.push(line[..consumed].to_string());
         stripped.push_str(&line[consumed..]);
     }

@@ -1,0 +1,79 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..92
+  LIST@0..23
+    LIST_ITEM@0..23
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      PLAIN@2..4
+        TEXT@2..3 "c"
+        NEWLINE@3..4 "\n"
+      LIST@4..23
+        LIST_ITEM@4..23
+          WHITESPACE@4..6 "  "
+          LIST_MARKER@6..7 "-"
+          WHITESPACE@7..8 " "
+          PLAIN@8..23
+            TEXT@8..9 "d"
+            NEWLINE@9..10 "\n"
+            WHITESPACE@10..14 "    "
+            INLINE_CODE@14..22
+              INLINE_CODE_MARKER@14..15 "`"
+              INLINE_CODE_CONTENT@15..17 "q\n"
+              WHITESPACE@17..19 "  "
+              INLINE_CODE_CONTENT@19..21 " y"
+              INLINE_CODE_MARKER@21..22 "`"
+            NEWLINE@22..23 "\n"
+  BLANK_LINE@23..24
+    BLANK_LINE@23..24 "\n"
+  PARAGRAPH@24..30
+    TEXT@24..25 "x"
+    FOOTNOTE_REFERENCE@25..29
+      FOOTNOTE_LABEL_START@25..27 "[^"
+      FOOTNOTE_LABEL_ID@27..28 "1"
+      FOOTNOTE_LABEL_END@28..29 "]"
+    NEWLINE@29..30 "\n"
+  BLANK_LINE@30..31
+    BLANK_LINE@30..31 "\n"
+  FOOTNOTE_DEFINITION@31..92
+    FOOTNOTE_LABEL_START@31..33 "[^"
+    FOOTNOTE_LABEL_ID@33..34 "1"
+    FOOTNOTE_LABEL_END@34..35 "]"
+    FOOTNOTE_LABEL_COLON@35..36 ":"
+    WHITESPACE@36..37 " "
+    PARAGRAPH@37..42
+      TEXT@37..41 "note"
+      NEWLINE@41..42 "\n"
+    BLANK_LINE@42..43
+      BLANK_LINE@42..43 "\n"
+    LIST@43..92
+      WHITESPACE@43..47 "    "
+      LIST_ITEM@47..64
+        LIST_MARKER@47..48 "-"
+        WHITESPACE@48..49 " "
+        PLAIN@49..64
+          TEXT@49..50 "a"
+          NEWLINE@50..51 "\n"
+          WHITESPACE@51..57 "      "
+          INLINE_CODE@57..63
+            INLINE_CODE_MARKER@57..58 "`"
+            INLINE_CODE_CONTENT@58..62 "q\n y"
+            INLINE_CODE_MARKER@62..63 "`"
+          NEWLINE@63..64 "\n"
+      WHITESPACE@64..68 "    "
+      LIST_ITEM@68..92
+        LIST_MARKER@68..69 "-"
+        WHITESPACE@69..70 " "
+        PLAIN@70..92
+          TEXT@70..71 "b"
+          NEWLINE@71..72 "\n"
+          WHITESPACE@72..78 "      "
+          INLINE_CODE@78..91
+            INLINE_CODE_MARKER@78..79 "`"
+            INLINE_CODE_CONTENT@79..81 "q\n"
+            WHITESPACE@81..87 "      "
+            INLINE_CODE_CONTENT@87..90 "  y"
+            INLINE_CODE_MARKER@90..91 "`"
+          NEWLINE@91..92 "\n"

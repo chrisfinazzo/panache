@@ -414,8 +414,8 @@ DOCUMENT@0..1703
             PLAIN@1568..1600
               TEXT@1568..1572 "List"
               NEWLINE@1572..1573 "\n"
-              WHITESPACE@1573..1575 "  "
-              TEXT@1575..1599 "  with lazy continuation"
+              WHITESPACE@1573..1577 "    "
+              TEXT@1577..1599 "with lazy continuation"
               NEWLINE@1599..1600 "\n"
           WHITESPACE@1600..1604 "    "
           LIST_ITEM@1604..1628
@@ -424,8 +424,8 @@ DOCUMENT@0..1703
             PLAIN@1606..1628
               TEXT@1606..1613 "Another"
               NEWLINE@1613..1614 "\n"
-              WHITESPACE@1614..1616 "  "
-              TEXT@1616..1627 "  list item"
+              WHITESPACE@1614..1618 "    "
+              TEXT@1618..1627 "list item"
               NEWLINE@1627..1628 "\n"
     BLANK_LINE@1628..1629
       BLANK_LINE@1628..1629 "\n"
@@ -445,8 +445,8 @@ DOCUMENT@0..1703
             PLAIN@1641..1673
               TEXT@1641..1645 "List"
               NEWLINE@1645..1646 "\n"
-              WHITESPACE@1646..1648 "  "
-              TEXT@1648..1672 "  with lazy continuation"
+              WHITESPACE@1646..1650 "    "
+              TEXT@1650..1672 "with lazy continuation"
               NEWLINE@1672..1673 "\n"
           WHITESPACE@1673..1677 "    "
           LIST_ITEM@1677..1703

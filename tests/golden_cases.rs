@@ -244,6 +244,7 @@ golden_test_cases!(
     atx_interrupts_reduced_marker_lazy_blockquote_no_blank_before_header,
     atx_interrupts_paragraph_commonmark,
     atx_interrupts_paragraph_no_blank_before_header,
+    list_gobble_chain_lazy_continuation,
     list_interrupts_paragraph_commonmark,
     list_item_blockquote_inner_list_siblings,
     list_item_blockquote_nested_list_issue_292,

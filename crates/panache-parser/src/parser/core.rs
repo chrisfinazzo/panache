@@ -186,14 +186,12 @@ impl<'a> Parser<'a> {
         while self.containers.depth() > keep {
             match self.containers.stack.last() {
                 // Handle ListItem with buffering
-                Some(Container::ListItem {
-                    buffer,
-                    content_col,
-                    ..
-                }) if !buffer.is_empty() => {
+                Some(Container::ListItem { buffer, .. }) if !buffer.is_empty() => {
                     // Clone buffer to avoid borrow issues
                     let buffer_clone = buffer.clone();
-                    let item_content_col = *content_col;
+                    // Snapshot the gobble chain while the item is still on the
+                    // stack — the pop below drops the innermost level.
+                    let gobble = self.containers.gobble_chain();
 
                     log::trace!(
                         "Closing ListItem with buffer (is_empty={}, segment_count={})",
@@ -243,7 +241,7 @@ impl<'a> Parser<'a> {
                         &mut self.builder,
                         use_paragraph,
                         self.config,
-                        item_content_col,
+                        &gobble,
                         suppress_footnote_refs,
                         true,
                     );
@@ -447,16 +445,12 @@ impl<'a> Parser<'a> {
     /// Emit buffered list item content if we're in a ListItem and it has content.
     /// This is used before starting block-level elements inside list items.
     fn emit_list_item_buffer_if_needed(&mut self) {
-        if let Some(Container::ListItem {
-            buffer,
-            content_col,
-            ..
-        }) = self.containers.stack.last_mut()
+        if let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last_mut()
             && !buffer.is_empty()
         {
             let buffer_clone = buffer.clone();
-            let item_content_col = *content_col;
             buffer.clear();
+            let gobble = self.containers.gobble_chain();
             let use_paragraph = buffer_clone.has_blank_lines_between_content();
             let suppress_footnote_refs = self.in_footnote_definition();
             // Mid-item partial flush before an interrupting block. The buffer
@@ -468,7 +462,7 @@ impl<'a> Parser<'a> {
                 &mut self.builder,
                 use_paragraph,
                 self.config,
-                item_content_col,
+                &gobble,
                 suppress_footnote_refs,
                 false,
             );
@@ -1801,7 +1795,7 @@ impl<'a> Parser<'a> {
             &mut self.builder,
             &text,
             self.config,
-            content_col,
+            &[content_col],
             use_paragraph,
             "",
             false,
@@ -1895,7 +1889,7 @@ impl<'a> Parser<'a> {
                 &mut probe,
                 &text,
                 self.config,
-                content_col,
+                &[content_col],
                 use_paragraph,
                 line0_prefix,
                 true,
@@ -1915,7 +1909,7 @@ impl<'a> Parser<'a> {
             &mut self.builder,
             &text,
             self.config,
-            content_col,
+            &[content_col],
             use_paragraph,
             line0_prefix,
             true,
@@ -2123,7 +2117,7 @@ impl<'a> Parser<'a> {
             &mut self.builder,
             &text,
             self.config,
-            content_col,
+            &[content_col],
             use_paragraph,
             "",
             false,

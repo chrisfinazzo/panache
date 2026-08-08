@@ -130,6 +130,47 @@ impl ContainerStack {
     pub(crate) fn push(&mut self, c: Container) {
         self.stack.push(c);
     }
+
+    /// The chain of indent gobbles that apply to a continuation line buffered
+    /// inside the innermost open list item, outermost container first.
+    ///
+    /// Pandoc nests its readers, so each container takes its own indent off
+    /// whatever residue its parent left, and each take is **all-or-nothing**:
+    /// `listLine` runs `optional (gobbleSpaces n)`, so a line too shallow for
+    /// one level keeps every column it has *and* the levels inside it see that
+    /// same text. Panache parses containers in a single pass over raw lines, so
+    /// the chain has to be reconstructed from the stack instead.
+    ///
+    /// Content containers (footnote definitions, admonitions, definition
+    /// bodies) record a width already relative to their own parent. A list item
+    /// records a content *column* that is cumulative within the enclosing
+    /// content container's frame (mirroring `ContainerPrefix::from_stack`), so
+    /// a nested item contributes only its delta over the item holding it.
+    pub(crate) fn gobble_chain(&self) -> Vec<usize> {
+        let mut chain = Vec::new();
+        let mut item_col = 0usize;
+        for c in &self.stack {
+            match c {
+                Container::FootnoteDefinition { content_col }
+                | Container::Admonition { content_col }
+                | Container::Definition { content_col, .. } => {
+                    if *content_col > 0 {
+                        chain.push(*content_col);
+                    }
+                    item_col = 0;
+                }
+                Container::ListItem { content_col, .. } => {
+                    let delta = content_col.saturating_sub(item_col);
+                    if delta > 0 {
+                        chain.push(delta);
+                    }
+                    item_col = *content_col;
+                }
+                _ => {}
+            }
+        }
+        chain
+    }
 }
 
 /// Expand tabs to columns (tab stop = 4) and return (cols, byte_offset).
@@ -196,6 +237,51 @@ pub(crate) fn gobbled_indent_prefix_len(line: &str, content_col: usize) -> usize
                 consumed += 1;
             }
             _ => break,
+        }
+    }
+    consumed
+}
+
+/// Number of leading bytes of `line` gobbled by a whole chain of container
+/// indents, outermost first (see [`ContainerStack::gobble_chain`]).
+///
+/// Each level is all-or-nothing: pandoc's `listLine` runs
+/// `optional (gobbleSpaces n)`, so a level whose width exceeds the whitespace
+/// still available takes nothing and leaves the residue for the levels inside
+/// it — which can still succeed, since their own widths are smaller. That is
+/// why an under-indented lazy line keeps all its columns while a line indented
+/// past an inner level still loses that level's share.
+pub(crate) fn gobble_chain_prefix_len(line: &str, chain: &[usize]) -> usize {
+    let mut consumed = 0usize;
+    let mut col = 0usize;
+    for &width in chain {
+        if width == 0 {
+            continue;
+        }
+        let rest = &line[consumed..];
+        if leading_indent_from(rest, col).0 < width {
+            continue;
+        }
+        let target = col + width;
+        for &b in rest.as_bytes() {
+            if col >= target {
+                break;
+            }
+            match b {
+                b' ' => {
+                    col += 1;
+                    consumed += 1;
+                }
+                b'\t' => {
+                    let next = (col / TAB_STOP + 1) * TAB_STOP;
+                    if next > target {
+                        break;
+                    }
+                    col = next;
+                    consumed += 1;
+                }
+                _ => break,
+            }
         }
     }
     consumed

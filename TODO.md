@@ -683,21 +683,22 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   change was needed --- `interrupts_paragraph`'s premise (a `BLOCK_QUOTE`
   cannot follow a `PLAIN` unless the extension that lets it interrupt is
   off) holds again.
-- [ ] A list nested inside a footnote body gobbles the wrong number of columns:
-  `x[^1]\n\n[^1]: d\n\n    - a\n      `x\n y\`\` is `Code "x y"` in pandoc
-  but `Code "x     y"` here. The footnote's own 4 columns are gobbled
-  correctly now, but the item's continuation lines go through
-  `ListItemBuffer::to_paragraph_buffer`, which is handed the list item's
-  `content_col` --- and that column is \*relative\* to the content the
-  footnote already stripped (2, not the absolute 6), while the buffered
-  lines are raw. So 2 of the 6 columns are held out and 4 leak into the
-  payload. Fixing it means passing `content_col` plus the enclosing
-  content-container indent, but that same value also feeds `emit_as_block`'s
-  ATX-heading, thematic-rule and HTML-block-lift detection, so it needs its
-  own verification pass rather than a one-line change. Note the projector
-  already reports 6 here, since `list_gobble_columns` measures the marker's
-  absolute source column. Found while fixing the footnote indent above. Not
-  in the corpus.
+- [x] A list nested inside a footnote body gobbled the wrong number of columns:
+  the item's continuation lines went through
+  `ListItemBuffer::to_paragraph_buffer` with only the item's own
+  `content_col`, which is \*relative\* to the content the footnote already
+  stripped (2, not the absolute 6), while the buffered lines are raw --- so
+  the footnote's 4 columns leaked into the payload. Fixed by handing the
+  buffer the whole enclosing container chain
+  (`ContainerStack::gobble_chain`) instead of a single column, and by making
+  each level of that chain \*all-or-nothing\*, which is what pandoc's
+  `listLine` does (`optional (gobbleSpaces n)`): a line too shallow for a
+  level keeps every column it has, and the levels inside it still get their
+  turn on the same residue. That second half was a bug of its own --- the
+  old `min(indent, content_col)` gobble was wrong for lazy continuation
+  lines in plain and nested lists too, with no footnote involved. Three
+  parser snapshots moved (all toward pandoc); the pandoc corpus stayed at
+  524/524.
 - [ ] The formatter expands a code span's tabs from column 0 of the span's own
   content rather than from its source column, so it rewrites `` a`x\ty`b ``
   to `` a`x   y`b `` --- pandoc reads 1 space in the input and 3 in the
