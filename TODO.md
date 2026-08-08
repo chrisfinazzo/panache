@@ -730,15 +730,6 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   ends the scan. Lazy gobbling without an intervening blank is untouched,
   and the guard only bites for *bare* fences, which are the only ones whose
   detection consults a closer. Pandoc corpus stayed at 524/524.
-- [ ] The formatter drops the blank line between a nested list and a sibling
-  block in the same item, so `- - x\n\n  b\n` formats to `- - x\n  b\n`,
-  which re-parses with `b` lazily folded into the *inner* item (`- - x b`).
-  Pandoc's own markdown writer keeps that blank line. Purely a formatter
-  defect --- the parse of both shapes already matches pandoc --- and it
-  predates the fence-closer fix above, but that fix makes it reachable for
-  fenced shapes too: the nested-list variant of that item's repro used to
-  pass the idempotency check only because the parse was wrong. Shows up as
-  an idempotency failure. Not in the corpus.
 - [ ] A bare closed fence after a plain paragraph does not interrupt it:
   ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but one
   inline-code `Para` here. This is panache's deliberate bare-fence heuristic

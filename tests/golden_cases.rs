@@ -256,6 +256,7 @@ golden_test_cases!(
     list_item_html_div_unclosed,
     list_item_html_pre_multiline,
     list_item_html_section_multiline,
+    list_item_leading_block_blank_separator,
     list_item_leading_code_block,
     list_item_leading_fenced_div,
     list_item_nested_div_close,

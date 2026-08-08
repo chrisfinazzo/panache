@@ -544,6 +544,46 @@ impl Formatter {
         None
     }
 
+    /// Emit a list item's remaining blocks after a leading block that was
+    /// rendered abutting the marker (nested list, blockquote, fenced div, code
+    /// block, line block), at `hanging` indent.
+    ///
+    /// A single blank-line separator is preserved between loose blocks. The
+    /// blank is structural, not cosmetic: without it two sibling divs glue
+    /// together (`:::` immediately followed by `:::  other`, issue #439), and a
+    /// paragraph after a nested list or blockquote gets lazily folded back into
+    /// that leading block on re-parse (`- - x\n\n  b` -> `- - x b`). Either way
+    /// the output re-parses to a different shape and idempotency breaks.
+    fn format_item_blocks_after_leading(
+        &mut self,
+        node: &SyntaxNode,
+        leading: &SyntaxNode,
+        hanging: usize,
+    ) {
+        let mut reached_leading = false;
+        let mut pending_blank = false;
+        for child in node.children() {
+            if &child == leading {
+                reached_leading = true;
+                continue;
+            }
+            if !reached_leading {
+                continue;
+            }
+            if child.kind() == SyntaxKind::BLANK_LINE {
+                pending_blank = true;
+                continue;
+            }
+            if pending_blank {
+                if !self.output.ends_with("\n\n") {
+                    self.output.push('\n');
+                }
+                pending_blank = false;
+            }
+            self.format_node_sync(&child, hanging);
+        }
+    }
+
     /// Format a ListItem node
     pub(super) fn format_list_item(&mut self, node: &SyntaxNode, indent: usize) {
         // Pre-pass: Process any directive comments to update tracker state
@@ -701,12 +741,7 @@ impl Formatter {
                 }
             }
 
-            for child in node.children() {
-                if &child == leading_bq || child.kind() == SyntaxKind::BLANK_LINE {
-                    continue;
-                }
-                self.format_node_sync(&child, hanging);
-            }
+            self.format_item_blocks_after_leading(node, leading_bq, hanging);
             return;
         }
 
@@ -797,33 +832,7 @@ impl Formatter {
                 }
             }
 
-            // Emit trailing children (further blocks after the leading block) at
-            // hanging indent, preserving a single blank-line separator between
-            // loose blocks. Dropping the blank would glue two sibling divs
-            // (`:::` immediately followed by `:::  other`), which re-parses into
-            // a different shape and breaks idempotency (issue #439).
-            let mut reached_leading = false;
-            let mut pending_blank = false;
-            for child in node.children() {
-                if &child == leading_block {
-                    reached_leading = true;
-                    continue;
-                }
-                if !reached_leading {
-                    continue;
-                }
-                if child.kind() == SyntaxKind::BLANK_LINE {
-                    pending_blank = true;
-                    continue;
-                }
-                if pending_blank {
-                    if !self.output.ends_with("\n\n") {
-                        self.output.push('\n');
-                    }
-                    pending_blank = false;
-                }
-                self.format_node_sync(&child, hanging);
-            }
+            self.format_item_blocks_after_leading(node, leading_block, hanging);
             return;
         }
 
@@ -873,14 +882,7 @@ impl Formatter {
                 }
             }
 
-            // Emit any trailing children (blank lines, continuation paragraphs,
-            // further nested blocks) at hanging indent.
-            for child in node.children() {
-                if &child == leading_list || child.kind() == SyntaxKind::BLANK_LINE {
-                    continue;
-                }
-                self.format_node_sync(&child, hanging);
-            }
+            self.format_item_blocks_after_leading(node, leading_list, hanging);
             return;
         }
 
