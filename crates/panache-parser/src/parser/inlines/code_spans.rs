@@ -79,6 +79,35 @@ pub fn try_parse_code_span(
     None
 }
 
+/// Backtick-run lengths in `text` that are still waiting for a closer.
+///
+/// A run only becomes a code-span opener once a matching run turns up, and
+/// pandoc reaches `endline` — where a block start can interrupt a paragraph —
+/// only *between* inlines, never from inside a code span. So a run left open at
+/// the end of the buffered text makes whatever later line closes it code-span
+/// content rather than a block start: ```` b ```r\nc\n``` ```` is one
+/// `Para [Str "b", Code "r c"]`, not a paragraph plus a fenced code block.
+/// Paragraph-interrupting block detectors consult this to stay out of an open
+/// span.
+///
+/// Runs are reported in source order; a run whose closer is already in `text`
+/// is consumed along with its span and not reported.
+pub fn pending_code_span_openers(text: &str) -> Vec<usize> {
+    let mut pending = Vec::new();
+    let mut rest = text;
+    while let Some(offset) = rest.find('`') {
+        rest = &rest[offset..];
+        if let Some((consumed, ..)) = try_parse_code_span(rest) {
+            rest = &rest[consumed..];
+            continue;
+        }
+        let run = rest.bytes().take_while(|&b| b == b'`').count();
+        pending.push(run);
+        rest = &rest[run..];
+    }
+    pending
+}
+
 /// Emit a code span node to the builder.
 pub fn emit_code_span(
     builder: &mut impl InlineSink,

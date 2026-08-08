@@ -14,6 +14,7 @@ use crate::parser::blocks::html_blocks::{
     HtmlBlockType, count_tag_balance, is_pandoc_matched_pair_tag, try_parse_html_block_start,
 };
 use crate::parser::blocks::paragraphs::update_display_math_state;
+use crate::parser::inlines::code_spans::pending_code_span_openers;
 use crate::parser::utils::container_stack::{
     OpenDisplayMath, gobble_chain_prefix_len as item_indent_prefix_len,
 };
@@ -78,6 +79,22 @@ impl ListItemBuffer {
     /// Whether the buffered lines left a display-math region open.
     pub(crate) fn has_open_display_math(&self) -> bool {
         self.open_display_math.is_some()
+    }
+
+    /// Backtick runs in the buffered text that are still waiting for a closer.
+    ///
+    /// The list-item analogue of
+    /// [`ParagraphBuffer::pending_code_span_openers`]: buffered item content is
+    /// an open paragraph by another name, so a run left open there governs
+    /// block detection on the closing line just the same.
+    pub(crate) fn pending_code_span_openers(&self) -> Vec<usize> {
+        let mut text = String::new();
+        for segment in &self.segments {
+            if let ListItemContent::Text(t) = segment {
+                text.push_str(t);
+            }
+        }
+        pending_code_span_openers(&text)
     }
 
     pub(crate) fn push_blockquote_marker(

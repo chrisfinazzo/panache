@@ -189,6 +189,21 @@ pub(crate) struct BlockContext<'a> {
     /// this alongside [`Self::paragraph_open`].
     pub list_item_content_open: bool,
 
+    /// Backtick runs buffered into the innermost open paragraph (or list item)
+    /// that are still waiting for a closer.
+    ///
+    /// Pandoc only reaches `endline`, where a block start may interrupt a
+    /// paragraph, between inlines — never from inside a code span. A line that
+    /// closes one of these runs is therefore code-span content, not a block
+    /// start, which is what keeps ```` b ```r\nc\n``` ```` a single
+    /// `Para [Str "b", Code "r c"]`. See
+    /// [`pending_code_span_openers`](crate::parser::inlines::code_spans::pending_code_span_openers).
+    ///
+    /// Empty unless the current line could actually close a run (it opens with
+    /// a backtick once the container prefix is stripped), since filling it
+    /// costs a scan of the whole buffer.
+    pub open_code_span_openers: Vec<usize>,
+
     /// Next line content for lookahead (used by setext headings)
     pub next_line: Option<&'a str>,
 
@@ -1789,9 +1804,20 @@ impl BlockParser for FencedCodeBlockParser {
         }
 
         // Fenced code blocks can interrupt paragraphs if they have an info string.
-        // For bare fences (```), allow interruption only in explicit transcript-like
-        // contexts and only when a matching closer exists later.
+        // A bare fence (```) needs a matching closer: pandoc's `codeBlockFenced`
+        // fails without one and the fence line falls back to paragraph text
+        // (`a\n```\nc` is one `Para`), but with a closer it interrupts like any
+        // other fence (`a\n```\nc\n```` ``` ```` is `Para "a"` + `CodeBlock "c"`).
         let has_info = !fence.info_string.trim().is_empty();
+
+        // ...but a bare fence that closes an inline code span opened earlier in
+        // the buffered paragraph is that span's closer, not a block start:
+        // pandoc never reaches `endline` from inside a code span, so
+        // ```` b ```r\nc\n``` ```` is one `Para [Str "b", Code "r c"]`.
+        let closes_open_code_span = !has_info
+            && fence.fence_char == '`'
+            && ctx.open_code_span_openers.contains(&fence.fence_count);
+
         let has_matching_closer = {
             let mut found = false;
             let container_content_col = ctx.content_indent
@@ -1851,22 +1877,6 @@ impl BlockParser for FencedCodeBlockParser {
             return None;
         }
 
-        let next_nonblank_is_command = lines
-            .iter()
-            .skip(line_pos + 1)
-            .find(|l| !l.trim().is_empty())
-            .is_some_and(|l| l.trim_start().starts_with('%'));
-        let bare_fence_before_command_with_closer = has_matching_closer && next_nonblank_is_command;
-        let bare_fence_after_colon_with_closer = has_matching_closer
-            && next_nonblank_is_command
-            && line_pos > 0
-            && lines[line_pos - 1].trim_end().ends_with(':');
-        let bare_fence_in_list_with_closer = has_matching_closer && ctx.list_indent_info.is_some();
-        let bare_fence_after_matching_closer = has_matching_closer
-            && next_nonblank_is_command
-            && line_pos > 0
-            && is_closing_fence(lines[line_pos - 1], &fence);
-
         // In Pandoc dialect, tilde fences require a blank line before — they
         // never interrupt a paragraph. CommonMark allows tilde fences with
         // info strings to interrupt paragraphs (spec §4.5).
@@ -1878,12 +1888,7 @@ impl BlockParser for FencedCodeBlockParser {
             } else {
                 BlockDetectionResult::No
             }
-        } else if has_info
-            || bare_fence_before_command_with_closer
-            || bare_fence_after_colon_with_closer
-            || bare_fence_in_list_with_closer
-            || bare_fence_after_matching_closer
-            || common_mark_dialect
+        } else if has_info || (has_matching_closer && !closes_open_code_span) || common_mark_dialect
         {
             BlockDetectionResult::YesCanInterrupt
         } else if ctx.has_blank_before {

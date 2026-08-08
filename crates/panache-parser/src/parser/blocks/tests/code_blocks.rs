@@ -161,6 +161,56 @@ fn code_block_with_language_can_interrupt_paragraph() {
     assert_eq!(info, "r");
 }
 
+/// pandoc: `[ Para [ Str "a" ], CodeBlock ("",[],[]) "c" ]`.
+///
+/// A bare fence interrupts a paragraph whenever a matching closer exists;
+/// nothing about the surrounding text is required. The closer is the whole
+/// condition -- without one the fence degrades to paragraph text
+/// (`bare_fence_without_closing_fence_does_not_interrupt_paragraph`).
+#[test]
+fn bare_fence_with_closing_fence_can_interrupt_paragraph() {
+    let input = "a\n```\nc\n```\n";
+    let node = parse_blocks(input);
+
+    assert_block_kinds_for_node(
+        &node,
+        &[SyntaxKind::PARAGRAPH, SyntaxKind::CODE_BLOCK],
+        input,
+    );
+    assert_eq!(get_code_content(&node).unwrap(), "c\n");
+}
+
+/// pandoc: `[ Para [ Str "b", Space, Code ("",[],[]) "r c" ] ]`.
+///
+/// The counterweight to the case above: a bare fence that closes an inline
+/// code span opened earlier in the paragraph is that span's closer. Pandoc
+/// only reaches `endline`, where a block start can interrupt, between inlines
+/// -- never from inside a code span.
+#[test]
+fn bare_fence_closing_an_open_code_span_stays_paragraph_text() {
+    let input = "b ```r\nc\n```\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_block_kinds_for_node(&node, &[SyntaxKind::PARAGRAPH], input);
+}
+
+/// The same guard one container down: a list item's buffered content is an
+/// open paragraph by another name.
+#[test]
+fn bare_fence_closing_a_list_item_code_span_stays_item_text() {
+    let input = "- a ```\n  c\n  ```\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert!(
+        !node
+            .descendants()
+            .any(|n| n.kind() == SyntaxKind::CODE_BLOCK),
+        "the fence closes the item's code span, so no code block opens"
+    );
+}
+
 #[test]
 fn bare_fence_after_colon_with_command_transcript_can_interrupt_paragraph() {
     let input = "Some text:\n```\n% pandoc -t plain\n```\n";

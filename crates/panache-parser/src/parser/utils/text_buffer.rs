@@ -8,6 +8,7 @@
 
 use super::inline_emission;
 use crate::options::ParserOptions;
+use crate::parser::inlines::code_spans::pending_code_span_openers;
 use crate::parser::inlines::sink::{InjectedMarker, MarkerInjectingSink};
 use rowan::GreenNodeBuilder;
 
@@ -110,6 +111,14 @@ impl ParagraphBuffer {
             }
         }
         result
+    }
+
+    /// Backtick runs in the buffered text that are still waiting for a closer.
+    ///
+    /// See [`pending_code_span_openers`]; measured on the inline-parser view,
+    /// since that is the text the code-span scan will actually see.
+    pub(crate) fn pending_code_span_openers(&self) -> Vec<usize> {
+        pending_code_span_openers(&self.get_text_for_parsing())
     }
 
     /// The buffered bytes as they appear in the source — held-out indents and

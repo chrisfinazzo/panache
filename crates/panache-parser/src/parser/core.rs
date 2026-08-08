@@ -2665,6 +2665,7 @@ impl<'a> Parser<'a> {
                 })
             ),
             list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
+            open_code_span_openers: self.open_code_span_openers(),
             paragraph_open: self.is_paragraph_open(),
             list_item_content_open: self.is_list_item_content_open(),
             next_line: (self.pos + 1 < self.lines.len())
@@ -3018,6 +3019,29 @@ impl<'a> Parser<'a> {
         buffer.unclosed_pandoc_matched_pair_tag(self.config)
     }
 
+    /// Backtick runs the innermost buffering container is still waiting on a
+    /// closer for, to populate `BlockContext::open_code_span_openers`.
+    ///
+    /// Gated on the current line opening with a backtick (after the container
+    /// prefix) because that is the only line that can close such a run, and the
+    /// lookup itself costs a scan of the whole buffer.
+    fn open_code_span_openers(&self) -> Vec<usize> {
+        let Some(line) = self.lines.get(self.pos) else {
+            return Vec::new();
+        };
+        if !line.trim_start_matches([' ', '\t', '>']).starts_with('`') {
+            return Vec::new();
+        }
+        match self.containers.last() {
+            Some(Container::Paragraph { buffer, .. }) => buffer.pending_code_span_openers(),
+            Some(Container::ListItem { buffer, .. }) => buffer.pending_code_span_openers(),
+            Some(Container::Definition { plain_buffer, .. }) => {
+                plain_buffer.pending_code_span_openers()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Emit or buffer a blockquote marker depending on parser state.
     ///
     /// If a paragraph is open and we're using integrated parsing, buffer the marker.
@@ -3127,6 +3151,7 @@ impl<'a> Parser<'a> {
                     })
                 ),
                 list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
+                open_code_span_openers: self.open_code_span_openers(),
                 paragraph_open: self.is_paragraph_open(),
                 list_item_content_open: self.is_list_item_content_open(),
                 next_line: if self.pos + 1 < self.lines.len() {
@@ -4494,6 +4519,7 @@ impl<'a> Parser<'a> {
                             })
                         ),
                         list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
+                        open_code_span_openers: self.open_code_span_openers(),
                         paragraph_open: self.is_paragraph_open(),
                         list_item_content_open: self.is_list_item_content_open(),
                         next_line: if self.pos + 1 < self.lines.len() {
@@ -4801,6 +4827,7 @@ impl<'a> Parser<'a> {
                 })
             ),
             list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
+            open_code_span_openers: self.open_code_span_openers(),
             paragraph_open: self.is_paragraph_open(),
             list_item_content_open: self.is_list_item_content_open(),
             next_line,

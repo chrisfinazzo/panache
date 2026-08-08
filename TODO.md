@@ -730,12 +730,21 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   ends the scan. Lazy gobbling without an intervening blank is untouched,
   and the guard only bites for *bare* fences, which are the only ones whose
   detection consults a closer. Pandoc corpus stayed at 524/524.
-- [ ] A bare closed fence after a plain paragraph does not interrupt it:
-  ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but one
-  inline-code `Para` here. This is panache's deliberate bare-fence heuristic
-  (`has_info || has_matching_closer`, plus the transcript/list contexts in
-  `FencedCodeBlockParser::detect_prepared`), so changing it means
-  re-deciding that heuristic rather than fixing a bug. Not in the corpus.
+- [x] A bare closed fence after a plain paragraph did not interrupt it:
+  ````a\n```\nc\n``` ```` is `Para "a"` + `CodeBlock "c"` in pandoc but was
+  one inline-code `Para` here. The extra transcript/list contexts guarding
+  the heuristic in `FencedCodeBlockParser::detect_prepared` are gone --- a
+  matching closer is the whole condition, as in pandoc, where
+  `codeBlockFenced` simply fails without one. What the contexts were
+  standing in for is the *inline* side: a bare fence that closes a code span
+  opened earlier in the buffered paragraph is that span's closer, since
+  pandoc reaches `endline` only between inlines, never from inside a code
+  span. That is now modelled directly by `pending_code_span_openers`,
+  threaded to the detector as `BlockContext::open_code_span_openers` (gated
+  on the line opening with a backtick, so the buffer scan stays off the hot
+  path), which keeps ````b ```r\nc\n``` ```` a single
+  `Para [Str "b", Code "r c"]`. Pandoc corpus stayed at 524/524, CommonMark
+  at 652/652.
 - [x] Under `flavor = "commonmark"` a lazy quoted fence kept its indent in the
   payload: ````> - a\n   ```\n   c\n   ``` ```` ends the quote (correct) but
   yielded `CodeBlock "   c"` where CommonMark strips up to the opening
