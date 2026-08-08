@@ -46,6 +46,17 @@
 490
 491
 492
+# `compactify` (Text.Pandoc.Shared): pandoc classifies each list-item
+# paragraph on its own (a `Para` when a blank line follows it), then demotes
+# the last item's final `Para` to `Plain` when it is the list's only one. A
+# footnote or reference definition projects to no block at all, so it leaves
+# the paragraph alone at the end of the item and the list stays tight --- 523
+# is the shape that forces the classification to be per paragraph rather than
+# per list. 524 additionally pins that a resolved bracket shape beats the task
+# checkbox, matching pandoc's post-inline `taskListItemFromAscii`.
+522
+523
+524
 
 # imported (machine-imported via scripts/import-pandoc-conformance-from-parser-fixtures.sh)
 26

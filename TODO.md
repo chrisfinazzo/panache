@@ -646,24 +646,42 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
     followed by a second paragraph: all match. Parser + formatter fixtures
     `footnote_definition_in_list_item`, plus three unit tests in
     `parser/blocks/reference_links.rs`. No existing test moved.
-  - One divergence survives, and it is not footnote-specific: a *single*-item
-    list whose only block is the note's paragraph is `Plain` in pandoc and
-    `Para` here. Pandoc's `compactify` demotes the last item's final `Para` to
-    `Plain` when it is the only `Para` in the whole list, which the projector's
-    list-wide `is_loose_list` cannot express (`- [x]\n\n  [x]: /url\n` misses
-    the same way, and worse). Filed below.
-- [ ] `is_loose_list` cannot express pandoc's `compactify`: pandoc marks each
-  item `Para` when its paragraph is followed by a blank line (the last item
-  getting an implicit trailing one), then demotes the last item's final
-  `Para` to `Plain` iff it is the only `Para` in the entire list. The
-  projector instead answers looseness once for the whole list from
-  blank-line placement, which agrees everywhere a blank-separated item has
-  two real blocks but not when the second "block" produces no output. So
-  `- x[^1]\n\n  [^1]: d\n` is `Plain` in pandoc and `Para` here;
-  `- [x]\n\n  [x]: /url\n` is `Plain [Link ...]` in pandoc and an empty item
-  here (a second, separate defect in the same shape). Fixing this means
-  making looseness per-item and running the demotion after block extraction.
-  Not in the corpus.
+  - One divergence survived at the time, and it was not footnote-specific: a
+    *single*-item list whose only block is the note's paragraph was `Plain` in
+    pandoc and `Para` here. Fixed since, by implementing `compactify`.
+- [x] `is_loose_list` cannot express pandoc's `compactify`. Fixed: looseness is
+  per paragraph now, and `compactify` runs after block extraction.
+  - `paragraph_is_para` classifies each `PLAIN` child on its own --- a `Para`
+    when a blank line follows it inside the item, when one of pandoc's `para`
+    terminators follows, or when the item itself is followed by a blank line
+    (pandoc's `rawListItem` swallows those into the item's own content).
+    `compactify` then applies all three of pandoc's branches, including the
+    demotion of a sole trailing `Para`.
+  - Per-paragraph is load-bearing, not an implementation detail: with a
+    list-wide flag `- a\n- b\n\n  [^1]: d\n` sees two `Para`s and skips the
+    demotion, where pandoc sees one and emits `Plain`, `Plain`. Corpus cases
+    522--524; the unit tests sit under the `compactify` banner in
+    `pandoc_ast.rs`.
+  - The second defect in the same shape is fixed too: `- [x]` was tagged a task
+    checkbox with nothing after it, so the item projected to nothing. Pandoc
+    converts task markers *after* inline parsing (`taskListItemFromAscii`),
+    matching only `Str "[x]" : Space : rest`, so the parser now requires a
+    literal space or tab and content on the same line.
+  - Still divergent, and much more obscure: `- [x] foo\n\n  [x]: /url\n` is
+    `Plain [Link ..., Space, Str "foo"]` in pandoc, because reference resolution
+    beats the task marker. Panache decides the checkbox structurally in the
+    parser, before references resolve, so it emits `Str "\9746"`. Not in the
+    corpus.
+- [ ] A lazy `> q` after list-item text opens a real `BLOCK_QUOTE` here but
+  stays text in pandoc: `- a\n  > q\n` is one
+  `Plain [Str "a", SoftBreak, Str ">", Space, Str "q"]` there, two blocks
+  here. Pandoc's `blank_before_blockquote` is on by default for `markdown`,
+  so a blockquote cannot interrupt a paragraph without a blank line, and the
+  lazy line is a continuation instead. `interrupts_paragraph` in
+  `pandoc_ast.rs` treats `BLOCK_QUOTE` as a `para` terminator
+  unconditionally, which is only right under `-blank_before_blockquote`; the
+  deeper fix is in the parser, which should not open the quote at all. Not
+  in the corpus.
 - [ ] A list nested inside a footnote body gobbles the wrong number of columns:
   `x[^1]\n\n[^1]: d\n\n    - a\n      `x\n y\`\` is `Code "x y"` in pandoc
   but `Code "x     y"` here. The footnote's own 4 columns are gobbled

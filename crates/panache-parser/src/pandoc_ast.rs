@@ -3512,12 +3512,19 @@ fn char_slice(s: &str, start_char: usize, end_char: usize) -> &str {
 }
 
 fn list_block(node: &SyntaxNode) -> Block {
-    let loose = is_loose_list(node);
-    let items: Vec<Vec<Block>> = node
+    let mut items: Vec<Vec<Block>> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
-        .map(|item| list_item_blocks(&item, loose))
+        .map(|item| {
+            // Pandoc's `rawListItem` swallows the blank lines that follow an
+            // item, so they terminate that item's last paragraph.
+            let followed_by_blank = item
+                .next_sibling()
+                .is_some_and(|s| s.kind() == SyntaxKind::BLANK_LINE);
+            list_item_blocks(&item, followed_by_blank)
+        })
         .collect();
+    compactify(&mut items);
     if list_is_ordered(node) {
         let (start, style, delim) = ordered_list_attrs(node);
         Block::OrderedList(start, style, delim, items)
@@ -3686,7 +3693,7 @@ fn roman_to_int(s: &str, upper: bool) -> Option<usize> {
     Some(total)
 }
 
-fn list_item_blocks(item: &SyntaxNode, loose: bool) -> Vec<Block> {
+fn list_item_blocks(item: &SyntaxNode, followed_by_blank: bool) -> Vec<Block> {
     let mut out = Vec::new();
     let item_indent = list_item_content_offset(item);
     let task_checkbox = task_checkbox_for_item(item);
@@ -3707,7 +3714,7 @@ fn list_item_blocks(item: &SyntaxNode, loose: bool) -> Vec<Block> {
                     inlines.insert(0, Inline::Str(glyph.to_string()));
                     checkbox_emitted = true;
                 }
-                if loose {
+                if paragraph_is_para(&child, followed_by_blank) {
                     out.push(Block::Para(inlines));
                 } else {
                     out.push(Block::Plain(inlines));
@@ -3808,56 +3815,85 @@ fn parent_list_leading_ws(item: &SyntaxNode) -> usize {
     }
 }
 
-fn is_loose_list(node: &SyntaxNode) -> bool {
-    let mut prev_was_item = false;
-    for child in node.children_with_tokens() {
-        if let NodeOrToken::Node(n) = child {
-            if n.kind() == SyntaxKind::LIST_ITEM {
-                prev_was_item = true;
-            } else if n.kind() == SyntaxKind::BLANK_LINE
-                && prev_was_item
-                && n.next_sibling()
-                    .map(|s| s.kind() == SyntaxKind::LIST_ITEM)
-                    .unwrap_or(false)
-            {
-                return true;
-            }
+/// Pandoc's `compactify` (`Text.Pandoc.Shared`), which every bullet and
+/// ordered list is run through once its items are parsed.
+///
+/// Items arrive with each paragraph already classified by
+/// [`paragraph_is_para`]. `compactify` then reconciles the list as a whole:
+///
+/// 1. the last item's last block is a `Para` and it is the list's only `Para`
+///    -> demote it to `Plain`;
+/// 2. no `Para` anywhere -> leave the items alone;
+/// 3. otherwise -> promote every top-level `Plain` to `Para` (pandoc #5285).
+///
+/// Branch 1 is what keeps `- x[^1]\n\n  [^1]: d` tight: the blank line makes
+/// the paragraph a `Para`, but the footnote definition projects to no block at
+/// all, so that `Para` is the list's only one and gets demoted straight back.
+/// The same shape one item later (`- a\n- b\n\n  [^1]: d`) is why the
+/// classification has to be per paragraph rather than per list --- a list-wide
+/// looseness flag would see two `Para`s here and skip the demotion.
+///
+/// Definition lists deliberately do not go through this: `compactifyDL` exists
+/// in `Shared.hs` but pandoc's markdown reader never calls it.
+fn compactify(items: &mut [Vec<Block>]) {
+    let Some(last) = items.len().checked_sub(1) else {
+        return;
+    };
+    // Pandoc counts each item's top-level blocks only, never nested ones.
+    let paras = items
+        .iter()
+        .flatten()
+        .filter(|block| matches!(block, Block::Para(_)))
+        .count();
+    if paras == 1 && matches!(items[last].last(), Some(Block::Para(_))) {
+        if let Some(Block::Para(inlines)) = items[last].pop() {
+            items[last].push(Block::Plain(inlines));
+        }
+        return;
+    }
+    if paras == 0 {
+        return;
+    }
+    for block in items.iter_mut().flatten() {
+        if let Block::Plain(inlines) = block {
+            *block = Block::Para(std::mem::take(inlines));
         }
     }
-    for item in node
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
-    {
-        if item.children().any(|c| c.kind() == SyntaxKind::PARAGRAPH) {
-            return true;
-        }
-        // Per CommonMark/pandoc: a list is loose if any item directly
-        // contains a blank line between two block-level children. The
-        // single-item form (`- a\n\n  b`) only manifests as a BLANK_LINE
-        // sandwiched between non-blank block children inside the item.
-        if has_internal_blank_between_blocks(&item) {
-            return true;
-        }
-        if has_paragraph_broken_by_block(&item) {
-            return true;
-        }
-    }
-    false
 }
 
-/// True if some paragraph inside `item` is terminated by a block that pandoc's
-/// `para` parser looks ahead for, with no blank line between the two.
+/// Whether a `PLAIN` child of a list item projects to `Para` rather than
+/// `Plain`, mirroring pandoc's `para` parser running over the item's extracted
+/// content.
 ///
-/// A blank line is the *usual* way a paragraph becomes a `Para` rather than a
-/// `Plain`, but pandoc's `para` also accepts a short list of block starts that
-/// may interrupt a paragraph outright: a fenced code block (`backtick_code_
-/// blocks`), an ATX header (`-blank_before_header`), and a blockquote
-/// (`-blank_before_blockquote`). Hitting one of those promotes the paragraph
-/// to `Para`, and a single `Para` anywhere in the list makes the whole list
-/// loose --- which is why this is checked per item but answers for the list.
+/// A blank line after the paragraph is the *usual* way it becomes a `Para`.
+/// `item_followed_by_blank` covers the item's final paragraph, because pandoc's
+/// `rawListItem` swallows the blank lines that follow an item into that item's
+/// own content.
 ///
-/// So `> - item` / ` # head` is loose: the lazy line de-indents into the quote
-/// and opens a header right after the item's text. No blank line in sight.
+/// `para` also accepts a short list of block starts that may interrupt a
+/// paragraph outright with no blank line in sight --- see
+/// [`interrupts_paragraph`]. That is why `> - item` / ` # head` is a `Para`:
+/// the lazy line de-indents into the quote and opens a header right after the
+/// item's text.
+fn paragraph_is_para(plain: &SyntaxNode, item_followed_by_blank: bool) -> bool {
+    let mut next = plain.next_sibling();
+    while let Some(node) = next {
+        match node.kind() {
+            SyntaxKind::BLANK_LINE => return true,
+            // A bare-marker line emits an empty PLAIN (NEWLINE only), which is
+            // not a block pandoc can see; look past it.
+            SyntaxKind::PLAIN if child_is_empty_plain(&node) => next = node.next_sibling(),
+            kind => return interrupts_paragraph(kind, &node),
+        }
+    }
+    item_followed_by_blank
+}
+
+/// Whether a block of this shape is one of `para`'s lookahead terminators:
+/// a fenced code block (`backtick_code_blocks`), an ATX header
+/// (`-blank_before_header`), or a blockquote (`-blank_before_blockquote`).
+/// Only *fenced* code counts: an indented code block cannot follow paragraph
+/// text without an intervening blank line, which is the other rule.
 ///
 /// The gates need no `ParserOptions` here, because the CST already answers
 /// them. None of these blocks can *exist* as a sibling directly after a
@@ -3876,23 +3912,6 @@ fn is_loose_list(node: &SyntaxNode) -> bool {
 ///
 /// Html blocks, pipe tables, and fenced divs are not terminators either, and
 /// a tilde fence does not interrupt a paragraph at all.
-fn has_paragraph_broken_by_block(item: &SyntaxNode) -> bool {
-    let mut after_paragraph_text = false;
-    for child in item.children() {
-        match child.kind() {
-            // A bare-marker line emits an empty PLAIN, which is not a
-            // paragraph pandoc could promote.
-            SyntaxKind::PLAIN => after_paragraph_text = !child_is_empty_plain(&child),
-            kind if after_paragraph_text && interrupts_paragraph(kind, &child) => return true,
-            _ => after_paragraph_text = false,
-        }
-    }
-    false
-}
-
-/// Whether a block of this shape is one of `para`'s lookahead terminators.
-/// Only *fenced* code counts: an indented code block cannot follow paragraph
-/// text without an intervening blank line, which is the other looseness rule.
 fn interrupts_paragraph(kind: SyntaxKind, node: &SyntaxNode) -> bool {
     match kind {
         SyntaxKind::HEADING | SyntaxKind::BLOCK_QUOTE => true,
@@ -3901,31 +3920,6 @@ fn interrupts_paragraph(kind: SyntaxKind, node: &SyntaxNode) -> bool {
             .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN),
         _ => false,
     }
-}
-
-fn has_internal_blank_between_blocks(item: &SyntaxNode) -> bool {
-    let mut saw_block_before = false;
-    let mut pending_blank = false;
-    for child in item.children() {
-        match child.kind() {
-            SyntaxKind::BLANK_LINE => {
-                if saw_block_before {
-                    pending_blank = true;
-                }
-            }
-            // Bare-marker line emits an empty PLAIN (NEWLINE only); pandoc
-            // doesn't count that as a block — its first real block is what
-            // comes after the blank line.
-            SyntaxKind::PLAIN if child_is_empty_plain(&child) => {}
-            _ => {
-                if pending_blank {
-                    return true;
-                }
-                saw_block_before = true;
-            }
-        }
-    }
-    false
 }
 
 fn child_is_empty_plain(node: &SyntaxNode) -> bool {
@@ -6498,6 +6492,86 @@ mod tests {
         assert!(
             out.contains("Plain [ Str \"def\" ]"),
             "a definition must stay tight, got: {out}"
+        );
+    }
+
+    // ----- list looseness: pandoc's `compactify` -------------------------
+
+    #[test]
+    fn sole_trailing_para_demoted_to_plain() {
+        // The blank line makes the item loose, but the footnote definition
+        // projects to no block, so the paragraph is the list's only `Para`
+        // and pandoc's `compactify` demotes it.
+        let out = native("- x[^1]\n\n  [^1]: d\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"x\", Note [ Para [ Str \"d\" ] ] ]"),
+            "a sole trailing `Para` must be demoted, got: {out}"
+        );
+    }
+
+    #[test]
+    fn refdef_only_second_block_demotes_last_item() {
+        // Same shape one item later: item 1 is tight, item 2's only surviving
+        // block is its paragraph, so the whole list ends up `Plain`.
+        let out = native("- a\n- b\n\n  [^1]: d\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"a\" ]") && out.contains("Plain [ Str \"b\" ]"),
+            "a definition-only second block must not make the list loose, got: {out}"
+        );
+    }
+
+    #[test]
+    fn sole_para_after_block_quote_demoted() {
+        // The `Para` is the last block of the last item and the only one, so
+        // it is demoted even though the item genuinely holds two blocks.
+        let out = native("- > q\n\n  a\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"a\" ]"),
+            "a sole `Para` after a block quote must be demoted, got: {out}"
+        );
+    }
+
+    #[test]
+    fn multiple_paras_are_not_demoted() {
+        // Two `Para`s across the list, so `compactify` leaves both alone.
+        let out = native("- y\n\n- x[^1]\n\n  [^1]: d\n", pandoc_options());
+        assert!(
+            out.contains("Para [ Str \"y\" ]"),
+            "a list with two `Para`s must stay loose, got: {out}"
+        );
+        assert!(!out.contains("Plain"), "expected no `Plain`, got: {out}");
+    }
+
+    #[test]
+    fn empty_first_item_keeps_last_item_plain() {
+        // A bare marker contributes no block, so the second item's paragraph
+        // is again the list's only `Para`.
+        let out = native("- \n\n- a\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"a\" ]"),
+            "an empty first item must not force the list loose, got: {out}"
+        );
+    }
+
+    #[test]
+    fn bare_task_checkbox_is_not_a_checkbox() {
+        // Pandoc's `taskListItemFromAscii` needs `Str "[x]" : Space : rest`,
+        // so a marker with nothing after it stays literal text.
+        let out = native("- [x]\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Str \"[x]\" ]"),
+            "a content-less `[x]` must stay text, got: {out}"
+        );
+    }
+
+    #[test]
+    fn task_checkbox_shape_resolves_as_reference() {
+        // With a matching definition the bracket shape is a link, and the
+        // definition leaves no block behind, so the `Para` is demoted.
+        let out = native("- [x]\n\n  [x]: /url\n", pandoc_options());
+        assert!(
+            out.contains("Plain [ Link ( \"\" , [] , [] ) [ Str \"x\" ] ( \"/url\" , \"\" ) ]"),
+            "a resolved bracket shape must beat the checkbox, got: {out}"
         );
     }
 

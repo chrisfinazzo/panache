@@ -1,0 +1,3 @@
+[ BulletList
+    [ [ Plain [ Str "x" , Note [ Para [ Str "d" ] ] ] ] ]
+]
