@@ -154,6 +154,442 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   user sees just `Error: invalid config <path>: ...`. Affects all
   `io::Error`s, not only config.
 
+## Incremental Parsing
+
+Multi-session effort to harden, unify, and graduate incremental reparsing to
+default-on, then add token/region tiers. Reference implementations audited for
+this plan: rust-analyzer (`reparsing.rs`), `../arity`
+(`crates/arity-parser/src/parser/reparse.rs`), and `../fatou`
+(`crates/fatou-parser/src/parser/reparse.rs`, `src/incremental.rs`) --- fatou is
+the primary model and both siblings are on disk for re-reading.
+
+**Governing invariant** (fatou "Tenet 4 strong form"): a successful incremental
+reparse must yield a green tree and syntax-error vector byte-identical to a full
+parse of the edited text, enforced by a `#[cfg(debug_assertions)]` oracle on
+every reparse. Every guard failure bails to full parse --- never an error.
+
+Work happens on the `feat/incremental-parsing-graduation` branch; the user files
+the PR themselves. Full design detail (phase entry/exit criteria, the
+salsa-unification design, flip acceptance criteria) lives in the plan document
+at `~/.claude/plans/i-want-to-promote-splendid-stardust.md`.
+
+**Handover protocol:** a fresh session reads this section, picks the first
+unchecked phase, verifies its entry criteria (previous phase's boxes checked,
+workspace green on the branch), and works TDD with atomic conventional commits.
+On completion it checks the phase box, updates the status line below, and
+records any deviation or discovered follow-up as an indented bullet under the
+phase. Never leave a phase half-landed: partial work is noted in the status line
+with the exact next step.
+
+**Current status / next step:** Phases 1--6a done. There is one authoritative
+tree, the reparse lives inside salsa's `parsed_document`, the window-size cutoff
+keeps a losing shape from ever being slower than a full parse, and the bench
+thresholds are machine-checked (`task bench:incremental-gate`). Everything so
+far sits behind `experimental.incrementalParsing`, still default-*off*, so none
+of it has changed behavior for anyone --- which is what makes this the natural
+PR boundary, with the flip landing separately.
+
+Next step is Phase 6b (default flip). Its entry criteria are met; what it needs
+is the gate *run*, not more code: oracle-clean fuzz at 10x iterations, the suite
+green with the flag forced both ways, `task bench:incremental-gate` green, and
+the week of oracle-live dogfooding. Run the gate at the default iteration count
+(see the phase's own note on `multi_change_large_8`).
+
+`incremental_regressions.rs` carries no ignored *incremental* tests; the three
+`#[ignore]`d tests there pin two full-parser bugs (setext-after-setext, and a
+trailing-`:` line promoting a list item's lazy continuation to a definition
+term), both tracked on `main` under "Parser bugs found by the incremental
+fuzzer" like the five the fuzzer found earlier. Neither fix has landed on `main`
+yet --- the branch is rebased onto it and they are still ignored --- so they
+stay ignored until they do.
+
+Hardening applied after the phases above, from a review of the branch:
+
+- Line endings. Every seam test in the cascade is textual, and the blank-line
+  check was a `"\n\n"` suffix test, so a CRLF document (blank line `"\r\n\r\n"`)
+  was refused at the first guard and never spliced at all --- safe, and a total
+  loss of the feature for anything authored on Windows. `ends_with_blank_line`
+  now strips one terminator and looks for another, which is line-ending
+  agnostic. The fuzz corpus grew two CRLF snippets and two CRLF insert-alphabet
+  entries, so the gap is measured rather than accidental.
+- Guard parity. `reparse_section_window` ran a strictly weaker guard set than
+  the suffix path. Two of the missing three cannot fire while the window is
+  anchored at a top-level `HEADING`, but the thematic-break/dash-rule one can,
+  and "the window starts at a heading" is a property of how the window is
+  *chosen* --- which Phase 8 changes. All are applied on both paths now.
+- Release-build safety. Both oracles are `cfg(debug_assertions)` (the host one
+  also wants `PANACHE_REPARSE_ORACLE=1`), so a release build checked nothing,
+  while `parsed_document` now feeds LSP formatting, which writes the user's
+  file. `splice_length_agrees` in `src/salsa.rs` checks the one part of the
+  invariant that is `O(1)` --- the spliced tree spans exactly its text --- in
+  every build, and *falls back* to the full parse rather than panicking.
+- The reshuffled corpus found one more full-parser bug: a trailing `:`/`~` line
+  promoting a preceding list item's lazy continuation into a definition term,
+  where the *splice* matched pandoc and the full parse did not. Declined by
+  `first_block_has_trailing_definition_marker` so the splice keeps matching the
+  full parse, pinned `#[ignore]`d in `incremental_regressions.rs`, and tracked
+  on `main` under "Parser bugs found by the incremental fuzzer" (the entry says
+  to delete the guard with the fix). It is not CRLF-specific --- the CRLF
+  inserts only reshuffled the draws onto it --- and reproduces on LF.
+
+No test in this section may read a document from `benches/documents/`: the
+corpus is gitignored, and `download.sh` does not even produce every name the
+repo still references (`medium_quarto.qmd` is gone). A corpus-reading test fails
+on every clean checkout, and a corpus-*skipping* one never runs in CI at all, so
+reproducers are synthetic and pin their strategy instead.
+
+- [x] Phase 1: oracle --- `pub fn fingerprint` + debug
+  `assert_matches_full_parse` on every non-fallback reparse; RA-style
+  `do_check` structural tests (full `{:#?}` equality, pinned strategy +
+  reparse-range length); delete the dead `src/range_utils.rs` copy of
+  `find_incremental_restart_offset`.
+  - Oracle lives in `crates/panache-parser/src/parser/verify.rs`; the existing
+    suite (parser + LSP integration) already runs clean under it, so no
+    divergence surfaced from the current strategies' happy paths.
+
+- [x] Phase 2: seeded fuzz harness
+  (`crates/panache-parser/tests/incremental_fuzz.rs`) with hazard-biased
+  alphabet (setext, lazy continuation, fences, `:::` divs, list markers,
+  table pipes, refdefs, YAML delimiters, HTML blocks, `$$`, footnotes) +
+  commented hazard snippets + `benches/documents/` corpus;
+  `PANACHE_FUZZ_ITERS` scaling. The known refdef-reuse bug is expected to
+  surface here; capture divergences as minimized `#[ignore]`d red tests.
+  - Delivered with deviations. The harness skips (and counts) inputs where the
+    *full parser* itself is lossy or panics --- with a broken oracle the splice
+    cannot be judged; every skip prints its reproducer, and the minimized cases
+    are pinned in `crates/panache-parser/tests/incremental_regressions.rs` and
+    tracked under "Parser bugs found by the incremental fuzzer" in the Parser
+    section below.
+  - Several incremental divergences the harness found were fixed in-session
+    instead of parked (Phase 3 work pulled forward): restart-past-edit guard,
+    textual + structural seam decoupling, fence-pairing parity over the prefix
+    (heuristic; precise old-tree check deferred to Phase 8), list/blockquote
+    continuation guard, and a refdef-proximity guard (`edit_may_touch_refdefs`,
+    textual; the precise set comparison lands with the host layer in Phase 4).
+    The section-window strategy was redesigned: it parses from the window start
+    to EOF (list-item buffering depends on unbounded lookahead, so a bounded
+    standalone window parse is untrustworthy) and re-adopts the old suffix
+    children only on structural equality, else degrades to a suffix splice.
+
+- [x] Phase 3: refdef-set-change guard (cheap bail to full parse); error
+  carrying in the incremental result + three-bucket merge (RA recipe);
+  oracle/fuzz extended to error equality; un-ignore red tests; error-matrix
+  tests {unchanged/fixed/introduced} x strategy.
+  - The merge has **two** buckets, not RA's three, as predicted when the phase
+    was scoped: both strategies parse their window to EOF and both window starts
+    are `<= edit.0`, where `map_old_offset_to_new` is the identity, so the seam
+    sits at the same offset in the old and new text and nothing can straddle it.
+    That case is a `debug_assert!` plus a bail. The real third bucket waits for
+    the bounded region tier in Phase 8; the module doc says so.
+  - `parse_incremental_suffix[_with_refdefs]` gained an `old_errors` parameter
+    (the shape Phase 4's `reparse` already wanted), and `DocumentState` carries
+    the errors beside its tree so `did_change` can feed the prefix's share to
+    the next reparse. Both retire with `DocumentState.tree` in Phase 4. The LSP
+    still serves diagnostics from salsa's independent full parse, so this is
+    plumbing for the oracle, not a behavior change.
+  - The **document-start-only construct guard** landed as a cheap textual bail
+    on the window's first line (pandoc `%` title block, MultiMarkdown title
+    block, CommonMark-dialect `---`). Splitting "byte 0 of the document" from
+    "blank-line separated fragment start" in `BlockContext` is the principled
+    fix and belongs with Phase 8 --- every other `at_document_start` consumer is
+    `||`-ed with `has_blank_before`, which the seam guard already guarantees.
+  - The fuzz harness runs four option tiers (pandoc, gfm, quarto,
+    multimarkdown), chosen for reach: plain `commonmark` leaves
+    `yaml_metadata_block` off and cannot reach the mid-document-YAML hazard at
+    all, so `gfm` carries it. Budgets **split** the old pandoc-only counts
+    rather than multiplying them, so a default `cargo test` costs about what it
+    did before; `PANACHE_FUZZ_ITERS` scales every tier together.
+  - The tiers found four more splice bugs, all fixed with regression tests:
+    definition-marker and table-caption lines reaching back across the seam, a
+    retained thematic break re-read as a multiline-table rule, a refdef-guard
+    slice landing inside a multi-byte token, and an `old_edit` past the old
+    tree's end. The last two were rowan panics, not divergences. The harness now
+    also checks that the *base* parse round-trips, not only the parse of the
+    edited text.
+  - Nothing to un-ignore: the earlier red tests were fixed on `main` before the
+    phase started. The tiers did surface one *new* full-parser bug
+    (setext-after-setext), pinned `#[ignore]`d here and tracked on `main` under
+    "Parser bugs found by the incremental fuzzer", where the fix belongs; it is
+    not an incremental bug.
+
+- [x] Phase 4: salsa unification --- reparse moves into `parsed_document` with a
+  side-channel reparse base (fatou model, no staged edit chain: whole-text
+  `diff_edit` recovers the single combined edit); base keyed on config +
+  refdef set; admission-gated by the runtime flag; delete
+  `DocumentState.tree` and the edit-range coalescing helpers; new
+  `tests/salsa_incremental.rs`. Staged commits S1-S4, each green.
+  - The design doc's three-bucket section-window error splice was already
+    obsolete: Phase 3 shipped `merge_incremental_errors` with **two** buckets
+    (both strategies parse to EOF), so S2 reused it unchanged.
+  - `ReparseCache` has no admitted-set beside its map: presence *is* admission,
+    so the two cannot drift apart. Fatou's hot/cold eviction classes are
+    unnecessary here for the same reason --- a sweep or a sibling-config parse
+    never enters the cache at all, so plain LRU over admitted entries suffices.
+  - The parser's textual `edit_may_touch_refdefs` guard stays even though the
+    host now compares the sets exactly: it is cheap, and it is the only refdef
+    protection the parser-crate entry point has (it holds no refdef history).
+  - The host oracle is gated on `cfg(debug_assertions)` +
+    `PANACHE_REPARSE_ORACLE=1`, not `cfg(test)` as designed --- integration
+    tests link the library built *without* `cfg(test)`, so a `cfg(test)` gate
+    would have excluded exactly the suites (`tests/lsp.rs`,
+    `tests/salsa_incremental.rs`) it exists to cover.
+  - New: `PANACHE_INCREMENTAL_PARSING=1|0` overrides the client setting for the
+    whole server process. Phase 6 wanted an escape hatch anyway, and it is what
+    lets the suite run green with the feature forced on *and* forced off (the
+    handful of tests that assert the setting's own plumbing skip under it).
+  - Phase 7's `parser/incremental.rs` extraction was pulled forward into S4 as
+    `parser/reparse.rs`, since S4 was already moving the surrounding code. The
+    retired `parse_incremental_suffix*` fallback policy now lives with the
+    callers that want it: `crates/panache-parser/tests/common/mod.rs` for the
+    suites, a `#[cfg(test)]` shim in `reparse.rs` for the in-crate tests, and
+    `try_reparse` in `benches/lsp_incremental.rs`.
+
+- [x] Phase 5: benchmark repair --- fix `benches/lsp_incremental.rs`
+  multi-change path (currently degenerates to full reparse), add
+  fallback-rate + bail-cost accounting, commit results table in module doc.
+  - The multi-change path is fixed by *mirroring* `parsed_document` rather than
+    approximating it: whole-text `diff_edit` per notification, a base chained
+    from step to step, and the host's refdef-set comparison ahead of the
+    parser's textual guard. A case is now a *stream* of notifications, which is
+    what makes a fallback rate mean anything --- the old per-case rate was 0 or
+    1 by construction.
+  - Three cases were measuring nothing. `synthetic_document` emitted adjacent
+    lines, so every "paragraph" was one giant paragraph with no blank line for
+    the seam guard to decouple at, and every synthetic edit got a window
+    starting at byte 0; it now separates paragraphs and emits a `##` heading
+    every ten, so the section-window strategy has something to find.
+    `pandoc_manual_single_edit` edited line 200, which is ``[`setspace`]: ...``,
+    and rewrote the *label* --- it is kept, renamed to
+    `pandoc_manual_refdef_label_edit`, as the host-side-decline case, and a
+    genuine early-prose edit was added beside it. `fallback_invalid_range` was
+    dropped: the server validates client ranges before touching its buffer, so
+    it modelled nothing, and with `diff_edit` it merely duplicated
+    `full_replace`.
+  - The accounting distinguishes **window** bytes (window start to EOF, what
+    both strategies actually re-parse) from **spliced** bytes (green children
+    replaced). Only the former predicts the speedup; printing the latter is what
+    made `tables_single_edit` look like "7% reparsed, 0.98x". The bench also
+    reports a per-strategy histogram and a fallback-reason histogram, and
+    verifies the governing invariant at every step of every case before timing
+    anything.
+  - Headline: speedup is a function of window share and nothing else --- 5.6x on
+    a late edit or a typing stream in the pandoc manual (7% window), 1.0x where
+    the window is \~98%. A *successful* wide reparse is 5-10% slower than a full
+    parse (`pandoc_manual_early_edit` at 0.9x, `full_replace` at 0.2x).
+    Guard-cascade bail cost is 15.7% of a full parse; a host-side decline costs
+    one refdef scan.
+  - Three consequences for the phases below, folded into them: the window-size
+    cutoff is promoted out of Phase 8 into its own phase *ahead of the flip*
+    (5b), Phase 6's gate grows a regression ceiling and names its cases, and
+    Phase 7's exit criterion is restated in the harness's terms.
+
+- [x] Phase 5b: window-size cutoff --- decline in `reparse_ranges` when the
+  window start leaves more than a threshold share of the document
+  downstream, before the guard cascade and the window parse run. Threshold
+  picked from the bench (the crossover is around 85-90% window, where the
+  5-10% splice surcharge stops being repaid); a bench case per side of it.
+  - Promoted out of Phase 8 and ahead of Phase 6 because the flip is what makes
+    the losing shapes the *default*. Today a whole-document replace measures
+    0.2x and an early edit in the pandoc manual 0.9x; the cutoff turns both into
+    a clean \~1.0x fallback, so the flip ships something that is never worse
+    than the status quo. `full_replace` is not an exotic shape: a client that
+    answers format-on-save with a whole-document replace takes that path on
+    every save.
+  - Independent of the region tier --- it compares `reparse_range.0` against a
+    fraction of the document length and returns `None`, which is the existing
+    refusal-first contract. Phase 8 keeps the cutoff and re-tunes the threshold
+    once regions change what a window costs.
+  - Landed as `MAX_WINDOW_SHARE_PERCENT = 85` and **two** checks, not one. The
+    cheap one runs before the old tree is touched at all: every window this
+    entry point can choose starts at or before the edit, so the edit offset is a
+    sound upper bound on the window start, and a whole-document replace declines
+    there for a tenth of a microsecond (0.2x -> 0.9x). The precise one runs
+    after the restart is known, because a single top-level block spanning most
+    of the document puts the restart arbitrarily far ahead of the edit.
+  - A too-wide *section* window declines the strategy, not the reparse: the
+    section anchor is the previous top-level heading, which can sit far earlier
+    than the edited block, so the suffix window below it is often narrower and
+    still admissible.
+  - Bench, before -> after: `full_replace` 0.2x -> 0.9x,
+    `pandoc_manual_early_edit` 0.9x -> 1.0x, `multi_change_large_8` 0.9x -> 0.9x
+    (see below), `tables_single_edit` / `math_single_edit` /
+    `large_authoring_single_edit` 1.0-1.1x -> 1.0x. Nothing that won lost: the
+    typing streams and `pandoc_manual_late_edit` are unchanged at 2.8x and 5.4x.
+    New cases `window_cutoff_accepted` (79.9% window) and
+    `window_cutoff_declined` (87.8%) bracket the threshold on one document.
+  - **Phase 6's 0.95x ceiling is not met by three cases, and none of them is a
+    wide-window splice.** `bail_refdef_edit` (0.9x) exists to price a decline,
+    which is definitionally slower than the full parse it wraps --- the ceiling
+    needs the same explicit exemption the fallback-rate threshold already gives
+    it. `multi_change_utf16_4` (0.7x) is a 74-byte document against a 1.8 us
+    fixed attempt cost; it lost at 0.8x *while splicing successfully* before
+    this phase, so it is Phase 7's fixed-overhead problem, not a threshold
+    problem. `multi_change_large_8` (0.9x) declines in under a microsecond and
+    still costs \~100 us more than a full parse of its 76 KB: that residual is
+    host-side per-step work (whole-text `diff_edit` plus the 67 KB `insert` it
+    allocates, the refdef-set clone, the base text copy), it is unattributed
+    between those, and it wants a profile in Phase 6 rather than a threshold.
+  - A document-size floor was tried for the 74-byte case and reverted: it would
+    also refuse small documents with *narrow* windows, which do win
+    (`single_change_small`, 1.6 KB, 1.3x), and it made every reuse assertion in
+    the suite untestable through the production entry point.
+  - The cutoff cost the fuzz harness two thirds of its coverage --- its hazard
+    snippets are tens of bytes, so nearly every window is a wide one, and the
+    share of edits reaching a splice fell from 78% to 23% while every assertion
+    still passed. `CostGuards::{Enforced,Ignored}` on a new
+    `reparse_with_cost_guards` is the opt-out: the snippets fuzz with the cost
+    guard off (the seams they encode occur mid-document in real files, where the
+    cutoff admits them), the real-document corpus keeps the production setting,
+    and each driver now asserts a floor on its splice rate so a future guard
+    cannot silently empty the harness again.
+
+- [x] Phase 6a: mechanize the gate --- the thresholds Phase 6b is gated on were
+  printed but never checked, so "the gate passed" was an eyeball judgement.
+  `PANACHE_LSP_BENCH_ASSERT=1` now checks every case and exits non-zero on a
+  violation; `task bench:incremental-gate` fetches the corpus and runs it.
+  - **The fallback-rate criterion was stale and had to be replaced, not
+    implemented.** It read "< 20% on every case except the two that price a
+    decline", which was written before Phase 5b: the window-size cutoff makes a
+    decline the *correct* outcome for a wide-window edit, and ten of the
+    eighteen cases now fall back on every step by design. A global rate rule
+    cannot express that. Each case instead declares an `Expect` (`Reuse::Always`
+    or `Reuse::Never`, plus an optional speedup floor), so the old exemption
+    list is gone: the exempted cases are simply the ones that declare `Never`,
+    and a new case cannot be added without saying what it is for.
+  - Every ratio rule carries an absolute-microsecond escape
+    (`MAX_ABSOLUTE_OVERHEAD_US = 20`), because a ratio on a 2 us baseline is
+    noise. That retires the by-name exemptions Phase 5b recorded for
+    `full_replace` (+0.3 us) and `multi_change_utf16_4` (+1.7 us, 44% bail on a
+    3.7 us parse) and puts them on a stated principle, and it lets
+    `bail_refdef_edit` (+15.8 us) pass the ceiling without the carve-out the
+    roadmap reserved for it. Presence is checked too: the real-document corpus
+    is gitignored and `load_document` skips silently, so without it a gate run
+    on a fresh checkout passes by not measuring exactly the strictest cases.
+  - **`multi_change_large_8`'s \~95 us is profiled, and Phase 5b's guess at it
+    was wrong.** It is not host-side per-step work: measured directly on the
+    case, `diff_edit` is 7.1 us, the config clone 0.1 us, and the declined
+    attempt 0.2 us --- under 8 us of the \~95, and the base text copy the guess
+    also named was never inside the timed region at all. The rest is the
+    *fallback full parse itself* running \~5% slower on the incremental path
+    (1861 us vs 1963 us for the same call on the same text), with the previous
+    green tree and the 64 KB edit buffer resident across it. That residual sits
+    inside the run-to-run spread of the same parse, which is why the case
+    straddles 0.95x rather than failing outright; it carries a documented 0.90
+    ceiling naming the profile, and the printed reason keeps the exemption
+    visible on every run.
+    - A real mis-attribution *was* found and fixed on the way, but it is not
+      this one. The bench modelled `refdef_set` as a bare scan and then compared
+      whole `RefdefMap`s on the incremental path only, while in production the
+      comparison happens inside the query, is charged to both paths, and hands
+      back the same `Arc` when the set is unchanged --- which is what makes
+      `parsed_document`'s check a pointer compare. `refdef_query` now models the
+      backdating. It moves this case by nothing measurable (its synthetic
+      document has no reference definitions, so the sets are empty and the
+      comparison was free); it matters for refdef-carrying documents, and for
+      the harness continuing to mirror the query it claims to mirror.
+  - Deferred deliberately: no CI workflow yet. The gate needs
+    `benches/documents/download.sh` and a release build, and a timing-assert job
+    on shared runners would land flaky next to the flip. The mode and the task
+    target are what make wiring it a later one-liner.
+
+- [ ] Phase 6b: default flip --- incremental parsing is **always on**, with no
+  new setting. `panache.experimental.incrementalParsing` stays exactly where
+  it is and keeps working, but inverts its meaning: absent means on, and the
+  only reason to write it is `false`, which turns the side channel off for
+  debugging. No `panache.incrementalParsing` key, no alias, no
+  `deprecationMessage`, no setting migration --- a second key buys nothing
+  when the only value anyone would set is the one the existing key already
+  accepts.
+  - Work: default the setting to on where it is read
+    (`experimental_incremental_parsing_from_initialize` in
+    `src/lsp/dispatch.rs`, and the `workspace/configuration` pull and
+    `didChangeConfiguration` paths in `src/lsp/handlers/configuration.rs`, which
+    share `runtime_incremental_parsing_from_value`); flip the VS Code
+    `package.json` default to `true` and reword its description, which currently
+    sells it as an unstable experiment rather than a debug switch; update
+    `docs/guide/lsp.qmd` (opt-in -> opt-out), `docs/development/lsp.qmd`, and
+    the AGENTS.md admission sentence; flip the LSP tests that assert the default
+    is off (`tests/lsp/test_incremental_edits.rs`,
+    `tests/lsp/test_config_pull.rs`, `tests/lsp/test_config_reload.rs`).
+    `PANACHE_INCREMENTAL_PARSING=1|0` keeps overriding the setting in both
+    directions and needs no change.
+  - The server-side default is only *one* of three:
+    `editors/code/src/extension.ts` passes its own hard-coded `false` fallback
+    into `initializationOptions`, and `editors/code/README.md` documents
+    `default: false`. Both need flipping with `package.json`, or VS Code keeps
+    sending an explicit `false` and the server default never governs that client
+    at all.
+  - `apply_runtime_settings` in `src/lsp/handlers/configuration.rs` applies no
+    default: an absent key keeps the current value rather than resetting. That
+    is correct and stays, but it means the flip cannot be made there --- only
+    the initialize path decides the default.
+  - The `experimental.` prefix becomes a misnomer the day this lands. Renaming
+    it is deliberately declined: a rename needs precisely the alias and
+    migration this phase drops, and the cost of a stale prefix on a debug-only
+    switch is lower than the cost of carrying two keys forever. The *internal*
+    name (`runtime_settings.experimental_incremental_parsing`) has no wire
+    impact and can be renamed freely --- Phase 9 material.
+  - Gate: oracle-clean fuzz at 10x iterations; workspace + LSP suite green with
+    the flag forced on and off; 1 week oracle-live dogfooding with zero panics;
+    and `task bench:incremental-gate` green.
+  - **The bench thresholds are no longer restated here.** Phase 6a moved them
+    into the cases themselves (`Expect` in `benches/lsp_incremental.rs`), which
+    is the only copy: a number in this file could not be checked and drifted
+    from the harness within one phase. The floors the roadmap named survive
+    verbatim as declarations --- `typing_stream_medium` >= 2x,
+    `pandoc_manual_late_edit` and `pandoc_manual_typing_stream` >= 5x --- as
+    does the 0.95x regression ceiling and the 20%-of-a-full-parse bail budget.
+    Read the gate's output, not this bullet.
+    - Both 5x floors measure 5.4-5.7x, run to run. That is a thin margin by
+      design: the floors are the roadmap's, and the margin printed on every run
+      is what makes drift visible before it fails.
+    - Run the gate at the default iteration count. `multi_change_large_8` fails
+      at 4 iterations and passes at 80 --- its margin is a few percent on a 1.9
+      ms parse, so a shortened run measures the sampling noise, not the feature.
+
+- [ ] Phase 7: token tier --- edit inside plain `TEXT`; newline ban,
+  construct-character ban list kept honest by a grammar-grepping test, relex
+  kind stability, join probes, error non-touch; char-by-char typing test.
+  (The module extraction this phase also carried landed early, in Phase 4's
+  S4: `crates/panache-parser/src/parser/reparse.rs`.)
+  - Phase 5's typing-stream numbers *raise* this phase's value rather than
+    lowering it. The section window already gets streams to 2.7x/5.6x, but
+    `pandoc_manual_typing_stream` still costs 1.9 ms per keystroke, because a 7%
+    window on a 300 KB document is still 21 KB re-parsed for a one-character
+    insert. This tier is O(token) instead of O(document tail) and is the only
+    thing that removes that.
+  - Exit criterion in the harness's terms: the typing-stream cases must show a
+    step change, not an improvement. And the tier has to skip the *fixed*
+    overhead too, not only the block parse --- `full_replace` puts a \~10 us
+    floor on a 1.6 KB document for machinery that ultimately parsed 27 bytes
+    (materializing the root from green, walking the cascade).
+
+- [ ] Phase 8: region tier over top-level `DOCUMENT` children replacing
+  section/suffix windows --- symmetric newline-decoupling scans in old and
+  new text, `no_straddle` seam primitive, fence/div balance,
+  setext/lazy-continuation/list-tightness/HTML-block coupling guards. Fixes
+  the suffix-window reparse-to-EOF gap. (The too-wide bail this phase used
+  to carry is Phase 5b; re-tune its threshold here.)
+  - Phase 5 confirms the premise: window share is the only lever on speedup, and
+    the current tier gets 92-98% windows on all three real documents, so it wins
+    nothing on early or mid-document edits in real files.
+  - The payoff depends on top-level *child* granularity, not on headings.
+    `tables_single_edit` edits line 40, the section window fires, and the window
+    still starts \~450 bytes in, because that is where the nearest top-level
+    heading sits. More headings would not help; regions over `DOCUMENT` children
+    are what does.
+
+- [ ] Phase 9: closeout --- architecture docs, dead-path pruning, record
+  deferrals.
+
+**Deferred (explicit non-goals):** nested-container regions (inside list items,
+blockquotes, divs) are unsound without a context-parameterized fragment-parser
+entry point carrying container stack, open fences, and refdef scope --- fatou's
+recorded lesson (fatou `TODO.md`, "Incremental" section). Regions stay
+restricted to top-level `DOCUMENT` children until that exists. NodePtr
+re-anchoring across edits (arity's `map_range_through_edits`) is only needed if
+panache starts caching NodePtrs across edits.
+
 ## Parser
 
 ### Parser bugs found by the incremental fuzzer (2026-08)

@@ -9,7 +9,10 @@
 //! these tests fail before the perf regression reaches salsa.
 
 use panache_parser::SyntaxNode;
-use panache_parser::parser::{parse, parse_incremental_suffix};
+use panache_parser::parser::{parse, parse_with_errors};
+
+mod common;
+use common::reparse_or_full;
 use rowan::{GreenNode, GreenNodeData, NodeOrToken};
 
 fn apply_edit(text: &str, old: (usize, usize), insert: &str) -> String {
@@ -50,7 +53,7 @@ fn incremental_suffix_retains_prefix_block_identity() {
     let updated = apply_edit(input, old_edit, "FIVE");
     let new_edit = (start, start + 4);
 
-    let inc = parse_incremental_suffix(&updated, None, &old_tree, old_edit, new_edit);
+    let inc = reparse_or_full(&updated, None, &old_tree, &[], old_edit, new_edit);
     assert_eq!(
         inc.strategy, "suffix_window",
         "expected the suffix strategy"
@@ -83,7 +86,7 @@ fn section_window_retains_surrounding_block_identity() {
     let updated = apply_edit(input, old_edit, "BETA");
     let new_edit = (start, start + 4);
 
-    let inc = parse_incremental_suffix(&updated, None, &old_tree, old_edit, new_edit);
+    let inc = reparse_or_full(&updated, None, &old_tree, &[], old_edit, new_edit);
     assert_eq!(
         inc.strategy, "section_window",
         "expected the section strategy"
@@ -126,7 +129,7 @@ fn incremental_and_full_reparse_agree_block_for_block() {
     let updated = apply_edit(input, old_edit, "BETA");
     let new_edit = (start, start + 4);
 
-    let inc = parse_incremental_suffix(&updated, None, &old_tree, old_edit, new_edit);
+    let inc = reparse_or_full(&updated, None, &old_tree, &[], old_edit, new_edit);
     let full = parse(&updated, None);
 
     let inc_blocks = blocks(&inc.tree);
@@ -176,6 +179,133 @@ fn unchanged_blocks_compare_equal_across_edit() {
     );
 }
 
+/// Extract the `$0...$0`-marked range from `marked`, returning the unmarked
+/// text and the byte range the markers delimited.
+fn extract_range(marked: &str) -> (String, (usize, usize)) {
+    let start = marked.find("$0").expect("opening $0 marker");
+    let rest = &marked[start + 2..];
+    let end_rel = rest.find("$0").expect("closing $0 marker");
+    let mut text = String::with_capacity(marked.len() - 4);
+    text.push_str(&marked[..start]);
+    text.push_str(&rest[..end_rel]);
+    text.push_str(&rest[end_rel + 2..]);
+    (text, (start, start + end_rel))
+}
+
+/// rust-analyzer-style structural check. `before_marked` holds `$0...$0`
+/// markers around the deleted range; `insert` replaces it. Asserts:
+///
+/// 1. the incremental parse engaged `expected_strategy` (not a silent
+///    fallback),
+/// 2. it reparsed exactly `reparsed_len` bytes — a pinned granularity that
+///    fails when a change silently widens the reparse window (a perf
+///    regression correctness tests cannot see),
+/// 3. the incremental tree's full `{:#?}` dump equals a from-scratch parse
+///    of the edited text — structural identity, not text equality,
+/// 4. the spliced syntax-error vector equals that parse's.
+fn do_check(before_marked: &str, insert: &str, expected_strategy: &str, reparsed_len: usize) {
+    let (before, old_edit) = extract_range(before_marked);
+    let updated = apply_edit(&before, old_edit, insert);
+    let new_edit = (old_edit.0, old_edit.0 + insert.len());
+
+    let (old_tree, old_errors) = parse_with_errors(&before, None);
+    let inc = reparse_or_full(&updated, None, &old_tree, &old_errors, old_edit, new_edit);
+    let (full, full_errors) = parse_with_errors(&updated, None);
+
+    assert_eq!(
+        inc.strategy, expected_strategy,
+        "wrong strategy for edit {old_edit:?} -> {insert:?} in {before:?}"
+    );
+    assert_eq!(
+        inc.reparse_range.1 - inc.reparse_range.0,
+        reparsed_len,
+        "reparsed window has wrong length (range {:?}) for edit {old_edit:?} in {before:?}",
+        inc.reparse_range
+    );
+    assert_eq!(
+        format!("{:#?}", inc.tree),
+        format!("{full:#?}"),
+        "incremental tree diverged structurally from full parse"
+    );
+    assert_eq!(
+        inc.errors, full_errors,
+        "incremental syntax errors diverged from full parse"
+    );
+}
+
+#[test]
+fn do_check_suffix_window_tail_edit() {
+    // Heading-free document: the suffix strategy restarts at a safe
+    // top-level block boundary and reparses to EOF.
+    do_check(
+        "para one\n\npara two\n\npara three\n\npara four\n\npara $0five$0\n",
+        "FIVE",
+        "suffix_window",
+        10,
+    );
+}
+
+#[test]
+fn do_check_suffix_window_reparses_to_eof_from_middle_edit() {
+    // Documents the suffix-window gap: an edit in the middle of a
+    // heading-free document reparses everything from the restart to EOF.
+    // The region tier (roadmap Phase 8) should shrink this window; when it
+    // does, this pinned length must go down, not up.
+    do_check(
+        "para one\n\npara $0two$0\n\npara three\n\npara four\n\npara five\n",
+        "TWO",
+        "suffix_window",
+        43,
+    );
+}
+
+#[test]
+fn do_check_section_window_between_headings() {
+    // Edit strictly inside a section body bounded by top-level headings:
+    // only the enclosing section (previous heading to next heading) is
+    // reparsed.
+    do_check(
+        "# Intro\n\nalpha\n\n# Middle\n\nbeta $0section$0\n\n# End\n\nomega\n",
+        "SECTION",
+        "section_window",
+        24,
+    );
+}
+
+#[test]
+fn do_check_section_window_last_section_runs_to_eof() {
+    do_check(
+        "# Intro\n\nalpha\n\n# End\n\nom$0eg$0a\n",
+        "EG",
+        "section_window",
+        13,
+    );
+}
+
+#[test]
+fn do_check_edit_at_document_start_declines_on_window_size() {
+    // The restart clamps to the document start, so the "suffix" would be the
+    // whole document: correct, but strictly more expensive than the full parse
+    // it duplicates. The window-size cutoff declines before the guard cascade
+    // and the window parse run, so the caller pays that full parse and nothing
+    // else.
+    do_check(
+        "$0p$0ara one\n\npara two\n\npara three\n",
+        "P",
+        "full_reparse",
+        31,
+    );
+}
+
+#[test]
+fn do_check_fallback_when_restart_would_pass_the_edit() {
+    // Inserting at the blank line after an unterminated fence resolves the
+    // enclosing block to the *following* paragraph, putting the restart
+    // past the edit start; the guard bails to a full reparse rather than
+    // retaining stale pre-edit bytes.
+    do_check("```\ncode\n$0$0\npara after\n", "\\", "full_reparse", 22);
+}
+
 #[test]
 fn incremental_reparse_is_lossless() {
     let input = "para one\n\npara two\n\npara three\n\npara four\n\npara five\n";
@@ -186,7 +316,7 @@ fn incremental_reparse_is_lossless() {
     let updated = apply_edit(input, old_edit, "THREE!!");
     let new_edit = (start, start + 7);
 
-    let inc = parse_incremental_suffix(&updated, None, &old_tree, old_edit, new_edit);
+    let inc = reparse_or_full(&updated, None, &old_tree, &[], old_edit, new_edit);
     assert_eq!(
         inc.tree.text().to_string(),
         updated,

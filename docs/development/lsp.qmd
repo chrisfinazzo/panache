@@ -21,6 +21,55 @@ The LSP tracks document changes using **incremental synchronization**:
 This ensures the LSP always has the current document state while minimizing data
 transfer.
 
+### One Tree, Derived on Demand
+
+The notification handlers write salsa *inputs* only --- they never parse. Every
+consumer (request handlers, the linter, diagnostics) reads the tree from the
+`parsed_document` query, so there is exactly one parse of a document per
+revision and no way for a handler to see a tree that disagrees with the text it
+was handed.
+
+When `experimental.incrementalParsing` is on, `parsed_document` splices that
+tree off the previous parse instead of reparsing from scratch. The previous
+parse lives in a side channel beside salsa (`src/incremental.rs`), keyed on
+`(file, config)` and reused only when both the config value and the document's
+reference-definition set are unchanged --- retained blocks keep the resolution
+and options they were parsed with, so either changing invalidates them at a
+distance.
+
+Four properties make reading and writing that channel from inside an otherwise
+pure query sound:
+
+- A successful splice is byte-identical to a full parse, tree *and* syntax
+  errors. The parser asserts this on every splice in debug builds; setting
+  `PANACHE_REPARSE_ORACLE=1` adds a second check against a real full parse
+  before anything is stored. Both oracles cost a full parse each, so both are
+  compiled out of release builds; what survives there is the one part of the
+  invariant that is `O(1)` --- the spliced tree spans exactly the text it was
+  spliced from. That check runs in every build and *falls back* to a full parse
+  rather than panicking, because `parsed_document` feeds formatting, which
+  writes the user's file.
+- Every guard declines to `None` rather than guessing, so the query's fallback
+  is an ordinary full parse.
+- One guard declines for cost rather than correctness. Both reparse strategies
+  parse their window to the end of the document, so a window that starts near
+  the top of the file re-derives nearly all of it and then pays a splice on top:
+  measured, that is a 5-10% loss against simply parsing the file again. The
+  parser therefore refuses a window leaving more than 85% of the document
+  downstream, before running the rest of the cascade or the window parse. A
+  whole-document replacement, which some clients send on every format-on-save,
+  takes that path and costs the full parse it would have cost anyway.
+  `benches/lsp_incremental.rs` carries the measurements and a case on each side
+  of the threshold.
+- The base is stored last, after every fallible step, so a panic or a salsa
+  cancellation mid-query can never leave a base whose text and tree disagree.
+  Stores are not ordered across revisions, so an older base can overwrite a
+  newer one; each is internally consistent, and a stale base only widens the
+  next diff.
+
+Only the LSP admits a document to the channel, and only while the setting is on.
+With it off nothing is admitted, so every parse is the full parse it was before.
+
 ### Durability and Invalidation Policy
 
 Panache uses Salsa durability levels to reduce unnecessary revalidation work in

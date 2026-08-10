@@ -9,7 +9,6 @@ use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::InitializeParams;
 use lsp_types::notification::Notification as _;
-use rowan::GreenNode;
 
 mod config;
 mod context;
@@ -44,8 +43,6 @@ pub struct DocumentState {
     pub salsa_file: crate::salsa::FileText,
     /// Salsa input for this document's config.
     pub salsa_config: crate::salsa::FileConfig,
-    /// Cached syntax tree for incremental parsing.
-    pub tree: GreenNode,
 }
 
 #[derive(Debug, Clone, Default)]
