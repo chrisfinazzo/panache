@@ -153,7 +153,7 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-panache-${{ hashFiles('**/Cargo.lock') }}
       - name: Install panache
-        run: cargo install panache --locked
+        run: cargo install --locked panache
       - name: Check formatting
         run: panache format --check .
       - name: Run linter

@@ -30,7 +30,7 @@ For line-level profiling with flame graphs:
 
 ```bash
 # Install flamegraph
-cargo install flamegraph
+cargo install --locked flamegraph
 
 # Profile the benchmark
 cargo flamegraph --bench formatting
