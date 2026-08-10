@@ -16,3 +16,10 @@ text
 ::: tip
 text
 :::
+
+-   one
+    two
+
+::: {.content-visible when-meta="tool.is_vscode"}
+text
+:::

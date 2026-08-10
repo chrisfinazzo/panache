@@ -2,7 +2,7 @@
 source: crates/panache-parser/tests/golden_parser_cases.rs
 expression: cst_output
 ---
-DOCUMENT@0..83
+DOCUMENT@0..160
   LIST@0..12
     LIST_ITEM@0..12
       LIST_MARKER@0..1 "-"
@@ -72,3 +72,37 @@ DOCUMENT@0..83
     DIV_FENCE_CLOSE@79..83
       TEXT@79..82 ":::"
       NEWLINE@82..83 "\n"
+  BLANK_LINE@83..84
+    BLANK_LINE@83..84 "\n"
+  LIST@84..100
+    LIST_ITEM@84..100
+      LIST_MARKER@84..85 "-"
+      WHITESPACE@85..88 "   "
+      PLAIN@88..100
+        TEXT@88..91 "one"
+        NEWLINE@91..92 "\n"
+        WHITESPACE@92..96 "    "
+        TEXT@96..99 "two"
+        NEWLINE@99..100 "\n"
+  BLANK_LINE@100..101
+    BLANK_LINE@100..101 "\n"
+  FENCED_DIV@101..160
+    DIV_FENCE_OPEN@101..151
+      TEXT@101..104 ":::"
+      WHITESPACE@104..105 " "
+      DIV_INFO@105..150
+        TEXT@105..106 "{"
+        ATTR_CLASS@106..122 ".content-visible"
+        WHITESPACE@122..123 " "
+        ATTR_KEY_VALUE@123..149
+          ATTR_KEY@123..132 "when-meta"
+          TEXT@132..133 "="
+          ATTR_VALUE@133..149 "\"tool.is_vscode\""
+        TEXT@149..150 "}"
+      NEWLINE@150..151 "\n"
+    PARAGRAPH@151..156
+      TEXT@151..155 "text"
+      NEWLINE@155..156 "\n"
+    DIV_FENCE_CLOSE@156..160
+      TEXT@156..159 ":::"
+      NEWLINE@159..160 "\n"
