@@ -824,6 +824,7 @@ golden_test_cases!(
     issue_314_advance_columns_multibyte,
     issue_336_gfm_strong_colon_bare_uri,
     issue_398_headerless_multiline_dash_closer,
+    issue_467_attribute_unnumbered_shorthand,
     writer_autolinks,
     writer_blockquote_not,
     writer_definition_lists_multiblock,

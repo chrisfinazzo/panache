@@ -151,10 +151,13 @@ impl InfoString {
         // Use chunk options parser (comma-aware) for initial detection
         let prelim_attrs = Self::parse_chunk_options(content);
 
-        // First non-ID, non-attribute token determines if it's executable or display
+        // First non-ID, non-attribute token determines if it's executable or
+        // display. A run of `-` is pandoc's `.unnumbered` shorthand, not a
+        // language, so ```` ```{-} ```` is a plain code block with that class
+        // rather than an executable chunk in a language named `-`.
         let mut first_lang_token = None;
         for (key, val) in prelim_attrs.iter() {
-            if val.is_none() && !key.starts_with('#') {
+            if val.is_none() && !key.starts_with('#') && !key.chars().all(|c| c == '-') {
                 first_lang_token = Some(key.as_str());
                 break;
             }

@@ -43,7 +43,10 @@ impl AttributeNode {
         self.0.children_with_tokens().any(|el| {
             matches!(
                 el.kind(),
-                SyntaxKind::ATTR_ID | SyntaxKind::ATTR_CLASS | SyntaxKind::ATTR_KEY_VALUE
+                SyntaxKind::ATTR_ID
+                    | SyntaxKind::ATTR_CLASS
+                    | SyntaxKind::ATTR_UNNUMBERED
+                    | SyntaxKind::ATTR_KEY_VALUE
             )
         })
     }
@@ -90,9 +93,18 @@ impl AttributeNode {
             return self
                 .0
                 .children_with_tokens()
-                .filter(|el| el.kind() == SyntaxKind::ATTR_CLASS)
+                .filter(|el| {
+                    matches!(
+                        el.kind(),
+                        SyntaxKind::ATTR_CLASS | SyntaxKind::ATTR_UNNUMBERED
+                    )
+                })
                 .filter_map(|el| el.into_token())
                 .map(|t| {
+                    // A bare `-` is pandoc's shorthand for `.unnumbered`.
+                    if t.kind() == SyntaxKind::ATTR_UNNUMBERED {
+                        return "unnumbered".to_string();
+                    }
                     self.decode_structured_value(t.text().strip_prefix('.').unwrap_or(t.text()))
                 })
                 .collect();

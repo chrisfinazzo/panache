@@ -250,6 +250,22 @@ Output
     ## Heading with classes {.important .highlight}
     ```
 
+Pandoc lets a single hyphen stand in for the `unnumbered` class, which is the
+preferable spelling in non-English documents. Panache keeps that shorthand as
+written rather than expanding it to `.unnumbered`.
+
+Input
+
+:   ```markdown
+    ### 河邊道路：不規則道路門牌處置 {#hbdl -}
+    ```
+
+Output
+
+:   ```markdown
+    ### 河邊道路：不規則道路門牌處置 {#hbdl -}
+    ```
+
 ### Setext Headings
 
 Setext-style headings are converted to ATX style.

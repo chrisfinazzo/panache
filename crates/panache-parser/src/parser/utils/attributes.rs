@@ -113,11 +113,16 @@ fn find_matching_open_brace_for_trailing_block(text: &str) -> Option<usize> {
 /// quotes are kept INSIDE the ranges so the emitter can wrap the exact source
 /// bytes; the string-deriving helpers strip them.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum AttrComponent {
+pub enum AttrComponent {
     /// `#id` — range includes the leading `#`.
     Id(std::ops::Range<usize>),
     /// `.class` or `=format` — range includes the leading `.`/`=` marker.
     Class(std::ops::Range<usize>),
+    /// A bare `-` — pandoc's shorthand for `.unnumbered`. Always exactly one
+    /// byte, since pandoc consumes the `-` and resumes scanning immediately
+    /// after it (`{---}` is three `unnumbered` classes, `{-.a}` is `unnumbered`
+    /// plus `a`).
+    Unnumbered(std::ops::Range<usize>),
     /// `key=value`: key range, `=` byte index, value range (the value range
     /// includes surrounding quotes when present).
     KeyValue {
@@ -134,7 +139,7 @@ pub(crate) enum AttrComponent {
 /// drift. Bytes the scan skips (duplicate `#id`, malformed tokens, whitespace)
 /// are not components; the emitter recovers them from the gaps between ranges.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AttributeSpans {
+pub struct AttributeSpans {
     pub components: Vec<AttrComponent>,
 }
 
@@ -259,7 +264,7 @@ fn numeric_reference_char(code: Option<u32>) -> char {
 /// Scan an attribute `{...}` body into [`AttributeSpans`]. Returns `None` when
 /// no component is recognized (empty/whitespace-only/`{}` is not a valid
 /// attribute block). Offsets are relative to `content`.
-pub(crate) fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
+pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
     let bytes = content.as_bytes();
     let mut pos = 0;
     let mut components: Vec<AttrComponent> = Vec::new();
@@ -296,6 +301,37 @@ pub(crate) fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
             if !have_id && pos > start + 1 {
                 components.push(AttrComponent::Id(start..pos));
                 have_id = true;
+            }
+        } else if bytes[pos] == b'-' {
+            // Pandoc's `.unnumbered` shorthand: each `-` is consumed on its own
+            // and the scan resumes immediately after it, so `{---}` is three
+            // `unnumbered` classes and `{-.a}` is `unnumbered` plus `a`.
+            //
+            // Pandoc only accepts the shorthand when whatever follows the run of
+            // hyphens is itself a valid attribute item, and rejects the WHOLE
+            // block otherwise — `{--verbose}` is literal text, not two
+            // `unnumbered` classes plus a stray word. Reproduce that boundary
+            // check here or a heading documenting a CLI flag gets silently
+            // eaten (and rewritten away by the formatter).
+            let run_end = pos + bytes[pos..].iter().take_while(|&&b| b == b'-').count();
+            let mut word_end = run_end;
+            while word_end < bytes.len() && !bytes[word_end].is_ascii_whitespace() {
+                word_end += 1;
+            }
+            let follower = &content[run_end..word_end];
+            // A `key=value` may follow with no separating space, but a bare
+            // `=format` raw marker may not — pandoc accepts that only as the
+            // whole body.
+            let key_len = follower.bytes().take_while(|&b| b != b'=').count();
+            let starts_new_item = follower.is_empty()
+                || matches!(bytes[run_end], b'.' | b'#')
+                || (key_len > 0 && key_len < follower.len());
+            if starts_new_item {
+                components.extend((pos..run_end).map(|i| AttrComponent::Unnumbered(i..i + 1)));
+                pos = run_end;
+            } else {
+                // Malformed token: skip it, as the key/value arm below does.
+                pos = word_end;
             }
         } else if bytes[pos] == b'.' {
             let start = pos;
@@ -377,6 +413,7 @@ pub fn parse_attribute_content(content: &str) -> Option<AttributeBlock> {
                     None => classes.push(raw.to_string()),
                 }
             }
+            AttrComponent::Unnumbered(_) => classes.push("unnumbered".to_string()),
             AttrComponent::KeyValue { key, value, .. } => {
                 key_values.push((
                     content[key.clone()].to_string(),
@@ -783,13 +820,18 @@ pub fn emit_code_info_attrs(
     let mut cursor = 0usize;
     for comp in &spans.components {
         let (start, end) = match comp {
-            AttrComponent::Id(r) | AttrComponent::Class(r) => (r.start, r.end),
+            AttrComponent::Id(r) | AttrComponent::Class(r) | AttrComponent::Unnumbered(r) => {
+                (r.start, r.end)
+            }
             AttrComponent::KeyValue { key, value, .. } => (key.start, value.end),
         };
         emit_attribute_gap(builder, &body[cursor..start]);
         match comp {
             AttrComponent::Id(r) => {
                 builder.token(SyntaxKind::ATTR_ID.into(), &body[r.clone()]);
+            }
+            AttrComponent::Unnumbered(r) => {
+                builder.token(SyntaxKind::ATTR_UNNUMBERED.into(), &body[r.clone()]);
             }
             AttrComponent::Class(r) => {
                 let is_dot_class = body.as_bytes().get(r.start) == Some(&b'.');
@@ -845,13 +887,18 @@ fn emit_attribute_node_with_kinds(
             let mut cursor = 0usize;
             for comp in &spans.components {
                 let (start, end) = match comp {
-                    AttrComponent::Id(r) | AttrComponent::Class(r) => (r.start, r.end),
+                    AttrComponent::Id(r)
+                    | AttrComponent::Class(r)
+                    | AttrComponent::Unnumbered(r) => (r.start, r.end),
                     AttrComponent::KeyValue { key, value, .. } => (key.start, value.end),
                 };
                 emit_attribute_gap(builder, &body[cursor..start]);
                 match comp {
                     AttrComponent::Id(r) => {
                         builder.token(SyntaxKind::ATTR_ID.into(), &body[r.clone()]);
+                    }
+                    AttrComponent::Unnumbered(r) => {
+                        builder.token(SyntaxKind::ATTR_UNNUMBERED.into(), &body[r.clone()]);
                     }
                     AttrComponent::Class(r) => {
                         builder.token(SyntaxKind::ATTR_CLASS.into(), &body[r.clone()]);
@@ -1018,6 +1065,76 @@ mod tests {
         );
     }
 
+    /// A bare `-` is pandoc's shorthand for `.unnumbered` (manual: "A single
+    /// hyphen (-) in an attribute context is equivalent to .unnumbered, and
+    /// preferable in non-English documents"). Every expectation below is
+    /// pinned against `pandoc -f markdown -t native`.
+    #[test]
+    fn test_bare_hyphen_is_unnumbered_shorthand() {
+        // On its own it makes the block an attribute block, id or not.
+        let (attrs, before) = try_parse_trailing_attributes("Heading {-}").unwrap();
+        assert_eq!(before, "Heading");
+        assert_eq!(attrs.identifier, None);
+        assert_eq!(attrs.classes, vec!["unnumbered"]);
+
+        let (attrs, _) = try_parse_trailing_attributes("Heading {#hbdl -}").unwrap();
+        assert_eq!(attrs.identifier, Some("hbdl".to_string()));
+        assert_eq!(attrs.classes, vec!["unnumbered"]);
+
+        // Source order is preserved among classes.
+        let (attrs, _) = try_parse_trailing_attributes("Text {.a - .b}").unwrap();
+        assert_eq!(attrs.classes, vec!["a", "unnumbered", "b"]);
+    }
+
+    /// The `-` consumes exactly one byte and scanning resumes right after it,
+    /// so it needs no surrounding whitespace and repeats.
+    #[test]
+    fn test_bare_hyphen_is_single_byte() {
+        let (attrs, _) = try_parse_trailing_attributes("Text {---}").unwrap();
+        assert_eq!(
+            attrs.classes,
+            vec!["unnumbered", "unnumbered", "unnumbered"]
+        );
+
+        let (attrs, _) = try_parse_trailing_attributes("Text {-.a}").unwrap();
+        assert_eq!(attrs.classes, vec!["unnumbered", "a"]);
+
+        let (attrs, _) = try_parse_trailing_attributes("Text {-#id}").unwrap();
+        assert_eq!(attrs.identifier, Some("id".to_string()));
+        assert_eq!(attrs.classes, vec!["unnumbered"]);
+
+        let (attrs, _) = try_parse_trailing_attributes("Text {-foo=bar}").unwrap();
+        assert_eq!(attrs.classes, vec!["unnumbered"]);
+        assert_eq!(
+            attrs.key_values,
+            vec![("foo".to_string(), "bar".to_string())]
+        );
+    }
+
+    /// Pandoc accepts the shorthand only when a valid attribute item follows
+    /// the run of hyphens, and otherwise rejects the whole block. Without this
+    /// boundary a heading documenting a CLI flag (`## Using {--verbose}`) would
+    /// be swallowed as attributes and rewritten away by the formatter.
+    #[test]
+    fn test_bare_hyphen_needs_a_following_item() {
+        assert!(try_parse_trailing_attributes("Using {--verbose}").is_none());
+        assert!(try_parse_trailing_attributes("Text {-x}").is_none());
+        // `=format` is a raw marker, valid only as an entire body.
+        assert!(try_parse_trailing_attributes("Text {-=html}").is_none());
+    }
+
+    /// A trailing `-` inside an id or class name is part of that name, not the
+    /// shorthand — the scan only reaches the `-` branch at an item boundary.
+    #[test]
+    fn test_hyphen_inside_id_or_class_is_not_shorthand() {
+        let (attrs, _) = try_parse_trailing_attributes("Text {#id- .x}").unwrap();
+        assert_eq!(attrs.identifier, Some("id-".to_string()));
+        assert_eq!(attrs.classes, vec!["x"]);
+
+        let (attrs, _) = try_parse_trailing_attributes("Text {.a-}").unwrap();
+        assert_eq!(attrs.classes, vec!["a-"]);
+    }
+
     #[test]
     fn test_no_attributes() {
         let result = try_parse_trailing_attributes("Heading with no attributes");
@@ -1125,6 +1242,10 @@ mod tests {
             "{key=}",
             "{}",
             "{   }",
+            "{-}",
+            "{#id -}",
+            "{---}",
+            "{-.a}",
         ] {
             let node = structured_attr(raw);
             assert_eq!(node.text().to_string(), raw, "lossless emit for {raw:?}");
@@ -1153,6 +1274,29 @@ mod tests {
                 .filter(|k| **k == SyntaxKind::ATTR_KEY_VALUE)
                 .count(),
             1
+        );
+    }
+
+    /// The `-` shorthand gets its own token kind so the formatter can re-emit
+    /// the source spelling while readers project the `unnumbered` class.
+    #[test]
+    fn emit_attribute_node_tags_bare_hyphen() {
+        let node = structured_attr("{#x - .a}");
+        let kinds: Vec<_> = node.children_with_tokens().map(|c| c.kind()).collect();
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|k| **k == SyntaxKind::ATTR_UNNUMBERED)
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|k| **k == SyntaxKind::ATTR_CLASS)
+                .count(),
+            1,
+            "the `-` must not be tagged as an ordinary class"
         );
     }
 

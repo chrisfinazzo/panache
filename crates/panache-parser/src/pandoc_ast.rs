@@ -2221,7 +2221,10 @@ fn attr_node_is_structured(node: &SyntaxNode) -> bool {
     node.children_with_tokens().any(|el| {
         matches!(
             el.kind(),
-            SyntaxKind::ATTR_ID | SyntaxKind::ATTR_CLASS | SyntaxKind::ATTR_KEY_VALUE
+            SyntaxKind::ATTR_ID
+                | SyntaxKind::ATTR_CLASS
+                | SyntaxKind::ATTR_UNNUMBERED
+                | SyntaxKind::ATTR_KEY_VALUE
         )
     })
 }
@@ -2267,6 +2270,8 @@ fn read_bare_attr_children(node: &SyntaxNode) -> Attr {
                     attr.classes.push(c.to_string());
                 }
             }
+            // A bare `-` is pandoc's shorthand for `.unnumbered`.
+            SyntaxKind::ATTR_UNNUMBERED => attr.classes.push("unnumbered".to_string()),
             SyntaxKind::ATTR_KEY_VALUE => {
                 if let Some(kv) = el.as_node() {
                     let key = attr_kv_child_text(kv, SyntaxKind::ATTR_KEY);
@@ -2406,6 +2411,12 @@ fn parse_attr_block(s: &str) -> Attr {
                 }
                 classes.push(s[start..j].to_string());
                 i = j;
+            }
+            // A bare `-` is pandoc's shorthand for `.unnumbered`; it consumes
+            // exactly one byte, so `{---}` is three `unnumbered` classes.
+            b'-' => {
+                classes.push("unnumbered".to_string());
+                i += 1;
             }
             _ => {
                 // Read key up to `=` or whitespace.

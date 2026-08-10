@@ -43,8 +43,13 @@ pub enum SyntaxKind {
     // existing source bytes (markers/quotes included); the projector strips
     // them. Absent on opaque ATTRIBUTE forms (MMD `[#id]`, raw-inline
     // `{=format}`, fallback), which keep a single inner ATTRIBUTE token.
-    ATTR_ID,         // #id (token text includes the leading '#')
-    ATTR_CLASS,      // .class (token text includes the leading '.')
+    ATTR_ID,    // #id (token text includes the leading '#')
+    ATTR_CLASS, // .class (token text includes the leading '.')
+    // A bare `-`, pandoc's shorthand for `.unnumbered` (see the "Heading
+    // identifiers" section of the manual). Kept distinct from ATTR_CLASS so the
+    // formatter can re-emit the source spelling while readers project the
+    // `unnumbered` class.
+    ATTR_UNNUMBERED,
     ATTR_KEY_VALUE,  // key=value (node grouping the pieces below)
     ATTR_KEY,        // key (token, no '=')
     ATTR_VALUE,      // value or "value"/'value' (token text includes quotes)

@@ -4,7 +4,7 @@ use crate::syntax::{BlockQuote, DefinitionItem, DisplayMath, FencedDiv, SyntaxKi
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use panache_parser::parser::blocks::horizontal_rules::try_parse_horizontal_rule;
-use panache_parser::parser::utils::attributes::parse_attribute_content;
+use panache_parser::parser::utils::attributes::{AttrComponent, attribute_content_spans};
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
 
@@ -3253,6 +3253,13 @@ fn format_directive_option(node: &SyntaxNode) -> String {
     }
 }
 
+/// Rewrite a Pandoc `{...}` attribute block in canonical form: id first, then
+/// classes in source order, then key/value pairs with quoted values.
+///
+/// Components are rendered from their *source* slices rather than from derived
+/// semantics, so a bare `-` (pandoc's shorthand for `.unnumbered`) survives as
+/// `-` instead of being expanded — the shorthand is the preferred spelling in
+/// non-English documents, and expanding it would rewrite the author's source.
 pub(super) fn normalize_attribute_text(attr_text: &str) -> String {
     let Some(inner) = attr_text
         .strip_prefix('{')
@@ -3260,38 +3267,56 @@ pub(super) fn normalize_attribute_text(attr_text: &str) -> String {
     else {
         return attr_text.to_string();
     };
-    let Some(attrs) = parse_attribute_content(inner) else {
+    let Some(spans) = attribute_content_spans(inner) else {
         return attr_text.to_string();
     };
 
+    let mut id = String::new();
+    let mut classes: Vec<&str> = Vec::new();
+    let mut key_values: Vec<String> = Vec::new();
+    for comp in &spans.components {
+        match comp {
+            // Ranges include the `#` / `.` / `=` marker byte.
+            AttrComponent::Id(r) => id = inner[r.clone()].to_string(),
+            AttrComponent::Class(r) | AttrComponent::Unnumbered(r) => {
+                classes.push(&inner[r.clone()])
+            }
+            AttrComponent::KeyValue { key, value, .. } => {
+                let value = strip_attr_value_quotes(&inner[value.clone()]);
+                key_values.push(format!(
+                    "{}=\"{}\"",
+                    &inner[key.clone()],
+                    value.replace('"', "\\\"")
+                ));
+            }
+        }
+    }
+
     let mut out = String::from("{");
-    if let Some(id) = attrs.identifier {
-        out.push('#');
+    if !id.is_empty() {
         out.push_str(&id);
     }
-    for class in attrs.classes {
+    for part in classes.into_iter().map(str::to_string).chain(key_values) {
         if out.len() > 1 {
             out.push(' ');
         }
-        if class.starts_with('=') {
-            out.push_str(&class);
-        } else {
-            out.push('.');
-            out.push_str(&class);
-        }
-    }
-    for (key, value) in attrs.key_values {
-        if out.len() > 1 {
-            out.push(' ');
-        }
-        out.push_str(&key);
-        out.push('=');
-        out.push('"');
-        out.push_str(&value.replace('"', "\\\""));
-        out.push('"');
+        out.push_str(&part);
     }
     out.push('}');
     out
+}
+
+/// Strip a matching pair of surrounding quotes from an attribute value's source
+/// bytes. Mirrors the parser's `attr_value_string`: a leading quote is always
+/// dropped, a trailing quote of the same kind only when present.
+fn strip_attr_value_quotes(raw: &str) -> &str {
+    match raw.as_bytes().first() {
+        Some(&q @ (b'"' | b'\'')) => {
+            let inner = &raw[1..];
+            inner.strip_suffix(q as char).unwrap_or(inner)
+        }
+        _ => raw,
+    }
 }
 
 /// Render a `SPAN_ATTRIBUTES` node, collapsing interior whitespace runs to a
