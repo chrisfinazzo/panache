@@ -2217,7 +2217,12 @@ impl Formatter {
             }
 
             SyntaxKind::TERM => {
-                // Format term - just emit text with newline
+                // Format term - emit the rendering indent, then the text. The
+                // term's own source indent is a WHITESPACE token the parser
+                // keeps out of the inlines, so it is not re-emitted here.
+                if indent > 0 && (self.output.is_empty() || self.output.ends_with('\n')) {
+                    self.output.push_str(&" ".repeat(indent));
+                }
                 for child in node.children_with_tokens() {
                     match child {
                         NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::TEXT => {

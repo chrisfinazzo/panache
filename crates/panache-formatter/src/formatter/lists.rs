@@ -746,8 +746,10 @@ impl Formatter {
         }
 
         // Same-line leading-block case: a LIST_ITEM whose first non-blank child
-        // is a FENCED_DIV, CODE_BLOCK, or LINE_BLOCK (no preceding
-        // PLAIN/PARAGRAPH). Examples: `- ::: note`, ``- ```rust``, `- | a`.
+        // is a FENCED_DIV, CODE_BLOCK, LINE_BLOCK, or DEFINITION_LIST (no
+        // preceding PLAIN/PARAGRAPH). Examples: `- ::: note`, ``- ```rust``,
+        // `- | a`, `- Term` + `  : def` (the term is the item's own first
+        // content line, so the definition list is the item's leading block).
         // Without this the item has no content node, so the generic path below
         // never emits the marker and the block swallows it (issue #439). Emit
         // the outer marker, then format the block at indent=0 so its first line
@@ -756,7 +758,10 @@ impl Formatter {
         if let Some(leading_block) = first_non_blank_child.as_ref()
             && matches!(
                 leading_block.kind(),
-                SyntaxKind::FENCED_DIV | SyntaxKind::CODE_BLOCK | SyntaxKind::LINE_BLOCK
+                SyntaxKind::FENCED_DIV
+                    | SyntaxKind::CODE_BLOCK
+                    | SyntaxKind::LINE_BLOCK
+                    | SyntaxKind::DEFINITION_LIST
             )
             && Self::find_content_node(node).is_none()
         {

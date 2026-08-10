@@ -537,3 +537,74 @@ fn definition_marker_beyond_the_content_column_stays_indented_code() {
         "the 0-3 allowance still applies, measured from the content column"
     );
 }
+
+#[test]
+fn term_on_the_list_marker_line_nests_the_definition_list_in_the_item() {
+    // Pandoc reparses item contents as a fresh block sequence, so `- Term`
+    // followed by a marker line is `BulletList [[DefinitionList [(Term,
+    // [[Plain def]])]]]` — the definition list lives inside the item.
+    for input in [
+        "- Term\n  : def\n",
+        "- Term\n  ~ def\n",
+        "- Term\n\n  : def\n",
+        "1. Term\n   : def\n",
+    ] {
+        let tree = parse_blocks(input);
+        let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+        let list = find_first(&item, SyntaxKind::DEFINITION_LIST)
+            .unwrap_or_else(|| panic!("definition list inside the item: {input:?}"));
+        assert_eq!(
+            find_first(&list, SyntaxKind::TERM)
+                .expect("term")
+                .text()
+                .to_string()
+                .trim(),
+            "Term",
+            "{input:?}"
+        );
+        assert!(
+            find_first(&list, SyntaxKind::DEFINITION).is_some(),
+            "term must get its definition body: {input:?}"
+        );
+    }
+}
+
+#[test]
+fn blocks_that_outrank_a_term_still_win_on_the_marker_line() {
+    // Everything pandoc's reader reaches before `definitionList` keeps the
+    // marker line; only then does the term lookahead get a turn.
+    for input in [
+        "- # H\n  : def\n",
+        "- ***\n  : def\n",
+        "- <!-- c -->\n  : def\n",
+        "- a\n  b\n  : def\n",
+    ] {
+        let tree = parse_blocks(input);
+        let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+        assert!(
+            find_first(&item, SyntaxKind::TERM).is_none(),
+            "no term should be detected for {input:?}"
+        );
+    }
+}
+
+#[test]
+fn a_dedented_marker_does_not_make_the_marker_line_a_term() {
+    // The marker must reach the item's content column.
+    for input in ["- Term\n: def\n", "- Term\n : def\n"] {
+        let tree = parse_blocks(input);
+        assert!(find_first(&tree, SyntaxKind::TERM).is_none(), "{input:?}");
+    }
+}
+
+#[test]
+fn definition_list_in_list_item_survives_siblings_and_trailing_blocks() {
+    let input = "- Term\n  : def\n- Term2\n  : def2\n";
+    let tree = parse_blocks(input);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::LIST_ITEM).len(),
+        2,
+        "both bullet items must survive"
+    );
+    assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 2);
+}

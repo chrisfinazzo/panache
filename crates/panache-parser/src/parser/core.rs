@@ -23,6 +23,7 @@ use super::blocks::lists;
 use super::blocks::paragraphs;
 use super::blocks::raw_blocks::{extract_environment_name, is_inline_math_environment};
 use super::blocks::tables;
+use super::blocks::tables::LineView;
 use super::diagnostics::{Diagnostics, SyntaxError};
 use super::utils::container_stack;
 use super::utils::helpers::{
@@ -1260,8 +1261,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.config.extensions.definition_lists
-            && let Some(blank_count) = footnote_first_line_term_lookahead(
-                &self.lines,
+            && let Some(blank_count) = first_content_line_term_lookahead(
+                self.lines.as_slice(),
                 self.pos,
                 content_col,
                 self.config.extensions.table_captions,
@@ -1525,6 +1526,9 @@ impl<'a> Parser<'a> {
                         return extras;
                     }
                     self.maybe_open_indented_code_in_new_list_item();
+                    if let Some(extras) = self.maybe_open_definition_term_in_new_list_item() {
+                        return extras;
+                    }
                     return self.dispatch_bq_after_list_item(finish);
                 }
             }
@@ -1552,6 +1556,9 @@ impl<'a> Parser<'a> {
                 return extras;
             }
             self.maybe_open_indented_code_in_new_list_item();
+            if let Some(extras) = self.maybe_open_definition_term_in_new_list_item() {
+                return extras;
+            }
             return self.dispatch_bq_after_list_item(finish);
         }
 
@@ -1600,6 +1607,9 @@ impl<'a> Parser<'a> {
                 return extras;
             }
             self.maybe_open_indented_code_in_new_list_item();
+            if let Some(extras) = self.maybe_open_definition_term_in_new_list_item() {
+                return extras;
+            }
             return self.dispatch_bq_after_list_item(finish);
         }
 
@@ -1654,6 +1664,9 @@ impl<'a> Parser<'a> {
             return extras;
         }
         self.maybe_open_indented_code_in_new_list_item();
+        if let Some(extras) = self.maybe_open_definition_term_in_new_list_item() {
+            return extras;
+        }
         self.dispatch_bq_after_list_item(finish)
     }
 
@@ -2815,6 +2828,82 @@ impl<'a> Parser<'a> {
     /// a "blank" line still carries its `>` markers in the source. Split them
     /// off as `BLOCK_QUOTE_MARKER` tokens the way the main blank-line path
     /// does, instead of burying them in the `BLANK_LINE` token.
+    /// Open a definition list whose term is the list item's own first content
+    /// line, i.e. the text on the list-marker line.
+    ///
+    /// `- Term\n  : def\n` is `BulletList [[DefinitionList [(Term, [[Plain
+    /// def]])]]]` for pandoc: it reparses item contents as a fresh block sequence,
+    /// so the term is found there rather than by the block dispatcher, which never
+    /// sees the marker line (`ListParser` claims it first). This is the list
+    /// analogue of the footnote branch in `handle_footnote_open_effect`.
+    ///
+    /// Declines whenever pandoc's reader would reach a block before
+    /// `definitionList`: an ATX heading or a thematic break on the marker line
+    /// keeps it, and so does more than one buffered line — a term is always a
+    /// one-line block. An empty buffer means the item's content went down the
+    /// blockquote-dispatch path, which has its own definition handling.
+    ///
+    /// Returns the number of source lines consumed beyond the marker line.
+    fn maybe_open_definition_term_in_new_list_item(&mut self) -> Option<usize> {
+        if !self.config.extensions.definition_lists {
+            return None;
+        }
+        let Some(Container::ListItem {
+            content_col,
+            buffer,
+            marker_only,
+            ..
+        }) = self.containers.stack.last()
+        else {
+            return None;
+        };
+        if *marker_only || buffer.segment_count() != 1 {
+            return None;
+        }
+        let content_col = *content_col;
+        let text = buffer.first_text()?.to_string();
+
+        // A term is a one-line block; more than one buffered line is a paragraph.
+        let mut lines_it = text.split_inclusive('\n');
+        let first_line = lines_it.next()?;
+        if lines_it.next().is_some() {
+            return None;
+        }
+        let (detect, _) = strip_newline(first_line);
+        if detect.trim().is_empty()
+            || try_parse_atx_heading(detect).is_some()
+            || try_parse_horizontal_rule(detect).is_some()
+            || html_blocks::try_parse_html_block_start(detect, false).is_some()
+        {
+            return None;
+        }
+
+        // `content_col` is absolute in the frame left by every container
+        // *below* this item, so the lookahead has to strip exactly those —
+        // blockquote markers, and any footnote/definition content indent.
+        let prefix =
+            ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect)
+                .without_innermost_list_advance();
+        let window = StrippedLines::new(&self.lines, self.pos, &prefix);
+        let blank_count = first_content_line_term_lookahead(
+            &window,
+            self.pos,
+            content_col,
+            self.config.extensions.table_captions,
+        )?;
+
+        if let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last_mut() {
+            buffer.clear();
+        }
+        self.builder.start_node(SyntaxKind::DEFINITION_LIST.into());
+        self.containers.push(Container::DefinitionList {});
+        self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
+        self.containers.push(Container::DefinitionItem {});
+        emit_term(&mut self.builder, &text, self.config);
+        self.emit_term_lookahead_blank_lines(blank_count);
+        Some(blank_count)
+    }
+
     fn emit_term_lookahead_blank_lines(&mut self, blank_count: usize) {
         let bq_depth = self.current_blockquote_depth();
         for i in 0..blank_count {
@@ -4106,7 +4195,11 @@ impl<'a> Parser<'a> {
                         extras
                     } else {
                         self.maybe_open_indented_code_in_new_list_item();
-                        self.dispatch_bq_after_list_item(finish)
+                        if let Some(extras) = self.maybe_open_definition_term_in_new_list_item() {
+                            extras
+                        } else {
+                            self.dispatch_bq_after_list_item(finish)
+                        }
                     };
                     return LineDispatch::consumed(1 + extras);
                 }
@@ -5638,20 +5731,27 @@ fn emit_definition_plain_or_heading(
 /// `content_col` indent. Returns the blank-line count consumed before the
 /// marker, or `None` if no marker is found at the next non-blank line.
 ///
-/// Used by `handle_footnote_open_effect` to decide whether the first content
-/// line of a footnote body should open a definition-list term: pandoc treats
-/// `[^1]: Term\n\n    :   Definition\n` as a `Note [DefinitionList ...]`,
-/// not as a paragraph followed by a separate def list with no term.
-fn footnote_first_line_term_lookahead(
-    lines: &[&str],
+/// Used by `handle_footnote_open_effect` and
+/// `maybe_open_definition_term_in_new_list_item` to decide whether a
+/// container's *first content line* should open a definition-list term:
+/// pandoc reparses container contents as a fresh block sequence, so it treats
+/// `[^1]: Term\n\n    :   Definition\n` as a `Note [DefinitionList ...]` and
+/// `- Term\n  : def\n` as a `BulletList [[DefinitionList ...]]`, not as a
+/// paragraph followed by a separate def list with no term.
+///
+/// `lines` is absolute-indexed. Pass a [`StrippedLines`] when a blockquote
+/// prefix is open, so `> - Term` / `>   : def` is measured on the quote's
+/// content rather than on its markers.
+fn first_content_line_term_lookahead(
+    lines: &(impl LineView + ?Sized),
     pos: usize,
     content_col: usize,
     table_captions_enabled: bool,
 ) -> Option<usize> {
     let mut check_pos = pos + 1;
     let mut blank_count = 0;
-    while check_pos < lines.len() {
-        let line = lines[check_pos];
+    while check_pos < lines.line_count() {
+        let line = lines.line(check_pos);
         let (trimmed, _) = strip_newline(line);
         if trimmed.trim().is_empty() {
             blank_count += 1;

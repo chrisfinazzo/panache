@@ -1,0 +1,81 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..66
+  PARAGRAPH@0..2
+    TEXT@0..1 "x"
+    NEWLINE@1..2 "\n"
+  BLANK_LINE@2..3
+    BLANK_LINE@2..3 "\n"
+  LIST@3..20
+    LIST_ITEM@3..20
+      LIST_MARKER@3..5 "1."
+      WHITESPACE@5..6 " "
+      DEFINITION_LIST@6..20
+        DEFINITION_ITEM@6..20
+          TERM@6..11
+            TEXT@6..10 "Term"
+            NEWLINE@10..11 "\n"
+          DEFINITION@11..20
+            WHITESPACE@11..14 "   "
+            DEFINITION_MARKER@14..15 ":"
+            WHITESPACE@15..16 " "
+            PLAIN@16..20
+              TEXT@16..19 "def"
+              NEWLINE@19..20 "\n"
+  BLANK_LINE@20..21
+    BLANK_LINE@20..21 "\n"
+  PARAGRAPH@21..23
+    TEXT@21..22 "y"
+    NEWLINE@22..23 "\n"
+  BLANK_LINE@23..24
+    BLANK_LINE@23..24 "\n"
+  LIST@24..43
+    LIST_ITEM@24..43
+      LIST_MARKER@24..25 "-"
+      WHITESPACE@25..26 " "
+      LIST@26..43
+        LIST_ITEM@26..43
+          LIST_MARKER@26..27 "-"
+          WHITESPACE@27..28 " "
+          DEFINITION_LIST@28..43
+            DEFINITION_ITEM@28..43
+              TERM@28..33
+                TEXT@28..32 "Term"
+                NEWLINE@32..33 "\n"
+              DEFINITION@33..43
+                WHITESPACE@33..37 "    "
+                DEFINITION_MARKER@37..38 ":"
+                WHITESPACE@38..39 " "
+                PLAIN@39..43
+                  TEXT@39..42 "def"
+                  NEWLINE@42..43 "\n"
+  BLANK_LINE@43..44
+    BLANK_LINE@43..44 "\n"
+  PARAGRAPH@44..46
+    TEXT@44..45 "z"
+    NEWLINE@45..46 "\n"
+  BLANK_LINE@46..47
+    BLANK_LINE@46..47 "\n"
+  BLOCK_QUOTE@47..66
+    BLOCK_QUOTE_MARKER@47..48 ">"
+    WHITESPACE@48..49 " "
+    LIST@49..66
+      LIST_ITEM@49..66
+        LIST_MARKER@49..50 "-"
+        WHITESPACE@50..51 " "
+        DEFINITION_LIST@51..66
+          DEFINITION_ITEM@51..66
+            TERM@51..56
+              TEXT@51..55 "Term"
+              NEWLINE@55..56 "\n"
+            BLOCK_QUOTE_MARKER@56..57 ">"
+            WHITESPACE@57..58 " "
+            DEFINITION@58..66
+              WHITESPACE@58..60 "  "
+              DEFINITION_MARKER@60..61 ":"
+              WHITESPACE@61..62 " "
+              PLAIN@62..66
+                TEXT@62..65 "def"
+                NEWLINE@65..66 "\n"

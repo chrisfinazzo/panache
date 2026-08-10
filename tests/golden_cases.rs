@@ -197,6 +197,8 @@ golden_test_cases!(
     definition_list_in_blockquote,
     definition_list_nesting,
     definition_list_pandoc_loose_compact,
+    definition_list_in_list_item,
+    definition_list_in_list_item_four_space,
     definition_list_wrapping,
     definition_term_requires_single_line_block,
     definition_colon_ratio_idempotency_134,

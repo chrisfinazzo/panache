@@ -19,7 +19,8 @@ DOCUMENT@0..53
           DEFINITION_LIST@9..28
             DEFINITION_ITEM@9..28
               TERM@9..17
-                TEXT@9..16 "    bar"
+                WHITESPACE@9..13 "    "
+                TEXT@13..16 "bar"
                 NEWLINE@16..17 "\n"
               BLANK_LINE@17..18
                 BLANK_LINE@17..18 "\n"

@@ -1,0 +1,103 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..94
+  LIST@0..94
+    LIST_ITEM@0..16
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      DEFINITION_LIST@2..16
+        DEFINITION_ITEM@2..15
+          TERM@2..7
+            TEXT@2..6 "Term"
+            NEWLINE@6..7 "\n"
+          DEFINITION@7..15
+            WHITESPACE@7..9 "  "
+            DEFINITION_MARKER@9..10 ":"
+            WHITESPACE@10..11 " "
+            PLAIN@11..15
+              TEXT@11..14 "def"
+              NEWLINE@14..15 "\n"
+        BLANK_LINE@15..16
+          BLANK_LINE@15..16 "\n"
+    LIST_ITEM@16..32
+      LIST_MARKER@16..17 "-"
+      WHITESPACE@17..18 " "
+      DEFINITION_LIST@18..32
+        DEFINITION_ITEM@18..31
+          TERM@18..23
+            TEXT@18..22 "Term"
+            NEWLINE@22..23 "\n"
+          DEFINITION@23..31
+            WHITESPACE@23..25 "  "
+            DEFINITION_MARKER@25..26 "~"
+            WHITESPACE@26..27 " "
+            PLAIN@27..31
+              TEXT@27..30 "def"
+              NEWLINE@30..31 "\n"
+        BLANK_LINE@31..32
+          BLANK_LINE@31..32 "\n"
+    LIST_ITEM@32..49
+      LIST_MARKER@32..33 "-"
+      WHITESPACE@33..34 " "
+      DEFINITION_LIST@34..49
+        DEFINITION_ITEM@34..48
+          TERM@34..39
+            TEXT@34..38 "Term"
+            NEWLINE@38..39 "\n"
+          BLANK_LINE@39..40
+            BLANK_LINE@39..40 "\n"
+          DEFINITION@40..48
+            WHITESPACE@40..42 "  "
+            DEFINITION_MARKER@42..43 ":"
+            WHITESPACE@43..44 " "
+            PLAIN@44..48
+              TEXT@44..47 "def"
+              NEWLINE@47..48 "\n"
+        BLANK_LINE@48..49
+          BLANK_LINE@48..49 "\n"
+    LIST_ITEM@49..71
+      LIST_MARKER@49..50 "-"
+      WHITESPACE@50..51 " "
+      DEFINITION_LIST@51..71
+        DEFINITION_ITEM@51..70
+          TERM@51..56
+            TEXT@51..55 "Term"
+            NEWLINE@55..56 "\n"
+          DEFINITION@56..63
+            WHITESPACE@56..58 "  "
+            DEFINITION_MARKER@58..59 ":"
+            WHITESPACE@59..60 " "
+            PLAIN@60..63
+              TEXT@60..62 "d1"
+              NEWLINE@62..63 "\n"
+          DEFINITION@63..70
+            WHITESPACE@63..65 "  "
+            DEFINITION_MARKER@65..66 ":"
+            WHITESPACE@66..67 " "
+            PLAIN@67..70
+              TEXT@67..69 "d2"
+              NEWLINE@69..70 "\n"
+        BLANK_LINE@70..71
+          BLANK_LINE@70..71 "\n"
+    LIST_ITEM@71..94
+      LIST_MARKER@71..72 "-"
+      WHITESPACE@72..73 " "
+      DEFINITION_LIST@73..86
+        DEFINITION_ITEM@73..86
+          TERM@73..78
+            TEXT@73..77 "Term"
+            NEWLINE@77..78 "\n"
+          DEFINITION@78..86
+            WHITESPACE@78..80 "  "
+            DEFINITION_MARKER@80..81 ":"
+            WHITESPACE@81..82 " "
+            PLAIN@82..86
+              TEXT@82..85 "def"
+              NEWLINE@85..86 "\n"
+      BLANK_LINE@86..87
+        BLANK_LINE@86..87 "\n"
+      PLAIN@87..94
+        TEXT@87..93 "  more"
+        NEWLINE@93..94 "\n"

@@ -1,0 +1,69 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..91
+  LIST@0..91
+    LIST_ITEM@0..14
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      HEADING@2..6
+        ATX_HEADING_MARKER@2..3
+          ATX_HEADING_MARKER@2..3 "#"
+        WHITESPACE@3..4 " "
+        HEADING_CONTENT@4..5
+          TEXT@4..5 "H"
+        NEWLINE@5..6 "\n"
+      PLAIN@6..14
+        TEXT@6..13 "  : def"
+        NEWLINE@13..14 "\n"
+    BLANK_LINE@14..15
+      BLANK_LINE@14..15 "\n"
+    LIST_ITEM@15..36
+      LIST_MARKER@15..16 "-"
+      WHITESPACE@16..17 " "
+      HTML_BLOCK_RAW@17..28
+        HTML_BLOCK_TAG@17..28
+          TEXT@17..27 "<!-- c -->"
+          NEWLINE@27..28 "\n"
+      PLAIN@28..36
+        WHITESPACE@28..30 "  "
+        TEXT@30..35 ": def"
+        NEWLINE@35..36 "\n"
+    BLANK_LINE@36..37
+      BLANK_LINE@36..37 "\n"
+    LIST_ITEM@37..56
+      LIST_MARKER@37..38 "-"
+      WHITESPACE@38..39 " "
+      CODE_BLOCK@39..48
+        CODE_CONTENT@39..48
+          WHITESPACE@39..43 "    "
+          TEXT@43..47 "code"
+          NEWLINE@47..48 "\n"
+      PLAIN@48..56
+        TEXT@48..55 "  : def"
+        NEWLINE@55..56 "\n"
+    BLANK_LINE@56..57
+      BLANK_LINE@56..57 "\n"
+    LIST_ITEM@57..71
+      LIST_MARKER@57..58 "-"
+      WHITESPACE@58..59 " "
+      LINE_BLOCK@59..63
+        LINE_BLOCK_LINE@59..63
+          LINE_BLOCK_MARKER@59..61 "| "
+          TEXT@61..62 "a"
+          NEWLINE@62..63 "\n"
+      PLAIN@63..71
+        TEXT@63..70 "  : def"
+        NEWLINE@70..71 "\n"
+    BLANK_LINE@71..72
+      BLANK_LINE@71..72 "\n"
+    LIST_ITEM@72..91
+      LIST_MARKER@72..73 "-"
+      WHITESPACE@73..74 " "
+      PLAIN@74..91
+        TEXT@74..78 "Term"
+        NEWLINE@78..79 "\n"
+        WHITESPACE@79..81 "  "
+        TEXT@81..90 "    : def"
+        NEWLINE@90..91 "\n"

@@ -1,0 +1,4 @@
+flavor = "pandoc"
+
+[extensions]
+four-space-rule = true

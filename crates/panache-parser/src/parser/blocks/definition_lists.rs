@@ -122,8 +122,18 @@ pub(crate) fn emit_term(
     let (text, newline_str) = strip_newline(line);
     let trimmed_text = text.trim_end();
 
-    if !trimmed_text.is_empty() {
-        inline_emission::emit_inlines(builder, trimmed_text, config, false);
+    // A term inside a container carries that container's indent. Emit it as
+    // WHITESPACE, the way the definition marker's own indent is emitted, so
+    // the term's inlines are just the term and the formatter can re-apply the
+    // indent it is rendering at.
+    let indent_len = trimmed_text.len() - trimmed_text.trim_start().len();
+    if indent_len > 0 {
+        builder.token(SyntaxKind::WHITESPACE.into(), &trimmed_text[..indent_len]);
+    }
+    let term_text = &trimmed_text[indent_len..];
+
+    if !term_text.is_empty() {
+        inline_emission::emit_inlines(builder, term_text, config, false);
     }
 
     if !newline_str.is_empty() {

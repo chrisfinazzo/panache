@@ -357,6 +357,29 @@ impl ContainerPrefix {
         s
     }
 
+    /// This recipe minus the innermost list item's own `ListAdvance`.
+    ///
+    /// That op is the item's `content_col`, and `content_col` is absolute in
+    /// the frame the *remaining* ops produce — inside a footnote body it is
+    /// measured after the footnote's content indent is stripped, but two
+    /// nested bullets contribute only the inner one's advance, already
+    /// absolute. So a lookahead that compares a line's indent against
+    /// `content_col` has to strip with this, not with the full recipe.
+    pub fn without_innermost_list_advance(&self) -> Self {
+        let mut ops = self.ops.clone();
+        if let Some(i) = ops
+            .iter()
+            .rposition(|op| matches!(op, StripOp::ListAdvance(_)))
+        {
+            ops.remove(i);
+        }
+        Self {
+            ops,
+            list_marker_consumed_on_line_0: self.list_marker_consumed_on_line_0,
+            lazy_blockquote_gobble: self.lazy_blockquote_gobble,
+        }
+    }
+
     /// Whether `line` carries every `ListAdvance` op's columns as real
     /// leading whitespace — i.e. the line sits *inside* the list item rather
     /// than being folded into it as an under-indented continuation.

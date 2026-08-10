@@ -172,3 +172,38 @@ fn lone_paragraph_definition_marker_is_left_alone() {
     );
     similar_asserts::assert_eq!(output1, format(&output1, None, None));
 }
+
+#[test]
+fn definition_list_on_the_list_marker_line_keeps_its_marker() {
+    // The item's only child is a DEFINITION_LIST, so it has no content node
+    // and the generic list-item path never emits the bullet. Without the
+    // leading-block arm the marker is dropped entirely.
+    for (input, expected) in [
+        ("- Term\n  : def\n", "- Term\n  :   def\n"),
+        ("- Term\n  ~ def\n", "- Term\n  :   def\n"),
+        ("- Term\n\n  : def\n", "- Term\n\n  :   def\n"),
+        ("1. Term\n   : def\n", "1. Term\n   :   def\n"),
+        ("> - Term\n>   : def\n", "> - Term\n>   :   def\n"),
+    ] {
+        let output1 = format(input, None, None);
+        similar_asserts::assert_eq!(output1, expected, "input: {input:?}");
+        similar_asserts::assert_eq!(output1, format(&output1, None, None), "input: {input:?}");
+    }
+}
+
+#[test]
+fn definition_list_nested_two_levels_deep_is_idempotent() {
+    // The term's own indent is a WHITESPACE token, not inline text, so the
+    // formatter re-applies the indent it is rendering at instead of stacking
+    // a second copy on top of the one already in the text.
+    let input = "- - foo\n\n    bar\n\n    : baz\n";
+
+    let output1 = format(input, None, None);
+    let output2 = format(&output1, None, None);
+
+    similar_asserts::assert_eq!(output1, output2, "Formatting should be idempotent");
+    assert!(
+        output1.contains("\n    bar\n"),
+        "term must stay at the item content column, got:\n{output1}"
+    );
+}
