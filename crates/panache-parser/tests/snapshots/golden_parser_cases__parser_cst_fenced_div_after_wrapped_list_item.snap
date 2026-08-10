@@ -1,0 +1,74 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..83
+  LIST@0..12
+    LIST_ITEM@0..12
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      PLAIN@2..12
+        TEXT@2..5 "one"
+        NEWLINE@5..6 "\n"
+        WHITESPACE@6..8 "  "
+        TEXT@8..11 "two"
+        NEWLINE@11..12 "\n"
+  BLANK_LINE@12..13
+    BLANK_LINE@12..13 "\n"
+  FENCED_DIV@13..30
+    DIV_FENCE_OPEN@13..21
+      TEXT@13..16 ":::"
+      WHITESPACE@16..17 " "
+      DIV_INFO@17..20
+        TEXT@17..20 "tip"
+      NEWLINE@20..21 "\n"
+    PARAGRAPH@21..26
+      TEXT@21..25 "text"
+      NEWLINE@25..26 "\n"
+    DIV_FENCE_CLOSE@26..30
+      TEXT@26..29 ":::"
+      NEWLINE@29..30 "\n"
+  BLANK_LINE@30..31
+    BLANK_LINE@30..31 "\n"
+  LIST@31..43
+    LIST_ITEM@31..43
+      LIST_MARKER@31..32 "-"
+      WHITESPACE@32..33 " "
+      PLAIN@33..43
+        TEXT@33..36 "one"
+        NEWLINE@36..37 "\n"
+        WHITESPACE@37..39 "  "
+        TEXT@39..42 "two"
+        NEWLINE@42..43 "\n"
+  BLANK_LINE@43..44
+    BLANK_LINE@43..44 "\n"
+  PARAGRAPH@44..50
+    TEXT@44..49 ": def"
+    NEWLINE@49..50 "\n"
+  BLANK_LINE@50..51
+    BLANK_LINE@50..51 "\n"
+  LIST@51..65
+    LIST_ITEM@51..65
+      LIST_MARKER@51..53 "1."
+      WHITESPACE@53..54 " "
+      PLAIN@54..65
+        TEXT@54..57 "one"
+        NEWLINE@57..58 "\n"
+        WHITESPACE@58..61 "   "
+        TEXT@61..64 "two"
+        NEWLINE@64..65 "\n"
+  BLANK_LINE@65..66
+    BLANK_LINE@65..66 "\n"
+  FENCED_DIV@66..83
+    DIV_FENCE_OPEN@66..74
+      TEXT@66..69 ":::"
+      WHITESPACE@69..70 " "
+      DIV_INFO@70..73
+        TEXT@70..73 "tip"
+      NEWLINE@73..74 "\n"
+    PARAGRAPH@74..79
+      TEXT@74..78 "text"
+      NEWLINE@78..79 "\n"
+    DIV_FENCE_CLOSE@79..83
+      TEXT@79..82 ":::"
+      NEWLINE@82..83 "\n"

@@ -529,6 +529,7 @@ golden_test_cases!(
     issue_344_table_indent_zero,
     issue_398_headerless_multiline_dash_closer,
     issue_467_attribute_unnumbered_shorthand,
+    issue_479_fenced_div_after_wrapped_list_item,
     writer_autolinks,
     writer_blockquote_not,
     writer_definition_lists_multiblock,
