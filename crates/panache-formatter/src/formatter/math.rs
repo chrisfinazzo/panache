@@ -253,6 +253,33 @@ mod tests {
     }
 
     #[test]
+    fn inline_keeps_the_definition_colon_glued_to_its_equals() {
+        // `:=` is one relation atom: the space goes before the `:`, never
+        // between it and the `=` (which would read as the nonsense `x : = y`).
+        assert_eq!(fmt("x:=y", MathContext::Inline), "x := y");
+        assert_eq!(fmt("x := y", MathContext::Inline), "x := y");
+        assert_eq!(fmt("\\mu:=\\nu", MathContext::Inline), "\\mu := \\nu");
+        // The fused atom still splits a trailing sign off as unary.
+        assert_eq!(fmt("x:=-y", MathContext::Inline), "x := -y");
+        // A lone `:` is an ordinary atom — its spacing is the author's.
+        assert_eq!(fmt("x:y", MathContext::Inline), "x:y");
+        assert_eq!(fmt("f: A", MathContext::Inline), "f: A");
+        // Only a `:` *before* an `=` fuses; a space between them keeps them apart.
+        assert_eq!(fmt("x : = y", MathContext::Inline), "x : = y");
+        for case in [
+            "x:=y",
+            "x := y",
+            "\\mu:=\\nu",
+            "x:=-y",
+            "x:y",
+            "f: A",
+            "x : = y",
+        ] {
+            assert_idempotent(case, MathContext::Inline);
+        }
+    }
+
+    #[test]
     fn inline_keeps_unary_operators_tight() {
         // Leading unary minus, and one written with a space, both canonicalize tight.
         assert_eq!(fmt("-x", MathContext::Inline), "-x");

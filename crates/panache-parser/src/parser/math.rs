@@ -149,6 +149,12 @@ impl MathParser<'_> {
                 '(' | '[' => self.bump_bytes(1, SyntaxKind::MATH_OPEN),
                 ')' | ']' => self.bump_bytes(1, SyntaxKind::MATH_CLOSE),
                 ',' | ';' => self.bump_bytes(1, SyntaxKind::MATH_PUNCT),
+                // A `:` stays an ordinary atom (its class needs macro context,
+                // like `| . /`), but it gets its own token so a consumer can see
+                // the `:=` definition boundary: `:` fused into a longer text run
+                // (`ab:=`) would leave the formatter no element boundary to
+                // align or break the composite relation on.
+                ':' => self.bump_bytes(1, SyntaxKind::MATH_TEXT),
                 '&' => self.bump_bytes(1, SyntaxKind::MATH_ALIGN),
                 '^' | '_' => self.bump_bytes(1, SyntaxKind::MATH_SCRIPT),
                 // Operator atoms (`+ - * = < >`), one token per char. Class and
@@ -285,7 +291,7 @@ impl MathParser<'_> {
     /// A run of ordinary atoms, up to the next structural character. Delimiters
     /// and punctuation (`( ) [ ] , ;`) bound the run too — they are now their
     /// own tokens (including the `(` that the dispatcher's equation-label check
-    /// sees while the bookdown extension is on).
+    /// sees while the bookdown extension is on), as does the `:` of a `:=`.
     fn parse_text(&mut self) {
         let len = self
             .rest()
@@ -309,7 +315,7 @@ fn is_special(c: char) -> bool {
         || is_delimiter(c)
         || matches!(
             c,
-            '\\' | '{' | '}' | '&' | '^' | '_' | '%' | ' ' | '\t' | '\n' | '\r'
+            '\\' | '{' | '}' | '&' | '^' | '_' | '%' | ':' | ' ' | '\t' | '\n' | '\r'
         )
 }
 

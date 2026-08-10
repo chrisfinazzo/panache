@@ -23,6 +23,12 @@
 //! with the arrow. [`continuation_anchor`] picks the column per the leading
 //! relation (via [`first_relation_is_assignment`]).
 //!
+//! A `:=` is such an assignment, and it is *one* relation atom spanning two
+//! tokens (the `:` and the `=`; see [`operators::is_definition_colon`]). Its
+//! break candidate is anchored on the `:` and spans through the `=`, so a chain
+//! is never split between them and the alignment columns measure the whole
+//! symbol — the same treatment a composite `<=` gets.
+//!
 //! ## What "top-level" means, and why groups are opaque
 //!
 //! Breaks are only ever offered at operators sitting at **delimiter depth 0**:
@@ -87,16 +93,19 @@ use crate::syntax::{SyntaxElement, SyntaxKind};
 struct Break {
     /// Element index of the atom's first token (where a break lands before it).
     index: usize,
+    /// Element index one past the atom's last token. Usually `index + 1`, but a
+    /// composite atom spans several tokens (`<=`, or the `:` + `=` of a `:=`),
+    /// and the alignment columns measure up to *here*, not to `index + 1`.
+    end: usize,
     /// The atom's coerced class — only `Bin`/`Rel` ever reach here.
     class: AtomClass,
 }
 
-/// Element index of the first top-level (depth-0) **relation** operator, if any.
-pub(super) fn first_top_level_relation_index(elems: &[SyntaxElement]) -> Option<usize> {
+/// The first top-level (depth-0) **relation** operator, if any.
+fn first_top_level_relation(elems: &[SyntaxElement]) -> Option<Break> {
     spaced_operator_breaks(elems)
         .into_iter()
         .find(|b| b.class == AtomClass::Rel)
-        .map(|b| b.index)
 }
 
 /// The column (relative to the row's own base, *excluding* the block math-indent)
@@ -108,11 +117,16 @@ pub(super) fn first_top_level_relation_index(elems: &[SyntaxElement]) -> Option<
 /// would sit), used only for a relation-led continuation whose head row lacks a
 /// relation; an empty row yields 0.
 pub(super) fn rhs_start_column(elems: &[SyntaxElement]) -> usize {
-    match first_top_level_relation_index(elems) {
-        // `..=r` renders LHS + the relation; `+ 1` is the normalized space before
-        // the RHS. Composite split relations (`<=`) anchor on their first char —
-        // a rare, harmless one-column coarseness that stays deterministic.
-        Some(r) => render::render_inline(&elems[..=r]).trim().chars().count() + 1,
+    match first_top_level_relation(elems) {
+        // `..b.end` renders LHS + the whole relation atom (a composite `<=` or
+        // `:=` included); `+ 1` is the normalized space before the RHS.
+        Some(b) => {
+            render::render_inline(&elems[..b.end])
+                .trim()
+                .chars()
+                .count()
+                + 1
+        }
         None => {
             let w = render::render_inline(elems).trim().chars().count();
             if w == 0 { 0 } else { w + 1 }
@@ -125,9 +139,12 @@ pub(super) fn rhs_start_column(elems: &[SyntaxElement]) -> usize {
 /// This aligns continuation relations *under the first relation* — the classic
 /// chain layout for an equality/comparison chain (`x = a = b` ⇒ the `=` stack).
 fn relation_column(elems: &[SyntaxElement]) -> usize {
-    match first_top_level_relation_index(elems) {
-        Some(r) => {
-            let w = render::render_inline(&elems[..r]).trim().chars().count();
+    match first_top_level_relation(elems) {
+        Some(b) => {
+            let w = render::render_inline(&elems[..b.index])
+                .trim()
+                .chars()
+                .count();
             if w == 0 { 0 } else { w + 1 }
         }
         None => 0,
@@ -140,10 +157,10 @@ fn relation_column(elems: &[SyntaxElement]) -> usize {
 /// equality chain it introduces is anchored under the assignment's right-hand
 /// side, not aligned with the arrow itself.
 fn first_relation_is_assignment(elems: &[SyntaxElement]) -> bool {
-    let Some(r) = first_top_level_relation_index(elems) else {
+    let Some(b) = first_top_level_relation(elems) else {
         return false;
     };
-    let Some(tok) = elems[r].as_token() else {
+    let Some(tok) = elems[b.index].as_token() else {
         return false;
     };
     match tok.kind() {
@@ -153,13 +170,9 @@ fn first_relation_is_assignment(elems: &[SyntaxElement]) -> bool {
             // mappings) are intentionally *not* assignments.
             matches!(name, "gets" | "leftarrow" | "mapsto" | "coloneqq")
         }
-        // `:=` tokenizes as `:` then the relation `=`; the relation atom is the
-        // `=`, immediately preceded by the `:` (whatever kind it parses as).
-        SyntaxKind::MATH_OPERATOR => {
-            tok.text().starts_with('=')
-                && r > 0
-                && elems[r - 1].as_token().is_some_and(|p| p.text() == ":")
-        }
+        // A `:=`: the composite relation starts on its `:`, which is the only
+        // way a `MATH_TEXT` token can head a break candidate.
+        SyntaxKind::MATH_TEXT => tok.text() == ":",
         _ => false,
     }
 }
@@ -169,7 +182,7 @@ fn first_relation_is_assignment(elems: &[SyntaxElement]) -> bool {
 /// ([`relation_column`]), but under the assignment's right-hand side for an
 /// assignment-led chain (or a relationless head) ([`rhs_start_column`]).
 pub(super) fn continuation_anchor(elems: &[SyntaxElement]) -> usize {
-    match first_top_level_relation_index(elems) {
+    match first_top_level_relation(elems) {
         Some(_) if !first_relation_is_assignment(elems) => relation_column(elems),
         _ => rhs_start_column(elems),
     }
@@ -287,8 +300,10 @@ fn break_binary_segment(
     // column would push a left-side operand past the very relation it comes
     // before (`H - H \leq …` ⇒ an absurd indent). A relationless segment (a bare
     // binary chain) likewise starts at its head term.
-    let rhs_offset = match first_top_level_relation_index(seg) {
-        Some(r) if bins[0] > r => render::render_inline(&seg[..=r]).trim().chars().count() + 1,
+    let rhs_offset = match first_top_level_relation(seg) {
+        Some(b) if bins[0] > b.index => {
+            render::render_inline(&seg[..b.end]).trim().chars().count() + 1
+        }
         _ => 0,
     };
     let bin_pad = " ".repeat(base_indent + rhs_offset);
@@ -340,6 +355,44 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 prev = Some(AtomClass::Punct);
                 i += 1;
             }
+            // A `:` directly followed by an `=` heads a composite `:=` relation
+            // (see [`operators::is_definition_colon`]). The break lands on the
+            // `:` so a chain never splits between the colon and its `=`, and the
+            // atom spans both — the renderer emits them as one unit.
+            SyntaxKind::MATH_TEXT
+                if operators::is_definition_colon(
+                    el.as_token().map(|t| t.text()).unwrap_or_default(),
+                    elems
+                        .get(i + 1)
+                        .and_then(|e| e.as_token())
+                        .map(|t| (t.kind(), t.text())),
+                ) =>
+            {
+                // The `=` may open a longer operator run (`:=-`); only its first
+                // atom fuses onto the colon, exactly as the renderer does.
+                let mut run = String::new();
+                let mut j = i + 1;
+                while j < elems.len() && elems[j].kind() == SyntaxKind::MATH_OPERATOR {
+                    if let Some(tok) = elems[j].as_token() {
+                        run.push_str(tok.text());
+                    }
+                    j += 1;
+                }
+                let head = operators::split_operator_atoms(&run)
+                    .first()
+                    .map(|a| a.chars().count())
+                    .unwrap_or(0);
+                let end = i + 1 + head;
+                if depth == 0 {
+                    out.push(Break {
+                        index: i,
+                        end,
+                        class: AtomClass::Rel,
+                    });
+                }
+                prev = Some(AtomClass::Rel);
+                i = end;
+            }
             SyntaxKind::MATH_TEXT => {
                 prev = Some(AtomClass::Ord);
                 i += 1;
@@ -379,7 +432,11 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 } else if let Some(raw) = operators::command_class(name) {
                     let class = operators::coerce(raw, prev);
                     if depth == 0 && operators::is_spaced(class) {
-                        out.push(Break { index: i, class });
+                        out.push(Break {
+                            index: i,
+                            end: i + 1,
+                            class,
+                        });
                     }
                     prev = Some(class);
                 } else {
@@ -405,6 +462,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                     if depth == 0 && operators::is_spaced(class) {
                         out.push(Break {
                             index: run_start + char_off,
+                            end: run_start + char_off + atom.chars().count(),
                             class,
                         });
                     }
@@ -461,6 +519,39 @@ mod tests {
             lines("A = bbbbbbbbbb = cccccccccc", 20),
             vec!["A = bbbbbbbbbb", "  = cccccccccc"],
         );
+    }
+
+    #[test]
+    fn definition_colon_is_one_relation_atom() {
+        // The `:` and its `=` are one break candidate anchored on the `:`, so a
+        // chain never splits them across lines. Being an assignment, the
+        // continuations hang under its right-hand side (`A :=` is 4 cols + 1).
+        assert_eq!(
+            lines("A := bbbbbbbbbb := cccccccccc", 20),
+            vec!["A := bbbbbbbbbb", "     := cccccccccc"],
+        );
+    }
+
+    #[test]
+    fn definition_colon_fused_into_a_text_run_still_pairs() {
+        // `ab:=cd` lexes as `ab` + `:` + `=`; the colon has its own token, so the
+        // composite is found even when the author wrote no space before it.
+        assert_eq!(
+            lines("ab:=bbbbbbbbbb:=cccccccccc", 20),
+            vec!["ab := bbbbbbbbbb", "      := cccccccccc"],
+        );
+    }
+
+    #[test]
+    fn reversed_colon_is_not_a_definition() {
+        // Only a `:` *preceding* an `=` fuses: in `=:` the relation is the `=`
+        // and the trailing `:` an ordinary atom, so the chain is an equality
+        // chain and its continuation stacks under the relation (column 2), not
+        // under an assignment's right-hand side.
+        let out = lines("A =: bbbbbbbbbb =: cccccccccc", 20);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].starts_with("A ="), "{out:?}");
+        assert_eq!(&out[1][..3], "  =", "{out:?}");
     }
 
     #[test]

@@ -576,6 +576,7 @@ golden_test_cases!(
     inline_math_multiline_dollars,
     inline_math_multiline_dollars_gfm,
     inline_math_operators,
+    math_definition_colon,
     grid_table,
     grid_table_in_list_blockquote,
     grid_table_indented_is_paragraph,

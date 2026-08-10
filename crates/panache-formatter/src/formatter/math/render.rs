@@ -539,6 +539,9 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
     // command (so its `{…}` argument opens a text-mode group).
     let mut group_stack: Vec<bool> = Vec::new();
     let mut prev_sig_is_text_cmd = false;
+    // Set when the `:` of a definition `:=` was passed over: the next operator
+    // run's first atom carries it, so the pair is emitted as one relation.
+    let mut colon_head = false;
 
     let mut i = 0;
     while i < toks.len() {
@@ -546,6 +549,19 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
         match *kind {
             SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE => {
                 pending_space = true;
+                i += 1;
+            }
+            // The `:` of a `:=` is the head of a composite relation, not an
+            // ordinary atom — hold it back and let the `=` below emit `:=` as one
+            // spaced unit. The space it demands lands *before* the `:`.
+            SyntaxKind::MATH_TEXT
+                if operators::is_definition_colon(
+                    text,
+                    toks.get(i + 1).map(|(k, t)| (*k, t.as_str())),
+                ) =>
+            {
+                colon_head = true;
+                prev_sig_is_text_cmd = false;
                 i += 1;
             }
             SyntaxKind::MATH_OPERATOR => {
@@ -558,18 +574,28 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                     run.push_str(&toks[i].1);
                     i += 1;
                 }
-                for atom in operators::split_operator_atoms(&run) {
-                    let class = operators::coerce(operators::classify_operator(atom), prev_class);
+                for (n, atom) in operators::split_operator_atoms(&run)
+                    .into_iter()
+                    .enumerate()
+                {
+                    // Only the run's *first* atom fuses with a held-back `:`.
+                    let atom = if n == 0 && colon_head {
+                        format!(":{atom}")
+                    } else {
+                        atom.to_string()
+                    };
+                    let class = operators::coerce(operators::classify_operator(&atom), prev_class);
                     let demand = if operators::is_spaced(class) {
                         Demand::SpacedOp
                     } else {
                         Demand::TightOp
                     };
-                    emit_atom(&mut out, prev_demand, demand, pending_space, atom);
+                    emit_atom(&mut out, prev_demand, demand, pending_space, &atom);
                     pending_space = false; // only the first atom sees the run's leading space
                     prev_demand = demand;
                     prev_class = Some(class);
                 }
+                colon_head = false;
                 prev_sig_is_text_cmd = false;
             }
             SyntaxKind::MATH_COMMAND => {
@@ -665,6 +691,11 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 i += 1;
             }
         }
+    }
+    // Defensive: a slice that ends on the `:` of a `:=` (its `=` lives outside)
+    // must still emit the colon — dropping it would lose bytes.
+    if colon_head {
+        emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, ":");
     }
     out
 }

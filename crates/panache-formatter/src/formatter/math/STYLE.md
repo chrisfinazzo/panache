@@ -77,9 +77,9 @@ Returned unchanged, never reflowed:
    into one composite relation (`<=`, `==` stay one unit), while each **sign**
    char (`+ - *`) is its own atom --- so `=-` is a relation `=` then a sign `-`,
    giving `x = -y`, and `a--b` is binary-then-unary `a - -b`. A sign atom in a
-   *unary* position --- list start, or after another Bin/Rel/Open/Punct/large-op
-   --- is coerced to ordinary (TeX's unary-minus rule). Binary/relation atoms
-   get one space on each side; unary atoms are **tight**, *stripping* adjacent
+   *unary* position --- list start, or after another Bin/Rel/Open/Punct/large-op ---
+   is coerced to ordinary (TeX's unary-minus rule). Binary/relation atoms get
+   one space on each side; unary atoms are **tight**, *stripping* adjacent
    author spaces (`- x` → `-x`, `f( - x)` → `f(-x)`), except a space demanded by
    a neighboring spaced operator still wins (`x = - y` → `x = -y`). The
    preceding atom's class comes from the last significant token: a `MATH_TEXT`
@@ -96,6 +96,16 @@ Returned unchanged, never reflowed:
    unary-position command op, a large operator (`\sum`), a delimiter command
    (`\left`/`\right`), and ordinary commands all keep their author space
    verbatim. A break-priority column for line-breaking is a later phase.
+
+   **The definition `:=`.** A `:` is an ordinary atom whose spacing is the
+   author's (`x:y` and `f: A` are left alone), *except* when an `=` follows it
+   immediately: then the two are one composite relation, spaced as a unit
+   (`x:=y` → `x := y`, never `x : = y`). The parser gives the `:` its own
+   `MATH_TEXT` token precisely so the pair has an element boundary --- the
+   line-breaker anchors and breaks on the `:`, so a chain can never be split
+   between a colon and its `=`. The selector is
+   `operators::is_definition_colon`; only the leading form fuses, so `=:` stays
+   an `=` relation followed by an ordinary `:`.
 
 7. **Display line-breaking.** A free display row (`$$…$$`, non-environment)
    wider than `line-width` is broken at its **top-level** operators in a
@@ -123,14 +133,14 @@ Returned unchanged, never reflowed:
    only the relation split shows: `A = aaaa + bbbb` / `= cccc + dddd`.)
 
    **Assignment exception.** When the leading relation is an *assignment* arrow
-   (`\gets`, `\leftarrow`, `\mapsto`, `\coloneqq`, or `:=`), the arrow defines
-   its LHS rather than equating it, so it is **not** part of the equality chain
-   it introduces. The equality continuations then anchor under the assignment's
-   *right-hand side* (`linebreak::rhs_start_column`) instead of under the arrow,
-   so a wide arrow (`\gets` is 5 cols) does not drag them left. The selector is
-   `linebreak::continuation_anchor` / `first_relation_is_assignment`. `\to` and
-   `\rightarrow` are intentionally *not* assignments (they are usually limits or
-   mappings).
+   (`\gets`, `\leftarrow`, `\mapsto`, `\coloneqq`, or the composite `:=`), the
+   arrow defines its LHS rather than equating it, so it is **not** part of the
+   equality chain it introduces. The equality continuations then anchor under
+   the assignment's *right-hand side* (`linebreak::rhs_start_column`) instead of
+   under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag them left.
+   The selector is `linebreak::continuation_anchor` /
+   `first_relation_is_assignment`. `\to` and `\rightarrow` are intentionally
+   *not* assignments (they are usually limits or mappings).
 
    ```
    \beta_0 \gets \beta_0 + \frac{4}{n} …
@@ -198,14 +208,14 @@ Returned unchanged, never reflowed:
      ignores it. The space *before* `{` and *after* `}` (between atoms) is left
      alone (`{x} y` stays `{x} y`), and inter-atom spaces inside the group keep
      the Rule 1/6 collapse, not removal. **Text-mode groups are exempt:** the
-     argument of a text-switching command (`\text`, `\mbox`, the `\text*` family
-     --- see `operators::is_text_mode_command`) keeps its interior spaces
-     verbatim (`\text{ a }` survives), and the exemption nests, so a group
-     inside a text argument (`\text{a {b} c}`) is also preserved. Whether a
-     group is text mode is tracked with a brace-mode stack in
-     `render::space_operators`. Math-mode font commands (`\mathrm`, `\mathbf`)
-     are **not** text mode --- spaces are already insignificant inside them ---
-     so their interiors are trimmed like any other math group.
+     argument of a text-switching command (`\text`, `\mbox`, the `\text*` family ---
+     see `operators::is_text_mode_command`) keeps its interior spaces verbatim
+     (`\text{ a }` survives), and the exemption nests, so a group inside a text
+     argument (`\text{a {b} c}`) is also preserved. Whether a group is text mode
+     is tracked with a brace-mode stack in `render::space_operators`. Math-mode
+     font commands (`\mathrm`, `\mathbf`) are **not** text mode --- spaces are
+     already insignificant inside them --- so their interiors are trimmed like
+     any other math group.
 
 ## Idempotency
 

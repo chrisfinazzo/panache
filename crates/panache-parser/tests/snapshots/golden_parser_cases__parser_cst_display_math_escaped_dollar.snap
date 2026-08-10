@@ -1,5 +1,6 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 99
 expression: cst_output
 ---
 DOCUMENT@0..240
@@ -50,7 +51,8 @@ DOCUMENT@0..240
         MATH_COMMAND@151..156 "\\text"
         MATH_GROUP@156..164
           MATH_GROUP_OPEN@156..157 "{"
-          MATH_TEXT@157..162 "Cost:"
+          MATH_TEXT@157..161 "Cost"
+          MATH_TEXT@161..162 ":"
           MATH_SPACE@162..163 " "
           MATH_GROUP_CLOSE@163..164 "}"
         MATH_SPACE@164..165 " "

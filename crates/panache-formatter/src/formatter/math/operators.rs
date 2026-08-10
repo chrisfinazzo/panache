@@ -72,6 +72,19 @@ pub fn split_operator_atoms(run: &str) -> Vec<&str> {
     atoms
 }
 
+/// The `:` of a definition `:=`, which the parser emits as its own `MATH_TEXT`
+/// token: a `:` immediately followed (no whitespace) by an `=`-led operator run
+/// is not an ordinary atom but the head of one composite relation. Keeping the
+/// two together is what stops the formatter from rendering `x := y` as the
+/// nonsense `x : = y` and from breaking a long row between the `:` and its `=`.
+///
+/// `next` is the text of the token directly after the `:`, `None` at end of
+/// input; only an `=` starts a relation atom the colon can fuse onto (`:<` and
+/// `:>` are not definition symbols).
+pub fn is_definition_colon(text: &str, next: Option<(SyntaxKind, &str)>) -> bool {
+    text == ":" && matches!(next, Some((SyntaxKind::MATH_OPERATOR, "=")))
+}
+
 /// Classify a single operator atom (from [`split_operator_atoms`]): any of
 /// `= < >` makes it a [`AtomClass::Rel`], otherwise it is a [`AtomClass::Bin`].
 pub fn classify_operator(atom: &str) -> AtomClass {
@@ -212,6 +225,29 @@ mod tests {
         assert_eq!(split_operator_atoms("->"), vec!["-", ">"]);
         assert_eq!(split_operator_atoms("--"), vec!["-", "-"]);
         assert_eq!(split_operator_atoms("=-="), vec!["=", "-", "="]);
+    }
+
+    #[test]
+    fn definition_colon_needs_an_adjacent_equals() {
+        let eq = Some((SyntaxKind::MATH_OPERATOR, "="));
+        assert!(is_definition_colon(":", eq));
+        // `:` is only ever a definition head when an `=` follows immediately.
+        assert!(!is_definition_colon(":", None));
+        assert!(!is_definition_colon(
+            ":",
+            Some((SyntaxKind::MATH_SPACE, " "))
+        ));
+        assert!(!is_definition_colon(
+            ":",
+            Some((SyntaxKind::MATH_TEXT, "="))
+        ));
+        assert!(!is_definition_colon(
+            ":",
+            Some((SyntaxKind::MATH_OPERATOR, "<"))
+        ));
+        // Only a lone `:` token — the parser never fuses it into a text run.
+        assert!(!is_definition_colon("ab:", eq));
+        assert!(!is_definition_colon("::", eq));
     }
 
     #[test]

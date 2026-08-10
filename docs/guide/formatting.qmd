@@ -1038,10 +1038,12 @@ The `&` columns and the trailing `\\` are both aligned.
 Operators are spaced precedence-aware: a binary or relational operator gets one
 space on each side (`a+b` → `a + b`, `a<=b` → `a <= b`), while a unary minus or
 plus stays tight (`x = -y`, `f(-x)`). Command operators are spaced the same way
-(`a\cdot b` → `a \cdot b`, `x\leq y` → `x \leq y`). Macro contents are not
-rewritten (no `\frac` canonicalization, no auto-`&` insertion). Alignment uses
-**source character widths** (it tidies the source, it does not align rendered
-glyphs), and malformed math is left untouched.
+(`a\cdot b` → `a \cdot b`, `x\leq y` → `x \leq y`). A definition `:=` is spaced
+as one symbol (`x:=y` → `x := y`), never split into `x : = y`; a colon that is
+not followed directly by `=` keeps the spacing you wrote (`x:y`, `f: A`). Macro
+contents are not rewritten (no `\frac` canonicalization, no auto-`&` insertion).
+Alignment uses **source character widths** (it tidies the source, it does not
+align rendered glyphs), and malformed math is left untouched.
 
 Whitespace that TeX ignores is normalized away: sub/superscript markers (`_`,
 `^`) are tightened (`H _{ 00}^{-1 }` → `H_{00}^{-1}`), and the leading/trailing
