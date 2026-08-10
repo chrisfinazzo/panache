@@ -2,6 +2,7 @@
 name = "panache-formatter"
 version = "0.20.5"
 edition.workspace = true
+rust-version.workspace = true
 include = [
     "/src/**/*",
     "/README.md",

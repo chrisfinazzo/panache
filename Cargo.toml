@@ -1,5 +1,8 @@
 [workspace.package]
 edition = "2024"
+# Kept in lockstep with the pinned toolchain in `rust-toolchain.toml`, which is
+# the only version CI builds. Bump both together.
+rust-version = "1.94"
 license = "MIT"
 repository = "https://github.com/jolars/panache"
 homepage = "https://panache.bz"
@@ -9,6 +12,7 @@ authors = ["Johan Larsson <johan@jolars.co>"]
 name = "panache"
 version = "3.3.0"
 edition.workspace = true
+rust-version.workspace = true
 # `distill_quarto_schema` is a dev-only vendoring bin (src/bin/); keep bare
 # `cargo run` resolving to the CLI for tooling like the pre-commit format hook.
 default-run = "panache"
