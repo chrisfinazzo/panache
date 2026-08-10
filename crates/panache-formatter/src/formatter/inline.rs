@@ -178,23 +178,29 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 }
             }
 
-            // Preserve malformed multi-line triple-backtick code spans as-is so they
-            // don't collapse into one line and then reparse differently on pass 2.
+            // A multi-line triple-backtick code span is a fence line that failed to
+            // open a block: pandoc anchors a paragraph-interrupting fence on the
+            // fence character itself, so one leftover column of indent leaves the
+            // whole run as lazy paragraph text. Its newlines join to spaces like any
+            // other code span's, which is what pandoc's own reader and markdown
+            // writer do. Re-emitting the original bytes instead is not an option --
+            // the writers re-indent continuation lines to the enclosing container's
+            // content indent, which is exactly where the fence *does* interrupt, so
+            // pass 2 reads a real code block.
             //
             // A single-line Quarto executable chunk (```` ```{r}\n...\n``` ````) is
-            // instead collapsed to inline `{r} ...` form. Its surrounding newlines
-            // are block-structure boundaries, not code content, so they must be
-            // trimmed after the newline->space normalization below.
+            // collapsed to inline `{r} ...` form. Its surrounding newlines are
+            // block-structure boundaries, not code content, so they must be trimmed
+            // after the newline->space normalization below.
             let mut collapse_block_chunk = false;
             if marker_len >= 3 && content.contains('\n') {
                 let trimmed_start = content.trim_start();
                 let first_line = trimmed_start.lines().next().unwrap_or_default();
                 let looks_quarto_chunk_header =
                     trimmed_start.starts_with('{') && first_line.contains('}');
-                if !looks_quarto_chunk_header {
-                    return node.text().to_string();
+                if looks_quarto_chunk_header {
+                    collapse_block_chunk = true;
                 }
-                collapse_block_chunk = true;
             }
 
             // Preserve code-span content verbatim: surrounding spaces are

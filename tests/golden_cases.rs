@@ -541,6 +541,7 @@ golden_test_cases!(
     wikilinks_before_pipe,
     wikilinks_image,
     wikilinks_in_paragraph,
+    wrapped_multiline_code_span_stays_lazy,
     yaml_metadata,
     yaml_metadata_dots_closer,
     yaml_metadata_normalization,
