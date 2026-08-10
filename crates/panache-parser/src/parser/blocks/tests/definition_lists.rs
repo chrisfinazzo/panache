@@ -341,3 +341,65 @@ fn lazy_definition_markers_add_further_definitions() {
     assert!(definitions[0].text().to_string().contains('b'));
     assert!(definitions[1].text().to_string().contains('c'));
 }
+
+#[test]
+fn trailing_marker_line_outside_the_item_is_not_a_definition_marker() {
+    // `ContainerPrefix::strip` advances the item's content column with
+    // `advance_columns`, which counts any character as a column. Inside a
+    // two-column item that turns `"c :"` into `":"`, so the term lookahead
+    // used to see a bare marker and promote the line above it. Pandoc reads
+    // `BulletList [[Plain [a, SoftBreak, b]]]` + `Para [c, Space, ":"]`.
+    for input in [
+        "- a\nb\n\nc :\n",
+        "- a\n  b\n\nc :\n",
+        "- a\nb\n\nc ~\n",
+        "- a\n\n  b\n\nc :\n",
+    ] {
+        let tree = parse_blocks(input);
+        assert!(
+            find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+            "a marker line outside the list item must not open a definition list: {input:?}"
+        );
+        assert_block_kinds(
+            input,
+            &[
+                SyntaxKind::LIST,
+                SyntaxKind::BLANK_LINE,
+                SyntaxKind::PARAGRAPH,
+            ],
+        );
+    }
+}
+
+#[test]
+fn trailing_marker_line_outside_the_item_is_inert_in_a_blockquote() {
+    let input = "> - a\n> b\n>\n> c :\n";
+    let tree = parse_blocks(input);
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "pandoc reads this as BlockQuote [BulletList, Para]"
+    );
+}
+
+#[test]
+fn ordered_and_tab_variants_already_agree_with_pandoc() {
+    // Controls for the case above: an ordered marker gives content_col 3 (the
+    // faked slice is just the newline) and a tab overshoots column 2, so
+    // neither ever reached the bad path. They must stay put.
+    for input in ["1. a\nb\n\nc :\n", "- a\nb\n\nc\t:\n"] {
+        assert!(
+            find_first(&parse_blocks(input), SyntaxKind::DEFINITION_LIST).is_none(),
+            "{input:?}"
+        );
+    }
+}
+
+#[test]
+fn definition_marker_at_the_item_content_column_still_opens_a_definition() {
+    // The gate must only reject lines that fall short of the content column.
+    let input = "- a\n\n  b\n\n  : def\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    let term = find_first(&list, SyntaxKind::TERM).expect("term");
+    assert_eq!(term.text().to_string().trim(), "b");
+}

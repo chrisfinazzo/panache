@@ -133,6 +133,15 @@ pub(in crate::parser) fn next_line_is_definition_marker(
             continue;
         }
         if let Some((marker, ..)) = try_parse_definition_marker(line) {
+            // A marker on a line that does not carry the enclosing item's
+            // content indent is not inside the item: the strip faked that
+            // indent by eating content characters, so the `:` it landed on is
+            // preceded by text on its own line. Pandoc folds such a line into
+            // the paragraph above (`- a\nb\n\nc :` is `BulletList` + `Para "c
+            // :"`), so it must not promote the term line above it.
+            if !lines.carries_container_prefix(check_pos) {
+                return None;
+            }
             if marker == ':' && is_caption_followed_by_table(lines, check_pos) {
                 return None;
             }

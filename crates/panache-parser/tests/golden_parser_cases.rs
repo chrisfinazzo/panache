@@ -255,6 +255,8 @@ golden_test_cases!(
     definition_list_pandoc_bare_leading_list,
     definition_list_pandoc_loose_compact,
     definition_list_wrapping,
+    definition_term_requires_list_indent,
+    definition_term_requires_list_indent_blockquote,
     display_math,
     display_math_blank_line_termination,
     display_math_content_on_fence_line,

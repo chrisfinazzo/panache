@@ -357,6 +357,52 @@ impl ContainerPrefix {
         s
     }
 
+    /// Whether `line` carries every `ListAdvance` op's columns as real
+    /// leading whitespace — i.e. the line sits *inside* the list item rather
+    /// than being folded into it as an under-indented continuation.
+    ///
+    /// [`Self::strip`] walks list indent with [`advance_columns`], which counts
+    /// any character as a column, so on a short line it slices off content as
+    /// if it were container indent: inside a two-column item `"c :"` becomes
+    /// `":"`. Emission never does that ([`strip_list_indent`] stops at the
+    /// first non-whitespace byte), so a classification that has to hold at
+    /// emission time must first ask this.
+    ///
+    /// Only the list component is checked. Blockquote markers and content
+    /// indent are still stripped, because the answer for an inner
+    /// `ListAdvance` depends on what the outer ops consumed, but their own
+    /// absence is not reported — `strip_content_indent` already degrades
+    /// gracefully and the blockquote strip cannot eat non-marker bytes.
+    ///
+    /// Mirrors the `line_indent_cols < content_col` gate in
+    /// `Parser::footnote_first_line_term_lookahead`.
+    pub fn line_carries_list_indent(&self, line: &str) -> bool {
+        let ops = self.ops();
+        let mut s = line;
+        let mut i = 0;
+        while i < ops.len() {
+            match ops[i] {
+                StripOp::ListAdvance(n) => {
+                    if leading_indent(s).0 < n as usize {
+                        return false;
+                    }
+                    s = strip_list_indent(s, n as usize);
+                    i += 1;
+                }
+                StripOp::BlockQuoteMarker => {
+                    let run = blockquote_run_len(&ops[i..]);
+                    s = strip_bq_with_gobble(s, run, self.lazy_blockquote_gobble);
+                    i += run;
+                }
+                StripOp::ContentIndent(n) => {
+                    s = strip_content_indent(s, n as usize).0;
+                    i += 1;
+                }
+            }
+        }
+        true
+    }
+
     /// Strip semantics for the dispatch line (line 0). Identical to
     /// [`Self::strip`] except that the *innermost* (last)
     /// `ListAdvance` op is skipped when
@@ -1380,6 +1426,32 @@ mod tests {
                 prefix.lazy_blockquote_gobble,
             )
         );
+    }
+
+    #[test]
+    fn line_carries_list_indent_rejects_faked_indent() {
+        let p = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
+        // `strip` would return `":\n"` here by counting `c` and the space as
+        // columns; the line never reaches the item's content column.
+        assert_eq!(p.strip("c :\n"), ":\n");
+        assert!(!p.line_carries_list_indent("c :\n"));
+        assert!(!p.line_carries_list_indent(" c :\n"));
+        // Real indent reaching the content column is accepted.
+        assert!(p.line_carries_list_indent("  : def\n"));
+        assert!(p.line_carries_list_indent("    : def\n"));
+        // A tab reaches column 4, which covers a two-column item.
+        assert!(p.line_carries_list_indent("\t: def\n"));
+        // An empty prefix has nothing to fake.
+        assert!(ContainerPrefix::default().line_carries_list_indent("c :\n"));
+    }
+
+    #[test]
+    fn line_carries_list_indent_applies_after_outer_ops() {
+        // The list advance is measured against what the blockquote strip left.
+        let p =
+            ContainerPrefix::from_ops(&[StripOp::BlockQuoteMarker, StripOp::ListAdvance(2)], false);
+        assert!(!p.line_carries_list_indent("> c :\n"));
+        assert!(p.line_carries_list_indent(">   : def\n"));
     }
 
     #[test]

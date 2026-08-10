@@ -32,6 +32,16 @@ pub(crate) trait LineView {
     fn line(&self, i: usize) -> &str;
     /// Total number of lines (absolute upper bound for indices).
     fn line_count(&self) -> usize;
+    /// Whether line `i` carries the enclosing list item's content indent as
+    /// real whitespace, so a block marker found on it opens a block *inside*
+    /// that item. False for an under-indented line whose indent
+    /// [`ContainerPrefix::strip`] had to fake by eating content characters.
+    ///
+    /// Defaults to `true`: a raw line slice does no stripping at all, so it
+    /// can never fake an indent.
+    fn carries_container_prefix(&self, _i: usize) -> bool {
+        true
+    }
 }
 
 impl LineView for [&str] {
@@ -49,6 +59,11 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
     }
     fn line_count(&self) -> usize {
         self.raw().len()
+    }
+    fn carries_container_prefix(&self, i: usize) -> bool {
+        // The dispatch line's list marker was emitted upstream, so its
+        // "indent" is the marker text itself, which is not whitespace.
+        i == self.dispatch_pos() || self.prefix().line_carries_list_indent(self.raw()[i])
     }
 }
 
