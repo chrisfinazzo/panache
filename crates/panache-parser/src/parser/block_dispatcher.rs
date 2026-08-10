@@ -3553,9 +3553,23 @@ impl BlockParser for IndentedCodeBlockParser {
             // the buffered line was indented past the heading limit), the
             // indented line that follows is paragraph continuation, not a new
             // code block.
+            //
+            // A closed fenced code block is the same kind of self-contained
+            // neighbour, so it gets the same shortcut — but a fence line is only
+            // recognizable as a *closer* from where it sits: an opener would
+            // have made this line code content rather than a block start, and a
+            // fence that never opened a block is paragraph or list-item text,
+            // which the two open-container guards below exclude.
             ctx.has_blank_before_strict
                 || (!ctx.paragraph_open
-                    && prev_line_is_terminal_one_liner(lines, line_pos, ctx.blockquote_depth))
+                    && (prev_line_is_terminal_one_liner(lines, line_pos, ctx.blockquote_depth)
+                        || (!ctx.list_item_content_open
+                            && prev_line_closed_a_fence(
+                                lines,
+                                line_pos,
+                                ctx.blockquote_depth,
+                                ctx.config.dialect,
+                            ))))
         };
         if !allow {
             return None;
@@ -3828,6 +3842,34 @@ fn prev_line_is_terminal_one_liner(
     // open paragraph.
     try_parse_atx_heading(prev_inner_no_nl).is_some()
         || try_parse_horizontal_rule(prev_inner_no_nl).is_some()
+}
+
+/// Whether the immediately-previous source line (after stripping
+/// `expected_bq_depth` blockquote markers) closed a fenced code block, making
+/// that block a complete neighbour the way an ATX heading or an HR is.
+///
+/// Only the shape is checked, because at a block start that shape can only be a
+/// closer: an *opener* on the previous line would have made this line the
+/// block's content instead, and a fence that failed to open one is paragraph or
+/// list-item text, which the caller excludes. A closer carries no info string,
+/// so one that does is some other fence entirely.
+fn prev_line_closed_a_fence(
+    lines: &[&str],
+    line_pos: usize,
+    expected_bq_depth: usize,
+    dialect: crate::options::Dialect,
+) -> bool {
+    if line_pos == 0 {
+        return false;
+    }
+    let prev_line = lines[line_pos - 1];
+    let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
+    if prev_bq_depth != expected_bq_depth {
+        return false;
+    }
+    let (prev_inner_no_nl, _) = strip_newline(prev_inner);
+    try_parse_fence_open(prev_inner_no_nl, dialect)
+        .is_some_and(|fence| fence.info_string.trim().is_empty())
 }
 
 // ============================================================================

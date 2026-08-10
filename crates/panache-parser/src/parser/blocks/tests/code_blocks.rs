@@ -277,6 +277,52 @@ fn under_indented_fence_scans_past_an_interior_blank_line_pandoc() {
     assert_eq!(get_code_content(&node).unwrap(), "c\n\nx\n");
 }
 
+/// A fenced code block is a complete block, so an indented line right below its
+/// closer opens an indented code block --- pandoc needs no blank line between
+/// them, just as it needs none after a heading or an HR. pandoc:
+/// `[ CodeBlock ("",["rust"],[]) "c", CodeBlock ("",[],[]) "x" ]`.
+#[test]
+fn indented_code_follows_a_fenced_code_block_pandoc() {
+    let input = "```rust\nc\n```\n    x\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        block_kinds(&node),
+        vec![SyntaxKind::CODE_BLOCK, SyntaxKind::CODE_BLOCK]
+    );
+}
+
+/// Same for a tilde fence, and inside a list item at the item's content column
+/// plus four.
+#[test]
+fn indented_code_follows_a_fenced_code_block_in_a_list_item_pandoc() {
+    let input = "- a\n\n  ~~~\n  c\n  ~~~\n      x\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        find_all(&node, SyntaxKind::CODE_BLOCK).len(),
+        2,
+        "the indented line below the closer is its own code block"
+    );
+}
+
+/// But an *unterminated* fence is item text, not a block, so the indented line
+/// below it is lazy item text too. pandoc:
+/// `[ BulletList [ [ Plain [ Str "a", SoftBreak, Str "```", SoftBreak, Str "x" ] ] ] ]`.
+#[test]
+fn indented_line_below_an_unterminated_item_fence_stays_item_text() {
+    let input = "- a\n  ```\n      x\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert!(
+        find_first(&node, SyntaxKind::CODE_BLOCK).is_none(),
+        "an unclosed fence is not a fence"
+    );
+}
+
 /// The boundary: at the item's content column the fence *is* item content, so
 /// the code block stays inside and the `Plain` is promoted to `Para` (0514).
 #[test]
