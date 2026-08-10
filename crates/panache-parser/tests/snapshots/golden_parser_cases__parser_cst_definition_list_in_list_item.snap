@@ -4,10 +4,10 @@ expression: cst_output
 ---
 DOCUMENT@0..94
   LIST@0..94
-    LIST_ITEM@0..16
+    LIST_ITEM@0..15
       LIST_MARKER@0..1 "-"
       WHITESPACE@1..2 " "
-      DEFINITION_LIST@2..16
+      DEFINITION_LIST@2..15
         DEFINITION_ITEM@2..15
           TERM@2..7
             TEXT@2..6 "Term"
@@ -19,12 +19,12 @@ DOCUMENT@0..94
             PLAIN@11..15
               TEXT@11..14 "def"
               NEWLINE@14..15 "\n"
-        BLANK_LINE@15..16
-          BLANK_LINE@15..16 "\n"
-    LIST_ITEM@16..32
+    BLANK_LINE@15..16
+      BLANK_LINE@15..16 "\n"
+    LIST_ITEM@16..31
       LIST_MARKER@16..17 "-"
       WHITESPACE@17..18 " "
-      DEFINITION_LIST@18..32
+      DEFINITION_LIST@18..31
         DEFINITION_ITEM@18..31
           TERM@18..23
             TEXT@18..22 "Term"
@@ -36,12 +36,12 @@ DOCUMENT@0..94
             PLAIN@27..31
               TEXT@27..30 "def"
               NEWLINE@30..31 "\n"
-        BLANK_LINE@31..32
-          BLANK_LINE@31..32 "\n"
-    LIST_ITEM@32..49
+    BLANK_LINE@31..32
+      BLANK_LINE@31..32 "\n"
+    LIST_ITEM@32..48
       LIST_MARKER@32..33 "-"
       WHITESPACE@33..34 " "
-      DEFINITION_LIST@34..49
+      DEFINITION_LIST@34..48
         DEFINITION_ITEM@34..48
           TERM@34..39
             TEXT@34..38 "Term"
@@ -55,12 +55,12 @@ DOCUMENT@0..94
             PLAIN@44..48
               TEXT@44..47 "def"
               NEWLINE@47..48 "\n"
-        BLANK_LINE@48..49
-          BLANK_LINE@48..49 "\n"
-    LIST_ITEM@49..71
+    BLANK_LINE@48..49
+      BLANK_LINE@48..49 "\n"
+    LIST_ITEM@49..70
       LIST_MARKER@49..50 "-"
       WHITESPACE@50..51 " "
-      DEFINITION_LIST@51..71
+      DEFINITION_LIST@51..70
         DEFINITION_ITEM@51..70
           TERM@51..56
             TEXT@51..55 "Term"
@@ -79,8 +79,8 @@ DOCUMENT@0..94
             PLAIN@67..70
               TEXT@67..69 "d2"
               NEWLINE@69..70 "\n"
-        BLANK_LINE@70..71
-          BLANK_LINE@70..71 "\n"
+    BLANK_LINE@70..71
+      BLANK_LINE@70..71 "\n"
     LIST_ITEM@71..94
       LIST_MARKER@71..72 "-"
       WHITESPACE@72..73 " "

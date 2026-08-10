@@ -608,3 +608,20 @@ fn definition_list_in_list_item_survives_siblings_and_trailing_blocks() {
     );
     assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 2);
 }
+
+#[test]
+fn blank_line_between_items_stays_at_the_list_level() {
+    // A definition list opened on a list-marker line must not swallow the
+    // blank line that separates two sibling items: the `LIST` needs to see it
+    // to stay loose. The next line, `- Term`, is a sibling marker at indent 0
+    // and never reaches the item's content column, so it cannot continue the
+    // definition list as a term.
+    let input = "- Term\n  : def\n\n- Term\n  : def\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::LIST).expect("list");
+    assert!(
+        list.children().any(|c| c.kind() == SyntaxKind::BLANK_LINE),
+        "the separator must be a direct child of LIST, not absorbed by the \
+         definition list inside the first item"
+    );
+}

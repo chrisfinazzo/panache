@@ -56,8 +56,36 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
         );
         let next_is_definition_marker =
             definition_lists::try_parse_definition_marker(next_inner).is_some();
-        let next_is_definition_term = !is_blank_line(next_inner)
+        // A term candidate inside a list item has to reach that item's content
+        // column, the same rule the block dispatcher's term lookahead applies.
+        // Otherwise a sibling item marker — `- Term` at indent 0, whose own
+        // next line is a `:` marker — reads as a term and keeps the definition
+        // list in the *previous* item open across the blank line separating
+        // them, hiding the separator from the `LIST` and rendering it compact.
+        // At top level there is no such column, and pandoc does read `- Term2`
+        // there as a term, so the constraint is only applied when a list item
+        // encloses the container being tested.
+        //
+        // The column is the one enclosing the container being tested, so it is
+        // resolved per level: a list nested *inside* a definition body sits
+        // above the definition list on the stack and must not constrain it.
+        let next_line_opens_definition = !is_blank_line(next_inner)
             && definition_lists::next_line_is_definition_marker(lines, next_line_pos).is_some();
+        let next_is_definition_term_below = |level: usize| -> bool {
+            next_line_opens_definition
+                && raw_indent_cols
+                    >= containers.stack[..level]
+                        .iter()
+                        .rev()
+                        .find_map(|c| match c {
+                            crate::parser::utils::container_stack::Container::ListItem {
+                                content_col,
+                                ..
+                            } => Some(*content_col),
+                            _ => None,
+                        })
+                        .unwrap_or(0)
+        };
 
         // Re-detect the definition marker after stripping a content-container
         // indent (e.g. the 4-space footnote body indent). Without this, a `:`
@@ -142,7 +170,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                 }
                 crate::parser::utils::container_stack::Container::DefinitionList { .. }
                     if next_is_definition_marker
-                        || next_is_definition_term
+                        || next_is_definition_term_below(i)
                         || stripped_is_definition_marker(content_indent_so_far) =>
                 {
                     keep_level = i + 1;
