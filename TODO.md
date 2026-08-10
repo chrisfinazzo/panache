@@ -211,6 +211,35 @@ Round-trip failures (`input` -> lossy output):
     `full_parse_lossless_setext_pair_after_unterminated_fence`; un-ignore them
     when that branch rebases onto this fix.
 
+Pandoc divergences. The parse round-trips its bytes, so the harness's
+lossy-or-panic precondition check does not catch these --- they surface the
+other way round, as an incremental splice that is *right* diverging from a full
+parse that is wrong:
+
+- [ ] A line ending in ` :` or ` ~` promotes a preceding list item's **lazy
+  continuation** line into a definition-list `TERM`, swallowing the blank
+  line between them. `- a\nb\n\nc :\n` parses as a `LIST_ITEM` containing a
+  `DEFINITION_LIST`, where pandoc has
+  `BulletList [[Plain [Str "a", SoftBreak, Str "b"]]]` followed by
+  `Para [Str "c", Space, Str ":"]`. The shape needs the lazy continuation
+  (`- a\n\nc :\n` is fine), reaches only into the block right after the
+  blank line (an intervening paragraph, heading, or fence stops it), fires
+  for a bullet list but not an ordered one, and does not fire after a tab
+  (`c\t:`).
+  - Surfaced on `feat/incremental-parsing-graduation` by the flavor-tiered fuzz
+    harness, once CRLF entries joined its insert alphabet and reshuffled the
+    chained-edit draws. It is not CRLF-specific and reproduces byte for byte on
+    LF. Pinned `#[ignore]`d there in `incremental_regressions.rs` as
+    `full_parse_definition_list_from_trailing_colon_after_lazy_list_item`;
+    un-ignore it when that branch rebases onto this fix.
+  - That branch also carries a workaround on the *incremental* side,
+    `first_block_has_trailing_definition_marker` in `parser/reparse.rs`, which
+    declines the shape so a splice keeps matching the full parse. It exists only
+    because the full parse is wrong: **delete the guard and its two call sites
+    with this fix**, since the splice already produces pandoc's answer.
+  - Expect the block-parser change to move conformance numbers; put the
+    pass-rate delta in the commit body as usual.
+
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
 - [x] `parse_line` honours the block registry only for `OpenBlockQuote` effects,
