@@ -2292,8 +2292,8 @@ impl<'a> Parser<'a> {
                         .token(SyntaxKind::WHITESPACE.into(), indent_str);
                 }
 
-                emit_definition_marker(&mut self.builder, *marker_char, *indent);
                 let indent_bytes = byte_index_at_column(content, *indent);
+                emit_definition_marker(&mut self.builder, *marker_char, &content[..indent_bytes]);
                 if *spaces_after > 0 {
                     let space_start = indent_bytes + 1;
                     let space_end = space_start + *spaces_after;

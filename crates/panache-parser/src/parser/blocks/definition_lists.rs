@@ -2,7 +2,9 @@ use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
-use crate::parser::utils::container_stack::{leading_indent, leading_indent_from};
+use crate::parser::utils::container_stack::{
+    byte_index_at_column, leading_indent, leading_indent_from,
+};
 use crate::parser::utils::helpers::strip_newline;
 use crate::parser::utils::inline_emission;
 
@@ -11,6 +13,19 @@ use crate::parser::utils::inline_emission;
 /// Returns Some((marker_char, indent_cols, spaces_after_cols, spaces_after_bytes)) if found, None otherwise.
 /// The marker can be indented 0-3 spaces and must be followed by whitespace.
 pub fn try_parse_definition_marker(line: &str) -> Option<(char, usize, usize, usize)> {
+    try_parse_definition_marker_at(line, 0)
+}
+
+/// [`try_parse_definition_marker`] for a slice that starts at column
+/// `base_col` of its source line.
+///
+/// The 0-3 space allowance is measured from `line`'s own start, but the
+/// returned `indent_cols` and the tab expansion after the marker are absolute,
+/// so callers keep indexing the full line with `byte_index_at_column`.
+fn try_parse_definition_marker_at(
+    line: &str,
+    base_col: usize,
+) -> Option<(char, usize, usize, usize)> {
     // Cheap byte-level leading-byte gate: a definition marker is `:` or
     // `~` after up to 3 ASCII spaces. Avoid the `leading_indent`
     // (Unicode char walk + tab-aware column count) on the common
@@ -60,10 +75,40 @@ pub fn try_parse_definition_marker(line: &str) -> Option<(char, usize, usize, us
     // Seed the column counter past the marker's own column, so a tab after
     // the marker expands to the stop it actually reaches: `:\td` puts the tab
     // at column 1, reaching column 4 (a content column of 4), not column 5.
-    let (spaces_after_cols, spaces_after_bytes) =
-        leading_indent_from(after_marker, indent_cols + 1);
+    let marker_col = base_col + indent_cols;
+    let (spaces_after_cols, spaces_after_bytes) = leading_indent_from(after_marker, marker_col + 1);
 
-    Some((marker, indent_cols, spaces_after_cols, spaces_after_bytes))
+    Some((marker, marker_col, spaces_after_cols, spaces_after_bytes))
+}
+
+/// [`try_parse_definition_marker`] in the frame pandoc reads item contents in.
+///
+/// Pandoc reparses a list item's contents as a fresh block sequence starting
+/// at the item's content column, so the marker's 0-3 space allowance is
+/// measured from there rather than from column 0. Without this a `:` at a
+/// content column of 4 or more is read as indented code, and the term above it
+/// is left with no definition body at all.
+///
+/// Falls back to the column-0 frame, which is what a marker-line dispatch and
+/// every top-level marker need. The returned `indent_cols` is absolute in both
+/// frames, so callers keep using `byte_index_at_column` on the full line.
+pub(in crate::parser) fn definition_marker_in_list_frame(
+    line: &str,
+    list_content_col: Option<usize>,
+) -> Option<(char, usize, usize, usize)> {
+    if let Some(content_col) = list_content_col
+        && content_col > 0
+        && leading_indent(line).0 >= content_col
+    {
+        let base = byte_index_at_column(line, content_col);
+        // A tab straddling the content column lands `base` past it, so read
+        // the column actually reached rather than assuming `content_col`.
+        let base_col = leading_indent(&line[..base]).0;
+        if let Some(found) = try_parse_definition_marker_at(&line[base..], base_col) {
+            return Some(found);
+        }
+    }
+    try_parse_definition_marker(line)
 }
 
 /// Emit a term line into the syntax tree
@@ -87,14 +132,18 @@ pub(crate) fn emit_term(
     builder.finish_node(); // Term
 }
 
-/// Emit a definition marker
+/// Emit a definition marker preceded by the literal bytes of its indent.
+///
+/// The indent is passed as a slice rather than a column count: in the list
+/// content-column frame it can contain a tab, which regenerating spaces would
+/// silently rewrite.
 pub(crate) fn emit_definition_marker(
     builder: &mut GreenNodeBuilder<'static>,
     marker: char,
-    indent_cols: usize,
+    indent: &str,
 ) {
-    if indent_cols > 0 {
-        builder.token(SyntaxKind::WHITESPACE.into(), &" ".repeat(indent_cols));
+    if !indent.is_empty() {
+        builder.token(SyntaxKind::WHITESPACE.into(), indent);
     }
     builder.token(SyntaxKind::DEFINITION_MARKER.into(), &marker.to_string());
 }

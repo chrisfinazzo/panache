@@ -28,7 +28,7 @@ use super::blocks::container_prefix::{
     ContainerPrefix, StrippedLines, bq_outer_of_list, strip_list_indent,
 };
 use super::blocks::definition_lists::{
-    next_line_is_definition_marker, try_parse_definition_marker,
+    definition_marker_in_list_frame, next_line_is_definition_marker,
 };
 use super::blocks::fenced_divs::{DivFenceInfo, is_div_closing_fence, try_parse_div_fence_open};
 use super::blocks::headings::{
@@ -954,7 +954,7 @@ impl BlockParser for DefinitionListParser {
         let stripped = StrippedLines::with_dispatch(raw, line_pos, line_pos, prefix);
 
         if let Some((marker_char, indent, spaces_after_cols, spaces_after_bytes)) =
-            try_parse_definition_marker(content)
+            definition_marker_in_list_frame(content, ctx.list_indent_info.map(|i| i.content_col))
         {
             // If this `:` line is actually a table caption marker and a table
             // follows, let TableParser claim it instead of starting a definition

@@ -502,3 +502,38 @@ fn footnote_body_first_line_term_still_opens_a_definition_list() {
         "Term"
     );
 }
+
+#[test]
+fn definition_marker_is_detected_at_a_deep_item_content_column() {
+    // Pandoc reparses item contents from the item's content column, so the
+    // 0-3 space allowance is measured from there, not from column 0. With a
+    // content column of 4 the marker used to be read as indented code, which
+    // left the term above it with no definition at all.
+    let input = "- - foo\n\n    bar\n\n    : baz\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    assert_eq!(
+        find_first(&list, SyntaxKind::TERM)
+            .expect("term")
+            .text()
+            .to_string()
+            .trim(),
+        "bar"
+    );
+    let definition = find_first(&list, SyntaxKind::DEFINITION).expect("definition");
+    assert!(
+        definition.text().to_string().contains("baz"),
+        "the term must get its definition body"
+    );
+}
+
+#[test]
+fn definition_marker_beyond_the_content_column_stays_indented_code() {
+    // Four further columns past the item's content column is an indented code
+    // block, exactly as at top level.
+    let input = "- a\n\n  bar\n\n      : baz\n";
+    assert!(
+        find_first(&parse_blocks(input), SyntaxKind::DEFINITION_LIST).is_none(),
+        "the 0-3 allowance still applies, measured from the content column"
+    );
+}
