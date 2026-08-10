@@ -216,29 +216,76 @@ lossy-or-panic precondition check does not catch these --- they surface the
 other way round, as an incremental splice that is *right* diverging from a full
 parse that is wrong:
 
-- [ ] A line ending in ` :` or ` ~` promotes a preceding list item's **lazy
-  continuation** line into a definition-list `TERM`, swallowing the blank
-  line between them. `- a\nb\n\nc :\n` parses as a `LIST_ITEM` containing a
+- [x] A line ending in ` :` or ` ~` promotes a preceding list item's
+  continuation line into a definition-list `TERM`, swallowing the blank line
+  between them. `- a\nb\n\nc :\n` parsed as a `LIST_ITEM` containing a
   `DEFINITION_LIST`, where pandoc has
   `BulletList [[Plain [Str "a", SoftBreak, Str "b"]]]` followed by
-  `Para [Str "c", Space, Str ":"]`. The shape needs the lazy continuation
-  (`- a\n\nc :\n` is fine), reaches only into the block right after the
-  blank line (an intervening paragraph, heading, or fence stops it), fires
-  for a bullet list but not an ordered one, and does not fire after a tab
-  (`c\t:`).
-  - Surfaced on `feat/incremental-parsing-graduation` by the flavor-tiered fuzz
-    harness, once CRLF entries joined its insert alphabet and reshuffled the
-    chained-edit draws. It is not CRLF-specific and reproduces byte for byte on
-    LF. Pinned `#[ignore]`d there in `incremental_regressions.rs` as
-    `full_parse_definition_list_from_trailing_colon_after_lazy_list_item`;
-    un-ignore it when that branch rebases onto this fix.
-  - That branch also carries a workaround on the *incremental* side,
-    `first_block_has_trailing_definition_marker` in `parser/reparse.rs`, which
-    declines the shape so a splice keeps matching the full parse. It exists only
-    because the full parse is wrong: **delete the guard and its two call sites
-    with this fix**, since the splice already produces pandoc's answer.
-  - Expect the block-parser change to move conformance numbers; put the
-    pass-rate delta in the commit body as usual.
+  `Para [Str "c", Space, Str ":"]`.
+  - Root cause: `ContainerPrefix::strip` walks a list item's content column with
+    `advance_columns`, which counts *any* character as a column, so on a line
+    short of that column it slices content off as if it were indent — inside a
+    two-column item `"c :"` became `":"`. Fixed by
+    `ContainerPrefix::line_carries_list_indent` plus a
+    `LineView::carries_container_prefix` gate in
+    `next_line_is_definition_marker`. That root cause also explains the original
+    qualifiers: an ordered marker gives `content_col` 3, so the faked slice is
+    just the newline, and a tab overshoots column 2 and survives the slice. The
+    lazy continuation was *not* required — an indented continuation
+    (`- a\n  b\n\nc :\n`) fired too.
+  - `feat/incremental-parsing-graduation` still owns un-ignoring
+    `full_parse_definition_list_from_trailing_colon_after_lazy_list_item` in
+    `incremental_regressions.rs` and deleting the incremental-side workaround
+    `first_block_has_trailing_definition_marker` in `parser/reparse.rs` with its
+    two call sites, when that branch rebases onto this. Neither file exists on
+    `main`.
+  - Conformance did not move: commonmark 652/652 and pandoc 524/524 both held
+    across the whole series (the earlier note expecting a delta was wrong — both
+    suites were already at 100%).
+
+Two further definition-list divergences fixed alongside it:
+
+- [x] A term had to be a **one-line block**, as pandoc requires: `a\nb\n\n: def`
+  is two `Para`s, not a definition list on `b`. Panache promoted the last
+  line of a multi-line paragraph. The orphan guard lost its `!ctx.in_list`
+  carve-out at the same time, since a refused term otherwise reached the
+  definition arm and emitted `DefinitionList [([], ...)]` outside the item.
+  Needed a formatter guard (`guard_definition_marker_start`) because reflow
+  can manufacture the one-line block above a `: def` paragraph.
+- [x] A term on the **list-marker line** now nests: `- Term\n  : def` is
+  `BulletList [[DefinitionList [(Term, ...)]]]`. Detected in the list-item
+  content path (`maybe_open_definition_term_in_new_list_item`), mirroring
+  the footnote branch, since `ListParser` outranks `DefinitionListParser`
+  and the dispatcher never sees the marker line. Required reading markers at
+  the item's content column (`definition_marker_in_list_frame`) so the
+  four-space rule and nested items keep working.
+
+Still open in the same area:
+
+- [ ] A **dedented** marker after a list item folds into the item as a lazy
+  continuation: `- Term\n: def\n` and `- Term\n : def\n` give
+  `BulletList [[Plain [Term, SoftBreak, ":", Space, "def"]]]` where pandoc
+  closes the list and emits `Para [Str ":", Space, Str "def"]`. Same for
+  `- a\n  b\n  : def\n`, where pandoc splits the item into two `Plain`s and
+  panache keeps one. Both used to produce the impossible
+  `DefinitionList [([], ...)]`, so this is what is left after that was
+  fixed.
+- [ ] `next_line_is_definition_marker` still cannot see a marker whose indent is
+  a **tab straddling** the item's content column: `- a\n\n  b\n\n\t: def\n`
+  yields three paragraphs where pandoc yields a definition list. The strip,
+  not the detection frame, is what fails — `advance_columns` refuses to
+  split the tab. `emit_definition_marker` already emits literal indent
+  bytes, so the emission side is ready for it.
+- [ ] `is_caption_followed_by_table` runs on the same over-stripping view as the
+  term lookahead and has the same latent asymmetry. It is a *suppression*
+  gate, so an over-strip can only fail to open a definition list, and it is
+  shared with the table parsers — no reproducer yet.
+- [ ] `StrippedLines::peek_prefix_at` is not equivalent to
+  `ContainerPrefix::strip` for the
+  `[ContentIndent, ListAdvance, BlockQuoteMarker]` shape (the `issue_209`
+  fixture). Its doc claims the divergence is dormant while
+  `content_indent == 0`, which does not hold for definition-list lookaheads,
+  where the definition container contributes the content indent.
 
 Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
