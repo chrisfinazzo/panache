@@ -95,12 +95,6 @@ Diagnostics
     - Parser errors
     - External linter integration (e.g., R code linting)
 
-    Built-in diagnostics are debounced: a burst of keystrokes coalesces into a
-    single lint pass once you pause briefly, so typing stays responsive on large
-    documents. External linters (e.g. `jarl`, `ruff`) are more expensive---they
-    spawn a subprocess per embedded code block---so they run **on save** rather than
-    on every keystroke. Save your file to refresh external-linter diagnostics.
-
     Both the push (`textDocument/publishDiagnostics`) and pull
     (`textDocument/diagnostic`, `workspace/diagnostic`) models are supported; the
     server chooses per client (see [Push vs. pull diagnostics] below).
@@ -173,36 +167,6 @@ Document tracking
 
 Configuration discovery
 :   Automatic detection from workspace root
-
-Live configuration reload
-:   Re-read `panache.toml`/`.panache.toml` and apply client settings without a
-    restart when the editor sends `workspace/didChangeConfiguration` or when a
-    config file changes on disk (`workspace/didChangeWatchedFiles`). All open
-    documents are re-linted with the new configuration. When the client
-    advertises `workspace.configuration`, the server also *pulls* the `panache`
-    settings section via a `workspace/configuration` request---once after
-    `initialize` and again on each `workspace/didChangeConfiguration`---so
-    pull-model editors (such as Zed) get live runtime settings without relying
-    on a pushed payload.
-
-Referenced-file updates
-:   Pick up changes to referenced files (bibliographies, includes, project
-    manifests) when the editor reports them via
-    `workspace/didChangeWatchedFiles`. As a fallback for clients whose
-    file-watching is incomplete---notably, Neovim does not emit a watch event
-    for a bibliography that is open in a buffer---the server also re-reads
-    referenced files from disk on the next document activity, so an out-of-band
-    edit is reflected without reloading the document. Files you have open in the
-    editor are never re-read this way; their in-editor content takes precedence.
-
-Config error reporting
-:   When a discovered `panache.toml` fails to parse (e.g. an unknown key), the
-    server does not silently fall back to default formatting. It publishes an
-    error diagnostic on the config file itself (anchored at the offending key,
-    shown even when the file isn't open), raises a one-time `window/showMessage`
-    notification, and **refuses to format** the affected documents until the
-    config parses again. All three clear automatically once the config is fixed.
-    See [Validation](configuration.qmd) for the underlying rules.
 
 ## Editor Configuration {#editor-configuration}
 
