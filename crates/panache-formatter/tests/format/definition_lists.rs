@@ -115,3 +115,60 @@ fn definition_item_with_code_block_formats_as_loose() {
     let output = format(input, None, None);
     assert_eq!(output, expected);
 }
+
+#[test]
+fn reflowed_paragraph_leading_definition_marker_is_escaped() {
+    // Reflow joins `aaa\nbbb` into one line, which turns the `: def`
+    // paragraph below it into a definition body on reparse. Escaping the
+    // marker keeps the second pass a no-op; `\: def` is `Para [":", Space,
+    // "def"]` for pandoc and panache alike.
+    let input = "aaa\nbbb\n\n: def\n";
+
+    let output1 = format(input, None, None);
+    let output2 = format(&output1, None, None);
+
+    assert!(
+        output1.contains("\\: def"),
+        "expected the marker to be escaped, got:\n{output1}"
+    );
+    similar_asserts::assert_eq!(output1, output2, "Formatting should be idempotent");
+}
+
+#[test]
+fn reflowed_blockquote_paragraph_leading_definition_marker_is_escaped() {
+    let input = "> aaa\n> bbb\n>\n> : def\n";
+
+    let output1 = format(input, None, None);
+    let output2 = format(&output1, None, None);
+
+    similar_asserts::assert_eq!(output1, output2, "Formatting should be idempotent");
+}
+
+#[test]
+fn paragraph_definition_marker_after_a_multi_line_block_is_left_alone() {
+    // The guard reads the *emitted* text, which is what the reparse sees.
+    // This paragraph is still two lines after wrapping, so the marker below
+    // it cannot become a definition and escaping would be gratuitous.
+    let input = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp qqq rrr sss ttt uuu vvv www\n\n: def\n";
+
+    let output1 = format(input, None, None);
+
+    assert!(
+        !output1.contains("\\:"),
+        "marker should not be escaped, got:\n{output1}"
+    );
+    similar_asserts::assert_eq!(output1, format(&output1, None, None));
+}
+
+#[test]
+fn lone_paragraph_definition_marker_is_left_alone() {
+    let input = ": def\n";
+
+    let output1 = format(input, None, None);
+
+    assert!(
+        !output1.contains("\\:"),
+        "marker should not be escaped, got:\n{output1}"
+    );
+    similar_asserts::assert_eq!(output1, format(&output1, None, None));
+}

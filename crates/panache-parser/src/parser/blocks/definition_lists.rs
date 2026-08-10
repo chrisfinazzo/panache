@@ -10,7 +10,7 @@ use crate::parser::utils::inline_emission;
 ///
 /// Returns Some((marker_char, indent_cols, spaces_after_cols, spaces_after_bytes)) if found, None otherwise.
 /// The marker can be indented 0-3 spaces and must be followed by whitespace.
-pub(crate) fn try_parse_definition_marker(line: &str) -> Option<(char, usize, usize, usize)> {
+pub fn try_parse_definition_marker(line: &str) -> Option<(char, usize, usize, usize)> {
     // Cheap byte-level leading-byte gate: a definition marker is `:` or
     // `~` after up to 3 ASCII spaces. Avoid the `leading_indent`
     // (Unicode char walk + tab-aware column count) on the common

@@ -403,3 +403,102 @@ fn definition_marker_at_the_item_content_column_still_opens_a_definition() {
     let term = find_first(&list, SyntaxKind::TERM).expect("term");
     assert_eq!(term.text().to_string().trim(), "b");
 }
+
+#[test]
+fn multiline_paragraph_last_line_is_not_a_term() {
+    // Pandoc's term is read where a block may start, so it is always a
+    // one-line block of its own: `a\nb\n\n: def` is `Para [a, SoftBreak, b]`
+    // + `Para [":", Space, "def"]`, not a definition list on `b`.
+    let input = "a\nb\n\n: def\n";
+    let tree = parse_blocks(input);
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "the last line of a multi-line paragraph is not a term"
+    );
+    assert_block_kinds(
+        input,
+        &[
+            SyntaxKind::PARAGRAPH,
+            SyntaxKind::BLANK_LINE,
+            SyntaxKind::PARAGRAPH,
+        ],
+    );
+}
+
+#[test]
+fn blank_line_resets_the_one_line_block_rule() {
+    // The rule is per block: a blank line closes the paragraph, so `b` is a
+    // one-line block again and does become a term.
+    let input = "a\n\nb\n\n: def\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    assert_eq!(
+        find_first(&list, SyntaxKind::TERM)
+            .expect("term")
+            .text()
+            .to_string()
+            .trim(),
+        "b"
+    );
+}
+
+#[test]
+fn multiline_item_content_last_line_is_not_a_term() {
+    // Same rule through a list item's buffered content. Pandoc:
+    // `BulletList [[Para [a, SoftBreak, b], Para [":", Space, "def"]]]`.
+    let input = "- a\n  b\n\n  : def\n";
+    let tree = parse_blocks(input);
+    assert!(
+        find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none(),
+        "buffered item content is the analogue of an open paragraph"
+    );
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+    assert!(
+        item.text().to_string().contains(": def"),
+        "the marker line must stay inside the item, not escape it"
+    );
+}
+
+#[test]
+fn multiline_paragraph_last_line_is_not_a_term_in_a_blockquote() {
+    let input = "> a\n> b\n>\n> : def\n";
+    assert!(
+        find_first(&parse_blocks(input), SyntaxKind::DEFINITION_LIST).is_none(),
+        "pandoc reads this as BlockQuote [Para, Para]"
+    );
+}
+
+#[test]
+fn refused_term_still_lets_a_marker_pair_form_a_term() {
+    // `: def` is itself a one-line block whose next line is a marker, so it
+    // becomes the literal term. Pandoc: `Para [a, SoftBreak, b]` +
+    // `DefinitionList [([": def"], [[Plain "def2"]])]`.
+    let input = "a\nb\n\n: def\n: def2\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    assert_eq!(
+        find_first(&list, SyntaxKind::TERM)
+            .expect("term")
+            .text()
+            .to_string()
+            .trim_end(),
+        ": def"
+    );
+}
+
+#[test]
+fn footnote_body_first_line_term_still_opens_a_definition_list() {
+    // `footnote_first_line_term_lookahead` must stay live: its term is the
+    // body's first line, so it is a one-line block by construction.
+    let input = "x[^1]\n\n[^1]: Term\n\n    :   Definition\n";
+    let tree = parse_blocks(input);
+    let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
+    assert_eq!(
+        find_first(&list, SyntaxKind::TERM)
+            .expect("term")
+            .text()
+            .to_string()
+            .trim(),
+        "Term"
+    );
+}

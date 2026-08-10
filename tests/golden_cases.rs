@@ -198,6 +198,7 @@ golden_test_cases!(
     definition_list_nesting,
     definition_list_pandoc_loose_compact,
     definition_list_wrapping,
+    definition_term_requires_single_line_block,
     definition_colon_ratio_idempotency_134,
     display_math,
     display_math_blank_line_termination,

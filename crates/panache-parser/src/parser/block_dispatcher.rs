@@ -978,12 +978,15 @@ impl BlockParser for DefinitionListParser {
             // `:   foo` (or a bare `:` with the body on the next line) from
             // opening a spurious definition list with no term.
             //
-            // The orphan guard applies only at the true top level. Inside a
-            // list, term detection below still cannot see a marker through the
-            // list's content-column prefix, so `in_definition_list` never
-            // becomes true even for a real term; keeping the old unconditional
-            // open there avoids regressing definition lists in lists.
-            let orphan_guard_applies = !ctx.in_definition_list && !ctx.in_list;
+            // The guard is not container-scoped. Skipping it inside a list
+            // sends a marker whose term was refused into the `Definition` arm,
+            // which closes every open `ListItem`/`List` before opening a
+            // `DEFINITION_LIST` — yielding `DefinitionList [([], ...)]`, an
+            // empty term, a shape pandoc cannot produce, with the content
+            // escaping the item. Falling through instead keeps the line as
+            // item content, matching pandoc's `BulletList [[Para "a b",
+            // Para ": def"]]`.
+            let orphan_guard_applies = !ctx.in_definition_list;
             if !orphan_guard_applies {
                 let indent_bytes =
                     super::utils::container_stack::byte_index_at_column(content, indent);
@@ -1004,7 +1007,23 @@ impl BlockParser for DefinitionListParser {
             }
         }
 
-        if let Some(blank_count) = next_line_is_definition_marker(&stripped, line_pos)
+        // Pandoc reads the term where a *block* may start, so a term is always
+        // a one-line block of its own. A line continuing an already-open
+        // paragraph — or a list item whose content is still buffered — is not
+        // a block start and can never be a term, whatever follows it:
+        // `a\nb\n\n: def` is `Para [a, SoftBreak, b]` + `Para [":", Space,
+        // "def"]`, not a definition list on `b`.
+        //
+        // A blank line resets this, since it closes the paragraph and flushes
+        // the item buffer, so `a\n\nb\n\n: def` does make `b` a term. The
+        // "term is also the last line of its block" half is already enforced
+        // by `next_line_is_definition_marker`, which only skips blank lines.
+        //
+        // This must run before emission: `YesCanInterrupt` flushes the item
+        // buffer, so by then the signal is gone.
+        if !ctx.paragraph_open
+            && !ctx.list_item_content_open
+            && let Some(blank_count) = next_line_is_definition_marker(&stripped, line_pos)
             && !content.trim().is_empty()
         {
             return Some((

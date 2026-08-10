@@ -1,6 +1,7 @@
 use crate::config::{Config, HorizontalRuleStyle, WrapMode};
 use crate::directives::{DirectiveTracker, extract_directive_from_node};
 use crate::syntax::{BlockQuote, DefinitionItem, DisplayMath, FencedDiv, SyntaxKind, SyntaxNode};
+use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use panache_parser::parser::blocks::horizontal_rules::try_parse_horizontal_rule;
 use panache_parser::parser::utils::attributes::parse_attribute_content;
@@ -562,6 +563,75 @@ impl Formatter {
             self.output.truncate(start);
             self.output.push_str(&original);
         }
+    }
+
+    /// A paragraph whose first emitted line is a `:` definition marker
+    /// re-parses as a `DEFINITION` as soon as the block above it is a single
+    /// line: the parser promotes that line to the `TERM`. Reflow manufactures
+    /// exactly that situation out of a multi-line paragraph, so escape the
+    /// marker to keep `format(format(x)) == format(x)`. `\: def` is
+    /// `Para [":", Space, "def"]` for pandoc and panache alike.
+    ///
+    /// `~` needs no guard: `escape_special_chars` already escapes it in TEXT.
+    ///
+    /// Reads the emitted text rather than the source, because the reparse sees
+    /// the emitted text — a paragraph that is still multi-line after wrapping
+    /// cannot supply a term and is left alone.
+    fn guard_definition_marker_start(&mut self, start: usize) {
+        let Some(first) = self.output[start..].lines().next() else {
+            return;
+        };
+        let prefix_len = Self::block_prefix_len(first);
+        let Some((':', ..)) = try_parse_definition_marker(&first[prefix_len..]) else {
+            return;
+        };
+        if !Self::preceding_block_is_one_line(&self.output[..start]) {
+            return;
+        }
+        // Insert before the marker's own leading spaces so the escape lands on
+        // the `:` itself.
+        let marker = first[prefix_len..]
+            .find(':')
+            .expect("marker parsed above")
+            .saturating_add(prefix_len);
+        self.output.insert(start + marker, '\\');
+    }
+
+    /// Byte length of the container prefix an emitted line carries — leading
+    /// spaces plus any run of `>` blockquote markers and the space after each.
+    /// What remains is the line's own content, which is what the parser tests
+    /// for a block marker.
+    fn block_prefix_len(line: &str) -> usize {
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        let mut saw_marker = false;
+        loop {
+            let start = i;
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b'>' {
+                i += 1;
+                if i < bytes.len() && bytes[i] == b' ' {
+                    i += 1;
+                }
+                saw_marker = true;
+                continue;
+            }
+            // Only whitespace left: keep it for the marker test, which allows
+            // its own 0-3 columns of indent.
+            return if saw_marker { start } else { 0 };
+        }
+    }
+
+    /// Whether the block immediately above `before` is exactly one line, i.e.
+    /// whether it could be promoted to a definition term.
+    fn preceding_block_is_one_line(before: &str) -> bool {
+        let is_blank = |line: &str| line[Self::block_prefix_len(line)..].trim().is_empty();
+        let mut lines = before.lines().rev().skip_while(|l| is_blank(l));
+        // The candidate term line must exist, and the line above it must be
+        // blank or absent — otherwise the block has more than one line.
+        lines.next().is_some() && lines.next().is_none_or(is_blank)
     }
 
     /// True if `text` has a line that re-parses as a dash thematic break or a
@@ -1273,68 +1343,75 @@ impl Formatter {
                         // Skip BlockQuoteMarker tokens - we add prefixes dynamically
                         SyntaxKind::BLOCK_QUOTE_MARKER => continue,
 
-                        SyntaxKind::PARAGRAPH => match wrap_mode {
-                            WrapMode::Preserve => {
-                                // Build paragraph text while skipping BlockQuoteMarker tokens
-                                // (they're in the tree for losslessness but we add prefixes dynamically)
-                                let mut lines_text = String::new();
-                                let mut skip_next_whitespace = false;
-                                for item in child.children_with_tokens() {
-                                    match item {
-                                        NodeOrToken::Token(t)
-                                            if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER =>
-                                        {
-                                            // Skip marker - we add these dynamically
-                                            // Also skip the following whitespace (part of marker syntax)
-                                            skip_next_whitespace = true;
-                                        }
-                                        NodeOrToken::Token(t)
-                                            if t.kind() == SyntaxKind::WHITESPACE
-                                                && skip_next_whitespace =>
-                                        {
-                                            // Skip whitespace after marker
-                                            skip_next_whitespace = false;
-                                        }
-                                        NodeOrToken::Token(t) => {
-                                            skip_next_whitespace = false;
-                                            lines_text.push_str(t.text());
-                                        }
-                                        NodeOrToken::Node(n) => {
-                                            skip_next_whitespace = false;
-                                            lines_text.push_str(&n.text().to_string());
+                        SyntaxKind::PARAGRAPH => {
+                            // This arm emits paragraph lines itself rather
+                            // than going through `format_node_sync`, so it
+                            // needs its own checkpoint for the guard below.
+                            let para_start = self.output.len();
+                            match wrap_mode {
+                                WrapMode::Preserve => {
+                                    // Build paragraph text while skipping BlockQuoteMarker tokens
+                                    // (they're in the tree for losslessness but we add prefixes dynamically)
+                                    let mut lines_text = String::new();
+                                    let mut skip_next_whitespace = false;
+                                    for item in child.children_with_tokens() {
+                                        match item {
+                                            NodeOrToken::Token(t)
+                                                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER =>
+                                            {
+                                                // Skip marker - we add these dynamically
+                                                // Also skip the following whitespace (part of marker syntax)
+                                                skip_next_whitespace = true;
+                                            }
+                                            NodeOrToken::Token(t)
+                                                if t.kind() == SyntaxKind::WHITESPACE
+                                                    && skip_next_whitespace =>
+                                            {
+                                                // Skip whitespace after marker
+                                                skip_next_whitespace = false;
+                                            }
+                                            NodeOrToken::Token(t) => {
+                                                skip_next_whitespace = false;
+                                                lines_text.push_str(t.text());
+                                            }
+                                            NodeOrToken::Node(n) => {
+                                                skip_next_whitespace = false;
+                                                lines_text.push_str(&n.text().to_string());
+                                            }
                                         }
                                     }
-                                }
 
-                                for line in lines_text.lines() {
-                                    self.output.push_str(&content_prefix);
-                                    self.output.push_str(line);
-                                    self.output.push('\n');
+                                    for line in lines_text.lines() {
+                                        self.output.push_str(&content_prefix);
+                                        self.output.push_str(line);
+                                        self.output.push('\n');
+                                    }
+                                }
+                                WrapMode::Reflow => {
+                                    let width =
+                                        self.config.line_width.saturating_sub(content_prefix.len());
+                                    let lines = self.wrapped_lines_for_paragraph(child, width);
+                                    for line in lines {
+                                        self.output.push_str(&content_prefix);
+                                        self.output.push_str(&line);
+                                        self.output.push('\n');
+                                    }
+                                }
+                                WrapMode::Sentence | WrapMode::Semantic => {
+                                    let lines = if matches!(wrap_mode, WrapMode::Semantic) {
+                                        self.semantic_lines_for_paragraph(child)
+                                    } else {
+                                        self.sentence_lines_for_paragraph(child)
+                                    };
+                                    for line in lines {
+                                        self.output.push_str(&content_prefix);
+                                        self.output.push_str(&line);
+                                        self.output.push('\n');
+                                    }
                                 }
                             }
-                            WrapMode::Reflow => {
-                                let width =
-                                    self.config.line_width.saturating_sub(content_prefix.len());
-                                let lines = self.wrapped_lines_for_paragraph(child, width);
-                                for line in lines {
-                                    self.output.push_str(&content_prefix);
-                                    self.output.push_str(&line);
-                                    self.output.push('\n');
-                                }
-                            }
-                            WrapMode::Sentence | WrapMode::Semantic => {
-                                let lines = if matches!(wrap_mode, WrapMode::Semantic) {
-                                    self.semantic_lines_for_paragraph(child)
-                                } else {
-                                    self.sentence_lines_for_paragraph(child)
-                                };
-                                for line in lines {
-                                    self.output.push_str(&content_prefix);
-                                    self.output.push_str(&line);
-                                    self.output.push('\n');
-                                }
-                            }
-                        },
+                            self.guard_definition_marker_start(para_start);
+                        }
                         SyntaxKind::ALERT => {
                             let marker = child
                                 .children_with_tokens()
@@ -1817,6 +1894,7 @@ impl Formatter {
                 }
 
                 self.guard_dash_block_marker(para_start, node, indent);
+                self.guard_definition_marker_start(para_start);
             }
 
             SyntaxKind::FIGURE => {
