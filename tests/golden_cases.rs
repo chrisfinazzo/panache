@@ -190,6 +190,7 @@ golden_test_cases!(
     crlf_yaml_metadata,
     east_asian_line_breaks,
     citations,
+    citation_colon_paragraph_reflow,
     citation_prefix_paren_escape_idempotency_278,
     definition_list,
     definition_list_bare_marker_body,

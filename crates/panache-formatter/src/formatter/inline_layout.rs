@@ -1038,10 +1038,6 @@ fn process_node_recursive(
                         config.formatter_extensions.smart_quotes,
                     );
                     let text = expand_tabs_with_width(raw.as_ref(), config.tab_width);
-                    if text.as_ref().contains("[@") && text.as_ref().contains("]:") {
-                        sink.push_piece(text.as_ref());
-                        continue;
-                    }
                     let mut text_to_process = text.as_ref();
                     if sink.skip_next_leading_whitespace() {
                         text_to_process =
