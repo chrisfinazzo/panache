@@ -222,8 +222,8 @@ jobs:
       - name: Install cargo-deb and cargo-generate-rpm
         if: matrix.build_packages == true
         run: |
-          cargo install cargo-deb
-          cargo install cargo-generate-rpm
+          cargo install --locked cargo-deb
+          cargo install --locked cargo-generate-rpm
 
       - name: Build DEB package
         if: matrix.build_packages == true
