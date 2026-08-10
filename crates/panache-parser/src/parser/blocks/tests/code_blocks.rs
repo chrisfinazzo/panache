@@ -259,6 +259,24 @@ fn under_indented_fence_closes_the_list_item_pandoc() {
     assert_eq!(get_code_content(&node).unwrap(), "c\n");
 }
 
+/// A blank line inside such a fence is *code*, so it must not stop the scan
+/// that looks for the closer. The item's content column is not this fence's
+/// boundary --- the fence left the item --- so the "blank line arms the indent
+/// requirement" rule does not apply to it. pandoc:
+/// `[ BulletList [ [ Plain [ Str "a" ] ] ], CodeBlock ("",["rust"],[]) "c\n\nx" ]`.
+#[test]
+fn under_indented_fence_scans_past_an_interior_blank_line_pandoc() {
+    let input = "- a\n```rust\nc\n\nx\n```\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(node.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        block_kinds(&node),
+        vec![SyntaxKind::LIST, SyntaxKind::CODE_BLOCK]
+    );
+    assert_eq!(get_code_content(&node).unwrap(), "c\n\nx\n");
+}
+
 /// The boundary: at the item's content column the fence *is* item content, so
 /// the code block stays inside and the `Plain` is promoted to `Para` (0514).
 #[test]

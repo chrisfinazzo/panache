@@ -428,6 +428,7 @@ golden_test_cases!(
     pipe_table_without_body_rows,
     plain_continuation_edge_cases,
     python_markdown_admonitions,
+    quarto_chunk_after_list_item_idempotency_471,
     quarto_code_blocks,
     quarto_executable_class_attrs,
     quarto_hashpipe,

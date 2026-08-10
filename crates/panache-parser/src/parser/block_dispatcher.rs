@@ -1839,11 +1839,21 @@ impl BlockParser for FencedCodeBlockParser {
 
         let has_matching_closer = {
             let mut found = false;
-            let container_content_col = ctx.content_indent
+            // Where the scan has to stop, because the container the fence
+            // opened in stops there. An under-indented fence closes its list
+            // item (`under_indented_fence_closes_the_list_item_pandoc`), so it
+            // is *not* in that item and the item's content column is not its
+            // boundary; clamping to the fence's own column keeps the "a blank
+            // line arms the indent requirement" rule off a fence that already
+            // left. `content` carries the list indent but not `content_indent`,
+            // which the scan's raw lines do carry.
+            let fence_col = ctx.content_indent + leading_indent(content).0;
+            let container_content_col = (ctx.content_indent
                 + ctx
                     .list_indent_info
                     .map(|list_info| list_info.content_col)
-                    .unwrap_or(0);
+                    .unwrap_or(0))
+            .min(fence_col);
             let mut container_scan = ContainerExitScan::new(container_content_col);
             for raw_line in lines.iter().skip(line_pos + 1) {
                 let (line_bq_depth, inner) = count_blockquote_markers(raw_line);
