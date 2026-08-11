@@ -730,6 +730,154 @@ fn a_marker_under_a_marker_that_broke_the_body_block_promotes_it_to_a_term() {
 }
 
 #[test]
+fn a_marker_across_a_blank_line_promotes_the_single_body_line_to_a_term() {
+    // A blank line does not detach the marker from the block above it: the
+    // body's last block is still a one-line block, so it is still a term.
+    // `T\n:   a\n\n    :   b` is
+    // `DefinitionList [(T, [[DefinitionList [(a, [[Para "b"]])]]])]`.
+    for input in [
+        "T\n:   a\n\n    :   b\n",
+        "T\n\n:   a\n\n    :   b\n",
+        "T\n:   a\n\n    : b\n",
+        "T\n:   a\n\n    ~ b\n",
+    ] {
+        let tree = parse_blocks(input);
+        let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+        assert_eq!(lists.len(), 2, "{input:?}");
+
+        let outer_definition = find_first(&lists[0], SyntaxKind::DEFINITION).expect("definition");
+        assert!(
+            outer_definition
+                .children()
+                .all(|child| child.kind() != SyntaxKind::PLAIN),
+            "the buffered line became a term, so no PLAIN is left in the body: {input:?}"
+        );
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION).len(),
+            2,
+            "the marker defines `a`, not `T` a second time: {input:?}"
+        );
+
+        let terms = find_all(&tree, SyntaxKind::TERM);
+        assert_eq!(terms.len(), 2, "{input:?}");
+        assert_eq!(terms[1].text().to_string().trim(), "a", "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_marker_across_a_blank_line_promotes_a_later_body_block_too() {
+    // The promotion reads the body's *last* block, not its first: the earlier
+    // blocks stay `PLAIN` siblings inside the same body.
+    // `T\n:   a\n\n    b\n\n    : c` is
+    // `DefinitionList [(T, [[Plain "a", DefinitionList [(b, [[Para "c"]])]]])]`.
+    let input = "T\n:   a\n\n    b\n\n    : c\n";
+    let tree = parse_blocks(input);
+
+    let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+    assert_eq!(lists.len(), 2);
+
+    let outer_definition = find_first(&lists[0], SyntaxKind::DEFINITION).expect("definition");
+    let blocks: Vec<_> = outer_definition
+        .children()
+        .map(|child| child.kind())
+        .filter(|kind| {
+            matches!(
+                kind,
+                SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH | SyntaxKind::DEFINITION_LIST
+            )
+        })
+        .collect();
+    assert_eq!(blocks, [SyntaxKind::PLAIN, SyntaxKind::DEFINITION_LIST]);
+
+    let terms = find_all(&tree, SyntaxKind::TERM);
+    assert_eq!(terms.len(), 2);
+    assert_eq!(terms[1].text().to_string().trim(), "b");
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn a_multi_line_body_block_across_a_blank_line_is_not_promoted() {
+    // Only a *one-line* block is a term, blank line or not. Pandoc keeps
+    // `a\nb` a `Plain` and reads the marker line as the body's next block, so
+    // the marker must not promote it and must not become a second definition
+    // of `T` either.
+    for input in [
+        "T\n:   a\n    b\n\n    : c\n",
+        "T\n:   x\n\n    a\n    b\n\n    : c\n",
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION_LIST).len(),
+            1,
+            "{input:?}"
+        );
+        assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 1, "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_marker_across_a_blank_line_promotes_inside_a_list_item_and_a_blockquote() {
+    // The lookahead reads the marker line in the body's own frame, so the
+    // promotion survives any container above it. Inside a list item the
+    // definition's content column is absolute (item indent included), which is
+    // what the dedent test has to measure against.
+    for input in [
+        "- T\n\n  : a\n\n    : b\n",
+        "> T\n>\n> :   a\n>\n>     :   b\n",
+        "> - T\n>\n>   : a\n>\n>     : b\n",
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION_LIST).len(),
+            2,
+            "{input:?}"
+        );
+        let terms = find_all(&tree, SyntaxKind::TERM);
+        assert_eq!(terms.len(), 2, "{input:?}");
+        assert_eq!(terms[1].text().to_string().trim(), "a", "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn two_blank_lines_detach_the_marker_from_the_body_block_above_it() {
+    // A term keeps at most one blank line between itself and its definition,
+    // so two blanks leave `a` a body block of its own. (Pandoc reads the
+    // marker line as a further body block rather than a second definition of
+    // `T`; that multi-blank divergence is tracked separately.)
+    let input = "T\n:   a\n\n\n    :   b\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(find_all(&tree, SyntaxKind::DEFINITION_LIST).len(), 1);
+    assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 1);
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn a_dedented_marker_across_a_blank_line_still_opens_a_sibling_definition() {
+    // Below the body's content column the marker is a second definition of the
+    // same term, so the blank-line lookahead must not promote across it:
+    // `DefinitionList [(T, [[Plain "a"], [Plain "b"]])]`.
+    for input in ["T\n:   a\n\n  : b\n", "T\n:   a\n\n: b\n"] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION_LIST).len(),
+            1,
+            "{input:?}"
+        );
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION).len(),
+            2,
+            "{input:?}"
+        );
+        assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 1, "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
 fn a_promoted_term_keeps_its_own_body_continuations() {
     // The nested definition is a definition like any other: its body keeps
     // reading continuation lines from its own content column.

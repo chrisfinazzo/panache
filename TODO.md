@@ -688,6 +688,7 @@ Three further definition-list divergences fixed alongside it:
   definition arm and emitted `DefinitionList [([], ...)]` outside the item.
   Needed a formatter guard (`guard_definition_marker_start`) because reflow
   can manufacture the one-line block above a `: def` paragraph.
+
 - [x] A term on the **list-marker line** now nests: `- Term\n  : def` is
   `BulletList [[DefinitionList [(Term, ...)]]]`. Detected in the list-item
   content path (`maybe_open_definition_term_in_new_list_item`), mirroring
@@ -695,6 +696,7 @@ Three further definition-list divergences fixed alongside it:
   and the dispatcher never sees the marker line. Required reading markers at
   the item's content column (`definition_marker_in_list_frame`) so the
   four-space rule and nested items keep working.
+
 - [x] A **dedented** marker after a list item folded into the item as a lazy
   continuation: `- Term\n: def\n` and `- Term\n : def\n` gave
   `BulletList [[Plain [Term, SoftBreak, ":", Space, "def"]]]` where pandoc
@@ -710,6 +712,7 @@ Three further definition-list divergences fixed alongside it:
   preserved line breaks for an item whose reflow would collapse the block
   above a marker into a one-line term
   (`reflow_would_promote_a_definition_term`).
+
 - [x] A marker **inside a definition body** opened a second `Definition` instead
   of a second block in the same one: `T\n:   a\n    b\n    : def\n` is
   `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]` for pandoc, which
@@ -723,6 +726,7 @@ Three further definition-list divergences fixed alongside it:
   definition. The formatter takes the same preserved-line-breaks guard a
   tight list item does (`reflow_would_promote_a_definition_term`), since
   collapsing the block above the marker to one line would make it a term.
+
 - [x] A marker under a **single buffered line** of a definition body now makes
   that line a term of a *nested* definition list: `T\n:   a\n    : def\n` is
   `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]`, and so
@@ -752,17 +756,39 @@ Three further definition-list divergences fixed alongside it:
   the nested marker detaches them on reparse. Looseness is unobservable
   there — such a body holds no paragraph to render either way.
 
+- [x] A one-line body block separated from the marker by a **blank line** is
+  promoted too: `T\n\n:   a\n\n    :   b\n` and
+  `T\n:   a\n\n    b\n\n    : c\n` now nest, matching pandoc. A blank line
+  does not detach a term from its definition, so the question the marker
+  line asks in `definition_marker_over_open_body_block` is asked one line
+  early, by lookahead, in the blank-line branch of `parse_inner_content`
+  (`blank_line_promotes_buffered_definition_term`) — before the flush, while
+  the block is still a buffer that `promote_buffered_definition_term` can
+  reopen as a `TERM`. Two frame details the shared
+  `next_line_is_definition_marker` cannot settle on its own: it must report
+  *zero* further blanks, since the lookahead already stands on one and a
+  term keeps at most one; and the dedent test is re-measured here, because
+  `line_carries_list_indent` vets only the list component of the strip while
+  `strip_content_indent` degrades gracefully instead of reporting a short
+  line. Both frames are absolute, so the promotion also fires inside a list
+  item and a blockquote.
+
 Still open in the same area:
 
-- [ ] A one-line body block separated from the marker by a **blank line** is
-  still not promoted: `T\n:   a\n\n    b\n\n    : c\n` and
-  `T\n\n:   a\n\n    :   b\n` are nested definition lists for pandoc and
-  flat ones for panache. Promotion reads the *buffered* block, and a blank
-  line has already flushed it to the builder, where it is a `PLAIN` that
-  cannot be retagged as a `TERM`. The fix is a lookahead at flush time (the
-  shape `next_line_is_definition_marker` already has) rather than a
-  retroactive wrap. Only reachable from hand-written source: the formatter's
-  own output never puts a blank line there.
+- [ ] **Two** blank lines between the body block and the marker still open a
+  second definition (`T\n:   a\n\n\n    :   b\n`); pandoc detaches the term
+  and reads the marker line as a further body block, `Plain ": b"`. Same
+  root as the top-level case — `T\n\n\n: b` is two paragraphs for pandoc and
+  a definition list for panache — so `next_line_is_definition_marker`
+  accepting any number of blanks is the one place to fix it. The formatter
+  is already unstable on that shape (it emits both blank lines, which
+  reparse differently), so the two travel together.
+- [ ] The formatter's marker-width heuristic is not stable for a definition list
+  *nested in a list item* when a thematic break follows:
+  `- T\n\n  :   a\n\n      :   def\n\n---\n` reformats the nested marker to
+  `: def`, dropping the padding. Pre-existing (it reproduces on the
+  pre-promotion parser given the same bytes) and unrelated to promotion, but
+  it is why the blank-line golden case carries no thematic break.
 - [ ] The same reflow-promotes-a-term idempotency failure survives when a
   **blank line** separates the two blocks: `- x\n\n  a\n  b\n\n  : def\n`
   formats to `- x\n\n  a b\n\n  : def\n`, which reparses as a definition

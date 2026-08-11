@@ -1129,6 +1129,69 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Whether the blank line at `self.pos` closes a definition body block
+    /// that the *next* line promotes to a term.
+    ///
+    /// The no-blank-line case is [`Self::definition_marker_over_open_body_block`],
+    /// which reads the marker line itself. Here the marker is still ahead, so
+    /// the same question is asked by lookahead: pandoc lets a term keep one
+    /// blank line before its definition, so the blank does not detach the
+    /// marker from the block above it, and a one-line block is a term
+    /// (`T\n:   a\n\n    :   b` nests a definition list on `a`).
+    ///
+    /// The lookahead must run *before* the flush: promotion re-opens the
+    /// buffered bytes as a `TERM`, and once they reach the builder as a
+    /// `PLAIN` there is nothing left to retag.
+    fn blank_line_promotes_buffered_definition_term(&self) -> bool {
+        if !self.config.extensions.definition_lists {
+            return false;
+        }
+        let content_indent = self.content_container_indent_to_strip();
+        // A body with no content column has no frame to read the marker in;
+        // the dispatcher's `Definition` arm owns that shape.
+        if content_indent == 0 {
+            return false;
+        }
+        let Some(Container::Definition {
+            plain_open: true,
+            plain_buffer,
+            ..
+        }) = self.containers.last()
+        else {
+            return false;
+        };
+        let buffered = plain_buffer.raw_text();
+        let buffered = buffered.trim_end_matches(['\r', '\n']);
+        // Only a one-line block is a term. An empty buffer has no block to
+        // promote, and a multi-line one stays a `PLAIN`.
+        if buffered.trim().is_empty() || buffered.contains('\n') {
+            return false;
+        }
+        // Read the lookahead through the open containers' prefix, so any
+        // list/blockquote markers above the body come off first.
+        let prefix =
+            ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect);
+        let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
+        // `self.pos` is the blank line itself, so a marker on the very next
+        // line reports zero further blanks. Anything more is two blank lines
+        // between the term and its definition, which detaches them.
+        if definition_lists::next_line_is_definition_marker(&stripped, self.pos) != Some(0) {
+            return false;
+        }
+        // The strip cannot answer the dedent question on its own —
+        // `line_carries_list_indent` vets only the *list* component, and
+        // `strip_content_indent` degrades gracefully instead of reporting a
+        // short line — so measure the content column the way
+        // `definition_marker_over_open_body_block` does: on the
+        // blockquote-stripped line, against the summed content indent (which
+        // is absolute, list indent included). A marker *below* that column is
+        // a second definition of the outer term (`T\n:   a\n\n  : b`), not a
+        // definition of the block above it.
+        let marker_line =
+            strip_n_blockquote_markers(self.lines[self.pos + 1], self.current_blockquote_depth());
+        leading_indent(marker_line).0 >= content_indent
+    }
+
     /// Turn the single buffered line of the open definition body into the term
     /// of a definition list nested in that body.
     ///
@@ -3473,7 +3536,16 @@ impl<'a> Parser<'a> {
 
             // Close Plain node in Definition if open
             // Blank lines should close Plain, allowing subsequent content to be siblings
-            // Emit buffered PLAIN content before continuing
+            // Emit buffered PLAIN content before continuing.
+            //
+            // Unless a definition marker is waiting just past this blank line:
+            // a blank line does not detach a term from its definition, so the
+            // one buffered line is a term and must be promoted *here*, while
+            // it is still buffered. Once flushed it is a `PLAIN` in the
+            // builder, which cannot be retagged.
+            if self.blank_line_promotes_buffered_definition_term() {
+                self.promote_buffered_definition_term();
+            }
             self.emit_buffered_plain_if_needed();
 
             // Note: Blank lines between terms and definitions are now preserved

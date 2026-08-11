@@ -203,6 +203,7 @@ golden_test_cases!(
     definition_list_wrapping,
     definition_marker_ends_definition_body_block,
     definition_marker_promotes_definition_body_term,
+    definition_marker_promotes_definition_body_term_blank_line,
     definition_marker_ends_list_item_block,
     definition_term_requires_single_line_block,
     definition_colon_ratio_idempotency_134,
