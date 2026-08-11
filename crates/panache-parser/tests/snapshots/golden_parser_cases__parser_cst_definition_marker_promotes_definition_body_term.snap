@@ -1,0 +1,159 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..170
+  DEFINITION_LIST@0..170
+    DEFINITION_ITEM@0..18
+      TERM@0..2
+        TEXT@0..1 "T"
+        NEWLINE@1..2 "\n"
+      DEFINITION@2..18
+        DEFINITION_MARKER@2..3 ":"
+        WHITESPACE@3..6 "   "
+        DEFINITION_LIST@6..18
+          DEFINITION_ITEM@6..18
+            TERM@6..8
+              TEXT@6..7 "a"
+              NEWLINE@7..8 "\n"
+            DEFINITION@8..18
+              WHITESPACE@8..12 "    "
+              DEFINITION_MARKER@12..13 ":"
+              WHITESPACE@13..14 " "
+              PLAIN@14..18
+                TEXT@14..17 "def"
+                NEWLINE@17..18 "\n"
+    BLANK_LINE@18..19
+      BLANK_LINE@18..19 "\n"
+    DEFINITION_ITEM@19..55
+      TERM@19..22
+        TEXT@19..21 "T2"
+        NEWLINE@21..22 "\n"
+      DEFINITION@22..55
+        DEFINITION_MARKER@22..23 ":"
+        WHITESPACE@23..26 "   "
+        PLAIN@26..34
+          TEXT@26..27 "a"
+          NEWLINE@27..28 "\n"
+          WHITESPACE@28..32 "    "
+          TEXT@32..33 "b"
+          NEWLINE@33..34 "\n"
+        DEFINITION_LIST@34..55
+          DEFINITION_ITEM@34..55
+            TERM@34..44
+              WHITESPACE@34..38 "    "
+              TEXT@38..43 ": def"
+              NEWLINE@43..44 "\n"
+            DEFINITION@44..55
+              WHITESPACE@44..48 "    "
+              DEFINITION_MARKER@48..49 ":"
+              WHITESPACE@49..50 " "
+              PLAIN@50..55
+                TEXT@50..54 "def2"
+                NEWLINE@54..55 "\n"
+    BLANK_LINE@55..56
+      BLANK_LINE@55..56 "\n"
+    DEFINITION_ITEM@56..85
+      TERM@56..59
+        TEXT@56..58 "T3"
+        NEWLINE@58..59 "\n"
+      DEFINITION@59..85
+        DEFINITION_MARKER@59..60 ":"
+        WHITESPACE@60..63 "   "
+        DEFINITION_LIST@63..85
+          DEFINITION_ITEM@63..85
+            TERM@63..65
+              TEXT@63..64 "a"
+              NEWLINE@64..65 "\n"
+            DEFINITION@65..85
+              WHITESPACE@65..69 "    "
+              DEFINITION_MARKER@69..70 ":"
+              WHITESPACE@70..71 " "
+              DEFINITION_LIST@71..85
+                DEFINITION_ITEM@71..85
+                  TERM@71..73
+                    TEXT@71..72 "b"
+                    NEWLINE@72..73 "\n"
+                  DEFINITION@73..85
+                    WHITESPACE@73..79 "      "
+                    WHITESPACE@79..81 "  "
+                    DEFINITION_MARKER@81..82 ":"
+                    WHITESPACE@82..83 " "
+                    PLAIN@83..85
+                      TEXT@83..84 "c"
+                      NEWLINE@84..85 "\n"
+    BLANK_LINE@85..86
+      BLANK_LINE@85..86 "\n"
+    DEFINITION_ITEM@86..107
+      TERM@86..89
+        TEXT@86..88 "T4"
+        NEWLINE@88..89 "\n"
+      DEFINITION@89..95
+        DEFINITION_MARKER@89..90 ":"
+        WHITESPACE@90..93 "   "
+        PLAIN@93..95
+          TEXT@93..94 "a"
+          NEWLINE@94..95 "\n"
+      DEFINITION@95..107
+        WHITESPACE@95..97 "  "
+        DEFINITION_MARKER@97..98 ":"
+        WHITESPACE@98..99 " "
+        PLAIN@99..107
+          TEXT@99..106 "sibling"
+          NEWLINE@106..107 "\n"
+    BLANK_LINE@107..108
+      BLANK_LINE@107..108 "\n"
+    DEFINITION_ITEM@108..139
+      TERM@108..111
+        TEXT@108..110 "T5"
+        NEWLINE@110..111 "\n"
+      DEFINITION@111..127
+        DEFINITION_MARKER@111..112 ":"
+        WHITESPACE@112..115 "   "
+        DEFINITION_LIST@115..127
+          DEFINITION_ITEM@115..127
+            TERM@115..117
+              TEXT@115..116 "a"
+              NEWLINE@116..117 "\n"
+            DEFINITION@117..127
+              WHITESPACE@117..121 "    "
+              DEFINITION_MARKER@121..122 ":"
+              WHITESPACE@122..123 " "
+              PLAIN@123..127
+                TEXT@123..126 "def"
+                NEWLINE@126..127 "\n"
+      DEFINITION@127..139
+        WHITESPACE@127..129 "  "
+        DEFINITION_MARKER@129..130 ":"
+        WHITESPACE@130..131 " "
+        PLAIN@131..139
+          TEXT@131..138 "sibling"
+          NEWLINE@138..139 "\n"
+    BLANK_LINE@139..140
+      BLANK_LINE@139..140 "\n"
+    DEFINITION_ITEM@140..170
+      TERM@140..143
+        TEXT@140..142 "T6"
+        NEWLINE@142..143 "\n"
+      DEFINITION@143..170
+        DEFINITION_MARKER@143..144 ":"
+        WHITESPACE@144..147 "   "
+        DEFINITION_LIST@147..170
+          DEFINITION_ITEM@147..170
+            TERM@147..149
+              TEXT@147..148 "a"
+              NEWLINE@148..149 "\n"
+            DEFINITION@149..159
+              WHITESPACE@149..153 "    "
+              DEFINITION_MARKER@153..154 ":"
+              WHITESPACE@154..155 " "
+              PLAIN@155..159
+                TEXT@155..158 "def"
+                NEWLINE@158..159 "\n"
+            DEFINITION@159..170
+              WHITESPACE@159..163 "    "
+              DEFINITION_MARKER@163..164 ":"
+              WHITESPACE@164..165 " "
+              PLAIN@165..170
+                TEXT@165..169 "def2"
+                NEWLINE@169..170 "\n"

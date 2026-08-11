@@ -69,22 +69,29 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
         // The column is the one enclosing the container being tested, so it is
         // resolved per level: a list nested *inside* a definition body sits
         // above the definition list on the stack and must not constrain it.
+        //
+        // A content container below the level being tested constrains it the
+        // same way, and stacks with the item's column: a definition list nested
+        // in a definition body only keeps that body open while the term reaches
+        // the body's own content column. `content_indent` is that running sum,
+        // and a list item's column is already cumulative within it.
         let next_line_opens_definition = !is_blank_line(next_inner)
             && definition_lists::next_line_is_definition_marker(lines, next_line_pos).is_some();
-        let next_is_definition_term_below = |level: usize| -> bool {
+        let next_is_definition_term_below = |level: usize, content_indent: usize| -> bool {
             next_line_opens_definition
                 && raw_indent_cols
-                    >= containers.stack[..level]
-                        .iter()
-                        .rev()
-                        .find_map(|c| match c {
-                            crate::parser::utils::container_stack::Container::ListItem {
-                                content_col,
-                                ..
-                            } => Some(*content_col),
-                            _ => None,
-                        })
-                        .unwrap_or(0)
+                    >= content_indent
+                        + containers.stack[..level]
+                            .iter()
+                            .rev()
+                            .find_map(|c| match c {
+                                crate::parser::utils::container_stack::Container::ListItem {
+                                    content_col,
+                                    ..
+                                } => Some(*content_col),
+                                _ => None,
+                            })
+                            .unwrap_or(0)
         };
 
         // Re-detect the definition marker after stripping a content-container
@@ -170,7 +177,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                 }
                 crate::parser::utils::container_stack::Container::DefinitionList { .. }
                     if next_is_definition_marker
-                        || next_is_definition_term_below(i)
+                        || next_is_definition_term_below(i, content_indent_so_far)
                         || stripped_is_definition_marker(content_indent_so_far) =>
                 {
                     keep_level = i + 1;

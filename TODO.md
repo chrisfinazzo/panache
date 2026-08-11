@@ -723,19 +723,46 @@ Three further definition-list divergences fixed alongside it:
   definition. The formatter takes the same preserved-line-breaks guard a
   tight list item does (`reflow_would_promote_a_definition_term`), since
   collapsing the block above the marker to one line would make it a term.
+- [x] A marker under a **single buffered line** of a definition body now makes
+  that line a term of a *nested* definition list: `T\n:   a\n    : def\n` is
+  `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]`, and so
+  is a marker following one that already broke the block
+  (`T\n:   a\n    b\n    : def\n    : def2\n`, where `: def` is the term).
+  Both promote a term out of already-buffered body content, so the old
+  break-or-nothing predicate became
+  `definition_marker_over_open_body_block`, returning which of the two the
+  buffered block's shape calls for; the buffer has not reached the green
+  builder yet, so `promote_buffered_definition_term` just opens the nested
+  `DEFINITION_LIST` around it and leaves the marker to the dispatcher.
+  Nesting recurses (`T\n:   a\n    : b\n        : c`) and the blank-line
+  variant (`T\n:   a\n\n    b\n    : def`) came with it. Two
+  container-unwinding rules had to follow, since a `DEFINITION_LIST` inside
+  a `DEFINITION` was previously unreachable: a term across a blank line only
+  keeps a nested list open while it reaches the body holding it
+  (`next_is_definition_term_below` now stacks the content-container frame on
+  the list-item column, or `T2` became a term of the nested list), and a
+  *dedented* marker unwinds to the level whose frame it lands in
+  (`close_dedented_definition_lists`, so `T\n:   a\n    : def\n  : sibling`
+  puts the sibling back on `T`). Plain text is not a block start and stays a
+  lazy continuation of the innermost body. Two formatter guards keep the
+  round-trip stable: `reflow_would_promote_a_definition_term` now also fires
+  on a `PLAIN` followed by a nested `DEFINITION_LIST` (collapsing the block
+  above hands the nested marker *that* line), and a body that is only a
+  definition list is `is_compact`, since a blank line between the term and
+  the nested marker detaches them on reparse. Looseness is unobservable
+  there — such a body holds no paragraph to render either way.
 
 Still open in the same area:
 
-- [ ] A marker under a **single buffered line** of a definition body should make
-  that line a term of a *nested* definition list: `T\n:   a\n    : def\n` is
-  `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]` for
-  pandoc, and panache still gives two definitions of `T`. Same for a marker
-  following one that already broke the block
-  (`T\n:   a\n    b\n    : def\n    : def2\n`, where `: def` is pandoc's
-  term). Both need a term promoted out of already-buffered body content,
-  which `definition_marker_breaks_open_definition_block` deliberately leaves
-  alone — it only fires on a block that is already longer than a line and so
-  cannot be a term.
+- [ ] A one-line body block separated from the marker by a **blank line** is
+  still not promoted: `T\n:   a\n\n    b\n\n    : c\n` and
+  `T\n\n:   a\n\n    :   b\n` are nested definition lists for pandoc and
+  flat ones for panache. Promotion reads the *buffered* block, and a blank
+  line has already flushed it to the builder, where it is a `PLAIN` that
+  cannot be retagged as a `TERM`. The fix is a lookahead at flush time (the
+  shape `next_line_is_definition_marker` already has) rather than a
+  retroactive wrap. Only reachable from hand-written source: the formatter's
+  own output never puts a blank line there.
 - [ ] The same reflow-promotes-a-term idempotency failure survives when a
   **blank line** separates the two blocks: `- x\n\n  a\n  b\n\n  : def\n`
   formats to `- x\n\n  a b\n\n  : def\n`, which reparses as a definition

@@ -83,6 +83,13 @@ impl DefinitionItem {
                 // single image, so it stays compact like the plain it
                 // replaced. No heading check: an image is never ATX-shaped.
                 SyntaxKind::FIGURE => true,
+                // A body that is only a definition list was promoted out of
+                // this item's own term line, so the two are one construct: a
+                // blank line between them detaches the nested list's marker
+                // from the term it defines. Looseness is unobservable here
+                // anyway — such a body holds no paragraph to render either
+                // way.
+                SyntaxKind::DEFINITION_LIST => true,
                 SyntaxKind::CODE_BLOCK => false,
                 _ => false,
             }

@@ -658,6 +658,155 @@ fn a_marker_at_the_content_column_breaks_the_definition_body_block() {
 }
 
 #[test]
+fn a_marker_under_a_single_body_line_promotes_it_to_a_nested_term() {
+    // A term is a one-line block, and a definition body is re-read as its own
+    // block sequence, so a single buffered body line *is* a term: the marker
+    // below it opens a definition list nested in that body rather than a
+    // second definition of the outer term. `T\n:   a\n    : def` is
+    // `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]`.
+    for input in [
+        "T\n:   a\n    : def\n",
+        "T\n: a\n  : def\n",
+        "T\n:   a\n      : def\n",
+        "T\n:   a\n    ~ def\n",
+        "T\n:   a\n    :   def\n",
+    ] {
+        let tree = parse_blocks(input);
+        let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+        assert_eq!(lists.len(), 2, "{input:?}");
+
+        let outer_definition = find_first(&lists[0], SyntaxKind::DEFINITION).expect("definition");
+        assert!(
+            outer_definition
+                .children()
+                .all(|child| child.kind() != SyntaxKind::PLAIN),
+            "the buffered line became a term, so no PLAIN is left in the body: {input:?}"
+        );
+        assert_eq!(
+            outer_definition
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::DEFINITION_LIST)
+                .count(),
+            1,
+            "{input:?}"
+        );
+
+        let terms = find_all(&tree, SyntaxKind::TERM);
+        assert_eq!(terms.len(), 2, "{input:?}");
+        assert_eq!(terms[1].text().to_string().trim(), "a", "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_marker_under_a_marker_that_broke_the_body_block_promotes_it_to_a_term() {
+    // The line a broken block leaves behind is itself a one-line block, so a
+    // second marker under it promotes it in turn:
+    // `T\n:   a\n    b\n    : def\n    : def2` is
+    // `DefinitionList [(T, [[Plain "a b", DefinitionList [(": def", ...)]]])]`.
+    let input = "T\n:   a\n    b\n    : def\n    : def2\n";
+    let tree = parse_blocks(input);
+
+    let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+    assert_eq!(lists.len(), 2);
+
+    let outer_definition = find_first(&lists[0], SyntaxKind::DEFINITION).expect("definition");
+    let blocks: Vec<_> = outer_definition
+        .children()
+        .map(|child| child.kind())
+        .filter(|kind| {
+            matches!(
+                kind,
+                SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH | SyntaxKind::DEFINITION_LIST
+            )
+        })
+        .collect();
+    assert_eq!(blocks, [SyntaxKind::PLAIN, SyntaxKind::DEFINITION_LIST]);
+
+    let terms = find_all(&tree, SyntaxKind::TERM);
+    assert_eq!(terms.len(), 2);
+    assert_eq!(terms[1].text().to_string().trim(), ": def");
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn a_promoted_term_keeps_its_own_body_continuations() {
+    // The nested definition is a definition like any other: its body keeps
+    // reading continuation lines from its own content column.
+    let input = "T\n:   a\n    : def\n    more\n";
+    let tree = parse_blocks(input);
+
+    let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+    assert_eq!(lists.len(), 2);
+    let nested_definition = find_first(&lists[1], SyntaxKind::DEFINITION).expect("definition");
+    let plains = find_all(&nested_definition, SyntaxKind::PLAIN);
+    assert_eq!(plains.len(), 1);
+    assert_eq!(plains[0].text().to_string().trim(), "def\n    more");
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn a_dedented_marker_leaves_the_nested_definition_list() {
+    // A marker is a block start, read in the frame of the body it lands in.
+    // Below the nested list's frame — the content column of the body holding
+    // it — it is a second definition of the *outer* term:
+    // `DefinitionList [(T, [[DefinitionList [(a, ...)]], [Plain "sibling"]])]`.
+    for input in [
+        "T\n:   a\n    : def\n  : sibling\n",
+        "T\n:   a\n    : def\n: sibling\n",
+    ] {
+        let tree = parse_blocks(input);
+        let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+        assert_eq!(lists.len(), 2, "{input:?}");
+
+        let outer_item = find_first(&lists[0], SyntaxKind::DEFINITION_ITEM).expect("item");
+        assert_eq!(
+            outer_item
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::DEFINITION)
+                .count(),
+            2,
+            "the sibling belongs to the outer term: {input:?}"
+        );
+        assert_eq!(find_all(&tree, SyntaxKind::TERM).len(), 2, "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_dedented_plain_line_stays_a_lazy_continuation_of_the_nested_body() {
+    // Only a marker is a block start; plain text below the nested frame is
+    // still a lazy continuation of the innermost body, so nothing unwinds.
+    let input = "T\n:   a\n    : def\n  tail\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(find_all(&tree, SyntaxKind::DEFINITION_LIST).len(), 2);
+    assert_eq!(find_all(&tree, SyntaxKind::PLAIN).len(), 1);
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
+fn a_term_below_the_body_frame_closes_the_nested_definition_list() {
+    // Across a blank line a nested list only stays open for a term that
+    // reaches the body holding it, or `T2` would become a term of the list
+    // nested in `T`'s body instead of a sibling of `T`.
+    let input = "T\n:   a\n    : def\n\nT2\n:   x\n";
+    let tree = parse_blocks(input);
+
+    let lists = find_all(&tree, SyntaxKind::DEFINITION_LIST);
+    assert_eq!(lists.len(), 2);
+    assert_eq!(
+        lists[0]
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::DEFINITION_ITEM)
+            .count(),
+        2,
+        "T and T2 are siblings"
+    );
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
 fn a_dedented_marker_still_opens_a_sibling_definition() {
     // Below the body's content column the marker is a definition of the same
     // term again, whatever the block above it is doing:

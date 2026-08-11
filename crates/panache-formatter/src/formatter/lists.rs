@@ -595,18 +595,25 @@ impl Formatter {
     /// list item or definition body has no blank line to separate the two
     /// with, so the only rendering that survives a round-trip is the source's
     /// own line breaks.
+    ///
+    /// A definition list already nested in the body is the same hazard seen
+    /// from the other side: its term was promoted out of a one-line block, so
+    /// collapsing the block above it hands the nested marker *that* line
+    /// instead and swallows the term as a definition.
     pub(super) fn reflow_would_promote_a_definition_term(item: &SyntaxNode) -> bool {
         item.children()
             .filter(|child| matches!(child.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
             .filter_map(|child| child.next_sibling())
-            .filter(|next| matches!(next.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
-            .any(|next| {
-                next.text()
+            .any(|next| match next.kind() {
+                SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH => next
+                    .text()
                     .to_string()
                     .lines()
                     .next()
                     .and_then(|line| try_parse_definition_marker(line.trim_start()))
-                    .is_some()
+                    .is_some(),
+                SyntaxKind::DEFINITION_LIST => true,
+                _ => false,
             })
     }
 

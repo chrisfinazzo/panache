@@ -79,6 +79,26 @@ impl LineDispatch {
     }
 }
 
+/// The shape of the block a definition marker stands over inside the body of
+/// the definition it sits in, as
+/// [`Parser::definition_marker_over_open_body_block`] reads it.
+///
+/// Pandoc re-reads the body as its own block sequence, so the buffered block
+/// above the marker decides what the marker can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BufferedBodyBlock {
+    /// A one-line block, which is exactly the shape of a term: the marker
+    /// below it defines that line, in a definition list nested in the body.
+    /// `T\n:   a\n    : def` is
+    /// `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]`.
+    Term,
+    /// A block longer than a line, which cannot be a term, so no term precedes
+    /// the marker. What is left is another block of the same body:
+    /// `T\n:   a\n    b\n    : def` is
+    /// `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]`.
+    Block,
+}
+
 /// The line being folded back into an open blockquote by pandoc's laziness
 /// rule, plus the marker bookkeeping `marker_info_for_line` needs to re-emit
 /// the `>` run this line does carry. Grouped because the fold is one step of
@@ -1047,40 +1067,33 @@ impl<'a> Parser<'a> {
             && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos))
     }
 
-    /// Whether a definition marker on this line has to *end* the open block of
-    /// the definition body it sits in rather than continue it.
+    /// What a definition marker on this line does to the open block of the
+    /// definition body it sits in, or `None` when it does nothing to it.
     ///
     /// This is the definition-body analogue of
     /// [`Self::definition_marker_breaks_open_list_item_block`]. Pandoc re-reads
     /// a definition body as its own block sequence starting at the body's
     /// content column, so a marker reaching that column is read where a block
     /// may start and `endline` refuses to cross it — the marker is neither a
-    /// soft nor a lazy continuation of the text above it. It is not a
-    /// definition either: a term is a one-line block, and the block above this
-    /// line is still open *and* longer than a line, so no term precedes the
-    /// marker. What is left is another block of the same body:
-    /// `T\n:   a\n    b\n    : def` is
-    /// `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]`.
+    /// soft nor a lazy continuation of the text above it. What is left depends
+    /// on the shape of the block it stands over; see [`BufferedBodyBlock`].
     ///
-    /// Two neighbouring shapes are deliberately left to the `Definition` arm of
-    /// `DefinitionListParser::detect_prepared`:
-    ///
-    /// - a marker *dedented* below the content column, which is a second
-    ///   definition of the same term (`T\n:   a\n  : def`);
-    /// - a marker under a single buffered line, which makes that line a term
-    ///   (`T\n:   a\n    : def` is a definition list nested in the body).
+    /// One neighbouring shape is deliberately left to the `Definition` arm of
+    /// `DefinitionListParser::detect_prepared`: a marker *dedented* below the
+    /// content column, which is a second definition of the same term
+    /// (`T\n:   a\n  : def`).
     ///
     /// `content_indent` is the body's content column, already stripped off
     /// `stripped_content`; `content` still carries it, so the dedent test reads
     /// the original indent.
-    fn definition_marker_breaks_open_definition_block(
+    fn definition_marker_over_open_body_block(
         &self,
         content: &str,
         stripped_content: &str,
         content_indent: usize,
-    ) -> bool {
+    ) -> Option<BufferedBodyBlock> {
         if !self.config.extensions.definition_lists || content_indent == 0 {
-            return false;
+            return None;
         }
         let Some(Container::Definition {
             plain_open: true,
@@ -1088,29 +1101,60 @@ impl<'a> Parser<'a> {
             ..
         }) = self.containers.last()
         else {
-            return false;
+            return None;
         };
-        // A one-line open block *is* a term, so a marker below it opens a
-        // nested definition list instead of breaking the block.
-        if !plain_buffer
-            .raw_text()
-            .trim_end_matches('\n')
-            .contains('\n')
-        {
-            return false;
-        }
         if leading_indent(content).0 < content_indent {
-            return false;
+            return None;
         }
-        let Some((marker, ..)) = definition_lists::try_parse_definition_marker(stripped_content)
-        else {
-            return false;
-        };
+        let (marker, ..) = definition_lists::try_parse_definition_marker(stripped_content)?;
         // Same table-caption escape the term lookaheads take: a `:` line that
         // introduces a table is not a definition marker at all.
-        !(marker == ':'
+        if marker == ':'
             && self.config.extensions.table_captions
-            && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos))
+            && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos)
+        {
+            return None;
+        }
+        let buffered = plain_buffer.raw_text();
+        let buffered = buffered.trim_end_matches(['\r', '\n']);
+        if buffered.trim().is_empty() {
+            // Nothing buffered to be a term or a block: the body has not
+            // started yet, so the marker is left to the dispatcher.
+            return None;
+        }
+        if buffered.contains('\n') {
+            Some(BufferedBodyBlock::Block)
+        } else {
+            Some(BufferedBodyBlock::Term)
+        }
+    }
+
+    /// Turn the single buffered line of the open definition body into the term
+    /// of a definition list nested in that body.
+    ///
+    /// The buffered bytes have not reached the green builder yet, so the nested
+    /// `DEFINITION_LIST` can simply be opened around them — no retroactive
+    /// wrapping is needed. The marker line itself is left to the dispatcher,
+    /// whose `Definition` arm finds the `DEFINITION_ITEM` this opens and hangs
+    /// the definition off it.
+    fn promote_buffered_definition_term(&mut self) {
+        let Some(Container::Definition {
+            plain_open,
+            plain_buffer,
+            ..
+        }) = self.containers.stack.last_mut()
+        else {
+            return;
+        };
+        let term_line = plain_buffer.raw_text();
+        plain_buffer.clear();
+        *plain_open = false;
+
+        self.builder.start_node(SyntaxKind::DEFINITION_LIST.into());
+        self.containers.push(Container::DefinitionList {});
+        self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
+        self.containers.push(Container::DefinitionItem {});
+        definition_lists::emit_term(&mut self.builder, &term_line, self.config);
     }
 
     /// Append `line` to whichever open text buffer is holding the current
@@ -4571,6 +4615,74 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Close nested definition-list levels that a dedented definition marker
+    /// on the current line has left.
+    ///
+    /// A marker is a block start, so pandoc reads it in the frame of whichever
+    /// body it lands in. `T\n:   a\n    : def\n  : sibling` puts `: sibling`
+    /// back on `T`: column 2 does not reach the frame of the list nested in
+    /// `T`'s body, which starts at the body's own content column. Plain text
+    /// is *not* a block start and stays a lazy continuation of the innermost
+    /// body, so only a marker line unwinds anything.
+    ///
+    /// Runs before the content-container strip, since the levels it closes are
+    /// what that strip is measured from. A single, unnested definition list
+    /// cannot be dedented out of this way — its own marker arm handles a
+    /// sibling definition — so this needs two levels to do anything.
+    fn close_dedented_definition_lists(&mut self, content: &str) {
+        if !self.config.extensions.definition_lists
+            || self
+                .containers
+                .stack
+                .iter()
+                .filter(|c| matches!(c, Container::DefinitionList { .. }))
+                .count()
+                < 2
+        {
+            return;
+        }
+
+        let (without_newline, _) = strip_newline(content);
+        let (indent_cols, _) = leading_indent(without_newline);
+
+        // The column each open definition list is read at: the content column
+        // of the body holding it. A list item's column is already cumulative
+        // within its enclosing content container, so it replaces rather than
+        // adds to the item column (mirroring `ContainerStack::gobble_chain`).
+        let mut content_frame = 0usize;
+        let mut item_frame = 0usize;
+        let mut levels: Vec<(usize, usize)> = Vec::new();
+        for (idx, container) in self.containers.stack.iter().enumerate() {
+            match container {
+                Container::FootnoteDefinition { content_col }
+                | Container::Admonition { content_col }
+                | Container::Definition { content_col, .. } => {
+                    content_frame += *content_col;
+                    item_frame = 0;
+                }
+                Container::ListItem { content_col, .. } => item_frame = *content_col,
+                Container::DefinitionList { .. } => levels.push((idx, content_frame + item_frame)),
+                _ => {}
+            }
+        }
+
+        // The marker belongs to the innermost level it both reaches and stays
+        // within the 0-3 space allowance of, read in that level's own frame.
+        let target = levels.iter().rposition(|(_, frame)| {
+            indent_cols >= *frame
+                && definition_lists::try_parse_definition_marker(
+                    &without_newline[byte_index_at_column(without_newline, *frame)..],
+                )
+                .is_some()
+        });
+
+        if let Some(target) = target
+            && let Some((first_closed, _)) = levels.get(target + 1)
+        {
+            self.close_containers_to(*first_closed);
+        }
+    }
+
     /// Get the total indentation to strip from content containers (footnotes + definitions).
     fn content_container_indent_to_strip(&self) -> usize {
         self.containers
@@ -4619,6 +4731,11 @@ impl<'a> Parser<'a> {
         // which allow lazy continuation). Close any open admonition whose
         // content indent the current line no longer meets, before stripping.
         self.close_dedented_admonitions(content);
+
+        // A definition marker dedented out of a nested definition list belongs
+        // to an outer one, so unwind to that level before the strip below is
+        // measured from the levels this line is actually in.
+        self.close_dedented_definition_lists(content);
 
         // Calculate how much indentation should be stripped for content containers
         // (definitions, footnotes) FIRST, so we can check for block markers correctly.
@@ -4669,16 +4786,19 @@ impl<'a> Parser<'a> {
             return LineDispatch::consumed(1);
         }
 
-        // A definition marker that reaches the body's own content column ends
-        // the block above it instead of continuing it, and stays in the same
-        // definition. Flushing the buffered PLAIN here — before the dispatcher
-        // gets a look and its `Definition` arm claims the marker — is what
-        // makes the line the body's next block rather than a second definition.
-        let definition_block_breaks = self.definition_marker_breaks_open_definition_block(
-            content,
-            stripped_content,
-            content_indent,
-        );
+        // A definition marker that reaches the body's own content column
+        // cannot continue the block above it, so it either ends that block or
+        // defines it. Settling that here — before the dispatcher gets a look
+        // and its `Definition` arm claims the marker as a second definition of
+        // the outer term — is what keeps the line inside this body.
+        let body_block =
+            self.definition_marker_over_open_body_block(content, stripped_content, content_indent);
+        if body_block == Some(BufferedBodyBlock::Term) {
+            self.promote_buffered_definition_term();
+        }
+        // Flushing the buffered PLAIN makes the marker line the body's next
+        // block rather than a second definition.
+        let definition_block_breaks = body_block == Some(BufferedBodyBlock::Block);
         if definition_block_breaks {
             self.emit_buffered_plain_if_needed();
         }
