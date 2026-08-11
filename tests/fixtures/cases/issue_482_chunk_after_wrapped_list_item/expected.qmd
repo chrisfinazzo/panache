@@ -1,0 +1,11 @@
+2. Minimize the 2D Rastrigin function via BO using the lower confidence bound as
+   acquisition function and `opt("nloptr")` as acquisition function optimizer.
+   You can construct the surrogate models with default settings using:
+```{r}
+#| label: solutions-035
+
+surrogate_gp = srlrn(default_gp())
+surrogate_rf = srlrn(default_rf())
+```
+
+We first construct the function.
