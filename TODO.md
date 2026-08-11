@@ -773,7 +773,12 @@ Three further definition-list divergences fixed alongside it:
   line. Both frames are absolute, so the promotion also fires inside a list
   item and a blockquote.
 
-Still open in the same area:
+Still open in the same area, and **independent of the frame refactor** — these
+touch blank-line policy and formatter stability, not the strip helpers, so they
+can land in any order and will not conflict with the container-frame
+consolidation under `Parser > Architecture`. The first two travel together (the
+formatter is already unstable on the two-blank shape), so they are roughly one
+session of definition-list formatter work plus one parser change:
 
 - [ ] **Two** blank lines between the body block and the marker still open a
   second definition (`T\n:   a\n\n\n    :   b\n`); pandoc detaches the term
@@ -783,12 +788,14 @@ Still open in the same area:
   accepting any number of blanks is the one place to fix it. The formatter
   is already unstable on that shape (it emits both blank lines, which
   reparse differently), so the two travel together.
+
 - [ ] The formatter's marker-width heuristic is not stable for a definition list
   *nested in a list item* when a thematic break follows:
   `- T\n\n  :   a\n\n      :   def\n\n---\n` reformats the nested marker to
   `: def`, dropping the padding. Pre-existing (it reproduces on the
   pre-promotion parser given the same bytes) and unrelated to promotion, but
   it is why the blank-line golden case carries no thematic break.
+
 - [ ] The same reflow-promotes-a-term idempotency failure survives when a
   **blank line** separates the two blocks: `- x\n\n  a\n  b\n\n  : def\n`
   formats to `- x\n\n  a b\n\n  : def\n`, which reparses as a definition
@@ -798,16 +805,32 @@ Still open in the same area:
   blocks, so escaping the marker is enough; the fix is to run
   `guard_definition_marker_start` from `format_list_continuation_paragraph`,
   which currently never calls it.
+
+Also still open, but **do not fix these individually** — they are input to
+"Consolidate container-frame resolution behind a single typed verdict" under
+`Parser > Architecture`, not competition for it. Each is one of the shapes where
+the eight overlapping strip helpers disagree today, so patching them separately
+means making the same judgment three times in three different helpers, which is
+the pathology performed once more. Feed them to that item's step 1 (the
+behavior-pinning table test) and let the verdict close them:
+
 - [ ] `next_line_is_definition_marker` still cannot see a marker whose indent is
   a **tab straddling** the item's content column: `- a\n\n  b\n\n\t: def\n`
   yields three paragraphs where pandoc yields a definition list. The strip,
-  not the detection frame, is what fails — `advance_columns` refuses to
-  split the tab. `emit_definition_marker` already emits literal indent
-  bytes, so the emission side is ready for it.
+  not the detection frame, is what fails — `advance_columns`
+  (`container_prefix.rs:1050`) hits `next > target` on the tab and returns
+  the slice *starting at* it rather than reporting the straddle.
+  `emit_definition_marker` already emits literal indent bytes, so the
+  emission side is ready for it. Design input for the verdict enum: a
+  straddling tab is its own case, distinct from a genuinely short line,
+  since the line *does* reach the content column — there is just no byte
+  boundary to split on.
+
 - [ ] `is_caption_followed_by_table` runs on the same over-stripping view as the
   term lookahead and has the same latent asymmetry. It is a *suppression*
   gate, so an over-strip can only fail to open a definition list, and it is
   shared with the table parsers — no reproducer yet.
+
 - [ ] `StrippedLines::peek_prefix_at` is not equivalent to
   `ContainerPrefix::strip` for the
   `[ContentIndent, ListAdvance, BlockQuoteMarker]` shape (the `issue_209`
@@ -1427,7 +1450,11 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   - [ ] Pin the current behavior of all eight paths as a table test over one
     corpus of `(container stack, line)` pairs, including the shapes where
     they disagree today. This is the safety net; nothing else starts without
-    it.
+    it. Seed the corpus from the three deferred items under
+    `Parser bugs found by the incremental fuzzer` --- the tab straddle, the
+    `is_caption_followed_by_table` over-strip, and the `peek_prefix_at`
+    non-equivalence are known disagreement shapes held back for exactly
+    this.
   - [ ] Settle the `content_col` convention (absolute or relative) and make
     `from_stack` and `content_container_indent_to_strip` agree.
   - [ ] Introduce the typed verdict alongside the existing API and migrate the
