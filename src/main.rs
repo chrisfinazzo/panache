@@ -369,28 +369,126 @@ fn read_all(path: Option<&PathBuf>) -> io::Result<String> {
     }
 }
 
+/// Exit with a clap-rendered usage error for `subcommand` (its own `Usage:`
+/// line, the `--help` pointer, and clap's exit code 2), so an argument mistake
+/// we diagnose ourselves is spelled exactly like one clap caught.
+/// `subcommand` is a space-separated path, so a nested command (`debug format`)
+/// reports its own usage rather than its parent's.
+fn usage_error(subcommand: &str, kind: clap::error::ErrorKind, message: &str) -> ! {
+    let mut cmd = <Cli as clap::CommandFactory>::command();
+    for name in subcommand.split_whitespace() {
+        cmd = match cmd.find_subcommand(name) {
+            Some(sub) => sub.clone(),
+            None => <Cli as clap::CommandFactory>::command(),
+        };
+    }
+    // Fetched off a freshly built `Command`, the subcommand has no bin name yet,
+    // so name it or the usage line reads `Usage: format …`.
+    cmd.bin_name(format!("panache {subcommand}"))
+        .error(kind, message)
+        .exit()
+}
+
+/// The "nothing to read" usage errors, one per subcommand. Each names `-` so the
+/// way out of the trap rides in the message that reports it.
+const FORMAT_MISSING_INPUT: &str =
+    "no input paths; pass files or directories to format, or `-` to read from stdin";
+const LINT_MISSING_INPUT: &str =
+    "no input paths; pass files or directories to lint, or `-` to read from stdin";
+const DEBUG_FORMAT_MISSING_INPUT: &str =
+    "no input paths; pass files or directories to check, or `-` to read from stdin";
+const PARSE_MISSING_INPUT: &str = "no input path; pass a file to parse, or `-` to read from stdin";
+
+/// A positional-argument mistake, rendered as a clap usage error by
+/// [`normalize_input_paths_or_exit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputError {
+    /// `-` was mixed with file paths; there is no sane order to read them in.
+    StdinWithPaths,
+    /// Nothing to read: no paths, and stdin is an interactive terminal.
+    NoInput,
+}
+
 /// Treat the `-` argument as the conventional Unix stdin sentinel: collapse
 /// `["-"]` to an empty list (which the subcommands already interpret as
 /// "read from stdin"). Mixing `-` with real paths is ambiguous, so reject it.
-fn normalize_input_paths(files: Vec<PathBuf>) -> io::Result<Vec<PathBuf>> {
+///
+/// An *empty* list means stdin too, but implicitly, and that is the one case
+/// that can strand a user at a prompt. Bare `panache format` reads stdin,
+/// matching rustfmt/gofmt/clang-format: right behind a pipe, and a trap at a
+/// terminal, where a new user expecting the current directory to be formatted
+/// instead sees the process hang on a terminal it is quietly reading. So no
+/// paths *and* an interactive stdin is a usage error naming `-`, while an
+/// explicit `-` is never gated — that is the spelling for asking on purpose.
+///
+/// The terminal check is the whole gate, and it is deliberately narrow: it can
+/// only fire where a human is typing, never behind a pipe, a redirect, a
+/// heredoc, or a CI runner, so no scripted invocation changes behavior. Taking
+/// `stdin_is_terminal` as an argument (as `resolve_color` does for stdout) keeps
+/// the decision testable without a pty.
+fn normalize_input_paths(
+    files: Vec<PathBuf>,
+    stdin_is_terminal: bool,
+) -> Result<Vec<PathBuf>, InputError> {
     let has_dash = files.iter().any(|p| p.as_os_str() == "-");
     if !has_dash {
+        if files.is_empty() && stdin_is_terminal {
+            return Err(InputError::NoInput);
+        }
         return Ok(files);
     }
     if files.len() > 1 {
-        return Err(io::Error::other(
-            "'-' (stdin) cannot be combined with file path arguments",
-        ));
+        return Err(InputError::StdinWithPaths);
     }
     Ok(Vec::new())
 }
 
-/// Same convention as `normalize_input_paths` for the `parse` subcommand,
+/// Same convention as [`normalize_input_paths`] for the `parse` subcommand,
 /// which takes a single optional path.
-fn normalize_parse_path(file: Option<PathBuf>) -> Option<PathBuf> {
+fn normalize_parse_path(
+    file: Option<PathBuf>,
+    stdin_is_terminal: bool,
+) -> Result<Option<PathBuf>, InputError> {
     match file {
-        Some(p) if p.as_os_str() == "-" => None,
-        other => other,
+        Some(p) if p.as_os_str() == "-" => Ok(None),
+        None if stdin_is_terminal => Err(InputError::NoInput),
+        other => Ok(other),
+    }
+}
+
+/// [`normalize_input_paths`] against the real stdin, exiting on a usage mistake.
+/// `missing` spells the "nothing to read" case in the subcommand's own terms.
+fn normalize_input_paths_or_exit(
+    files: Vec<PathBuf>,
+    subcommand: &str,
+    missing: &str,
+) -> Vec<PathBuf> {
+    match normalize_input_paths(files, io::stdin().is_terminal()) {
+        Ok(files) => files,
+        Err(err) => input_usage_error(subcommand, missing, err),
+    }
+}
+
+/// [`normalize_parse_path`] against the real stdin, exiting on a usage mistake.
+fn normalize_parse_path_or_exit(file: Option<PathBuf>) -> Option<PathBuf> {
+    match normalize_parse_path(file, io::stdin().is_terminal()) {
+        Ok(file) => file,
+        Err(err) => input_usage_error("parse", PARSE_MISSING_INPUT, err),
+    }
+}
+
+fn input_usage_error(subcommand: &str, missing: &str, err: InputError) -> ! {
+    match err {
+        InputError::StdinWithPaths => usage_error(
+            subcommand,
+            clap::error::ErrorKind::ArgumentConflict,
+            "'-' (stdin) cannot be combined with file path arguments",
+        ),
+        InputError::NoInput => usage_error(
+            subcommand,
+            clap::error::ErrorKind::MissingRequiredArgument,
+            missing,
+        ),
     }
 }
 
@@ -844,7 +942,7 @@ fn main() -> io::Result<()> {
 
     match cli.command {
         Commands::Parse { file, to, json } => {
-            let file = normalize_parse_path(file);
+            let file = normalize_parse_path_or_exit(file);
             let input_path = file.as_deref().or(cli.stdin_filename.as_deref());
             let start_dir = start_dir_for(input_path)?;
             let (cfg, cfg_source) = load_config_for_cli(
@@ -890,13 +988,7 @@ fn main() -> io::Result<()> {
             force_exclude,
             option,
         } => {
-            let files = match normalize_input_paths(files) {
-                Ok(files) => files,
-                Err(err) => {
-                    eprintln!("Error: {}", err);
-                    std::process::exit(1);
-                }
-            };
+            let files = normalize_input_paths_or_exit(files, "format", FORMAT_MISSING_INPUT);
             // Parse range if provided (only valid for single file or stdin)
             let parsed_range = if let Some(range_str) = range {
                 if files.len() > 1 {
@@ -1343,13 +1435,11 @@ fn main() -> io::Result<()> {
                     std::process::exit(1);
                 }
 
-                let files = match normalize_input_paths(files) {
-                    Ok(files) => files,
-                    Err(err) => {
-                        eprintln!("Error: {}", err);
-                        std::process::exit(1);
-                    }
-                };
+                let files = normalize_input_paths_or_exit(
+                    files,
+                    "debug format",
+                    DEBUG_FORMAT_MISSING_INPUT,
+                );
                 let use_stdin = files.is_empty();
                 let targets = if use_stdin {
                     vec![]
@@ -1547,13 +1637,7 @@ fn main() -> io::Result<()> {
                      violations by default. The flag is now a no-op."
                 );
             }
-            let files = match normalize_input_paths(files) {
-                Ok(files) => files,
-                Err(err) => {
-                    eprintln!("Error: {}", err);
-                    std::process::exit(1);
-                }
-            };
+            let files = normalize_input_paths_or_exit(files, "lint", LINT_MISSING_INPUT);
             // Quarto project manifests (`_quarto.yml` / `_metadata.yml`) are
             // standalone YAML, not markdown documents. Pull explicit manifest
             // targets out of the normal document pipeline and validate them
@@ -2834,8 +2918,67 @@ fn runtime_diagnostic_from_cached(diag: &cache::CachedDiagnostic) -> panache::li
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorMode, per_file_external_parallel, resolve_color};
+    use super::{
+        ColorMode, InputError, normalize_input_paths, normalize_parse_path,
+        per_file_external_parallel, resolve_color,
+    };
     use std::ffi::OsStr;
+    use std::path::PathBuf;
+
+    fn paths(entries: &[&str]) -> Vec<PathBuf> {
+        entries.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn no_paths_reads_stdin_unless_it_is_a_terminal() {
+        // Behind a pipe, a redirect, or a CI runner, bare `panache format` keeps
+        // reading stdin exactly as rustfmt/gofmt do — the gate cannot reach any
+        // scripted invocation.
+        assert_eq!(normalize_input_paths(vec![], false), Ok(vec![]));
+        // At a prompt there is nothing to read, so it is a usage error instead of
+        // a silent wait on the terminal.
+        assert_eq!(
+            normalize_input_paths(vec![], true),
+            Err(InputError::NoInput)
+        );
+    }
+
+    #[test]
+    fn dash_names_stdin_even_at_a_terminal() {
+        // The explicit spelling still collapses to the empty "read stdin" list.
+        assert_eq!(normalize_input_paths(paths(&["-"]), true), Ok(vec![]));
+        assert_eq!(normalize_input_paths(paths(&["-"]), false), Ok(vec![]));
+    }
+
+    #[test]
+    fn dash_cannot_be_mixed_with_file_paths() {
+        assert_eq!(
+            normalize_input_paths(paths(&["-", "a.md"]), false),
+            Err(InputError::StdinWithPaths)
+        );
+        assert_eq!(
+            normalize_input_paths(paths(&["a.md", "-"]), false),
+            Err(InputError::StdinWithPaths)
+        );
+    }
+
+    #[test]
+    fn named_paths_are_passed_through() {
+        let named = paths(&["a.md", "docs"]);
+        assert_eq!(normalize_input_paths(named.clone(), true), Ok(named));
+    }
+
+    #[test]
+    fn parse_path_follows_the_same_rules() {
+        assert_eq!(
+            normalize_parse_path(Some(PathBuf::from("-")), true),
+            Ok(None)
+        );
+        assert_eq!(normalize_parse_path(None, false), Ok(None));
+        assert_eq!(normalize_parse_path(None, true), Err(InputError::NoInput));
+        let named = Some(PathBuf::from("a.md"));
+        assert_eq!(normalize_parse_path(named.clone(), true), Ok(named));
+    }
 
     #[test]
     fn few_files_split_the_budget_to_saturate_it() {
