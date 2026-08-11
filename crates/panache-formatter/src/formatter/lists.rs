@@ -585,17 +585,17 @@ impl Formatter {
         }
     }
 
-    /// Format a ListItem node
-    /// Whether reflowing this item's content would manufacture a definition
-    /// term out of it.
+    /// Whether reflowing this container's content would manufacture a
+    /// definition term out of it.
     ///
     /// Two adjacent plain blocks where the second starts with a `:` or `~`
     /// marker only stay two blocks while the first one is longer than a line:
     /// a one-line block above a marker *is* a term, so wrapping `a\nb` down to
     /// `a b` turns `[Plain, Plain]` into a `DefinitionList` on reparse. A tight
-    /// item has no blank line to separate the two with, so the only rendering
-    /// that survives a round-trip is the source's own line breaks.
-    fn reflow_would_promote_a_definition_term(item: &SyntaxNode) -> bool {
+    /// list item or definition body has no blank line to separate the two
+    /// with, so the only rendering that survives a round-trip is the source's
+    /// own line breaks.
+    pub(super) fn reflow_would_promote_a_definition_term(item: &SyntaxNode) -> bool {
         item.children()
             .filter(|child| matches!(child.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
             .filter_map(|child| child.next_sibling())
@@ -610,6 +610,7 @@ impl Formatter {
             })
     }
 
+    /// Format a ListItem node
     pub(super) fn format_list_item(&mut self, node: &SyntaxNode, indent: usize) {
         if Self::reflow_would_promote_a_definition_term(node) {
             let saved = self.config.wrap.clone();

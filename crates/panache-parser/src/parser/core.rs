@@ -1047,6 +1047,72 @@ impl<'a> Parser<'a> {
             && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos))
     }
 
+    /// Whether a definition marker on this line has to *end* the open block of
+    /// the definition body it sits in rather than continue it.
+    ///
+    /// This is the definition-body analogue of
+    /// [`Self::definition_marker_breaks_open_list_item_block`]. Pandoc re-reads
+    /// a definition body as its own block sequence starting at the body's
+    /// content column, so a marker reaching that column is read where a block
+    /// may start and `endline` refuses to cross it — the marker is neither a
+    /// soft nor a lazy continuation of the text above it. It is not a
+    /// definition either: a term is a one-line block, and the block above this
+    /// line is still open *and* longer than a line, so no term precedes the
+    /// marker. What is left is another block of the same body:
+    /// `T\n:   a\n    b\n    : def` is
+    /// `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]`.
+    ///
+    /// Two neighbouring shapes are deliberately left to the `Definition` arm of
+    /// `DefinitionListParser::detect_prepared`:
+    ///
+    /// - a marker *dedented* below the content column, which is a second
+    ///   definition of the same term (`T\n:   a\n  : def`);
+    /// - a marker under a single buffered line, which makes that line a term
+    ///   (`T\n:   a\n    : def` is a definition list nested in the body).
+    ///
+    /// `content_indent` is the body's content column, already stripped off
+    /// `stripped_content`; `content` still carries it, so the dedent test reads
+    /// the original indent.
+    fn definition_marker_breaks_open_definition_block(
+        &self,
+        content: &str,
+        stripped_content: &str,
+        content_indent: usize,
+    ) -> bool {
+        if !self.config.extensions.definition_lists || content_indent == 0 {
+            return false;
+        }
+        let Some(Container::Definition {
+            plain_open: true,
+            plain_buffer,
+            ..
+        }) = self.containers.last()
+        else {
+            return false;
+        };
+        // A one-line open block *is* a term, so a marker below it opens a
+        // nested definition list instead of breaking the block.
+        if !plain_buffer
+            .raw_text()
+            .trim_end_matches('\n')
+            .contains('\n')
+        {
+            return false;
+        }
+        if leading_indent(content).0 < content_indent {
+            return false;
+        }
+        let Some((marker, ..)) = definition_lists::try_parse_definition_marker(stripped_content)
+        else {
+            return false;
+        };
+        // Same table-caption escape the term lookaheads take: a `:` line that
+        // introduces a table is not a definition marker at all.
+        !(marker == ':'
+            && self.config.extensions.table_captions
+            && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos))
+    }
+
     /// Append `line` to whichever open text buffer is holding the current
     /// block's content — the paragraph's, or the list item's.
     ///
@@ -4603,6 +4669,20 @@ impl<'a> Parser<'a> {
             return LineDispatch::consumed(1);
         }
 
+        // A definition marker that reaches the body's own content column ends
+        // the block above it instead of continuing it, and stays in the same
+        // definition. Flushing the buffered PLAIN here — before the dispatcher
+        // gets a look and its `Definition` arm claims the marker — is what
+        // makes the line the body's next block rather than a second definition.
+        let definition_block_breaks = self.definition_marker_breaks_open_definition_block(
+            content,
+            stripped_content,
+            content_indent,
+        );
+        if definition_block_breaks {
+            self.emit_buffered_plain_if_needed();
+        }
+
         // Check if we're in a Definition container (with or without an open PLAIN)
         // Continuation lines should be added to PLAIN, not treated as new blocks
         // BUT: Don't treat lines with block element markers as continuations
@@ -4620,52 +4700,59 @@ impl<'a> Parser<'a> {
             } else {
                 let policy = ContinuationPolicy::new(self.config, &self.block_registry);
 
-                if policy.definition_plain_can_continue(
-                    stripped_content,
-                    content,
-                    content_indent,
-                    &BlockContext {
-                        has_blank_before: self.pos == 0 || is_blank_line(self.lines[self.pos - 1]),
-                        has_blank_before_strict: self.pos == 0
-                            || is_blank_line(self.lines[self.pos - 1]),
-                        at_document_start: self.pos == 0 && self.current_blockquote_depth() == 0,
-                        in_fenced_div: self.in_fenced_div(),
-                        fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
-                        fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
-                        myst_directive_closer: self.innermost_myst_directive_closer(),
-                        blockquote_depth: self.current_blockquote_depth(),
-                        config: self.config,
-                        diags: self.diagnostics.clone(),
+                if definition_block_breaks
+                    || policy.definition_plain_can_continue(
+                        stripped_content,
+                        content,
                         content_indent,
-                        indent_to_emit: None,
-                        list_indent_info: None,
-                        in_list: lists::in_list(&self.containers),
-                        in_definition_list: definition_lists::in_definition_list(&self.containers),
-                        in_marker_only_list_item: matches!(
-                            self.containers.last(),
-                            Some(Container::ListItem {
-                                marker_only: true,
-                                ..
-                            })
-                        ),
-                        list_item_unclosed_html_block_tag: self.list_item_unclosed_html_block_tag(),
-                        open_code_span_openers: self.open_code_span_openers(),
-                        paragraph_open: self.is_paragraph_open(),
-                        list_item_content_open: self.is_list_item_content_open(),
-                        next_line: if self.pos + 1 < self.lines.len() {
-                            Some(self.lines[self.pos + 1])
-                        } else {
-                            None
+                        &BlockContext {
+                            has_blank_before: self.pos == 0
+                                || is_blank_line(self.lines[self.pos - 1]),
+                            has_blank_before_strict: self.pos == 0
+                                || is_blank_line(self.lines[self.pos - 1]),
+                            at_document_start: self.pos == 0
+                                && self.current_blockquote_depth() == 0,
+                            in_fenced_div: self.in_fenced_div(),
+                            fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
+                            fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
+                            myst_directive_closer: self.innermost_myst_directive_closer(),
+                            blockquote_depth: self.current_blockquote_depth(),
+                            config: self.config,
+                            diags: self.diagnostics.clone(),
+                            content_indent,
+                            indent_to_emit: None,
+                            list_indent_info: None,
+                            in_list: lists::in_list(&self.containers),
+                            in_definition_list: definition_lists::in_definition_list(
+                                &self.containers,
+                            ),
+                            in_marker_only_list_item: matches!(
+                                self.containers.last(),
+                                Some(Container::ListItem {
+                                    marker_only: true,
+                                    ..
+                                })
+                            ),
+                            list_item_unclosed_html_block_tag: self
+                                .list_item_unclosed_html_block_tag(),
+                            open_code_span_openers: self.open_code_span_openers(),
+                            paragraph_open: self.is_paragraph_open(),
+                            list_item_content_open: self.is_list_item_content_open(),
+                            next_line: if self.pos + 1 < self.lines.len() {
+                                Some(self.lines[self.pos + 1])
+                            } else {
+                                None
+                            },
+                            open_alpha_hint: lists::open_list_hint_at_indent(
+                                &self.containers,
+                                leading_indent(stripped_content).0,
+                            ),
                         },
-                        open_alpha_hint: lists::open_list_hint_at_indent(
-                            &self.containers,
-                            leading_indent(stripped_content).0,
-                        ),
-                    },
-                    &self.lines,
-                    self.pos,
-                    definition_plain_open,
-                ) {
+                        &self.lines,
+                        self.pos,
+                        definition_plain_open,
+                    )
+                {
                     let content_line = stripped_content;
                     let (text_without_newline, newline_str) = strip_newline(content_line);
                     let indent_prefix = if !text_without_newline.trim().is_empty() {

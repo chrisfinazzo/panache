@@ -2256,6 +2256,14 @@ impl Formatter {
                 // The definition marker itself is at the base indent level
                 // Definition content is indented 4 spaces from the margin
                 let def_indent = indent + 4;
+                // A body whose blocks are held apart by a `:` marker keeps the
+                // source's line breaks: reflowing the block above the marker
+                // down to one line would make it a term, nesting a definition
+                // list where there were two blocks. Same guard a tight list
+                // item takes, and for the same reason — no blank line is
+                // available to separate them with.
+                let saved_wrap = Self::reflow_would_promote_a_definition_term(node)
+                    .then(|| self.config.wrap.replace(WrapMode::Preserve));
                 let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
 
                 // Emit base indentation before the marker
@@ -2517,6 +2525,9 @@ impl Formatter {
                 }
                 if !self.output.ends_with('\n') {
                     self.output.push('\n');
+                }
+                if let Some(saved) = saved_wrap {
+                    self.config.wrap = saved;
                 }
             }
 

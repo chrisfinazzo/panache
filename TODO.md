@@ -710,18 +710,32 @@ Three further definition-list divergences fixed alongside it:
   preserved line breaks for an item whose reflow would collapse the block
   above a marker into a one-line term
   (`reflow_would_promote_a_definition_term`).
+- [x] A marker **inside a definition body** opened a second `Definition` instead
+  of a second block in the same one: `T\n:   a\n    b\n    : def\n` is
+  `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]` for pandoc, which
+  reads the body in the same frame as a list item's, so the marker ends the
+  block above without starting a definition
+  (`definition_marker_breaks_open_definition_block`). It runs in the
+  definition-continuation branch of `parse_inner_content`, which flushes the
+  buffered `PLAIN` before the dispatcher gets a look — the `Definition` arm
+  of `DefinitionListParser::detect_prepared` would otherwise claim the line.
+  A marker *dedented* below the content column still opens a sibling
+  definition. The formatter takes the same preserved-line-breaks guard a
+  tight list item does (`reflow_would_promote_a_definition_term`), since
+  collapsing the block above the marker to one line would make it a term.
 
 Still open in the same area:
 
-- [ ] A marker **inside a definition body** opens a second `Definition` instead
-  of a second block in the same one: `T\n:   a\n    b\n    : def\n` is
-  `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]` for pandoc — the
-  body is read in the same list-item frame as an item's, so the marker ends
-  the paragraph without starting a definition. Panache splits the body into
-  two definitions. The fix is the definition-body analogue of
-  `definition_marker_breaks_open_list_item_block`, but it has to run
-  *before* the `Definition` arm of `DefinitionListParser::detect_prepared`
-  claims the line, which the list-item case never has to contend with.
+- [ ] A marker under a **single buffered line** of a definition body should make
+  that line a term of a *nested* definition list: `T\n:   a\n    : def\n` is
+  `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]` for
+  pandoc, and panache still gives two definitions of `T`. Same for a marker
+  following one that already broke the block
+  (`T\n:   a\n    b\n    : def\n    : def2\n`, where `: def` is pandoc's
+  term). Both need a term promoted out of already-buffered body content,
+  which `definition_marker_breaks_open_definition_block` deliberately leaves
+  alone — it only fires on a block that is already longer than a line and so
+  cannot be a term.
 - [ ] The same reflow-promotes-a-term idempotency failure survives when a
   **blank line** separates the two blocks: `- x\n\n  a\n  b\n\n  : def\n`
   formats to `- x\n\n  a b\n\n  : def\n`, which reparses as a definition

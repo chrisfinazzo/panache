@@ -633,6 +633,47 @@ fn a_marker_at_the_content_column_breaks_the_items_paragraph() {
 }
 
 #[test]
+fn a_marker_at_the_content_column_breaks_the_definition_body_block() {
+    // Pandoc re-reads a definition body from its content column, so a marker
+    // that reaches it is a block start inside the *same* definition, not a
+    // second one: `T\n:   a\n    b\n    : def` is
+    // `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]`.
+    for input in [
+        "T\n:   a\n    b\n    : def\n",
+        "T\n: a\n  b\n  : def\n",
+        "T\n:   a\n    b\n      : def\n",
+        "T\n:   a\n    b\n    ~ def\n",
+    ] {
+        let tree = parse_blocks(input);
+        let definitions = find_all(&tree, SyntaxKind::DEFINITION);
+        assert_eq!(definitions.len(), 1, "{input:?}");
+        let blocks: Vec<_> = definitions[0]
+            .children()
+            .map(|child| child.kind())
+            .filter(|kind| matches!(kind, SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
+            .collect();
+        assert_eq!(blocks, [SyntaxKind::PLAIN, SyntaxKind::PLAIN], "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_dedented_marker_still_opens_a_sibling_definition() {
+    // Below the body's content column the marker is a definition of the same
+    // term again, whatever the block above it is doing:
+    // `DefinitionList [(T, [[Plain "a b"], [Plain "def"]])]`.
+    for input in ["T\n:   a\n    b\n  : def\n", "T\n:   a\n    b\n: def\n"] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::DEFINITION).len(),
+            2,
+            "{input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
 fn definition_list_in_list_item_survives_siblings_and_trailing_blocks() {
     let input = "- Term\n  : def\n- Term2\n  : def2\n";
     let tree = parse_blocks(input);
