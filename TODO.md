@@ -1372,6 +1372,90 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
+- [ ] Consolidate container-frame resolution behind a single typed verdict.
+  There is no authoritative answer to "which container frame is this line
+  in, and does it reach the content column?", so every lookahead site picks
+  one of several overlapping helpers and a wrong pick fails only under a
+  specific container nesting.
+
+  The bug stream says this is where the defects are. Of the last 300 commits,
+  120 are fixes and 77 of those are `fix(parser)`; 44 of the 77 (57%) name a
+  frame concept (indent, column, list, item, blockquote, definition, lazy,
+  continuation). Keyword histogram: `list` 19, `item` 14, `definition` 11,
+  `indent` 9, `marker` 9, `table` 9, `lazy` 8. That is one question answered
+  wrongly many times, not a scatter of unrelated defects.
+
+  Current answers to that one question, all subtly different:
+
+  - `ContainerPrefix::strip` (`container_prefix.rs:337`) --- walks ops via
+    `advance_columns` (`:1050`), which counts *any* character as a column, so on
+    a short line it slices content off as if it were indent.
+  - `ContainerPrefix::line_carries_list_indent` (`:402`) --- vets only the
+    `ListAdvance` component; blockquote and content indent are stripped but
+    their absence is deliberately not reported.
+  - `ContainerPrefix::peek_prefix_at` (`:775`) --- already has its own open TODO
+    below for not being equivalent to `strip`.
+  - `ContainerPrefix::strip_line_0_for_emission` (`:435`) --- skips the
+    innermost `ListAdvance` under a flag.
+  - `strip_content_indent` --- degrades gracefully instead of reporting a short
+    line, which is exactly the signal callers need.
+  - `Parser::content_container_indent_to_strip` (`core.rs:4759`) --- sums
+    content columns into an *absolute*.
+  - `gobbled_indent_prefix_len` (`container_stack.rs:219`).
+  - Hand-rolled `leading_indent(x).0 >= content_col` at `core.rs:1106`,
+    `core.rs:1192`, `core.rs:4836`, `core.rs:4969`, and
+    `definition_lists.rs:101`.
+
+  Two live traps inside that list. First, `content_col` carries two conventions:
+  absolute (what `content_container_indent_to_strip` sums, and what every
+  hand-rolled dedent test compares against) versus relative-per-container (what
+  `from_stack` pushes as `ContentIndent` ops). Inside a list item the same
+  definition body reads 4 one way and 2 the other. Second, the source already
+  documents the divergences it cannot reconcile: `from_ctx` "may diverge from
+  `from_stack`" (`:161`), and `peek_prefix_at`'s dormancy claim rests on
+  `content_indent == 0`, which is false for every definition-list lookahead.
+
+  The guiding principle: a strip must not be able to report *what is left of a
+  line* without also reporting *whether the container indent it consumed was
+  real*. Replace the `&str` return with a typed verdict (`InsideFrame` /
+  `Dedented(cols)` / `FakedIndent`) so that today's class of bug becomes a type
+  error rather than a missing test. Fix the `content_col` convention at the same
+  time and state it once, in one doc comment.
+
+  Bounded steps, each landable on its own:
+
+  - [ ] Pin the current behavior of all eight paths as a table test over one
+    corpus of `(container stack, line)` pairs, including the shapes where
+    they disagree today. This is the safety net; nothing else starts without
+    it.
+  - [ ] Settle the `content_col` convention (absolute or relative) and make
+    `from_stack` and `content_container_indent_to_strip` agree.
+  - [ ] Introduce the typed verdict alongside the existing API and migrate the
+    five hand-rolled `leading_indent` sites first --- they are the smallest
+    and each has existing coverage.
+  - [ ] Migrate the lookahead callers (`next_line_is_definition_marker`,
+    `next_is_definition_term_below`, the caption and term probes), then
+    delete whichever of `peek_prefix_at` / `line_carries_list_indent` the
+    verdict subsumes. Closes the `peek_prefix_at` item below.
+
+  Secondary, and worth folding in once the above lands: containers hold text in
+  `ParagraphBuffer` / `ListItemBuffer` *outside* the green builder, and a
+  classification can only be revised while it is still buffered --- once flushed
+  it is a `PLAIN` that cannot be retagged. The definition-list series has now
+  asked "is this line a term?" at three different moments (the marker line, the
+  dispatcher's `Term` arm, and blank-line flush time), each a separate site to
+  keep in sync. The single-pass rule in `AGENTS.md` is right; what is missing is
+  one mechanism for plumbing the lookahead, so each site hand-rolls it with a
+  different strip helper.
+
+  Two honest caveats for whoever picks this up. Only 9 of 55 open TODO items are
+  frame-related, well under the 57% in the fix history --- frame bugs are
+  reachable from real documents and so get found and fixed, meaning this
+  dominates past work more than it does the remaining backlog. And the claim
+  that consolidation cuts the bug rate is judgment, not measurement; what is
+  measured is that the divergences exist and are already documented in the
+  source.
+
 ## Parser - Coverage
 
 This section tracks implementation status of Pandoc Markdown features based on
