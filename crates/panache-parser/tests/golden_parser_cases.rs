@@ -263,6 +263,7 @@ golden_test_cases!(
     definition_term_not_paragraph_continuation_blockquote,
     definition_term_requires_list_indent,
     definition_term_requires_list_indent_blockquote,
+    definition_marker_ends_list_item_block,
     definition_term_requires_single_line_block,
     display_math,
     display_math_blank_line_termination,

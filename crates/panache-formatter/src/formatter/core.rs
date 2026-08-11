@@ -1708,6 +1708,22 @@ impl Formatter {
             }
 
             SyntaxKind::PARAGRAPH => {
+                // A paragraph pressed straight against the list above it is
+                // lazy continuation on reparse: the list swallows it and the
+                // two blocks merge. The parser only leaves them adjacent where
+                // pandoc does — a definition marker dedented out of the item
+                // it followed — so separate them here to keep the round-trip
+                // stable.
+                if indent == 0
+                    && node
+                        .prev_sibling()
+                        .is_some_and(|prev| prev.kind() == SyntaxKind::LIST)
+                    && self.output.ends_with('\n')
+                    && !self.output.ends_with("\n\n")
+                {
+                    self.output.push('\n');
+                }
+
                 let para_start = self.output.len();
                 let text = node.text().to_string();
                 log::trace!("Formatting paragraph, text length: {}", text.len());

@@ -3,6 +3,7 @@ use crate::formatter::indent_utils::{calculate_list_item_indent, is_alignable_ma
 use crate::formatter::inline_layout::{self, WrapStrategy};
 use crate::formatter::tables;
 use crate::syntax::{AstNode, BlockQuote, FencedDiv, SyntaxKind, SyntaxNode};
+use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use rowan::NodeOrToken;
 
 use super::Formatter;
@@ -585,7 +586,42 @@ impl Formatter {
     }
 
     /// Format a ListItem node
+    /// Whether reflowing this item's content would manufacture a definition
+    /// term out of it.
+    ///
+    /// Two adjacent plain blocks where the second starts with a `:` or `~`
+    /// marker only stay two blocks while the first one is longer than a line:
+    /// a one-line block above a marker *is* a term, so wrapping `a\nb` down to
+    /// `a b` turns `[Plain, Plain]` into a `DefinitionList` on reparse. A tight
+    /// item has no blank line to separate the two with, so the only rendering
+    /// that survives a round-trip is the source's own line breaks.
+    fn reflow_would_promote_a_definition_term(item: &SyntaxNode) -> bool {
+        item.children()
+            .filter(|child| matches!(child.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
+            .filter_map(|child| child.next_sibling())
+            .filter(|next| matches!(next.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
+            .any(|next| {
+                next.text()
+                    .to_string()
+                    .lines()
+                    .next()
+                    .and_then(|line| try_parse_definition_marker(line.trim_start()))
+                    .is_some()
+            })
+    }
+
     pub(super) fn format_list_item(&mut self, node: &SyntaxNode, indent: usize) {
+        if Self::reflow_would_promote_a_definition_term(node) {
+            let saved = self.config.wrap.clone();
+            self.config.wrap = Some(WrapMode::Preserve);
+            self.format_list_item_inner(node, indent);
+            self.config.wrap = saved;
+        } else {
+            self.format_list_item_inner(node, indent);
+        }
+    }
+
+    fn format_list_item_inner(&mut self, node: &SyntaxNode, indent: usize) {
         // Pre-pass: Process any directive comments to update tracker state
         for child in node.children() {
             if matches!(

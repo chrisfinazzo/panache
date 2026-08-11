@@ -1010,6 +1010,43 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Whether a definition marker on this line has to *end* the list item
+    /// content above it rather than continue it.
+    ///
+    /// Pandoc reads a definition marker where a block may start, and inside a
+    /// list item its `endline` refuses to cross a block start, so the marker
+    /// is neither a soft nor a lazy continuation of the text above it. It is
+    /// not a definition either: a term is a one-line block, and the block
+    /// above this line is still open, so no term precedes the marker. What is
+    /// left is an ordinary paragraph, placed by the marker's own indent:
+    ///
+    /// - `- a\n  b\n  : def` -> `BulletList [[Plain "a b", Plain ": def"]]`,
+    ///   the marker reaching the item's content column and staying inside it;
+    /// - `- Term\n: def` -> `BulletList [[Plain "Term"]]` + `Para ": def"`,
+    ///   the dedented marker landing outside the item altogether.
+    ///
+    /// Only a list item guards its `endline` this way. At top level and inside
+    /// a blockquote pandoc keeps `a\nb\n: def` a single paragraph, so this
+    /// asks for a list item whose content is still buffered — the state the
+    /// two cases above share, and the one an already-open definition list
+    /// never reaches (its marker is claimed as a `Definition` upstream).
+    fn definition_marker_breaks_open_list_item_block(&self, content: &str) -> bool {
+        if !self.config.extensions.definition_lists || !self.is_list_item_content_open() {
+            return false;
+        }
+        let content_col = paragraphs::current_content_col(&self.containers);
+        let Some((marker, ..)) =
+            definition_lists::definition_marker_in_list_frame(content, Some(content_col))
+        else {
+            return false;
+        };
+        // Same table-caption escape the term lookaheads take: a `:` line that
+        // introduces a table is not a definition marker at all.
+        !(marker == ':'
+            && self.config.extensions.table_captions
+            && super::blocks::tables::is_caption_followed_by_table(&self.lines[..], self.pos))
+    }
+
     /// Append `line` to whichever open text buffer is holding the current
     /// block's content — the paragraph's, or the list item's.
     ///
@@ -5413,6 +5450,14 @@ impl<'a> Parser<'a> {
             if new_pos > self.pos {
                 return LineDispatch::consumed(new_pos - self.pos);
             }
+        }
+
+        // A definition marker cannot be swallowed as continuation text of the
+        // item content above it; flush that content first so this line starts
+        // its own block, and drop the containers its indent no longer reaches.
+        if self.definition_marker_breaks_open_list_item_block(content) {
+            self.emit_list_item_buffer_if_needed();
+            self.close_lists_above_indent(leading_indent(content).0);
         }
 
         // Paragraph or list item continuation

@@ -679,7 +679,7 @@ parse that is wrong:
     across the whole series (the earlier note expecting a delta was wrong — both
     suites were already at 100%).
 
-Two further definition-list divergences fixed alongside it:
+Three further definition-list divergences fixed alongside it:
 
 - [x] A term had to be a **one-line block**, as pandoc requires: `a\nb\n\n: def`
   is two `Para`s, not a definition list on `b`. Panache promoted the last
@@ -695,17 +695,42 @@ Two further definition-list divergences fixed alongside it:
   and the dispatcher never sees the marker line. Required reading markers at
   the item's content column (`definition_marker_in_list_frame`) so the
   four-space rule and nested items keep working.
-
-Still open in the same area:
-
-- [ ] A **dedented** marker after a list item folds into the item as a lazy
-  continuation: `- Term\n: def\n` and `- Term\n : def\n` give
+- [x] A **dedented** marker after a list item folded into the item as a lazy
+  continuation: `- Term\n: def\n` and `- Term\n : def\n` gave
   `BulletList [[Plain [Term, SoftBreak, ":", Space, "def"]]]` where pandoc
   closes the list and emits `Para [Str ":", Space, Str "def"]`. Same for
   `- a\n  b\n  : def\n`, where pandoc splits the item into two `Plain`s and
-  panache keeps one. Both used to produce the impossible
-  `DefinitionList [([], ...)]`, so this is what is left after that was
-  fixed.
+  panache kept one. A definition marker is a *block start*, and pandoc's
+  `endline` refuses to cross one while it is reading a list item, so it can
+  be neither a soft nor a lazy continuation there
+  (`definition_marker_breaks_open_list_item_block`); the marker's own indent
+  then decides whether it stays in the item or drops out of the list. Needed
+  two formatter guards, since neither shape survived a round-trip otherwise:
+  a blank line between a `LIST` and a `PARAGRAPH` pressed against it, and
+  preserved line breaks for an item whose reflow would collapse the block
+  above a marker into a one-line term
+  (`reflow_would_promote_a_definition_term`).
+
+Still open in the same area:
+
+- [ ] A marker **inside a definition body** opens a second `Definition` instead
+  of a second block in the same one: `T\n:   a\n    b\n    : def\n` is
+  `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]` for pandoc — the
+  body is read in the same list-item frame as an item's, so the marker ends
+  the paragraph without starting a definition. Panache splits the body into
+  two definitions. The fix is the definition-body analogue of
+  `definition_marker_breaks_open_list_item_block`, but it has to run
+  *before* the `Definition` arm of `DefinitionListParser::detect_prepared`
+  claims the line, which the list-item case never has to contend with.
+- [ ] The same reflow-promotes-a-term idempotency failure survives when a
+  **blank line** separates the two blocks: `- x\n\n  a\n  b\n\n  : def\n`
+  formats to `- x\n\n  a b\n\n  : def\n`, which reparses as a definition
+  list on `a b`. Pre-existing, and not what
+  `reflow_would_promote_a_definition_term` guards — it deliberately looks at
+  the *immediate* sibling only. Here a blank line already separates the
+  blocks, so escaping the marker is enough; the fix is to run
+  `guard_definition_marker_start` from `format_list_continuation_paragraph`,
+  which currently never calls it.
 - [ ] `next_line_is_definition_marker` still cannot see a marker whose indent is
   a **tab straddling** the item's content column: `- a\n\n  b\n\n\t: def\n`
   yields three paragraphs where pandoc yields a definition list. The strip,

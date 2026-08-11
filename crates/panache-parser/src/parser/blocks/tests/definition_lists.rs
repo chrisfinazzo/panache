@@ -1,4 +1,6 @@
-use super::helpers::{assert_block_kinds, find_all, find_first, parse_blocks};
+use super::helpers::{
+    assert_block_kinds, assert_block_kinds_for_node, find_all, find_first, parse_blocks,
+};
 use crate::syntax::SyntaxKind;
 
 #[test]
@@ -595,6 +597,39 @@ fn a_dedented_marker_does_not_make_the_marker_line_a_term() {
         let tree = parse_blocks(input);
         assert!(find_first(&tree, SyntaxKind::TERM).is_none(), "{input:?}");
     }
+}
+
+#[test]
+fn a_dedented_marker_closes_the_list_instead_of_continuing_it() {
+    // A definition marker is a block start, so it is not lazy continuation
+    // text. Dedented below the item's content column it lands outside the
+    // item entirely: pandoc gives `BulletList [[Plain "Term"]]` followed by
+    // `Para [":", Space, "def"]`.
+    for input in ["- Term\n: def\n", "- Term\n : def\n"] {
+        let tree = parse_blocks(input);
+        assert_block_kinds_for_node(&tree, &[SyntaxKind::LIST, SyntaxKind::PARAGRAPH], input);
+        let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+        assert_eq!(item.text().to_string(), "- Term\n", "{input:?}");
+        assert_eq!(tree.text().to_string(), input, "{input:?}");
+    }
+}
+
+#[test]
+fn a_marker_at_the_content_column_breaks_the_items_paragraph() {
+    // Same rule one column further in: the marker still cannot continue the
+    // paragraph, but it does stay inside the item, so pandoc splits the item
+    // into `Plain [a, SoftBreak, b]` and `Plain [":", Space, "def"]`.
+    let input = "- a\n  b\n  : def\n";
+    let tree = parse_blocks(input);
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
+    let blocks: Vec<_> = item
+        .children()
+        .map(|c| c.kind())
+        .filter(|k| matches!(k, SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH))
+        .collect();
+    assert_eq!(blocks, [SyntaxKind::PLAIN, SyntaxKind::PLAIN]);
+    assert!(find_first(&tree, SyntaxKind::DEFINITION_LIST).is_none());
+    assert_eq!(tree.text().to_string(), input);
 }
 
 #[test]
