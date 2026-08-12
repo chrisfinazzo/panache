@@ -833,18 +833,52 @@ through `ContentColStripView` (per-line `content_col` strip over the caller's
 view). Pinned by `footnote_body_table_caption` (parser) and
 `footnote_body_simple_table` (formatter).
 
-One more in the caption probe, latent rather than failing (review finding on the
-container-frame PR, no reproducer yet):
+The review finding that used to sit here — that the probe's container bound vets
+only the line the grid check *starts* on, leaving `table_grid_starts_at`'s
+`pos + 1` and `find_single_column_table_end`'s scan unvetted — is resolved, but
+not the way it was written:
 
-- [ ] The probe's container bound vets only the line the grid check *starts* on:
-  `is_caption_followed_by_table` runs `inside_container` on `pos`, but
-  `table_grid_starts_at` also reads `pos + 1` (the header-plus-separator
-  shape) and `find_single_column_table_end` scans further down, all
-  unvetted. A header at the content column with a dedented separator below
-  it could still read as the caption's table. Finding a repro needs a line
-  that is a valid table separator *and* a plausible block at the outer
-  level, so treat this as a bound-tightening refactor and verify any
-  candidate against `pandoc -f markdown -t native` first.
+- [x] **The indent bound needs no widening.** Every line the lookahead reads
+  past the vetted one is *contiguous* with it (the scan stops at the first
+  blank line), and pandoc admits a contiguous dedent into a container as a
+  lazy continuation.
+  `Term\n\n:   body\n\n    : cap\n\n    A    B\n--- ---\n…` and its
+  single-column twin both parse as a table *inside* the definition body
+  under `pandoc -f markdown -t native`; tightening the frame bound over the
+  tail would turn those into false negatives. Pinned by
+  `caption_probe_frame_bound_admits_lazy_continuations`.
+- [x] **The bound that was actually missing is the fenced-div closer**, which
+  the frame verdict cannot see: a bare `:::` carries no indent, yet it ends
+  the raw-line run of every container it sits in (pandoc collects list-item,
+  definition-body, and blockquote lines under `notFollowedByDivCloser`). The
+  gap was not caption-specific — `find_table_end` crossed it too, with no
+  caption in sight, so `::: note\n\n> A    B\n> --- ---\n> x    y\n:::\n`
+  had the table swallow the fence as a row and the div never closed. Now
+  `ContainerPrefix::div_closer_ends_lines` records the ordering pandoc's div
+  level encodes (a div *outside* the line-collected container; a div nested
+  inside it was opened after those lines were already collected), exposed on
+  `LineView` as `ends_container_lines` and consulted by both end scans.
+  Pinned by `simple_table_in_a_quoted_div_ends_at_the_div_closer`,
+  `single_column_table_needs_its_closer_before_the_div_closer`,
+  `stray_div_closer_in_a_definition_body_stays_a_table_row`, and
+  `div_closer_ends_lines_needs_the_div_outside`, plus two parser golden
+  cases.
+
+Two things noticed while verifying the above, both out of that item's scope:
+
+- [ ] `table_grid_starts_at`'s bare-dash-run branch was dead:
+  `parse_single_dash_run` and `try_parse_multiline_separator` accept exactly
+  the same lines, so the multiline check above it always won and the
+  closing-dash gate its comment advertised never ran. The branch is gone and
+  the comment now says what the probe really does (it does not check either
+  kind's closer — a caption whose table then fails to parse falls back to a
+  paragraph). If the multiline check is ever narrowed, the single-column
+  shape needs its own gate back.
+- [ ] Simple tables inside a blockquote are **not idempotent**:
+  `> A    B\n> --- ---\n> x    y\n` reformats to `>   A B` / `>   x y` on
+  pass 2, shifting cells out of their columns. Unrelated to the div bound
+  (reproduces on the bare quote, and before the fix too), but it means
+  `debug format --checks all` fails on any such document.
 
 Also still open, but **do not fix these individually** — they are input to
 "Consolidate container-frame resolution behind a single typed verdict" under

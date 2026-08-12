@@ -44,6 +44,24 @@ pub(crate) trait LineView {
     fn frame_verdict(&self, i: usize) -> FrameVerdict<'_> {
         FrameVerdict::Inside { rest: self.line(i) }
     }
+
+    /// Whether line `i` ends the enclosing container's line run — the
+    /// second half of the container bound, for the boundary the frame
+    /// verdict cannot see.
+    ///
+    /// [`Self::frame_verdict`] bounds a scan by *indent*, which settles
+    /// every dedent that follows a blank line. It says nothing about a
+    /// bare `:::`, which carries no indent yet closes the div it sits
+    /// in: pandoc collects a list item's / definition body's /
+    /// blockquote's raw lines with `notFollowedByDivCloser`, so the run
+    /// stops there and the block the scan was tracking cannot continue
+    /// past it. Without this bound a table swallows the fence as a row
+    /// and the div never closes.
+    ///
+    /// Defaults to `false`: a raw line slice has no container to end.
+    fn ends_container_lines(&self, _i: usize) -> bool {
+        false
+    }
 }
 
 impl LineView for [&str] {
@@ -75,6 +93,9 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
             self.prefix().resolve(self.raw()[i])
         }
     }
+    fn ends_container_lines(&self, i: usize) -> bool {
+        self.prefix().div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i])
+    }
 }
 
 /// A [`LineView`] over a [`StrippedLines`] window that strips *every* line —
@@ -94,6 +115,9 @@ impl<'s, 'a, 'p> LineView for UniformStripView<'s, 'a, 'p> {
     }
     fn line_count(&self) -> usize {
         self.0.raw().len()
+    }
+    fn ends_container_lines(&self, i: usize) -> bool {
+        self.0.ends_container_lines(i)
     }
 }
 
@@ -126,6 +150,9 @@ impl<V: LineView + ?Sized> LineView for ContentColStripView<'_, V> {
             return inner_verdict;
         }
         super::container_prefix::resolve_content_indent(self.inner.line(i), self.content_col)
+    }
+    fn ends_container_lines(&self, i: usize) -> bool {
+        self.inner.ends_container_lines(i)
     }
 }
 
@@ -269,6 +296,13 @@ fn find_single_column_table_end(lines: &(impl LineView + ?Sized), start: usize) 
         if line.trim().is_empty() {
             return None;
         }
+        // The closing dash line must arrive before the container's line
+        // run ends, same as before the first blank line — a `:::` that
+        // closes the enclosing div takes everything below it out of
+        // reach. Without a closer the opener is a horizontal rule.
+        if lines.ends_container_lines(i) {
+            return None;
+        }
         if try_parse_table_separator(line).is_some() || parse_single_dash_run(line).is_some() {
             return saw_row.then_some(i + 1);
         }
@@ -343,6 +377,15 @@ fn bare_colon_caption_looks_like_definition_code_block(line: &str) -> bool {
     };
     let trimmed = rest.trim_start();
     trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+/// A bare fenced-div *closer*: three or more colons and nothing else.
+/// Stricter than [`line_is_fenced_div_fence`], which also accepts an
+/// opening fence (`::: note`). Container line runs stop at closers only
+/// — an opener starts a nested div, which is ordinary content.
+fn line_is_fenced_div_closer(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.len() >= 3 && trimmed.chars().all(|c| c == ':')
 }
 
 fn line_is_fenced_div_fence(line: &str) -> bool {
@@ -478,19 +521,14 @@ fn table_grid_starts_at(lines: &(impl LineView + ?Sized), pos: usize) -> bool {
         return true;
     }
 
-    // Multiline table start (`----` or `---- ---- ----`).
+    // Multiline table start (`----` or `---- ---- ----`), which also covers
+    // the bare dash run opening a headerless single-column simple table --
+    // `try_parse_multiline_separator` and `parse_single_dash_run` accept
+    // exactly the same lines. Both kinds need a closing dash line the real
+    // parsers demand and this probe does not check: the caption's verdict
+    // only decides whether the line is *caption-shaped*, and a caption whose
+    // table then fails to parse falls back to a paragraph anyway.
     if is_multiline_table_start(line) {
-        return true;
-    }
-
-    // Bare dash run opening a headerless single-column simple table. Runs of
-    // three or more dashes already matched the multiline check above; this
-    // catches the two-dash opener pandoc also accepts. It is gated on the
-    // closing dash line the real parser requires (a scan bounded by the first
-    // blank line) so the probe stays in agreement with `try_parse_simple_table`.
-    if parse_single_dash_run(line).is_some()
-        && find_single_column_table_end(lines, pos + 1).is_some()
-    {
         return true;
     }
 
@@ -1122,7 +1160,10 @@ fn find_table_end(
 ) -> Option<(usize, bool)> {
     let mut saw_row = false;
     for i in start_pos..lines.line_count() {
-        if lines.line(i).trim().is_empty() {
+        // A `:::` closing the enclosing div ends the container's line
+        // run, so it bounds the table exactly like a blank line does:
+        // the fence is the div's, never a row.
+        if lines.line(i).trim().is_empty() || lines.ends_container_lines(i) {
             return (!require_closer).then_some((i, false));
         }
         // Check if this could be a closing separator (next line blank or EOF)

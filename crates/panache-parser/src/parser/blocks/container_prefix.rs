@@ -102,6 +102,23 @@ pub(crate) struct ContainerPrefix {
     /// reads its body straight out of `lines[..]` through this prefix, so
     /// without the gobble here only its first line is de-indented.
     pub lazy_blockquote_gobble: bool,
+    /// True when a fenced div was opened *outside* a line-collected
+    /// container (list item, definition/footnote body, blockquote) that
+    /// this prefix strips. Pandoc collects those containers' raw lines
+    /// with `notFollowedByDivCloser`, so a bare `:::` ends the run: the
+    /// closer belongs to the div, not to whatever block the container's
+    /// content was in the middle of. Lookaheads that scan for a block's
+    /// end (see [`LineView::ends_container_lines`]) stop there instead
+    /// of swallowing the fence.
+    ///
+    /// The div must be *outside*: pandoc's div level is set when the
+    /// opening fence is parsed, which for a div nested inside the
+    /// container happens only after the container's lines were already
+    /// collected. A stack of `[Definition, FencedDiv]` therefore leaves
+    /// this false, and a `:::` inside is collected as ordinary content.
+    ///
+    /// [`LineView::ends_container_lines`]: super::tables::LineView::ends_container_lines
+    div_closer_ends_lines: bool,
 }
 
 impl ContainerPrefix {
@@ -124,33 +141,44 @@ impl ContainerPrefix {
         dialect: Dialect,
     ) -> Self {
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
-        let mut pending_list_advance: Option<u32> = None;
+        // `(content_col, a div is open outside this item)`, flushed below.
+        let mut pending_list_advance: Option<(u32, bool)> = None;
+        // Set by a `FencedDiv` seen so far in the walk, i.e. outside every
+        // container pushed after it. See `div_closer_ends_lines`.
+        let mut div_open = false;
+        let mut div_closer_ends_lines = false;
         for c in stack {
             match c {
                 Container::BlockQuote { .. } => {
-                    if let Some(la) = pending_list_advance.take() {
+                    if let Some((la, la_div)) = pending_list_advance.take() {
                         ops.push(StripOp::ListAdvance(la));
+                        div_closer_ends_lines |= la_div;
                     }
                     ops.push(StripOp::BlockQuoteMarker);
+                    div_closer_ends_lines |= div_open;
                 }
                 Container::FootnoteDefinition { content_col, .. }
                 | Container::Definition { content_col, .. }
                 | Container::Admonition { content_col } => {
-                    if let Some(la) = pending_list_advance.take() {
+                    if let Some((la, la_div)) = pending_list_advance.take() {
                         ops.push(StripOp::ListAdvance(la));
+                        div_closer_ends_lines |= la_div;
                     }
                     ops.push(StripOp::ContentIndent(*content_col as u32));
+                    div_closer_ends_lines |= div_open;
                 }
                 Container::ListItem { content_col, .. } => {
                     // Keep only the innermost ListItem within this section
                     // (overwrites any previous pending value).
-                    pending_list_advance = Some(*content_col as u32);
+                    pending_list_advance = Some((*content_col as u32, div_open));
                 }
+                Container::FencedDiv { .. } => div_open = true,
                 _ => {}
             }
         }
-        if let Some(la) = pending_list_advance {
+        if let Some((la, la_div)) = pending_list_advance {
             ops.push(StripOp::ListAdvance(la));
+            div_closer_ends_lines |= la_div;
         }
         // The `content_col` convention (see `Container`): content
         // containers carry relative widths, so the ContentIndent ops --
@@ -171,6 +199,7 @@ impl ContainerPrefix {
             ops,
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: dialect == Dialect::Pandoc,
+            div_closer_ends_lines,
         }
     }
 
@@ -211,7 +240,10 @@ impl ContainerPrefix {
         Self {
             ops,
             list_marker_consumed_on_line_0: false,
+            // No stack access here, so the div-vs-container ordering is
+            // unknowable; today's behaviour (collect the fence) stands.
             lazy_blockquote_gobble: ctx.config.dialect == Dialect::Pandoc,
+            div_closer_ends_lines: false,
         }
     }
 
@@ -228,6 +260,7 @@ impl ContainerPrefix {
             ops,
             list_marker_consumed_on_line_0: false,
             lazy_blockquote_gobble: false,
+            div_closer_ends_lines: false,
         }
     }
 
@@ -295,11 +328,18 @@ impl ContainerPrefix {
             ops,
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: dialect == Dialect::Pandoc,
+            div_closer_ends_lines: false,
         }
     }
 
     pub fn ops(&self) -> &[StripOp] {
         &self.ops
+    }
+
+    /// See the field of the same name: whether a bare `:::` ends the
+    /// line run of the container this prefix strips.
+    pub fn div_closer_ends_lines(&self) -> bool {
+        self.div_closer_ends_lines
     }
 
     /// Total number of `BlockQuoteMarker` ops. Kept as a back-compat
@@ -348,6 +388,7 @@ impl ContainerPrefix {
             ops: SmallVec::from_slice(ops_slice),
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: false,
+            div_closer_ends_lines: false,
         }
     }
 
@@ -397,6 +438,7 @@ impl ContainerPrefix {
             ops,
             list_marker_consumed_on_line_0: self.list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: self.lazy_blockquote_gobble,
+            div_closer_ends_lines: self.div_closer_ends_lines,
         }
     }
 

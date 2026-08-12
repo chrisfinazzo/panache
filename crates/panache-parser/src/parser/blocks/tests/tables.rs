@@ -138,3 +138,90 @@ fn bodyless_pipe_table_does_not_cap_under_commonmark() {
     assert_eq!(outer.kind(), SyntaxKind::BLOCK_QUOTE);
     assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
 }
+
+// ---------------------------------------------------------------------------
+// Container line runs end at a fenced-div closer
+//
+// pandoc collects a list item's / definition body's / blockquote's raw lines
+// before parsing them as blocks, and that collection runs under
+// `notFollowedByDivCloser`. So a bare `:::` inside an open div ends the run:
+// the fence belongs to the div, and no table scan started inside the
+// container may reach past it. The container-frame bound cannot see this --
+// a closer at column 0 carries no indent to compare.
+
+/// `pandoc -f markdown -t native`: BlockQuote [Table ...], the div closes,
+/// and `after` is a sibling of the div. The closer is never a table row.
+#[test]
+fn simple_table_in_a_quoted_div_ends_at_the_div_closer() {
+    let input = "::: note\n\n> A    B\n> --- ---\n> x    y\n:::\n\nafter\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        child_kinds(&node),
+        vec![
+            SyntaxKind::FENCED_DIV,
+            SyntaxKind::BLANK_LINE,
+            SyntaxKind::PARAGRAPH
+        ],
+        "the div closes at `:::`, so `after` sits outside it"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table inside the quote");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A headerless single-column table needs its closing dash line before the
+/// container's lines end. `pandoc -f markdown -t native` on this document
+/// has no table at all: the body is `Para [-- x]` and the trailing `--`
+/// opens a table outside the div.
+#[test]
+fn single_column_table_needs_its_closer_before_the_div_closer() {
+    let input = "::: note\n\nTerm\n\n:   body\n\n    --\n    x\n:::\n--\ny\n--\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let div = node.children().next().expect("div");
+    assert_eq!(div.kind(), SyntaxKind::FENCED_DIV);
+    assert!(
+        first_of(&div, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the closing dash line is out of reach, so `--` stays a paragraph"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::SIMPLE_TABLE).is_some(),
+        "the table below the div is unaffected"
+    );
+}
+
+/// The bound is gated on a div being open *outside* the container: pandoc
+/// raises its div level when the opening fence is parsed, so a stray `:::`
+/// with no div to close is collected as ordinary content. Here
+/// `pandoc -f markdown -t native` puts the fence in the table as a row.
+#[test]
+fn stray_div_closer_in_a_definition_body_stays_a_table_row() {
+    let input = "Term\n\n:   body\n\n    --\n    x\n:::\n--\ny\n--\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the body");
+    assert!(
+        table.text().to_string().contains(":::"),
+        "with no div open the fence is a row: {}",
+        table.text()
+    );
+}

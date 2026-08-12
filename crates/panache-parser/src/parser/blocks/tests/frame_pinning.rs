@@ -557,3 +557,57 @@ fn definition_list_nests_inside_footnote_body() {
     );
     assert_lossless(input);
 }
+
+/// What the caption probe's container bound deliberately does *not*
+/// reject. The bound settles indent, and indent only decides a dedent
+/// that follows a blank line: every line the grid lookahead reads past
+/// the vetted one is contiguous with it, and pandoc admits a contiguous
+/// dedent into the container as a lazy continuation. Both shapes below
+/// parse as a table inside the definition body under
+/// `pandoc -f markdown -t native`, so widening the frame bound over the
+/// lookahead tail would be a false negative, not a fix.
+#[test]
+fn caption_probe_frame_bound_admits_lazy_continuations() {
+    let prefix = ContainerPrefix::from_ops(&[StripOp::ContentIndent(4)], false);
+
+    // Header at the content column, separator dedented on the next line.
+    let header_sep = [
+        "    : cap",
+        "",
+        "    A    B",
+        "--- ---",
+        "x    y",
+        "--- ---",
+    ];
+    let view = StrippedLines::new(&header_sep, 0, &prefix);
+    assert!(is_caption_followed_by_table(&view, 0));
+
+    // Single-column opener at the content column, whose closing dash line
+    // -- which `try_parse_simple_table` does demand -- is dedented.
+    let single_col = ["    : cap", "", "    --", "    x", "--"];
+    let view = StrippedLines::new(&single_col, 0, &prefix);
+    assert!(is_caption_followed_by_table(&view, 0));
+}
+
+/// `div_closer_ends_lines` tracks *ordering*, not mere presence: pandoc
+/// raises its div level when the opening fence is parsed, which for a
+/// div nested inside the container happens only after that container's
+/// lines were collected.
+#[test]
+fn div_closer_ends_lines_needs_the_div_outside() {
+    let p = |stack: &[Container]| {
+        ContainerPrefix::from_stack(stack, false, Dialect::Pandoc).div_closer_ends_lines()
+    };
+    assert!(p(&[fenced_div(0), definition(4)]));
+    assert!(p(&[fenced_div(0), Container::BlockQuote {}]));
+    assert!(p(&[fenced_div(0), list(), list_item(2)]));
+    // Div inside the container, or with no line-collected container at
+    // all: the fence is content.
+    assert!(!p(&[definition(4), fenced_div(0)]));
+    assert!(!p(&[fenced_div(0)]));
+    assert!(!p(&[]));
+}
+
+fn fenced_div(open_indent_cols: usize) -> Container {
+    Container::FencedDiv { open_indent_cols }
+}

@@ -1,0 +1,50 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..51
+  FENCED_DIV@0..43
+    DIV_FENCE_OPEN@0..9
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..8
+        TEXT@4..8 "note"
+      NEWLINE@8..9 "\n"
+    BLANK_LINE@9..10
+      BLANK_LINE@9..10 "\n"
+    DEFINITION_LIST@10..39
+      DEFINITION_ITEM@10..39
+        TERM@10..15
+          TEXT@10..14 "Term"
+          NEWLINE@14..15 "\n"
+        BLANK_LINE@15..16
+          BLANK_LINE@15..16 "\n"
+        DEFINITION@16..39
+          DEFINITION_MARKER@16..17 ":"
+          WHITESPACE@17..20 "   "
+          PLAIN@20..25
+            TEXT@20..24 "body"
+            NEWLINE@24..25 "\n"
+          BLANK_LINE@25..26
+            BLANK_LINE@25..26 "\n"
+          PARAGRAPH@26..39
+            WHITESPACE@26..30 "    "
+            TEXT@30..32 "--"
+            NEWLINE@32..33 "\n"
+            WHITESPACE@33..37 "    "
+            TEXT@37..38 "x"
+            NEWLINE@38..39 "\n"
+    DIV_FENCE_CLOSE@39..43
+      TEXT@39..42 ":::"
+      NEWLINE@42..43 "\n"
+  SIMPLE_TABLE@43..51
+    TABLE_SEPARATOR@43..46
+      TABLE_SEP_DASHES@43..45 "--"
+      NEWLINE@45..46 "\n"
+    TABLE_ROW@46..48
+      TABLE_CELL@46..47
+        TEXT@46..47 "y"
+      NEWLINE@47..48 "\n"
+    TABLE_SEPARATOR@48..51
+      TABLE_SEP_DASHES@48..50 "--"
+      NEWLINE@50..51 "\n"
