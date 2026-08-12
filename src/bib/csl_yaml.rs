@@ -2,7 +2,7 @@ use rowan::ast::AstNode as _;
 use std::collections::HashMap;
 
 use crate::bib::{ParsedEntry, Span};
-use crate::syntax::{YamlBlockMap, YamlBlockMapValue, parse_yaml_document};
+use crate::syntax::{YamlBlockMap, YamlBlockMapValue, YamlBlockSequence, parse_yaml_document};
 
 /// Parse CSL-YAML file and extract full entry data (id, type, fields).
 ///
@@ -41,11 +41,36 @@ fn parse_csl_entry_maps(input: &str) -> Result<Vec<YamlBlockMap>, String> {
     let document = parse_yaml_document(input)
         .ok_or_else(|| "Invalid CSL-YAML: missing root node".to_string())?;
     if let Some(map) = document.block_map() {
+        // Pandoc's canonical CSL-YAML shape (and Better BibTeX's export) is a
+        // mapping with the entries under a `references` key. A root map
+        // without that key is kept as a single entry for leniency.
+        if let Some(refs) = map.value_of("references") {
+            return references_entry_maps(&refs);
+        }
         return Ok(vec![map]);
     }
     let seq = document
         .block_sequence()
         .ok_or_else(|| "Invalid CSL-YAML: expected sequence of entries".to_string())?;
+    sequence_entry_maps(&seq)
+}
+
+fn references_entry_maps(refs: &YamlBlockMapValue) -> Result<Vec<YamlBlockMap>, String> {
+    if refs.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(seq) = refs.as_block_sequence() {
+        return sequence_entry_maps(&seq);
+    }
+    if let Some(flow) = refs.as_flow_sequence()
+        && flow.items().next().is_none()
+    {
+        return Ok(Vec::new());
+    }
+    Err("Invalid CSL-YAML: 'references' must be a sequence of entries".to_string())
+}
+
+fn sequence_entry_maps(seq: &YamlBlockSequence) -> Result<Vec<YamlBlockMap>, String> {
     let mut entries = Vec::new();
     for item in seq.items() {
         let Some(map) = item.as_block_map() else {
@@ -114,4 +139,54 @@ fn find_yaml_id_span(input: &str, id: &str) -> Span {
 
     // Fallback: zero span
     Span { start: 0, end: 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(input: &str) -> Vec<String> {
+        parse_csl_yaml_full(input)
+            .expect("parse should succeed")
+            .into_iter()
+            .map(|(id, _, _, _)| id)
+            .collect()
+    }
+
+    #[test]
+    fn parses_bare_entry_sequence() {
+        let input = "- id: item1\n  title: First\n- id: item2\n  title: Second\n";
+        assert_eq!(ids(input), ["item1", "item2"]);
+    }
+
+    #[test]
+    fn parses_references_map() {
+        let input = "references:\n- id: item1\n  title: First\n- id: item2\n  title: Second\n";
+        assert_eq!(ids(input), ["item1", "item2"]);
+    }
+
+    #[test]
+    fn parses_references_map_with_document_markers() {
+        let input =
+            "---\nreferences:\n- id: item1\n  title: First\n- id: item2\n  title: Second\n...\n";
+        assert_eq!(ids(input), ["item1", "item2"]);
+    }
+
+    #[test]
+    fn empty_references_yields_no_entries() {
+        assert_eq!(ids("references:\n"), Vec::<String>::new());
+        assert_eq!(ids("references: []\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn scalar_references_is_an_error() {
+        let err = parse_csl_yaml_full("references: nope\n").unwrap_err();
+        assert!(err.contains("references"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn root_map_without_references_is_a_single_entry() {
+        let input = "id: item1\ntitle: First\n";
+        assert_eq!(ids(input), ["item1"]);
+    }
 }

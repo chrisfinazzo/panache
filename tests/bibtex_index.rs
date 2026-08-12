@@ -198,6 +198,38 @@ fn bib_index_load_csl_yaml() {
 }
 
 #[test]
+fn bib_index_load_csl_yaml_references_map() {
+    // The document form Better BibTeX exports and pandoc documents:
+    // a `references` mapping wrapped in `---`/`...` markers.
+    let mut file = NamedTempFile::new().expect("Failed to create temp file");
+    writeln!(
+        file,
+        "---\nreferences:\n- id: cslkey\n  title: Sample\n- id: otherkey\n  title: Sample 2\n..."
+    )
+    .unwrap();
+    file.flush().unwrap();
+
+    let yaml_path = file.path().with_extension("yaml");
+    std::fs::rename(file.path(), &yaml_path).unwrap();
+    let index = load_bibliography(&[yaml_path]);
+    assert!(
+        index.load_errors.is_empty(),
+        "load errors: {:?}",
+        index.load_errors
+    );
+    assert!(
+        index.get("cslkey").is_some(),
+        "entries: {:?}",
+        index.entries
+    );
+    assert!(
+        index.get("otherkey").is_some(),
+        "entries: {:?}",
+        index.entries
+    );
+}
+
+#[test]
 fn bib_index_load_csl_json() {
     let mut file = NamedTempFile::new().expect("Failed to create temp file");
     writeln!(
