@@ -1468,6 +1468,72 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
 ### Architecture
 
+- [ ] Give a container's **line extent** a single owner, the way the typed frame
+  verdict now owns its **prefix strip**. These are two orthogonal questions
+  about the same container and only the first one has been consolidated:
+  `FrameVerdict` answers "what does stripping line `i` leave, and did it
+  reach the frame?", but "does this container's line run still reach line
+  `i`?" is re-derived independently inside every lookahead scan, each
+  implementing a different subset of the rules. Pandoc decides it once (the
+  `rawLines` collection per container), so every block parser running inside
+  physically cannot see past it; panache has no such fence.
+
+  The rules pandoc terminates a container's line run on, against where panache
+  honors them today:
+
+  | terminator                     | pandoc                    | panache                        |
+  | ------------------------------ | ------------------------- | ------------------------------ |
+  | blank line                     | all containers            | every scan                     |
+  | dedent past the content column | after a blank line        | caption probe only             |
+  | fenced-div closer              | `notFollowedByDivCloser`  | the two simple-table end scans |
+  | new note marker (`[^x]:`)      | `noteBlock`'s `rawLine`   | missing                        |
+  | new list start                 | `listContinuationLine`    | missing                        |
+  | HTML closer                    | `notFollowedByHtmlCloser` | missing                        |
+
+  Times the scans that need them: `find_table_end`,
+  `find_single_column_table_end`, `table_grid_starts_at`,
+  `is_caption_followed_by_table`, and (unverified, but the same shape) the grid,
+  multiline, and pipe table scans. That cross-product is being filled in one
+  cell at a time, each time someone trips over a bug.
+
+  The three missing terminators all reproduce, verified against
+  `pandoc -f markdown -t native`. Two are **destructive**: the simple-table scan
+  runs past the boundary, claims the next container's opening line as a row, and
+  slices it on the table's column boundaries, so `format` rewrites it (and is
+  not idempotent).
+
+  ```
+  [^1]: body            - item                <div>
+
+      A    B              A    B              - item
+      --- ---             --- ---
+      x    y              x    y                A    B
+  [^2]: two             - next                  --- ---
+                                                x    y
+  text[^1][^2]                                </div>
+  ```
+
+  Left: `[^2]: two` becomes a table row and reformats to `[^2]    : two`,
+  destroying footnote 2. Middle: `- next` reformats to `- ne   xt`, splitting
+  the word across columns. Right: the table runs past `</div>`; lossless and
+  idempotent, so structural only.
+
+  The fix is one `LineView` predicate folding every terminator, computed from
+  the container stack once, so each scan's loop consults it and nothing else.
+  The seam already exists --- `ends_container_lines` landed with the div closer
+  behind it (see the caption-probe entry under `Parser`), so this is filling it
+  in, not restructuring around it. Explicitly **not** pandoc's
+  collect-then-reparse model, which would break the single-pass invariant in
+  `AGENTS.md`; this is plumbing state into detection, which that invariant asks
+  for.
+
+  Do it one terminator per commit, each with pandoc-verified pins, because the
+  subtleties are real and asymmetric: the div closer only counts when the div is
+  open *outside* the container, and the plausible-looking companion tightening
+  (bounding the lookahead tail by indent) turned out to be a regression, since
+  pandoc admits a contiguous dedent as a lazy continuation. Start with the note
+  marker --- it is the one that eats a whole footnote.
+
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
   and the refs/heading-id reparse helpers) re-tokenize source the CST should
