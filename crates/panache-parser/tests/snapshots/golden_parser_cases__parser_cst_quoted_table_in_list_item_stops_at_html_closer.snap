@@ -1,0 +1,49 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..61
+  LIST@0..61
+    LIST_ITEM@0..61
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      PLAIN@2..8
+        INLINE_HTML@2..7
+          INLINE_HTML_CONTENT@2..7 "<div>"
+        NEWLINE@7..8 "\n"
+      BLANK_LINE@8..9
+        BLANK_LINE@8..9 "\n"
+      BLOCK_QUOTE@9..52
+        WHITESPACE@9..11 "  "
+        BLOCK_QUOTE_MARKER@11..12 ">"
+        WHITESPACE@12..13 " "
+        SIMPLE_TABLE@13..52
+          TABLE_HEADER@13..24
+            TABLE_CELL@13..17
+              TEXT@13..17 "col1"
+            WHITESPACE@17..19 "  "
+            TABLE_CELL@19..23
+              TEXT@19..23 "col2"
+            NEWLINE@23..24 "\n"
+          TABLE_SEPARATOR@24..40
+            WHITESPACE@24..26 "  "
+            BLOCK_QUOTE_MARKER@26..27 ">"
+            WHITESPACE@27..28 " "
+            TABLE_SEP_DASHES@28..33 "-----"
+            TABLE_SEP_WHITESPACE@33..34 " "
+            TABLE_SEP_DASHES@34..39 "-----"
+            NEWLINE@39..40 "\n"
+          TABLE_ROW@40..52
+            WHITESPACE@40..42 "  "
+            BLOCK_QUOTE_MARKER@42..43 ">"
+            WHITESPACE@43..44 " "
+            TABLE_CELL@44..45
+              TEXT@44..45 "a"
+            WHITESPACE@45..50 "     "
+            TABLE_CELL@50..51
+              TEXT@50..51 "b"
+            NEWLINE@51..52 "\n"
+      HTML_BLOCK@52..61
+        HTML_BLOCK_TAG@52..61
+          TEXT@52..60 "  </div>"
+          NEWLINE@60..61 "\n"

@@ -447,6 +447,7 @@ golden_test_cases!(
     quarto_hashpipe,
     quarto_shortcodes,
     quiz_options_after_chunk_idempotency_471,
+    quoted_para_in_list_item_stops_at_html_closer,
     raw_blocks,
     raw_tex_commands,
     reference_definition_attached_title_commonmark,

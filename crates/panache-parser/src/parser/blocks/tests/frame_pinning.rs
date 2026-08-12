@@ -795,3 +795,177 @@ fn list_start_fence_respects_captured_config_bits() {
         );
     }
 }
+
+fn list_item_with_open_tag(content_col: usize, first_line: &str) -> Container {
+    use crate::parser::utils::list_item_buffer::ListItemBuffer;
+    let mut buffer = ListItemBuffer::new();
+    buffer.push_text(first_line, &opts(Dialect::Pandoc));
+    Container::ListItem {
+        content_col,
+        buffer,
+        marker_only: false,
+        virtual_marker_space: false,
+    }
+}
+
+/// `html_closer_tag` tracks *ordering* like the div flag, anchored at
+/// the list item whose buffer holds the open tag: pandoc's
+/// `stateInHtmlBlock` is set when the open tag is parsed, which fences
+/// only the containers whose lines are collected after that — the
+/// item's own run is not fenced (pandoc slices the closer into the
+/// item's own table), and a quote below the item collected its lines
+/// before the tag existed.
+#[test]
+fn html_closer_tag_needs_a_container_above_the_tag_holding_item() {
+    let p = |stack: &[Container]| {
+        ContainerPrefix::from_stack(stack, false, &opts(Dialect::Pandoc))
+            .html_closer_tag()
+            .map(|(tag, col)| (tag.to_string(), col))
+    };
+    let armed = Some(("div".to_string(), 2));
+    assert_eq!(
+        p(&[
+            list(),
+            list_item_with_open_tag(2, "<div>"),
+            Container::BlockQuote {}
+        ]),
+        armed
+    );
+    assert_eq!(
+        p(&[list(), list_item_with_open_tag(2, "<div>"), definition(4)]),
+        armed
+    );
+    // Nothing above the item: its own run is not fenced.
+    assert_eq!(p(&[list(), list_item_with_open_tag(2, "<div>")]), None);
+    // The quote below the item collected its lines before the tag.
+    assert_eq!(
+        p(&[
+            Container::BlockQuote {},
+            list(),
+            list_item_with_open_tag(2, "<div>")
+        ]),
+        None
+    );
+    // No open tag anywhere.
+    assert_eq!(p(&[list(), list_item(2), Container::BlockQuote {}]), None);
+    assert_eq!(p(&[]), None);
+}
+
+/// The signal survives the mid-item partial flush: the interrupting
+/// block that pushes the container above the item clears the buffer
+/// first, so `clear()` folds the tag into the carried field. A later
+/// chunk consuming the closer drops it again.
+#[test]
+fn html_closer_tag_survives_the_mid_item_flush() {
+    use crate::parser::utils::list_item_buffer::ListItemBuffer;
+
+    let config = opts(Dialect::Pandoc);
+    let item = |buffer| Container::ListItem {
+        content_col: 2,
+        buffer,
+        marker_only: false,
+        virtual_marker_space: false,
+    };
+
+    let mut flushed = ListItemBuffer::new();
+    flushed.push_text("<div>\n", &config);
+    flushed.clear();
+    let prefix = ContainerPrefix::from_stack(
+        &[list(), item(flushed), Container::BlockQuote {}],
+        false,
+        &config,
+    );
+    assert_eq!(prefix.html_closer_tag(), Some(("div", 2)));
+
+    let mut closed = ListItemBuffer::new();
+    closed.push_text("<div>\n", &config);
+    closed.clear();
+    closed.push_text("</div>\n", &config);
+    closed.clear();
+    let prefix = ContainerPrefix::from_stack(
+        &[list(), item(closed), Container::BlockQuote {}],
+        false,
+        &config,
+    );
+    assert_eq!(prefix.html_closer_tag(), None);
+}
+
+/// The closer fires at up to the tag-holding item's content column of
+/// indent and not one space more: pandoc's item gobble eats at most
+/// `content_col` columns before the guard's `htmlTag` runs, and
+/// `htmlTag` skips no whitespace (probed: `  </div>` under a 2-column
+/// item ends the quoted run, `   </div>` stays lazy quote content).
+#[test]
+fn html_closer_ends_container_lines_at_the_items_frame_position() {
+    use crate::parser::blocks::tables::LineView;
+
+    let prefix = ContainerPrefix::from_stack(
+        &[
+            list(),
+            list_item_with_open_tag(2, "<div>"),
+            Container::BlockQuote {},
+        ],
+        false,
+        &opts(Dialect::Pandoc),
+    );
+    let raw = [
+        "  > col1  col2",
+        "  > ----- -----",
+        "  > a     b",
+        "  </div>",
+        "</div>",
+        "   </div>",
+        "  </span>",
+        "  > </div>",
+    ];
+    let view = StrippedLines::new(&raw, 0, &prefix);
+    assert!(
+        !view.ends_container_lines(2),
+        "a quoted row is quote content"
+    );
+    assert!(
+        view.ends_container_lines(3),
+        "the closer at the content column ends the run"
+    );
+    assert!(
+        view.ends_container_lines(4),
+        "the closer at column 0 ends the run"
+    );
+    assert!(
+        !view.ends_container_lines(5),
+        "one space past the content column is lazy content"
+    );
+    assert!(
+        !view.ends_container_lines(6),
+        "a different tag's closer is ordinary content"
+    );
+    assert!(
+        !view.ends_container_lines(7),
+        "a closer behind a quote marker is quote content"
+    );
+}
+
+/// The open-tag signal is Pandoc-only: under CommonMark list items keep
+/// their inline-HTML behavior and no fence arms.
+#[test]
+fn html_closer_fence_is_pandoc_only() {
+    for (dialect, armed) in [(Dialect::Pandoc, true), (Dialect::CommonMark, false)] {
+        let config = opts(dialect);
+        use crate::parser::utils::list_item_buffer::ListItemBuffer;
+        let mut buffer = ListItemBuffer::new();
+        buffer.push_text("<div>\n", &config);
+        let item = Container::ListItem {
+            content_col: 2,
+            buffer,
+            marker_only: false,
+            virtual_marker_space: false,
+        };
+        let prefix =
+            ContainerPrefix::from_stack(&[list(), item, Container::BlockQuote {}], false, &config);
+        assert_eq!(
+            prefix.html_closer_tag().is_some(),
+            armed,
+            "fence armed under {dialect:?}"
+        );
+    }
+}

@@ -452,3 +452,137 @@ fn list_marker_within_nonindent_tolerance_ends_the_run() {
         "the bullet opens its own list after the ordered one"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Container line runs end at an HTML closer (markdown-in-html)
+//
+// Inside markdown-in-html, pandoc guards its line collectors with
+// `notFollowedByHtmlCloser`: a line opening with the close form of the open
+// tag ends a collected run. The open tag lives in a list item's buffer
+// (markdown-in-html is not a stack transition here), and the fence is
+// ordering-gated at that item — its own run is not fenced (pandoc itself
+// slices the closer into the item's own table), only containers pushed
+// above it are. The guard's `htmlTag` skips no whitespace, so the closer
+// fires at up to the item's content column of indent and not one more.
+// Known, deliberate divergence: pandoc wraps the whole item body in a
+// `Div` (the markdown-in-html structural lift); panache keeps the open
+// and close tags as raw siblings — see the allowlist rationale for
+// pandoc-conformance 0464 and TODO.md.
+
+/// `pandoc -f markdown -t native` on `- <div>` + blank + quoted simple
+/// table + `  </div>`: `Div [BlockQuote [Table]]` — the quote's run
+/// stops and the closer belongs to the div. Before this fence the quoted
+/// table sliced the closer into `</di` / `v>` cells.
+#[test]
+fn quoted_table_in_a_list_item_div_ends_at_the_html_closer() {
+    let input = "- <div>\n\n  > col1  col2\n  > ----- -----\n  > a     b\n  </div>\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = first_of(&node, SyntaxKind::BLOCK_QUOTE).expect("quote in the item");
+    assert!(
+        !quote.text().to_string().contains("</div>"),
+        "the closer is not quote content: {}",
+        quote.text()
+    );
+}
+
+/// The closer at column 0 ends the quoted run the same way (`pandoc -f
+/// markdown -t native` gives `Div [BlockQuote [Table]]` with one body
+/// row).
+#[test]
+fn html_closer_at_column_zero_ends_the_quoted_run() {
+    let input = "- <div>\n\n  > col1  col2\n  > ----- -----\n  > a     b\n</div>\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = first_of(&node, SyntaxKind::BLOCK_QUOTE).expect("quote in the item");
+    assert!(
+        !quote.text().to_string().contains("</div>"),
+        "the closer is not quote content: {}",
+        quote.text()
+    );
+}
+
+/// The ordering gate: for the item's *own* table the fence does not
+/// apply — `pandoc -f markdown -t native` collects the closer as a
+/// table row (empty cells after HTML stripping; panache slices it as
+/// raw inline, the pre-existing width-wobble family in TODO.md).
+#[test]
+fn item_level_table_collects_the_html_closer_as_a_row() {
+    let input = "- <div>\n\n  col1  col2\n  ----- -----\n  a     b\n  </div>\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("</div>"),
+        "the item's own table keeps the closer as a row: {}",
+        table.text()
+    );
+}
+
+/// A different tag's closer is no fence: `pandoc -f markdown -t native`
+/// collects `  </span>` as a table row sliced into `</span` / `>`
+/// cells, and the div stays unclosed.
+#[test]
+fn wrong_tag_closer_stays_a_quoted_table_row() {
+    let input = "- <div>\n\n  > col1  col2\n  > ----- -----\n  > a     b\n  </span>\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("</span>"),
+        "the wrong-tag closer is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// The quote gobble consults the same fence for its lazy fold: with a
+/// quoted paragraph instead of a table, `pandoc -f markdown -t native`
+/// gives `Div [BlockQuote [Para]]` — the closer at the content column
+/// ends the quote — while one extra space of indent keeps the line lazy
+/// quote content.
+#[test]
+fn lazy_quote_fold_stops_at_the_html_closer() {
+    let stops = "- <div>\n\n  > a\n  </div>\n";
+    let node = parse_blocks(stops);
+    assert_eq!(
+        node.text().to_string(),
+        stops,
+        "parser must remain lossless"
+    );
+    let quote = first_of(&node, SyntaxKind::BLOCK_QUOTE).expect("quote in the item");
+    assert!(
+        !quote.text().to_string().contains("</div>"),
+        "the closer is not quote content: {}",
+        quote.text()
+    );
+
+    let lazy = "- <div>\n\n  > a\n   </div>\n";
+    let node = parse_blocks(lazy);
+    assert_eq!(node.text().to_string(), lazy, "parser must remain lossless");
+    let quote = first_of(&node, SyntaxKind::BLOCK_QUOTE).expect("quote in the item");
+    assert!(
+        quote.text().to_string().contains("</div>"),
+        "one space past the content column stays lazy quote content: {}",
+        quote.text()
+    );
+}

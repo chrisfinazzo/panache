@@ -766,6 +766,8 @@ golden_test_cases!(
     quarto_hashpipe,
     quarto_hashpipe_list_item,
     quarto_shortcodes,
+    quoted_para_in_list_item_stops_at_html_closer,
+    quoted_table_in_list_item_stops_at_html_closer,
     raw_blocks,
     raw_inline_format_attr,
     raw_tex_commands,

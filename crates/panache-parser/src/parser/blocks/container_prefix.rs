@@ -165,6 +165,31 @@ pub(crate) struct ContainerPrefix {
     /// access at scan time (the same pattern as
     /// `lazy_blockquote_gobble`).
     list_start_detect: Option<ListMarkerDetect>,
+    /// The matched-pair HTML tag left open by a list item *below* some
+    /// container this prefix strips. `Some` arms pandoc's
+    /// `notFollowedByHtmlCloser` fence: inside markdown-in-html, a line
+    /// opening with the tag's close form ends a collected line run — the
+    /// closer belongs to the HTML block, not to whatever block the
+    /// container's content was in the middle of.
+    ///
+    /// Ordering-gated like [`Self::div_closer_ends_lines`], but anchored
+    /// at the list item whose buffer holds the open tag (markdown-in-html
+    /// is not a stack transition here, so there is no `Container` to
+    /// anchor on): only containers pushed *after* that item are fenced.
+    /// The item's own line run is not — pandoc itself collects the closer
+    /// as e.g. a table row there (verified: `- <div>` + blank + indented
+    /// simple table + `  </div>` slices the closer into cells in pandoc).
+    /// The innermost tag-holding item wins, matching pandoc's
+    /// `stateInHtmlBlock`.
+    ///
+    /// The second element is that item's `content_col`: pandoc's item
+    /// gobble eats at most that many columns before the guard's `htmlTag`
+    /// runs, and `htmlTag` skips no whitespace — so the closer fires at
+    /// up to the content column of indent and not one space more (both
+    /// probed). Kept as a column bound rather than resolved through the
+    /// ops because the lazy blockquote gobble skips a marker-less line's
+    /// indent wholesale, erasing exactly the distinction pandoc draws.
+    html_closer_tag: Option<(String, u32)>,
 }
 
 impl ContainerPrefix {
@@ -186,55 +211,87 @@ impl ContainerPrefix {
         list_marker_consumed_on_line_0: bool,
         config: &ParserOptions,
     ) -> Self {
+        // A `ListItem`'s deferred advance, carrying the terminator state
+        // captured at the item's stack position; flushed below.
+        struct PendingListAdvance {
+            content_col: u32,
+            div_open: bool,
+            html_open: Option<(String, u32)>,
+        }
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
-        // `(content_col, a div is open outside this item)`, flushed below.
-        let mut pending_list_advance: Option<(u32, bool)> = None;
+        let mut pending_list_advance: Option<PendingListAdvance> = None;
         // Set by a `FencedDiv` seen so far in the walk, i.e. outside every
         // container pushed after it. See `div_closer_ends_lines`.
         let mut div_open = false;
         let mut div_closer_ends_lines = false;
+        // The matched-pair tag left open by a `ListItem` seen so far in
+        // the walk, with that item's content column. See
+        // `html_closer_tag`; same ordering discipline as `div_open`,
+        // with the item playing the `FencedDiv` role.
+        let mut html_open: Option<(String, u32)> = None;
+        let mut html_closer_tag: Option<(String, u32)> = None;
         let mut note_marker_op_bound = None;
         for c in stack {
             match c {
                 Container::BlockQuote { .. } => {
-                    if let Some((la, la_div)) = pending_list_advance.take() {
-                        ops.push(StripOp::ListAdvance(la));
-                        div_closer_ends_lines |= la_div;
+                    if let Some(p) = pending_list_advance.take() {
+                        ops.push(StripOp::ListAdvance(p.content_col));
+                        div_closer_ends_lines |= p.div_open;
+                        html_closer_tag = p.html_open.or(html_closer_tag);
                     }
                     ops.push(StripOp::BlockQuoteMarker);
                     div_closer_ends_lines |= div_open;
+                    html_closer_tag = html_open.clone().or(html_closer_tag);
                 }
                 Container::FootnoteDefinition { content_col } => {
-                    if let Some((la, la_div)) = pending_list_advance.take() {
-                        ops.push(StripOp::ListAdvance(la));
-                        div_closer_ends_lines |= la_div;
+                    if let Some(p) = pending_list_advance.take() {
+                        ops.push(StripOp::ListAdvance(p.content_col));
+                        div_closer_ends_lines |= p.div_open;
+                        html_closer_tag = p.html_open.or(html_closer_tag);
                     }
                     // Outermost footnote wins: see `note_marker_op_bound`.
                     note_marker_op_bound.get_or_insert(ops.len());
                     ops.push(StripOp::ContentIndent(*content_col as u32));
                     div_closer_ends_lines |= div_open;
+                    html_closer_tag = html_open.clone().or(html_closer_tag);
                 }
                 Container::Definition { content_col, .. }
                 | Container::Admonition { content_col } => {
-                    if let Some((la, la_div)) = pending_list_advance.take() {
-                        ops.push(StripOp::ListAdvance(la));
-                        div_closer_ends_lines |= la_div;
+                    if let Some(p) = pending_list_advance.take() {
+                        ops.push(StripOp::ListAdvance(p.content_col));
+                        div_closer_ends_lines |= p.div_open;
+                        html_closer_tag = p.html_open.or(html_closer_tag);
                     }
                     ops.push(StripOp::ContentIndent(*content_col as u32));
                     div_closer_ends_lines |= div_open;
+                    html_closer_tag = html_open.clone().or(html_closer_tag);
                 }
-                Container::ListItem { content_col, .. } => {
+                Container::ListItem {
+                    content_col,
+                    buffer,
+                    ..
+                } => {
                     // Keep only the innermost ListItem within this section
-                    // (overwrites any previous pending value).
-                    pending_list_advance = Some((*content_col as u32, div_open));
+                    // (overwrites any previous pending value). The `html_open`
+                    // capture happens before this item's own tag is folded in:
+                    // the fence never applies to the tag-holding item's own op.
+                    pending_list_advance = Some(PendingListAdvance {
+                        content_col: *content_col as u32,
+                        div_open,
+                        html_open: html_open.clone(),
+                    });
+                    if let Some(tag) = buffer.open_matched_pair_tag(config) {
+                        html_open = Some((tag, *content_col as u32));
+                    }
                 }
                 Container::FencedDiv { .. } => div_open = true,
                 _ => {}
             }
         }
-        if let Some((la, la_div)) = pending_list_advance {
-            ops.push(StripOp::ListAdvance(la));
-            div_closer_ends_lines |= la_div;
+        if let Some(p) = pending_list_advance {
+            ops.push(StripOp::ListAdvance(p.content_col));
+            div_closer_ends_lines |= p.div_open;
+            html_closer_tag = p.html_open.or(html_closer_tag);
         }
         // The `content_col` convention (see `Container`): content
         // containers carry relative widths, so the ContentIndent ops --
@@ -264,6 +321,7 @@ impl ContainerPrefix {
             div_closer_ends_lines,
             note_marker_op_bound,
             list_start_detect,
+            html_closer_tag,
         }
     }
 
@@ -311,6 +369,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            html_closer_tag: None,
         }
     }
 
@@ -330,6 +389,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            html_closer_tag: None,
         }
     }
 
@@ -400,6 +460,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            html_closer_tag: None,
         }
     }
 
@@ -418,6 +479,17 @@ impl ContainerPrefix {
     /// strips, when a footnote is on the stack.
     pub fn note_marker_op_bound(&self) -> Option<usize> {
         self.note_marker_op_bound
+    }
+
+    /// See the field of the same name: the matched-pair HTML tag whose
+    /// close form ends the line run of the container this prefix
+    /// strips, when a list item below that container holds the tag
+    /// open, with that item's content column as the closer's maximum
+    /// leading indent.
+    pub fn html_closer_tag(&self) -> Option<(&str, u32)> {
+        self.html_closer_tag
+            .as_ref()
+            .map(|(tag, col)| (tag.as_str(), *col))
     }
 
     /// See the field of the same name: the marker-detection bits a
@@ -476,6 +548,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            html_closer_tag: None,
         }
     }
 
@@ -538,6 +611,8 @@ impl ContainerPrefix {
             note_marker_op_bound,
             // A column bound, not an op index: no remap needed.
             list_start_detect: self.list_start_detect,
+            // A tag, not an op index: no remap needed.
+            html_closer_tag: self.html_closer_tag.clone(),
         }
     }
 

@@ -52,6 +52,14 @@ pub(crate) struct ListItemBuffer {
     /// so block detection cannot split an open region into a `TEX_BLOCK`
     /// (same failure mode the paragraph tracker fixes at top level).
     open_display_math: Option<OpenDisplayMath>,
+    /// Matched-pair HTML open tag surviving a mid-item partial flush.
+    ///
+    /// `clear()` folds the segments' unclosed tag in here before draining,
+    /// so the markdown-in-html signal outlives the buffered text it was
+    /// computed from. Read via [`Self::open_matched_pair_tag`] by
+    /// `ContainerPrefix::from_stack` to arm the HTML-closer line-extent
+    /// terminator for containers pushed above the item.
+    carried_unclosed_html_tag: Option<String>,
 }
 
 impl ListItemBuffer {
@@ -60,6 +68,7 @@ impl ListItemBuffer {
         Self {
             segments: Vec::new(),
             open_display_math: None,
+            carried_unclosed_html_tag: None,
         }
     }
 
@@ -144,6 +153,12 @@ impl ListItemBuffer {
         if config.dialect != Dialect::Pandoc {
             return None;
         }
+        self.segments_unclosed_matched_pair_tag()
+    }
+
+    /// Dialect-free body of [`Self::unclosed_pandoc_matched_pair_tag`]:
+    /// the tag opened on the *current segments'* first line, if any.
+    fn segments_unclosed_matched_pair_tag(&self) -> Option<String> {
         let first = self.first_text()?;
         let first_line_with_nl = first.split_inclusive('\n').next()?;
         let first_line_no_nl = first_line_with_nl
@@ -171,6 +186,44 @@ impl ListItemBuffer {
             }
         }
         if opens > closes { Some(tag_name) } else { None }
+    }
+
+    /// The current chunk's unclosed tag if the segments open one, else the
+    /// carried tag adjusted for closes in the current segments. Dialect-free;
+    /// shared by `clear()` (fold into the carried field) and
+    /// [`Self::open_matched_pair_tag`] (read).
+    fn combined_unclosed_tag(&self) -> Option<String> {
+        if let Some(fresh) = self.segments_unclosed_matched_pair_tag() {
+            return Some(fresh);
+        }
+        let carried = self.carried_unclosed_html_tag.as_deref()?;
+        let mut opens = 0usize;
+        let mut closes = 0usize;
+        for segment in &self.segments {
+            if let ListItemContent::Text(t) = segment {
+                let (o, c) = count_tag_balance(t, carried);
+                opens += o;
+                closes += c;
+            }
+        }
+        (1 + opens > closes).then(|| carried.to_string())
+    }
+
+    /// Like [`Self::unclosed_pandoc_matched_pair_tag`], but surviving the
+    /// mid-item partial flush via the carried field, so it still answers
+    /// after an interrupting block (blockquote, nested list, ...) emptied
+    /// the segments. Used by `ContainerPrefix::from_stack` to arm the
+    /// HTML-closer line-extent terminator (pandoc's
+    /// `notFollowedByHtmlCloser`) for containers pushed above the item.
+    ///
+    /// The dispatcher gate keeps using the segments-only accessor: the
+    /// carried tag must not change how post-flush close-form lines
+    /// dispatch, only where container line runs end.
+    pub(crate) fn open_matched_pair_tag(&self, config: &ParserOptions) -> Option<String> {
+        if config.dialect != Dialect::Pandoc {
+            return None;
+        }
+        self.combined_unclosed_tag()
     }
 
     /// Determine if this list item has blank lines between content.
@@ -419,7 +472,12 @@ impl ListItemBuffer {
     /// every clear site starts a fresh paragraph-like chunk (blank-line
     /// flush, first-line conversion, setext fold), and a blank line ends
     /// the math region just like it ends a paragraph.
+    ///
+    /// The unclosed matched-pair HTML tag is the exception: it is folded
+    /// into the carried field first, because pandoc's markdown-in-html
+    /// span outlives the paragraph chunk that opened it.
     pub(crate) fn clear(&mut self) {
+        self.carried_unclosed_html_tag = self.combined_unclosed_tag();
         self.segments.clear();
         self.open_display_math = None;
     }

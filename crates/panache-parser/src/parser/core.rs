@@ -3205,7 +3205,19 @@ impl<'a> Parser<'a> {
             return true;
         }
 
-        self.div_closer_ends_blockquote(line)
+        self.div_closer_ends_blockquote(line) || self.html_closer_ends_blockquote(line)
+    }
+
+    /// Pandoc's `notFollowedByHtmlCloser` on the quote gobble: inside
+    /// markdown-in-html, a line opening with the close form of the open
+    /// tag ends the quote instead of folding in as lazy content. The
+    /// open-tag signal lives in a list item's buffer below the quote
+    /// (markdown-in-html is not a stack transition here), so the
+    /// ordering gate and the line test are the prefix's — the same seam
+    /// the table end scans consult (`tables::html_closer_ends_lines`).
+    fn html_closer_ends_blockquote(&self, line: &str) -> bool {
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
+        tables::html_closer_ends_lines(&prefix, line)
     }
 
     /// Whether a fenced-div closing fence ends the open blockquote rather

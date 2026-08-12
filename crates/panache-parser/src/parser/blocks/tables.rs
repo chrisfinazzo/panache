@@ -99,6 +99,7 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
         (prefix.div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i]))
             || note_marker_ends_lines(prefix, self.raw()[i])
             || list_start_ends_lines(prefix, self.raw()[i])
+            || html_closer_ends_lines(prefix, self.raw()[i])
     }
 }
 
@@ -121,6 +122,41 @@ fn note_marker_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Inside markdown-in-html, pandoc guards its line collectors with
+/// `notFollowedByHtmlCloser`: a line opening with the close form of
+/// the surrounding HTML block's tag ends the run — the closer belongs
+/// to the HTML block, not to whatever block the container's content
+/// was in the middle of. Armed by `ContainerPrefix::html_closer_tag`
+/// (ordering-gated at the tag-holding list item; see the field).
+///
+/// The closer's indent tolerance is the tag-holding item's content
+/// column: pandoc's item gobble eats at most that many columns before
+/// the guard's `htmlTag` runs, and `htmlTag` skips no whitespace — so
+/// `  </div>` at the content column ends the run while one extra space
+/// keeps it lazy content (both probed). A line still carrying a `>`
+/// marker after its indent fails the tag parse and stays ordinary
+/// content.
+pub(crate) fn html_closer_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
+    use super::super::utils::container_stack::leading_indent;
+    use super::html_blocks::{HtmlBlockType, try_parse_html_block_start};
+
+    let Some((tag, content_col)) = prefix.html_closer_tag() else {
+        return false;
+    };
+    let (cols, bytes) = leading_indent(raw);
+    if cols > content_col as usize {
+        return false;
+    }
+    matches!(
+        try_parse_html_block_start(&raw[bytes..], false),
+        Some(HtmlBlockType::BlockTag {
+            tag_name,
+            is_closing: true,
+            ..
+        }) if tag_name.eq_ignore_ascii_case(tag)
+    )
 }
 
 /// Pandoc collects a list item's continuation lines with
