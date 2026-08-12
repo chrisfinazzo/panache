@@ -414,7 +414,6 @@ impl ContainerPrefix {
     /// bytes consumed by the *last* `ContentIndent` op (for re-emission
     /// as WHITESPACE when a nested BlockQuote opens inside a
     /// footnote/definition).
-    #[allow(dead_code)]
     pub fn strip_line_0_with_indent_emit<'a>(&self, line: &'a str) -> (&'a str, Option<&'a str>) {
         let last_list_idx = self
             .ops()
@@ -1027,9 +1026,12 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
     }
 
     /// Emission tail for the line at ABSOLUTE index `i`, picking the right
-    /// strategy by position: the dispatch line emits no prefix tokens (the
-    /// core consumed them) via [`Self::dispatch_tail`]; every other line
-    /// re-emits its container prefix as tokens via [`Self::emit_prefix_at`].
+    /// strategy by position: the dispatch line re-emits only the innermost
+    /// `ContentIndent` bytes (list markers and blockquote prefixes were
+    /// consumed upstream by the core, but a footnote/definition body's
+    /// content indent never is — block parsers own those bytes, mirroring
+    /// the paragraph and fenced-code paths); every other line re-emits its
+    /// full container prefix as tokens via [`Self::emit_prefix_at`].
     /// Consolidates the `if i == dispatch { … } else { … }` idiom repeated
     /// across the table emitters.
     pub fn emit_or_dispatch_tail(
@@ -1038,7 +1040,15 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
         i: usize,
     ) -> &'a str {
         if i == self.dispatch {
-            self.dispatch_tail()
+            let (tail, indent) = self
+                .prefix
+                .strip_line_0_with_indent_emit(self.raw[self.dispatch]);
+            if let Some(ws) = indent
+                && !ws.is_empty()
+            {
+                builder.token(SyntaxKind::WHITESPACE.into(), ws);
+            }
+            tail
         } else {
             self.emit_prefix_at(builder, i)
         }

@@ -499,9 +499,18 @@ fn caption_range_starting_at(
 
 /// Find caption before table (if any).
 /// Returns (caption_start, caption_end) positions, or None.
+///
+/// `dispatch` bounds the backward scan: a caption-before is only ever
+/// legitimate when the core dispatched the table *at* the caption line (the
+/// dispatcher's caption lookahead anchors dispatch there), so a caption
+/// candidate above `dispatch` is a line the core already parsed and emitted
+/// as other content — e.g. a definition body's own `:   a` marker line —
+/// and claiming it would duplicate its bytes (pandoc reads such tables with
+/// an empty caption).
 fn find_caption_before_table(
     lines: &(impl LineView + ?Sized),
     table_start: usize,
+    dispatch: usize,
 ) -> Option<(usize, usize)> {
     if table_start == 0 {
         return None;
@@ -539,6 +548,9 @@ fn find_caption_before_table(
 
             // If we find a caption start, this is the beginning of the multiline caption
             if is_valid_caption_start_before_table(lines, scan_pos) {
+                if scan_pos < dispatch {
+                    return None;
+                }
                 if scan_pos > 0 && !lines.line(scan_pos - 1).trim().is_empty() {
                     return None;
                 }
@@ -551,6 +563,9 @@ fn find_caption_before_table(
         // Scanned to beginning without finding caption start
         None
     } else {
+        if pos < dispatch {
+            return None;
+        }
         if pos > 0 && !lines.line(pos - 1).trim().is_empty() {
             return None;
         }
@@ -939,7 +954,7 @@ pub(crate) fn try_parse_simple_table(
     }
 
     // Check for caption before table
-    let caption_before = find_caption_before_table(window, start_pos);
+    let caption_before = find_caption_before_table(window, start_pos, window.dispatch_pos());
 
     // Check for caption after table
     let caption_after = if caption_before.is_some() {
@@ -1304,16 +1319,10 @@ fn emit_pipe_table_row(
 
     // On continuation lines (separator/data rows under a list+blockquote
     // container) the leading `  > ` prefix is not consumed by the core;
-    // `emit_prefix_at` re-emits it as WHITESPACE/BLOCK_QUOTE_MARKER tokens
-    // and returns the stripped tail. On the dispatch line the core already
-    // emitted the prefix, so `dispatch_tail` just strips it from our view.
-    // With an empty prefix (non-nested tables) both are no-ops returning
-    // the raw line.
-    let line = if abs_idx == window.dispatch_pos() {
-        window.dispatch_tail()
-    } else {
-        window.emit_prefix_at(builder, abs_idx)
-    };
+    // `emit_or_dispatch_tail` re-emits it as WHITESPACE/BLOCK_QUOTE_MARKER
+    // tokens and returns the stripped tail. With an empty prefix
+    // (non-nested tables) it is a no-op returning the raw line.
+    let line = window.emit_or_dispatch_tail(builder, abs_idx);
 
     let (line_without_newline, newline_str) = strip_newline(line);
     let trimmed = line_without_newline.trim();
@@ -1536,7 +1545,8 @@ pub(crate) fn try_parse_pipe_table(
     // line at the probe depth.
 
     // Check for caption before table (only if we didn't already detect it)
-    let caption_before = caption_before.or_else(|| find_caption_before_table(window, actual_start));
+    let caption_before = caption_before
+        .or_else(|| find_caption_before_table(window, actual_start, window.dispatch_pos()));
 
     // Check for caption after table
     let caption_after = if caption_before.is_some() {
@@ -1570,12 +1580,7 @@ pub(crate) fn try_parse_pipe_table(
     // Emit separator, re-emitting any continuation-line container prefix
     // (`  > `) as WHITESPACE/BLOCK_QUOTE_MARKER tokens before the row text.
     builder.start_node(SyntaxKind::TABLE_SEPARATOR.into());
-    let sep_idx = actual_start + 1;
-    let separator_tail = if sep_idx == window.dispatch_pos() {
-        window.dispatch_tail()
-    } else {
-        window.emit_prefix_at(builder, sep_idx)
-    };
+    let separator_tail = window.emit_or_dispatch_tail(builder, actual_start + 1);
     emit_separator_tokens(builder, separator_tail);
     builder.finish_node();
 
@@ -2049,7 +2054,9 @@ mod tests {
 
         let mut builder = GreenNodeBuilder::new();
         let prefix = ContainerPrefix::default();
-        let window = StrippedLines::new(&input, 2, &prefix);
+        // Dispatch anchors at the caption line (the dispatcher's caption
+        // lookahead fires there); the grid scan starts past it.
+        let window = StrippedLines::with_dispatch(&input, 2, 0, &prefix);
         let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
 
         assert!(result.is_some());
@@ -2635,7 +2642,8 @@ pub(crate) fn try_parse_grid_table(
     // But we'll be lenient and accept tables ending with content rows
 
     // Check for caption before table (only if we didn't already detected it)
-    let caption_before = caption_before.or_else(|| find_caption_before_table(&view, actual_start));
+    let caption_before = caption_before
+        .or_else(|| find_caption_before_table(&view, actual_start, window.dispatch_pos()));
 
     // Check for caption after table
     let caption_after = if caption_before.is_some() {
@@ -2902,7 +2910,9 @@ mod grid_table_tests {
 
         let mut builder = GreenNodeBuilder::new();
         let prefix = ContainerPrefix::default();
-        let window = StrippedLines::new(&input, 2, &prefix);
+        // Dispatch anchors at the caption line (the dispatcher's caption
+        // lookahead fires there); the grid scan starts past it.
+        let window = StrippedLines::with_dispatch(&input, 2, 0, &prefix);
         let result = try_parse_grid_table(&window, &mut builder, &ParserOptions::default());
 
         assert!(result.is_some());
@@ -3206,7 +3216,7 @@ pub(crate) fn try_parse_multiline_table(
         .or_else(|| parse_single_dash_run(window.line(column_sep_pos)))?;
 
     // Check for caption before table
-    let caption_before = find_caption_before_table(window, start_pos);
+    let caption_before = find_caption_before_table(window, start_pos, window.dispatch_pos());
 
     // Check for caption after table
     let caption_after = if caption_before.is_some() {
