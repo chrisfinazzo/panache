@@ -879,18 +879,30 @@ pub(crate) fn try_parse_simple_table(
         return None;
     }
 
-    // Cheap gate before the O(buffer) `strip_all` below: a simple table's
+    // Detection reads the stripped view through `UniformStripView`, which
+    // strips *every* line — including the dispatch line — with the full
+    // container strip. `strip_at` keeps the innermost list indent on a
+    // continuation-line dispatch (the marker wasn't consumed there), so a
+    // table sitting at the item's content column plus the simple-table
+    // writer's 2-space self-indent would fail the `<= 3` leading-spaces
+    // gate and collapse to paragraph text on reparse. Column coordinates
+    // below live in this uniform space too, so cells slice consistently
+    // across the dispatch and continuation lines. Emission still goes
+    // through `window`, which preserves the indent bytes.
+    let view = UniformStripView(window);
+
+    // Cheap gate before any O(buffer) scan below: a simple table's
     // separator must sit on the dispatch line or the line just after it (see
     // `find_separator_line`). Table detection runs at every block start, so
     // stripping the whole line buffer for every prose/math paragraph that
     // can't be a table was quadratic on large documents. Peek just those one
-    // or two lines via `strip_at` and bail before materializing the full view.
-    let gate_first = window.strip_at(start_pos);
+    // or two lines and bail before scanning further.
+    let gate_first = view.line(start_pos);
     let separator_here = try_parse_table_separator(gate_first).is_some();
     let separator_next = !separator_here
         && start_pos + 1 < lines.len()
         && !gate_first.trim().is_empty()
-        && try_parse_table_separator(window.strip_at(start_pos + 1)).is_some();
+        && try_parse_table_separator(view.line(start_pos + 1)).is_some();
     // A bare dash run can open a headerless *single-column* table (pandoc:
     // `---` / rows / `---`), but only on the dispatch line — on the line
     // after content it is a setext underline, which pandoc's header parser
@@ -913,20 +925,20 @@ pub(crate) fn try_parse_simple_table(
     // horizontal rule, so unlike the multi-column paths it also demands the
     // closing dash line up front (pandoc rejects the table without one).
     let (separator_pos, end_pos, has_closer) = if single_column_here {
-        let end_pos = find_single_column_table_end(window, start_pos + 1)?;
+        let end_pos = find_single_column_table_end(&view, start_pos + 1)?;
         (start_pos, end_pos, true)
     } else {
-        let separator_pos = find_separator_line(window, start_pos)?;
+        let separator_pos = find_separator_line(&view, start_pos)?;
         // Headerless (separator on the dispatch line): pandoc demands the
         // closing dash line, same as the single-column path above. With a
         // header the table may end at a blank line or EOF instead.
         let headerless = separator_pos == start_pos;
-        let (end_pos, has_closer) = find_table_end(window, separator_pos + 1, headerless)?;
+        let (end_pos, has_closer) = find_table_end(&view, separator_pos + 1, headerless)?;
         (separator_pos, end_pos, has_closer)
     };
     log::trace!("  found separator at line {}", separator_pos + 1);
 
-    let separator_line = window.line(separator_pos);
+    let separator_line = view.line(separator_pos);
     let mut columns = if single_column_here {
         parse_single_dash_run(separator_line)?
     } else {
@@ -936,7 +948,7 @@ pub(crate) fn try_parse_simple_table(
     // Determine if there's a header (separator not at start)
     let has_header = separator_pos > start_pos;
     let header_line = if has_header {
-        Some(window.line(separator_pos - 1))
+        Some(view.line(separator_pos - 1))
     } else {
         None
     };
@@ -954,13 +966,13 @@ pub(crate) fn try_parse_simple_table(
     }
 
     // Check for caption before table
-    let caption_before = find_caption_before_table(window, start_pos, window.dispatch_pos());
+    let caption_before = find_caption_before_table(&view, start_pos, window.dispatch_pos());
 
     // Check for caption after table
     let caption_after = if caption_before.is_some() {
         None
     } else {
-        find_caption_after_table(window, end_pos)
+        find_caption_after_table(&view, end_pos)
     };
 
     // Build the table
@@ -1114,6 +1126,30 @@ fn emit_table_row(
     // stripped tail returned; the dispatch line just strips its (already
     // core-emitted) prefix. Empty prefix ⇒ the raw line.
     let line = window.emit_or_dispatch_tail(builder, abs_idx);
+
+    // Column coordinates live in the uniform-strip space (see
+    // `try_parse_simple_table`), but the dispatch tail keeps the innermost
+    // list indent when the marker wasn't consumed on that line. Both are
+    // suffixes of the same raw line, so the retained indent is the length
+    // difference; emit it as WHITESPACE and do the position math on the
+    // uniform tail. Guarded on the prefix being whitespace so a lazy
+    // under-indented dispatch line (where the uniform strip would consume
+    // content bytes) falls back to the tail as-is.
+    let line = if abs_idx == window.dispatch_pos() {
+        let uniform = window.prefix().strip(window.raw()[abs_idx]);
+        let retained = line.len().saturating_sub(uniform.len());
+        if retained > 0
+            && line.ends_with(uniform)
+            && line[..retained].chars().all(|c| c == ' ' || c == '\t')
+        {
+            builder.token(SyntaxKind::WHITESPACE.into(), &line[..retained]);
+            uniform
+        } else {
+            line
+        }
+    } else {
+        line
+    };
 
     let (line_without_newline, newline_str) = strip_newline(line);
 
@@ -1698,6 +1734,27 @@ mod tests {
 
         assert!(result.is_some());
         assert_eq!(result.unwrap(), 4); // sep + 2 rows + closer
+    }
+
+    /// A headerless single-column table dispatched on a list-item
+    /// continuation line, sitting at the item's content column plus the
+    /// simple-table writer's 2-space self-indent. The dispatch line keeps
+    /// its list indent under `strip_line_0_for_emission` (the marker was
+    /// not consumed on this line), so detection must read the uniform
+    /// strip or the 4 leading columns fail the `<= 3` indent gate and
+    /// the table collapses to paragraph text on reparse.
+    #[test]
+    fn headerless_table_with_self_indent_in_list_item() {
+        use super::super::container_prefix::StripOp;
+
+        let input = vec!["    ---\n", "    x\n", "    ---\n", "\n"];
+
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
+        let window = StrippedLines::new(&input, 0, &prefix);
+        let result = try_parse_simple_table(&window, &mut builder, &ParserOptions::default());
+
+        assert_eq!(result, Some(3)); // sep + row + closer
     }
 
     /// Asserts a `SIMPLE_TABLE` closing dash line is shaped as a

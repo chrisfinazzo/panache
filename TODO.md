@@ -823,18 +823,12 @@ Further definition-list divergences fixed alongside it:
   `caption_probe_still_fires_inside_the_container`.
 
 Still open in the same area, found while fixing the above and **pre-existing**
-(both reproduce at `4fedf093`, unchanged by the caption-probe bound). The
-definition-body losslessness failure that used to lead this list is fixed; these
-two are idempotency failures in adjacent container shapes:
-
-- [ ] The caption-plus-table shape in a **list item** now formats to pandoc's
-  writer output exactly (`- item\n\n    ---\n    x\n    ---\n\n    : cap`),
-  but the *reparse* of that output fails: the table sits at the item's
-  content column plus the simple table's 2-space self-indent, and detection
-  loses it (the dispatcher probes `indented_code_block` and the lines end up
-  as `PLAIN` paragraphs), so pass 2 collapses the table — an idempotency
-  failure. Pandoc reads the same bytes as `BulletList [Para, Table]`. Repro:
-  `- item\n\n  : cap\n\n  ----\n  x\n  ----\n`
+(reproduces at `4fedf093`, unchanged by the caption-probe bound). The
+definition-body losslessness failure that used to lead this list is fixed, and
+so is the list-item caption-plus-table idempotency failure (simple-table
+detection now reads the uniform container strip, so the table at the item's
+content column plus the writer's 2-space self-indent survives reparse); this one
+is an idempotency failure in an adjacent container shape:
 
 - [ ] A simple table with a **caption in a footnote body**
   (`[^1]: a\n\n    : cap\n\n    ----\n    x\n    ----\n`) still fails

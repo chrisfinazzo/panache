@@ -664,6 +664,7 @@ golden_test_cases!(
     list_item_pipe_table_continuation_blank_pandoc,
     list_item_pipe_table_marker_line_no_separator_pandoc,
     list_item_pipe_table_marker_line_pandoc,
+    list_item_simple_table_self_indent_pandoc,
     list_item_task_checkbox_refdef_is_link,
     overindented_fence_after_paragraph_is_lazy_pandoc,
     ordered_marker_pipe_table_line_pandoc,

@@ -272,6 +272,7 @@ golden_test_cases!(
     list_item_leading_code_block,
     list_item_leading_fenced_div,
     list_item_nested_div_close,
+    list_item_simple_table_caption,
     list_item_table_first_bullet,
     list_item_table_first_caption_bullet,
     list_item_table_first_grid,
