@@ -1,0 +1,38 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..44
+  FOOTNOTE_DEFINITION@0..44
+    FOOTNOTE_LABEL_START@0..2 "[^"
+    FOOTNOTE_LABEL_ID@2..3 "1"
+    FOOTNOTE_LABEL_END@3..4 "]"
+    FOOTNOTE_LABEL_COLON@4..5 ":"
+    WHITESPACE@5..6 " "
+    PARAGRAPH@6..8
+      TEXT@6..7 "a"
+      NEWLINE@7..8 "\n"
+    BLANK_LINE@8..9
+      BLANK_LINE@8..9 "\n"
+    SIMPLE_TABLE@9..44
+      TABLE_CAPTION@9..19
+        WHITESPACE@9..13 "    "
+        TABLE_CAPTION_PREFIX@13..15 ": "
+        TEXT@15..18 "cap"
+        NEWLINE@18..19 "\n"
+      BLANK_LINE@19..20
+        WHITESPACE@19..20 "\n"
+        BLANK_LINE@20..20 ""
+      TABLE_SEPARATOR@20..29
+        WHITESPACE@20..24 "    "
+        TABLE_SEP_DASHES@24..28 "----"
+        NEWLINE@28..29 "\n"
+      TABLE_ROW@29..35
+        WHITESPACE@29..33 "    "
+        TABLE_CELL@33..34
+          TEXT@33..34 "x"
+        NEWLINE@34..35 "\n"
+      TABLE_SEPARATOR@35..44
+        WHITESPACE@35..39 "    "
+        TABLE_SEP_DASHES@39..43 "----"
+        NEWLINE@43..44 "\n"

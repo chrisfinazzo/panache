@@ -97,6 +97,38 @@ impl<'s, 'a, 'p> LineView for UniformStripView<'s, 'a, 'p> {
     }
 }
 
+/// A [`LineView`] that strips `content_col` columns of leading whitespace
+/// from every line of an inner view, on top of whatever the inner view
+/// strips. The first-content-line term lookahead reads captions through
+/// this: a footnote or definition body's content column is 4, so its
+/// `    : cap` line fails [`try_parse_caption_prefix`]'s <= 3 indent gate
+/// when probed raw, and a caption-led table in the body would wrongly
+/// promote the body's first line to a definition term.
+///
+/// `frame_verdict` composes: a line must reach the inner view's frame
+/// *and* the content column to count as inside. Blank lines fall out as
+/// `Dedented`, which the caption probe already exempts.
+pub(crate) struct ContentColStripView<'v, V: LineView + ?Sized> {
+    pub inner: &'v V,
+    pub content_col: usize,
+}
+
+impl<V: LineView + ?Sized> LineView for ContentColStripView<'_, V> {
+    fn line(&self, i: usize) -> &str {
+        super::container_prefix::strip_list_indent(self.inner.line(i), self.content_col)
+    }
+    fn line_count(&self) -> usize {
+        self.inner.line_count()
+    }
+    fn frame_verdict(&self, i: usize) -> FrameVerdict<'_> {
+        let inner_verdict = self.inner.frame_verdict(i);
+        if !inner_verdict.reaches_frame() {
+            return inner_verdict;
+        }
+        super::container_prefix::resolve_content_indent(self.inner.line(i), self.content_col)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
     Left,

@@ -329,6 +329,7 @@ golden_test_cases!(
     fenced_div_list_item_nested_div_close,
     fenced_div_indented_close_top_level,
     fenced_div_close_grid_table,
+    footnote_body_table_caption,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
     footnote_continuation_indent_stripped_pandoc,

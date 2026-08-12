@@ -6110,14 +6110,19 @@ fn first_content_line_term_lookahead(
         if let Some((marker, ..)) = definition_lists::try_parse_definition_marker(stripped) {
             // A `:` line that is actually a table caption shouldn't open a
             // definition list. Mirror the gate from
-            // `next_line_is_definition_marker`. This lookahead strips the
-            // footnote/list `content_col` indent (not a container prefix), so
-            // the raw-line caption gate is appropriate here.
-            if marker == ':'
-                && table_captions_enabled
-                && super::blocks::tables::is_caption_followed_by_table(lines, check_pos)
-            {
-                return None;
+            // `next_line_is_definition_marker`, but probe through a view
+            // that strips `content_col` from every line: a footnote or
+            // definition body's content column is 4, so its `    : cap`
+            // and `    ----` lines fail the caption probe's <= 3 indent
+            // gates when read raw, and the gate would never fire.
+            if marker == ':' && table_captions_enabled {
+                let view = super::blocks::tables::ContentColStripView {
+                    inner: lines,
+                    content_col,
+                };
+                if super::blocks::tables::is_caption_followed_by_table(&view, check_pos) {
+                    return None;
+                }
             }
             return Some(blank_count);
         }

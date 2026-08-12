@@ -822,23 +822,16 @@ Further definition-list divergences fixed alongside it:
   content column) is pinned by
   `caption_probe_still_fires_inside_the_container`.
 
-Still open in the same area, found while fixing the above and **pre-existing**
-(reproduces at `4fedf093`, unchanged by the caption-probe bound). The
-definition-body losslessness failure that used to lead this list is fixed, and
-so is the list-item caption-plus-table idempotency failure (simple-table
-detection now reads the uniform container strip, so the table at the item's
-content column plus the writer's 2-space self-indent survives reparse); this one
-is an idempotency failure in an adjacent container shape:
-
-- [ ] A simple table with a **caption in a footnote body**
-  (`[^1]: a\n\n    : cap\n\n    ----\n    x\n    ----\n`) still fails
-  idempotency: the footnote formatter drops the blank line between the
-  body's first paragraph and the table, so pass 2 reads the table lines as
-  paragraph continuation (`[^1]: a --- x ---`). The caption-less footnote
-  shape round-trips clean; the definition-body equivalents of both shapes
-  were fixed with the dispatch-bounded caption scan, the dispatch-line
-  content-indent re-emission, and the container-indent threading into
-  `format_simple_table`.
+The footnote-body caption-plus-table idempotency failure that used to sit here
+(`[^1]: a\n\n    : cap\n\n    ----\n    x\n    ----\n` collapsing to
+`[^1]: a --- x ---` on pass 2) is fixed: the misparse was in
+`first_content_line_term_lookahead`, whose table-caption gate probed *raw*
+lines, so a body content column of 4 (footnotes, `10.`-style ordered items)
+pushed the `: cap` and `----` lines past the probe's <= 3 indent gates and the
+body's first line was wrongly promoted to a definition term. The gate now probes
+through `ContentColStripView` (per-line `content_col` strip over the caller's
+view). Pinned by `footnote_body_table_caption` (parser) and
+`footnote_body_simple_table` (formatter).
 
 One more in the caption probe, latent rather than failing (review finding on the
 container-frame PR, no reproducer yet):
