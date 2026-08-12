@@ -823,24 +823,28 @@ Further definition-list divergences fixed alongside it:
   `caption_probe_still_fires_inside_the_container`.
 
 Still open in the same area, found while fixing the above and **pre-existing**
-(both reproduce at `4fedf093`, unchanged by the caption-probe bound). These are
-losslessness failures, so they outrank the cosmetic issues above:
+(both reproduce at `4fedf093`, unchanged by the caption-probe bound). The
+definition-body losslessness failure that used to lead this list is fixed; these
+two are idempotency failures in adjacent container shapes:
 
-- [ ] A table **caption inside a container** loses bytes on the round trip.
-  `T\n\n:   a\n\n    :   def\n\n    ----\n    x\n    ----\n` — a caption
-  plus simple table at a definition body's content column. Before the
-  container-frame consolidation it reparsed with the caption line duplicated
-  and the table's indent dropped; since the caption probe reads the true
-  frame, the symptom has shifted (the round trip now drops the nested
-  marker's indent, `-    :   def` / `+:   def`, plus an idempotency failure
-  escaping the marker) but the shape still fails
-  `panache debug format --checks all`.
-
-- [ ] The same shape in a **list item** parses to pandoc's AST exactly, but the
-  *formatter* mangles the round trip: it rewrites the `----` rules to `--`
-  and re-emits the caption below the table. Parser-side is clean here, so
-  this one is genuinely a formatter bug, unlike the item above it. Repro:
+- [ ] The caption-plus-table shape in a **list item** now formats to pandoc's
+  writer output exactly (`- item\n\n    ---\n    x\n    ---\n\n    : cap`),
+  but the *reparse* of that output fails: the table sits at the item's
+  content column plus the simple table's 2-space self-indent, and detection
+  loses it (the dispatcher probes `indented_code_block` and the lines end up
+  as `PLAIN` paragraphs), so pass 2 collapses the table — an idempotency
+  failure. Pandoc reads the same bytes as `BulletList [Para, Table]`. Repro:
   `- item\n\n  : cap\n\n  ----\n  x\n  ----\n`
+
+- [ ] A simple table with a **caption in a footnote body**
+  (`[^1]: a\n\n    : cap\n\n    ----\n    x\n    ----\n`) still fails
+  idempotency: the footnote formatter drops the blank line between the
+  body's first paragraph and the table, so pass 2 reads the table lines as
+  paragraph continuation (`[^1]: a --- x ---`). The caption-less footnote
+  shape round-trips clean; the definition-body equivalents of both shapes
+  were fixed with the dispatch-bounded caption scan, the dispatch-line
+  content-indent re-emission, and the container-indent threading into
+  `format_simple_table`.
 
 One more in the caption probe, latent rather than failing (review finding on the
 container-frame PR, no reproducer yet):
