@@ -1468,71 +1468,129 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
 
 ### Architecture
 
-- [ ] Give a container's **line extent** a single owner, the way the typed frame
-  verdict now owns its **prefix strip**. These are two orthogonal questions
-  about the same container and only the first one has been consolidated:
-  `FrameVerdict` answers "what does stripping line `i` leave, and did it
-  reach the frame?", but "does this container's line run still reach line
-  `i`?" is re-derived independently inside every lookahead scan, each
-  implementing a different subset of the rules. Pandoc decides it once (the
-  `rawLines` collection per container), so every block parser running inside
-  physically cannot see past it; panache has no such fence.
-
-  The rules pandoc terminates a container's line run on, against where panache
-  honors them today:
+- [x] Give a container's **line extent** a single owner, the way the typed frame
+  verdict owns its **prefix strip**. The two destructive terminators landed
+  on the `ends_container_lines` seam, one commit each with pandoc-verified
+  pins; the updated cross-product:
 
   | terminator                     | pandoc                    | panache                        |
   | ------------------------------ | ------------------------- | ------------------------------ |
   | blank line                     | all containers            | every scan                     |
   | dedent past the content column | after a blank line        | caption probe only             |
   | fenced-div closer              | `notFollowedByDivCloser`  | the two simple-table end scans |
-  | new note marker (`[^x]:`)      | `noteBlock`'s `rawLine`   | missing                        |
-  | new list start                 | `listContinuationLine`    | missing                        |
-  | HTML closer                    | `notFollowedByHtmlCloser` | missing                        |
+  | new note marker (`[^x]:`)      | `noteBlock`'s `rawLine`   | the two simple-table end scans |
+  | new list start                 | `listContinuationLine`    | the two simple-table end scans |
+  | HTML closer                    | `notFollowedByHtmlCloser` | see the follow-up below        |
 
-  Times the scans that need them: `find_table_end`,
-  `find_single_column_table_end`, `table_grid_starts_at`,
-  `is_caption_followed_by_table`, and (unverified, but the same shape) the grid,
-  multiline, and pipe table scans. That cross-product is being filled in one
-  cell at a time, each time someone trips over a bug.
+  - **Note marker**: `ContainerPrefix::from_stack` records the outermost
+    `FootnoteDefinition`'s op index (`note_marker_op_bound`); a line whose
+    verdict fails at or before that op and whose resolved tail parses as a
+    marker ends the run. Presence gates it, not ordering --- pandoc's fence
+    lives in `noteBlock` only, so inside a plain list item pandoc itself
+    collects `[^2]: two` as a table row (pinned), and a marker at the note's
+    content column stays note content. No config capture needed: a
+    `FootnoteDefinition` on the stack implies the extension.
+  - **List start**: `from_stack` captures the marker-detection config bits
+    (`ListMarkerDetect`, split out of `try_parse_list_marker`) whenever a
+    `ListAdvance` op exists. Three-way split, all pinned: a marker failing the
+    item's advance whose outer frame resolves `Inside` with <= 3 leading columns
+    ends the run; at the content column it is nested-list content; in between it
+    is a lazy continuation.
 
-  The three missing terminators all reproduce, verified against
-  `pandoc -f markdown -t native`. Two are **destructive**: the simple-table scan
-  runs past the boundary, claims the next container's opening line as a row, and
-  slices it on the table's column boundaries, so `format` rewrites it (and is
-  not idempotent).
+  Both destructive repros are fixed and pinned in both golden suites
+  (`simple_table_in_footnote_stops_at_note_marker`,
+  `simple_table_in_list_item_stops_at_sibling_marker`). The remaining cells and
+  everything found on the way are the follow-ups below.
 
-  ```
-  [^1]: body            - item                <div>
+- [ ] **HTML closer** (`notFollowedByHtmlCloser`): deferred after a bounded
+  attempt, because probing narrowed the gap considerably and the sketched
+  fix's precondition turned out false. Empirics, all against
+  `pandoc -f markdown -t native`:
 
-      A    B              A    B              - item
-      --- ---             --- ---
-      x    y              x    y                A    B
-  [^2]: two             - next                  --- ---
-                                                x    y
-  text[^1][^2]                                </div>
-  ```
+  - For the item's *own* table scan the fence does **not** apply: in `- <div>` +
+    indented simple table + `</div>` (closer at the content column or at column
+    0), pandoc itself collects the closer as a table row and slices it into
+    `</di` / `v>` cells. Panache matches pandoc on both shapes today; nothing to
+    fix there.
+  - Top-level `<div>` blocks already bound their span (list, blockquote, and
+    footnote bodies inside a top-level div all end at `</div>`, verified
+    lossless and idempotent) --- the collect-at-detection HTML block machinery
+    is the fence.
+  - The one divergent shape is a **line-collected container above the item
+    inside markdown-in-html**: `- <div>` + quoted table + `  </div>`. Pandoc
+    gives `Div [BlockQuote [Table]]` with the closer as raw HTML (the quote's
+    line run stops); panache's quoted table swallows the closer as a sliced row.
+    Structural, plus the width wobble filed below.
 
-  Left: `[^2]: two` becomes a table row and reformats to `[^2]    : two`,
-  destroying footnote 2. Middle: `- next` reformats to `- ne   xt`, splitting
-  the word across columns. Right: the table runs past `</div>`; lossless and
-  idempotent, so structural only.
+  So the terminator is ordering-gated like the div flag, but anchored at the
+  list item whose buffer holds the open tag: it applies only to containers
+  pushed *above* that item. The sketched `Container::HtmlBlock` marker cannot
+  work --- markdown-in-html is not a stack transition in panache; the open-tag
+  signal lives in `ListItemBuffer::unclosed_pandoc_matched_pair_tag`
+  (`utils/list_item_buffer.rs`), computed per dispatch. The viable shape is
+  threading that tag into `from_stack` (an `Option<&str>` param; `None` from
+  `continuation.rs` and the scalar constructors) and OR-ing an
+  `html_closer_ends_lines` flag for containers pushed after the innermost
+  `ListItem`, with `is_closing_marker` / `count_tag_balance`
+  (`blocks/html_blocks.rs`) as the line test. Low urgency: the only divergence
+  is structural, on an exotic shape.
 
-  The fix is one `LineView` predicate folding every terminator, computed from
-  the container stack once, so each scan's loop consults it and nothing else.
-  The seam already exists --- `ends_container_lines` landed with the div closer
-  behind it (see the caption-probe entry under `Parser`), so this is filling it
-  in, not restructuring around it. Explicitly **not** pandoc's
-  collect-then-reparse model, which would break the single-pass invariant in
-  `AGENTS.md`; this is plumbing state into detection, which that invariant asks
-  for.
+- [ ] Migrate the remaining scans' **ad-hoc container bounds** onto
+  `ends_container_lines`, one scan per commit with pandoc probes. The
+  caption scans (`is_caption_followed_by_table`,
+  `caption_range_starting_at`, `find_caption_before_table`,
+  `previous_nonblank_looks_like_table`, `find_caption_after_table`,
+  `is_valid_caption_start_before_table`) each test
+  `line_is_fenced_div_fence` *unconditionally* --- a looser predicate than
+  the seam's (it accepts openers, and fires with no div open), so migrating
+  them is a behavior change needing its own pins, and the backward scans run
+  upward, where "ends the run" is direction-inverted. The pipe scan stops on
+  "no `|`" (a `:::` happens to stop it, by accident), the grid scan has no
+  bound at all, and the multiline scan's `crossed_scope_boundary`
+  deliberately differs (any fence including openers, bq-blank handling) and
+  indexes raw lines, so it needs threading onto `LineView` first.
+  `table_grid_starts_at`'s `pos + 1` stays unvetted.
 
-  Do it one terminator per commit, each with pandoc-verified pins, because the
-  subtleties are real and asymmetric: the div closer only counts when the div is
-  open *outside* the container, and the plausible-looking companion tightening
-  (bounding the lookahead tail by indent) turned out to be a regression, since
-  pandoc admits a contiguous dedent as a lazy continuation. Start with the note
-  marker --- it is the one that eats a whole footnote.
+- [ ] Terminator-adjacent **headered simple tables should degrade to a
+  paragraph** the way pandoc's footer rule makes them: when a contiguous
+  terminator (div closer, note marker, list start) ends the run, the
+  collected raw has no trailing blank line, pandoc's `simpleTable` footer
+  (`blanklines`) fails, and the block reparses as a paragraph.
+  `find_table_end` treats the terminator like a blank line instead, so
+  panache keeps the Table (lossless and idempotent; pinned with divergence
+  comments in `blocks/tests/tables.rs`). Applies to the shipped div closer
+  too when it ends a *list item's* run --- the existing div pins only cover
+  blockquote/definition containers, whose reparse appends the blank.
+
+- [ ] The list-start fence stops at pandoc's plain `nonindentSpaces` (<= 3
+  columns in the outer frame). For a **nested list with a positive base
+  indent**, pandoc's tolerance is base+3 in the outer list's frame --- a
+  marker in the base+1..base+3 band (e.g. 4-5 columns under a base-2 inner
+  list) terminates there but stays collected-as-content here. Honoring it
+  today trips a formatter reindent cascade that destroys the marker on the
+  second pass (`- x` at 5 columns reflows to 4, then loses its marker), so
+  the band is deliberately excluded (`list_start_detect` doc comment). Fix
+  the downstream cascade first, then widen the bound to
+  `List::base_indent_cols + 3`.
+
+Two more found while verifying, both independent of the seam:
+
+- [ ] A **simple table in a blockquote in a footnote body is not lossless**:
+  `[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n` parses with
+  four duplicated indent columns on the table's dispatch line
+  (`    > A    B` re-emits as `    >     A    B`), so
+  `debug format --checks losslessness` fails before any formatting question
+  arises. Pre-existing (reproduces on the commit before the note-marker
+  fence); the note-marker golden pins had to route around it via a
+  list-in-footnote shape instead.
+
+- [ ] Simple-table rows holding a **sliced multi-space cell** are not idempotent
+  even where the slicing matches pandoc: `- <div>` + indented table +
+  `</div>` collects the closer as a `</di` / `v>` row (as pandoc does), but
+  pass 1 renders `A       B` / `</di    v>` and pass 2 re-measures to
+  `A      B` / `</di   v>`. Same family as the "simple tables inside a
+  blockquote are not idempotent" entry above, but reproduces without a
+  blockquote.
 
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
