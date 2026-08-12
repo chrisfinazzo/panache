@@ -332,6 +332,8 @@ golden_test_cases!(
     footnote_body_table_caption,
     simple_table_in_footnote_stops_at_note_marker,
     simple_table_in_list_item_stops_at_sibling_marker,
+    pipe_table_in_footnote_stops_at_note_marker,
+    pipe_table_in_list_item_stops_at_sibling_marker,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
     footnote_continuation_indent_stripped_pandoc,

@@ -1739,11 +1739,17 @@ pub(crate) fn try_parse_pipe_table(
         }
     }
 
-    // Find table end (first blank line or end of input)
+    // Find table end (first blank line or end of input). A line ending
+    // the enclosing container's line run bounds the table exactly like a
+    // blank line does: pandoc's line-run collection stops there before
+    // the table parser ever sees the line, so a sibling list start or a
+    // new note marker containing a `|` is never a data row. (Div and
+    // HTML closers carry no `|`, so the pipe gate below already stopped
+    // there — this makes the bound principled rather than accidental.)
     let mut end_pos = actual_start + 2;
     while end_pos < window.line_count() {
         let line = window.line(end_pos);
-        if line.trim().is_empty() {
+        if line.trim().is_empty() || window.ends_container_lines(end_pos) {
             break;
         }
         // Row should have pipes

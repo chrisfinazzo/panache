@@ -586,3 +586,109 @@ fn lazy_quote_fold_stops_at_the_html_closer() {
         quote.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The pipe-table row scan ends at container line-run terminators
+//
+// The row loop used to stop only on a blank line or a line without `|`,
+// which let a container-ending line *containing* a pipe — a sibling list
+// start `- e | f`, a new note marker `[^2]: e | f` — be swallowed as a
+// data row. pandoc's line-run collection (`listContinuationLine`,
+// `noteBlock`) ends the run before the table parser ever sees the line.
+// Div closers and HTML closers carry no `|`, so the old gate already
+// stopped there by accident; these pins cover the terminators the gate
+// missed.
+
+/// `pandoc -f markdown -t native`: `- e | f` is a sibling item, never a
+/// pipe-table row.
+#[test]
+fn pipe_table_in_a_list_item_ends_at_a_sibling_marker() {
+    let input = "- x\n\n  a | b\n  ---|---\n  c | d\n- e | f\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    assert_eq!(list.kind(), SyntaxKind::LIST);
+    let items: Vec<_> = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .collect();
+    assert_eq!(items.len(), 2, "the sibling item survives the table scan");
+    let table = first_of(&items[0], SyntaxKind::PIPE_TABLE).expect("table in item 1");
+    assert!(
+        !table.text().to_string().contains("e | f"),
+        "the sibling marker is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A marker at the item's content column is nested-list content, which
+/// the run collects like any other line: `pandoc -f markdown -t native`
+/// makes `  - e | f` a table row (`- e` / `f` cells).
+#[test]
+fn nested_list_marker_with_pipes_stays_a_pipe_table_row() {
+    let input = "- x\n\n  a | b\n  ---|---\n  c | d\n  - e | f\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- e | f"),
+        "the nested marker is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// A marker past the 3-column tolerance but short of the content column
+/// is a lazy continuation: `pandoc -f markdown -t native` collects
+/// `    - e | f` under `10.  item` (content column 5) as a table row.
+#[test]
+fn list_marker_in_the_lazy_band_stays_a_pipe_table_row() {
+    let input = "10.  item\n\n     a | b\n     ---|---\n     c | d\n    - e | f\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- e | f"),
+        "the lazy marker is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: `[^2]: e | f` opens the second note;
+/// the first note's table must not claim it as a row.
+#[test]
+fn pipe_table_in_a_footnote_body_ends_at_a_note_marker() {
+    let input = "[^1]: x\n\n    a | b\n    ---|---\n    c | d\n[^2]: e | f\n\nx[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("table in the note body");
+    assert!(
+        !table.text().to_string().contains("[^2]"),
+        "the new note marker is not a table row: {}",
+        table.text()
+    );
+    let notes: Vec<_> = node
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
+        .collect();
+    assert_eq!(notes.len(), 2, "the second note survives the table scan");
+}
