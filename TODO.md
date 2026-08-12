@@ -1473,14 +1473,14 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   on the `ends_container_lines` seam, one commit each with pandoc-verified
   pins; the updated cross-product:
 
-  | terminator                     | pandoc                    | panache                        |
-  | ------------------------------ | ------------------------- | ------------------------------ |
-  | blank line                     | all containers            | every scan                     |
-  | dedent past the content column | after a blank line        | caption probe only             |
-  | fenced-div closer              | `notFollowedByDivCloser`  | the two simple-table end scans |
-  | new note marker (`[^x]:`)      | `noteBlock`'s `rawLine`   | the two simple-table end scans |
-  | new list start                 | `listContinuationLine`    | the two simple-table end scans |
-  | HTML closer                    | `notFollowedByHtmlCloser` | see the follow-up below        |
+  | terminator                     | pandoc                    | panache                          |
+  | ------------------------------ | ------------------------- | -------------------------------- |
+  | blank line                     | all containers            | every scan                       |
+  | dedent past the content column | after a blank line        | caption probe only               |
+  | fenced-div closer              | `notFollowedByDivCloser`  | the two simple-table end scans   |
+  | new note marker (`[^x]:`)      | `noteBlock`'s `rawLine`   | the two simple-table end scans   |
+  | new list start                 | `listContinuationLine`    | the two simple-table end scans   |
+  | HTML closer                    | `notFollowedByHtmlCloser` | the end scans + the quote gobble |
 
   - **Note marker**: `ContainerPrefix::from_stack` records the outermost
     `FootnoteDefinition`'s op index (`note_marker_op_bound`); a line whose
@@ -1502,38 +1502,54 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `simple_table_in_list_item_stops_at_sibling_marker`). The remaining cells and
   everything found on the way are the follow-ups below.
 
-- [ ] **HTML closer** (`notFollowedByHtmlCloser`): deferred after a bounded
-  attempt, because probing narrowed the gap considerably and the sketched
-  fix's precondition turned out false. Empirics, all against
-  `pandoc -f markdown -t native`:
+- [x] **HTML closer** (`notFollowedByHtmlCloser`): landed on the seam. The
+  divergent shape was a line-collected container pushed above the item
+  inside markdown-in-html --- `- <div>` + blank + quoted table + `  </div>`
+  (the blank is essential: without it the whole item stays in the
+  `ListItemBuffer` and the emit-time HTML lift already bounds the span) ---
+  where the quoted table swallowed the closer as a sliced row while pandoc
+  stops the quote's run.
 
-  - For the item's *own* table scan the fence does **not** apply: in `- <div>` +
-    indented simple table + `</div>` (closer at the content column or at column
-    0), pandoc itself collects the closer as a table row and slices it into
-    `</di` / `v>` cells. Panache matches pandoc on both shapes today; nothing to
-    fix there.
-  - Top-level `<div>` blocks already bound their span (list, blockquote, and
-    footnote bodies inside a top-level div all end at `</div>`, verified
-    lossless and idempotent) --- the collect-at-detection HTML block machinery
-    is the fence.
-  - The one divergent shape is a **line-collected container above the item
-    inside markdown-in-html**: `- <div>` + quoted table + `  </div>`. Pandoc
-    gives `Div [BlockQuote [Table]]` with the closer as raw HTML (the quote's
-    line run stops); panache's quoted table swallows the closer as a sliced row.
-    Structural, plus the width wobble filed below.
+  The previously sketched param threading turned out impossible for a second
+  reason beyond the `Container::HtmlBlock` marker: the interrupting block that
+  pushes the container above the item *clears the item's buffer first*
+  (`emit_list_item_buffer_if_needed`), so `unclosed_pandoc_matched_pair_tag`
+  answers `None` at every dispatch where the terminator matters. What landed
+  instead:
 
-  So the terminator is ordering-gated like the div flag, but anchored at the
-  list item whose buffer holds the open tag: it applies only to containers
-  pushed *above* that item. The sketched `Container::HtmlBlock` marker cannot
-  work --- markdown-in-html is not a stack transition in panache; the open-tag
-  signal lives in `ListItemBuffer::unclosed_pandoc_matched_pair_tag`
-  (`utils/list_item_buffer.rs`), computed per dispatch. The viable shape is
-  threading that tag into `from_stack` (an `Option<&str>` param; `None` from
-  `continuation.rs` and the scalar constructors) and OR-ing an
-  `html_closer_ends_lines` flag for containers pushed after the innermost
-  `ListItem`, with `is_closing_marker` / `count_tag_balance`
-  (`blocks/html_blocks.rs`) as the line test. Low urgency: the only divergence
-  is structural, on an exotic shape.
+  - `ListItemBuffer::clear` folds the open tag into a carried field
+    (`carried_unclosed_html_tag`), dropped again when a later chunk's closes
+    catch up; `open_matched_pair_tag` reads through it. The dispatcher gate
+    stays on the segments-only accessor.
+  - `from_stack` reads the buffer straight off the `ListItem` stack entry (it
+    already has `config`) --- no param threading. `html_closer_tag` on
+    `ContainerPrefix` carries `(tag, content_col)`, ordering-gated exactly like
+    the div flag with the tag-holding item in the `FencedDiv` role, so the
+    item's own run is never fenced (pandoc slices the closer into the item's own
+    table --- pinned).
+  - The line test (`tables::html_closer_ends_lines`, OR-ed into
+    `ends_container_lines` and consulted by `blockquote_gobble_ends_at` for the
+    lazy fold) is a column bound, not a frame resolve: the lazy blockquote
+    gobble skips a marker-less line's indent wholesale, which would erase the
+    distinction pandoc draws. Probed: the closer fires at up to the item's
+    content column of indent (`  </div>` under a 2-column item) and not one
+    space more (`   </div>` stays lazy quote content).
+
+  Pinned in `frame_pinning.rs` (gate shape, flush survival, dialect gate, column
+  split) and `blocks/tests/tables.rs` (quoted table, column-0 closer, item's own
+  table, wrong tag, lazy quote fold), plus golden cases
+  `quoted_table_in_list_item_stops_at_html_closer` (parser; the formatter side
+  would trip the quoted-table width wobble filed below) and
+  `quoted_para_in_list_item_stops_at_html_closer` (both suites). Residual
+  divergence is the missing markdown-in-html `Div` lift (panache keeps the tags
+  as raw siblings), tracked in the pandoc allowlist 0464 rationale.
+
+- [ ] A **lazy block-HTML line folded into a quoted paragraph** stays inline
+  text: `> a\n<hr>\n` is `BlockQuote [Plain "a", RawBlock "<hr>"]` in pandoc
+  but `BlockQuote [Para ["a", SoftBreak, RawInline "<hr>"]]` here. General
+  (no markdown-in-html involved), found while probing the HTML-closer fence:
+  the same shape puts a deeper-indented `</div>` (past the closer's column
+  bound, so correctly gobbled) inline instead of as the quote's `RawBlock`.
 
 - [ ] Migrate the remaining scans' **ad-hoc container bounds** onto
   `ends_container_lines`, one scan per commit with pandoc probes. The
