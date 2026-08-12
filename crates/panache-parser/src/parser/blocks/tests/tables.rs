@@ -749,3 +749,191 @@ fn grid_table_in_a_fenced_div_ends_at_the_closer() {
         table.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The multiline-table scan ends at container line-run terminators
+//
+// The scan used to cross container ends hunting for a closing separator:
+// a `:::` div closer, a sibling list start, or a raw blank inside a
+// blockquote was collected (or peeked past) and a closer found beyond it
+// completed the table, swallowing the terminator as a row. pandoc's
+// line-run collection stops at the terminator, so no closer beyond it can
+// complete the shape; the truncated run then reparses as a smaller
+// single-column table, a horizontal rule, or a paragraph. Unmatched `:::`
+// fences and `::: x` openers are ordinary rows in pandoc (probed), so the
+// old `crossed_scope_boundary` guard — any fence, open div or not — is
+// gone entirely.
+
+/// `pandoc -f markdown -t native`: the `:::` closes the div; the
+/// headerless table finds no closer inside it and degrades to
+/// HorizontalRule + Para (the trailing separator sits outside the div).
+#[test]
+fn multiline_table_in_a_fenced_div_ends_at_the_closer() {
+    let input = "::: note\n----- -----\nc     d\n:::\n\n----- -----\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::MULTILINE_TABLE).is_none()
+            && first_of(&node, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "no table crosses the div closer"
+    );
+    let div = first_of(&node, SyntaxKind::FENCED_DIV).expect("div");
+    assert!(
+        div.text().to_string().ends_with(":::\n"),
+        "the div closes at its own fence: {}",
+        div.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: the run ends at `- next`, so the
+/// full-width shape finds no closer; the truncated run reparses as a
+/// single-column table closed by the column separator, with `x y` left
+/// over as a paragraph.
+#[test]
+fn multiline_table_in_a_list_item_ends_at_a_sibling_marker() {
+    let input =
+        "- x\n\n  -----------\n  a     b\n  ----- -----\n  x     y\n- next\n  -----------\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    let items: Vec<_> = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .collect();
+    assert_eq!(items.len(), 2, "the sibling item survives the table scan");
+    assert!(
+        !items[0].text().to_string().contains("next"),
+        "the sibling marker stays outside item 1: {}",
+        items[0].text()
+    );
+    let table = first_of(&items[0], SyntaxKind::SIMPLE_TABLE).expect("truncated table in item 1");
+    assert!(
+        table.text().to_string().contains("a     b") && !table.text().to_string().contains("x"),
+        "the truncated run reparses as the single-column table: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: a raw blank ends the blockquote (only
+/// a `>`-marked blank is an interior row separator), so the table cannot
+/// close in the next quote; both quotes hold HorizontalRule (+ Para).
+#[test]
+fn multiline_table_does_not_cross_a_blockquote_blank() {
+    let input = "> ----- -----\n> a     b\n\n> ----- -----\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::MULTILINE_TABLE).is_none()
+            && first_of(&node, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "no table crosses the raw blank"
+    );
+    let quotes: Vec<_> = node
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::BLOCK_QUOTE)
+        .collect();
+    assert_eq!(quotes.len(), 2, "the raw blank splits the quotes");
+}
+
+/// `pandoc -f markdown -t native`: with no div open, `:::` is an
+/// ordinary row, not a boundary. (The shape lands on the headerless
+/// simple-table path — the multiline reading wants blank-separated rows
+/// — but the cell structure matches pandoc's either way.)
+#[test]
+fn unmatched_div_fence_stays_a_multiline_row() {
+    let input = "----- -----\na     b\n:::\n----- -----\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table");
+    assert!(
+        table.text().to_string().contains(":::"),
+        "the unmatched fence is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: same at the single-column shape — the
+/// old scope guard rejected the reinterpretation on any fence, but an
+/// unmatched `:::` is just a row there too.
+#[test]
+fn unmatched_div_fence_stays_a_single_column_row() {
+    let input = "p\n\n----\na\n\n:::\n\nb\n----\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::MULTILINE_TABLE).expect("single-column table");
+    assert!(
+        table.text().to_string().contains(":::"),
+        "the unmatched fence is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: a `::: nested` opener inside an open
+/// div is a row, not a boundary — only closers end the run.
+#[test]
+fn nested_div_opener_stays_a_single_column_row() {
+    let input = "::: note\n----\na\n\n::: nested\n\nb\n----\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::MULTILINE_TABLE).expect("single-column table");
+    assert!(
+        table.text().to_string().contains("::: nested"),
+        "the nested opener is collected as a row: {}",
+        table.text()
+    );
+    assert!(
+        !table.text().to_string().ends_with(":::\n"),
+        "the div's own closer stays outside the table: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: a sibling `- --- ---` is a list
+/// start, so it cannot serve as the closing column separator peeked
+/// after a blank; the headerless shape degrades to HorizontalRule +
+/// Para.
+#[test]
+fn sibling_marker_is_no_multiline_closer() {
+    let input = "- x\n\n  --- ---\n  a   b\n\n- --- ---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::MULTILINE_TABLE).is_none()
+            && first_of(&node, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the sibling marker is not a closing separator"
+    );
+}

@@ -245,6 +245,7 @@ golden_test_cases!(
     pipe_table_in_footnote_stops_at_note_marker,
     pipe_table_in_list_item_stops_at_sibling_marker,
     simple_table_in_div_stops_at_closer,
+    multiline_table_in_div_stops_at_closer,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
     footnote_numeric_continuation_idempotency_134,

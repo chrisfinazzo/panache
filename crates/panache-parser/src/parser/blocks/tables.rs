@@ -3334,21 +3334,26 @@ pub(crate) fn try_parse_multiline_table(
     let mut found_closing_sep = false;
     let mut content_line_count = 0usize;
 
-    // A bare `---` opener is also a plain horizontal rule, so the
-    // single-column reinterpretation below must not let the scan cross the
-    // enclosing container's end looking for a closer: a truly blank line ends
-    // a blockquote (a quoted blank still carries `>`), and a `:::` fence
-    // closes the enclosing div (the convention the simple-table scans already
-    // follow). Multi-group shapes keep their historical scan behavior.
+    // Inside a blockquote only a `>`-marked blank is an interior row
+    // separator; a raw blank ends the quote itself, so the run cannot
+    // continue past it. Both strip to "", so the distinction needs the
+    // raw buffer.
     let bq_prefixed = window.prefix().bq_depth() > 0;
-    let mut crossed_scope_boundary = false;
 
     // Scan for header section and column separator
     while pos < lines.len() {
         let line = window.line(pos);
 
-        if line_is_fenced_div_fence(line) || (bq_prefixed && lines[pos].trim().is_empty()) {
-            crossed_scope_boundary = true;
+        // A line ending the enclosing container's line run bounds the
+        // table: pandoc's collection stops there, so no closer beyond
+        // it can complete the shape, and whatever structure the
+        // truncated run has decides the reparse. Unmatched `:::`
+        // fences and `::: x` openers are ordinary rows (probed) — only
+        // a closer of an open div ends the run, so the old
+        // `crossed_scope_boundary` guard (any fence, open div or not)
+        // is gone.
+        if window.ends_container_lines(pos) || (bq_prefixed && lines[pos].trim().is_empty()) {
+            break;
         }
 
         // Check for column separator (defines columns) - only if we started with full-width
@@ -3364,8 +3369,12 @@ pub(crate) fn try_parse_multiline_table(
         if line.trim().is_empty() {
             found_blank_line = true;
             pos += 1;
-            // Check if next line is a valid closing separator for this table shape.
-            if pos < lines.len() {
+            // Check if next line is a valid closing separator for this table
+            // shape. A container-ending line is never a closer, even when it
+            // is separator-shaped: a sibling `- --- ---` is a list start
+            // whose run boundary comes first (probed; the loop head only
+            // catches it on the next iteration, after this peek).
+            if pos < lines.len() && !window.ends_container_lines(pos) {
                 let next = window.line(pos);
                 let is_valid_closer = if is_full_width_start {
                     try_parse_multiline_separator(next).is_some()
@@ -3423,8 +3432,7 @@ pub(crate) fn try_parse_multiline_table(
         && is_full_width_start
         && first_row_adjacent
         && found_blank_line
-        && found_closing_sep
-        && !crossed_scope_boundary;
+        && found_closing_sep;
     if headerless_single_column {
         found_column_sep = true;
         column_sep_pos = start_pos;
