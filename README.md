@@ -187,12 +187,12 @@ Panache looks for a configuration in:
 ```toml
 # Markdown flavor and line width
 flavor = "quarto"
-line-width = 80
-line-ending = "auto"
 
 # Formatting style
 [format]
 wrap = "reflow"
+line-width = 80
+line-ending = "auto"
 
 # External code formatters (opt-in)
 [formatters]
