@@ -103,20 +103,20 @@ pub(crate) struct ContainerPrefix {
     /// reads its body straight out of `lines[..]` through this prefix, so
     /// without the gobble here only its first line is de-indented.
     pub lazy_blockquote_gobble: bool,
-    /// True when a fenced div was opened *outside* a line-collected
-    /// container (list item, definition/footnote body, blockquote) that
-    /// this prefix strips. Pandoc collects those containers' raw lines
-    /// with `notFollowedByDivCloser`, so a bare `:::` ends the run: the
-    /// closer belongs to the div, not to whatever block the container's
-    /// content was in the middle of. Lookaheads that scan for a block's
-    /// end (see [`LineView::ends_container_lines`]) stop there instead
-    /// of swallowing the fence.
-    ///
-    /// The div must be *outside*: pandoc's div level is set when the
-    /// opening fence is parsed, which for a div nested inside the
-    /// container happens only after the container's lines were already
-    /// collected. A stack of `[Definition, FencedDiv]` therefore leaves
-    /// this false, and a `:::` inside is collected as ordinary content.
+    /// True when a fenced div is open anywhere on the stack. Pandoc
+    /// bounds the block a scan tracks at a bare `:::` through two
+    /// guards, and one of them always applies while a div is open: a
+    /// div *outside* a line-collected container (list item,
+    /// definition/footnote body, blockquote) fences that container's
+    /// raw collection (`notFollowedByDivCloser` — the div's level was
+    /// already set when the lines were collected), and the innermost
+    /// div's *own* content parse carries the same guard, so a block
+    /// sitting directly in the div stops at the closer too (probed: a
+    /// table directly in a div, and in a div nested inside a
+    /// definition body, both end there). Lookaheads that scan for a
+    /// block's end (see [`LineView::ends_container_lines`]) stop
+    /// instead of swallowing the fence. With no div open a stray `:::`
+    /// is ordinary content — a table row in pandoc (probed).
     ///
     /// [`LineView::ends_container_lines`]: super::tables::LineView::ends_container_lines
     div_closer_ends_lines: bool,
@@ -132,8 +132,8 @@ pub(crate) struct ContainerPrefix {
     /// at all — is note content, which pandoc collects as ordinary
     /// text (e.g. a table row).
     ///
-    /// Unlike [`Self::div_closer_ends_lines`] this tracks presence,
-    /// not ordering: everything pushed above the note sits inside its
+    /// Like [`Self::div_closer_ends_lines`] this tracks presence, not
+    /// ordering: everything pushed above the note sits inside its
     /// collected raw either way. With no footnote on the stack there
     /// is nothing to fence — pandoc's `listLine` and
     /// `definitionListItem` have no note-marker guard, so a stray
@@ -172,10 +172,11 @@ pub(crate) struct ContainerPrefix {
     /// closer belongs to the HTML block, not to whatever block the
     /// container's content was in the middle of.
     ///
-    /// Ordering-gated like [`Self::div_closer_ends_lines`], but anchored
-    /// at the list item whose buffer holds the open tag (markdown-in-html
-    /// is not a stack transition here, so there is no `Container` to
-    /// anchor on): only containers pushed *after* that item are fenced.
+    /// Ordering-gated, unlike the presence-tracked flags above, and
+    /// anchored at the list item whose buffer holds the open tag
+    /// (markdown-in-html is not a stack transition here, so there is no
+    /// `Container` to anchor on): only containers pushed *after* that
+    /// item are fenced.
     /// The item's own line run is not — pandoc itself collects the closer
     /// as e.g. a table row there (verified: `- <div>` + blank + indented
     /// simple table + `  </div>` slices the closer into cells in pandoc).
@@ -293,6 +294,9 @@ impl ContainerPrefix {
             div_closer_ends_lines |= p.div_open;
             html_closer_tag = p.html_open.or(html_closer_tag);
         }
+        // An innermost div (no line-collected container after it) fences
+        // scans through its own content parse; see the field docs.
+        div_closer_ends_lines |= div_open;
         // The `content_col` convention (see `Container`): content
         // containers carry relative widths, so the ContentIndent ops --
         // applied sequentially -- must sum to the absolute column the

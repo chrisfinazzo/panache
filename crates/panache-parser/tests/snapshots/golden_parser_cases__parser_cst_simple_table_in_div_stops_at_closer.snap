@@ -1,0 +1,40 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..44
+  FENCED_DIV@0..37
+    DIV_FENCE_OPEN@0..9
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..8
+        TEXT@4..8 "note"
+      NEWLINE@8..9 "\n"
+    SIMPLE_TABLE@9..33
+      TABLE_HEADER@9..16
+        TABLE_CELL@9..10
+          TEXT@9..10 "A"
+        WHITESPACE@10..14 "    "
+        TABLE_CELL@14..15
+          TEXT@14..15 "B"
+        NEWLINE@15..16 "\n"
+      TABLE_SEPARATOR@16..26
+        TABLE_SEP_DASHES@16..20 "----"
+        TABLE_SEP_WHITESPACE@20..21 " "
+        TABLE_SEP_DASHES@21..25 "----"
+        NEWLINE@25..26 "\n"
+      TABLE_ROW@26..33
+        TABLE_CELL@26..27
+          TEXT@26..27 "x"
+        WHITESPACE@27..31 "    "
+        TABLE_CELL@31..32
+          TEXT@31..32 "y"
+        NEWLINE@32..33 "\n"
+    DIV_FENCE_CLOSE@33..37
+      TEXT@33..36 ":::"
+      NEWLINE@36..37 "\n"
+  BLANK_LINE@37..38
+    BLANK_LINE@37..38 "\n"
+  PARAGRAPH@38..44
+    TEXT@38..43 "after"
+    NEWLINE@43..44 "\n"

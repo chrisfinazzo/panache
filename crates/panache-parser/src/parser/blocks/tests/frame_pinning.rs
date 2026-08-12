@@ -605,22 +605,26 @@ fn caption_probe_frame_bound_admits_lazy_continuations() {
     assert!(is_caption_followed_by_table(&view, 0));
 }
 
-/// `div_closer_ends_lines` tracks *ordering*, not mere presence: pandoc
-/// raises its div level when the opening fence is parsed, which for a
-/// div nested inside the container happens only after that container's
-/// lines were collected.
+/// `div_closer_ends_lines` tracks presence: a div outside a
+/// line-collected container fences that container's raw collection
+/// (`notFollowedByDivCloser` — the div level was already set when the
+/// lines were collected), and an innermost div's own content parse
+/// carries the same guard, so a block sitting directly in the div stops
+/// at the closer too. Both probed against `pandoc -f markdown -t
+/// native`: a table directly in a div, and in a div nested inside a
+/// definition body, both end at the `:::`.
 #[test]
-fn div_closer_ends_lines_needs_the_div_outside() {
+fn div_closer_ends_lines_needs_a_div_on_the_stack() {
     let p = |stack: &[Container]| {
         ContainerPrefix::from_stack(stack, false, &opts(Dialect::Pandoc)).div_closer_ends_lines()
     };
     assert!(p(&[fenced_div(0), definition(4)]));
     assert!(p(&[fenced_div(0), Container::BlockQuote {}]));
     assert!(p(&[fenced_div(0), list(), list_item(2)]));
-    // Div inside the container, or with no line-collected container at
-    // all: the fence is content.
-    assert!(!p(&[definition(4), fenced_div(0)]));
-    assert!(!p(&[fenced_div(0)]));
+    assert!(p(&[definition(4), fenced_div(0)]));
+    assert!(p(&[fenced_div(0)]));
+    // No div open: a stray `:::` is ordinary content (a table row in
+    // pandoc — probed).
     assert!(!p(&[]));
 }
 
