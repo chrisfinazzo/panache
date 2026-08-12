@@ -336,3 +336,119 @@ fn note_marker_ends_a_list_item_table_inside_a_footnote_body() {
         table.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Container line runs end at a new list start
+//
+// pandoc collects a list item's continuation lines with
+// `listContinuationLine = notFollowedBy blankline >> notFollowedBy'
+// listStart >> ...`, where `listStart` tolerates `nonindentSpaces` (at most
+// 3 columns) in the frame the list was parsed in. So a marker line within
+// that tolerance ends the item's run; one at the item's content column is
+// nested-list content; and one in between is a lazy continuation. Known,
+// deliberate divergence: when the terminator is contiguous with a headered
+// simple table, pandoc's collected raw ends without the blank line the
+// table's footer rule demands, so pandoc degrades the table to a
+// paragraph; panache treats the terminator like a blank line and keeps the
+// table (lossless and idempotent; see TODO.md).
+
+/// `pandoc -f markdown -t native`: `- next` is a sibling item, never a
+/// table row (before this fence it was sliced across the table's column
+/// boundaries, reformatting to `- ne   xt`).
+#[test]
+fn simple_table_in_a_list_item_ends_at_a_sibling_marker() {
+    let input = "- item\n\n  A    B\n  --- ---\n  x    y\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    assert_eq!(list.kind(), SyntaxKind::LIST);
+    let items: Vec<_> = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .collect();
+    assert_eq!(items.len(), 2, "the sibling item survives the table scan");
+    let table = first_of(&items[0], SyntaxKind::SIMPLE_TABLE).expect("table in item 1");
+    assert!(
+        !table.text().to_string().contains("next"),
+        "the sibling marker is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A marker at the item's content column is nested-list content, which
+/// the run collects like any other line: `pandoc -f markdown -t native`
+/// makes it a table row (sliced across the column boundaries -- pandoc
+/// itself splits `- ne` / `sted` here).
+#[test]
+fn nested_list_marker_at_the_content_column_stays_a_table_row() {
+    let input = "- item\n\n  A    B\n  --- ---\n  x    y\n  - nested\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- nested"),
+        "the nested marker is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// A marker past the 3-column tolerance but short of the content column
+/// is a lazy continuation: `pandoc -f markdown -t native` collects
+/// `    - lazy` under `10.  item` (content column 5) as a table row.
+#[test]
+fn list_marker_in_the_lazy_band_stays_a_table_row() {
+    let input = "10.  item\n\n     A    B\n     --- ---\n     x    y\n    - lazy\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- lazy"),
+        "the lazy marker is collected as a row: {}",
+        table.text()
+    );
+}
+
+/// The same shape with the marker inside the tolerance: `pandoc -f
+/// markdown -t native` ends the ordered item's run and opens a sibling
+/// BulletList after the list.
+#[test]
+fn list_marker_within_nonindent_tolerance_ends_the_run() {
+    let input = "10.  item\n\n     A    B\n     --- ---\n     x    y\n   - sib\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        !table.text().to_string().contains("sib"),
+        "the marker is not a table row: {}",
+        table.text()
+    );
+    let lists: Vec<_> = node
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST)
+        .collect();
+    assert_eq!(
+        lists.len(),
+        2,
+        "the bullet opens its own list after the ordered one"
+    );
+}

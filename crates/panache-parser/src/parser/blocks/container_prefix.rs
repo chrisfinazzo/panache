@@ -27,7 +27,7 @@
 use rowan::GreenNodeBuilder;
 use smallvec::SmallVec;
 
-use crate::options::Dialect;
+use crate::options::{Dialect, ParserOptions};
 use crate::syntax::SyntaxKind;
 
 use super::super::block_dispatcher::BlockContext;
@@ -35,6 +35,7 @@ use super::super::utils::container_stack::{
     Container, byte_index_at_column, content_container_indent, leading_indent,
 };
 use super::blockquotes::{strip_blockquote_markers_counted, strip_n_blockquote_markers};
+use super::lists::ListMarkerDetect;
 
 /// A single strip operation applied during the dispatcher's
 /// container-stack walk. Ops are applied in order; each consumes some
@@ -138,6 +139,32 @@ pub(crate) struct ContainerPrefix {
     /// `definitionListItem` have no note-marker guard, so a stray
     /// marker there is ordinary content.
     note_marker_op_bound: Option<usize>,
+    /// Captured when a list item is on the stack: the marker-detection
+    /// bits a line must match to be pandoc's `listStart` fence. Pandoc
+    /// collects a list item's continuation lines with
+    /// `listContinuationLine = notFollowedBy blankline >>
+    /// notFollowedBy' listStart >> ...`, where `listStart` runs in the
+    /// frame the list was parsed in and tolerates `nonindentSpaces`
+    /// (at most 3). So a marker line within 3 columns of the outer
+    /// frame ends the run, one that reaches the item's content column
+    /// is nested-list content, and one in between is a lazy
+    /// continuation (all verified against `pandoc -f markdown -t
+    /// native`; see the `list_start` pins). Like
+    /// [`Self::note_marker_op_bound`] this tracks presence: with no
+    /// list item on the stack there is no item run to fence.
+    ///
+    /// Known gap: for a nested list whose base indent is > 0, pandoc's
+    /// tolerance is base+3 in the *outer list's* frame, not 3. The
+    /// predicate deliberately stops at 3 — the base+1..base+3 band
+    /// currently trips a formatter reindent cascade that destroys the
+    /// marker on the second pass, so those lines keep today's
+    /// collected-as-content behavior until that is fixed (see
+    /// TODO.md).
+    ///
+    /// The bits are captured here because the predicate has no config
+    /// access at scan time (the same pattern as
+    /// `lazy_blockquote_gobble`).
+    list_start_detect: Option<ListMarkerDetect>,
 }
 
 impl ContainerPrefix {
@@ -157,7 +184,7 @@ impl ContainerPrefix {
     pub fn from_stack(
         stack: &[Container],
         list_marker_consumed_on_line_0: bool,
-        dialect: Dialect,
+        config: &ParserOptions,
     ) -> Self {
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
         // `(content_col, a div is open outside this item)`, flushed below.
@@ -224,12 +251,19 @@ impl ContainerPrefix {
             content_container_indent(stack),
             "from_stack's ContentIndent ops must mirror the stack's content-container sum"
         );
+        // No `ListAdvance` op means no open item: there is no item run
+        // for a scan to be inside, so nothing to fence.
+        let list_start_detect = ops
+            .iter()
+            .any(|op| matches!(op, StripOp::ListAdvance(_)))
+            .then(|| ListMarkerDetect::from_options(config));
         Self {
             ops,
             list_marker_consumed_on_line_0,
-            lazy_blockquote_gobble: dialect == Dialect::Pandoc,
+            lazy_blockquote_gobble: config.dialect == Dialect::Pandoc,
             div_closer_ends_lines,
             note_marker_op_bound,
+            list_start_detect,
         }
     }
 
@@ -276,6 +310,7 @@ impl ContainerPrefix {
             lazy_blockquote_gobble: ctx.config.dialect == Dialect::Pandoc,
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
+            list_start_detect: None,
         }
     }
 
@@ -294,6 +329,7 @@ impl ContainerPrefix {
             lazy_blockquote_gobble: false,
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
+            list_start_detect: None,
         }
     }
 
@@ -363,6 +399,7 @@ impl ContainerPrefix {
             lazy_blockquote_gobble: dialect == Dialect::Pandoc,
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
+            list_start_detect: None,
         }
     }
 
@@ -381,6 +418,13 @@ impl ContainerPrefix {
     /// strips, when a footnote is on the stack.
     pub fn note_marker_op_bound(&self) -> Option<usize> {
         self.note_marker_op_bound
+    }
+
+    /// See the field of the same name: the marker-detection bits a
+    /// line must match to be pandoc's `listStart` fence, when a list
+    /// item is on the stack.
+    pub fn list_start_detect(&self) -> Option<ListMarkerDetect> {
+        self.list_start_detect
     }
 
     /// Total number of `BlockQuoteMarker` ops. Kept as a back-compat
@@ -431,6 +475,7 @@ impl ContainerPrefix {
             lazy_blockquote_gobble: false,
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
+            list_start_detect: None,
         }
     }
 
@@ -491,6 +536,8 @@ impl ContainerPrefix {
             lazy_blockquote_gobble: self.lazy_blockquote_gobble,
             div_closer_ends_lines: self.div_closer_ends_lines,
             note_marker_op_bound,
+            // A column bound, not an op index: no remap needed.
+            list_start_detect: self.list_start_detect,
         }
     }
 
@@ -1495,6 +1542,21 @@ pub(crate) fn emit_container_prefix_tokens(
 mod tests {
     use super::*;
 
+    /// `ParserOptions` for the given dialect, with that dialect's
+    /// default flavor and extensions.
+    fn opts(dialect: Dialect) -> ParserOptions {
+        let flavor = match dialect {
+            Dialect::Pandoc => crate::options::Flavor::Pandoc,
+            Dialect::CommonMark => crate::options::Flavor::CommonMark,
+        };
+        ParserOptions {
+            flavor,
+            dialect,
+            extensions: crate::options::Extensions::for_flavor(flavor),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn strip_bq_only_matches_legacy() {
         let p = ContainerPrefix::bq_only(1);
@@ -1506,8 +1568,11 @@ mod tests {
 
     #[test]
     fn with_extra_blockquotes_matches_a_deeper_stack() {
-        let base =
-            ContainerPrefix::from_stack(&[Container::BlockQuote {}], false, Dialect::CommonMark);
+        let base = ContainerPrefix::from_stack(
+            &[Container::BlockQuote {}],
+            false,
+            &opts(Dialect::CommonMark),
+        );
         let deeper = base.with_extra_blockquotes(1);
         assert_eq!(deeper.bq_depth(), 2);
         assert_eq!(deeper.strip("> > a"), "a");
@@ -1519,7 +1584,7 @@ mod tests {
         let from_stack = ContainerPrefix::from_stack(
             &[Container::BlockQuote {}, Container::BlockQuote {}],
             false,
-            Dialect::CommonMark,
+            &opts(Dialect::CommonMark),
         );
         assert_eq!(deeper.ops().len(), from_stack.ops().len());
         assert_eq!(deeper.bq_depth(), from_stack.bq_depth());
@@ -1901,7 +1966,7 @@ mod tests {
                 virtual_marker_space: false,
             },
         ];
-        let p = ContainerPrefix::from_stack(&stack, false, Dialect::CommonMark);
+        let p = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::CommonMark));
         // Only the innermost (content_col=4) is applied.
         assert_eq!(p.strip("- - foo"), "foo");
     }

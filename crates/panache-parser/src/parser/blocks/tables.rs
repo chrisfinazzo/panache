@@ -96,28 +96,77 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
     }
     fn ends_container_lines(&self, i: usize) -> bool {
         let prefix = self.prefix();
-        if prefix.div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i]) {
-            return true;
+        (prefix.div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i]))
+            || note_marker_ends_lines(prefix, self.raw()[i])
+            || list_start_ends_lines(prefix, self.raw()[i])
+    }
+}
+
+/// Pandoc's `noteBlock` stops collecting at a new note marker with at
+/// most 3 spaces in the note's outer frame — a verdict failing at or
+/// before the note's own op. A failure past it means the line reached
+/// the note's frame, so the marker is note content (see
+/// `note_marker_op_bound`). The marker test runs on the resolved tail:
+/// inside a blockquote the raw line still carries its `>` prefix.
+fn note_marker_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
+    let Some(bound) = prefix.note_marker_op_bound() else {
+        return false;
+    };
+    match prefix.resolve(raw) {
+        FrameVerdict::Dedented { rest, op_index, .. }
+        | FrameVerdict::FakedIndent { rest, op_index }
+            if op_index <= bound =>
+        {
+            rest.starts_with("[^") && try_parse_footnote_marker(rest).is_some()
         }
-        // Pandoc's `noteBlock` stops collecting at a new note marker
-        // with at most 3 spaces in the note's outer frame — a verdict
-        // failing at or before the note's own op. A failure past it
-        // means the line reached the note's frame, so the marker is
-        // note content (see `note_marker_op_bound`). The marker test
-        // runs on the resolved tail: inside a blockquote the raw line
-        // still carries its `>` prefix.
-        let Some(bound) = prefix.note_marker_op_bound() else {
-            return false;
-        };
-        match prefix.resolve(self.raw()[i]) {
-            FrameVerdict::Dedented { rest, op_index, .. }
-            | FrameVerdict::FakedIndent { rest, op_index }
-                if op_index <= bound =>
-            {
-                rest.starts_with("[^") && try_parse_footnote_marker(rest).is_some()
-            }
-            _ => false,
+        _ => false,
+    }
+}
+
+/// Pandoc collects a list item's continuation lines with
+/// `listContinuationLine`, which stops at a `listStart` reached by at
+/// most 3 spaces in the frame the list was parsed in. A three-way
+/// split, all verified against `pandoc -f markdown -t native`: a
+/// marker at or past the item's content column is nested-list content
+/// (the full resolve stays inside the frame); one past the base+3
+/// tolerance but short of the content column is a lazy continuation;
+/// one within the tolerance ends the run (see
+/// `ContainerPrefix::list_start_bound`).
+fn list_start_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
+    use super::super::utils::container_stack::leading_indent;
+    use super::container_prefix::StripOp;
+    use super::lists::{OpenListHint, try_parse_list_marker_with};
+
+    let Some(detect) = prefix.list_start_detect() else {
+        return false;
+    };
+    let Some(la_index) = prefix
+        .ops()
+        .iter()
+        .rposition(|op| matches!(op, StripOp::ListAdvance(_)))
+    else {
+        return false;
+    };
+    // The line must fail the innermost item's advance or an op before
+    // it; a failure past the advance means the line is inside the
+    // item's frame and belongs to whatever container failed there.
+    match prefix.resolve(raw) {
+        FrameVerdict::Dedented { op_index, .. } | FrameVerdict::FakedIndent { op_index, .. }
+            if op_index <= la_index => {}
+        _ => return false,
+    }
+    // The outer frame — every op but that advance — must be real, and
+    // its `rest` keeps the leading whitespace the advance would have
+    // eaten: the columns pandoc's 3-column `nonindentSpaces` tolerance
+    // is measured in. The alpha hint is irrelevant here: it flips a
+    // single-letter marker's *classification* (roman vs. alpha), never
+    // whether it matches.
+    match prefix.without_innermost_list_advance().resolve(raw) {
+        FrameVerdict::Inside { rest } => {
+            leading_indent(rest).0 <= 3
+                && try_parse_list_marker_with(rest, detect, OpenListHint::None).is_some()
         }
+        _ => false,
     }
 }
 

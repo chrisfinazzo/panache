@@ -84,7 +84,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             // from content bytes used to slip through here, and a marker
             // behind a container's content indent (which fails the raw
             // 0-3-space test) was invisible.
-            let prefix = ContainerPrefix::from_stack(&containers.stack, false, self.config.dialect);
+            let prefix = ContainerPrefix::from_stack(&containers.stack, false, self.config);
             let window = StrippedLines::new(lines, next_line_pos, &prefix);
             definition_lists::next_line_is_definition_marker(&window, next_line_pos).is_some()
         };

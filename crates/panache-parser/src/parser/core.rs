@@ -713,7 +713,7 @@ impl<'a> Parser<'a> {
         // footnote/definition content indent visible to the probe's container
         // bound. Bail otherwise, leaving the line buffered for paragraph
         // handling.
-        let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config.dialect);
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config);
         debug_assert_eq!(prefix.list_content_col(), content_col);
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
         if !tables::is_caption_followed_by_table(&window, self.pos) {
@@ -810,7 +810,7 @@ impl<'a> Parser<'a> {
         // Same frame as the sibling caption-led probe: the just-pushed item is
         // the stack top, so `from_stack` reproduces the old bq-then-list
         // scalar recipe with any content-container indent visible.
-        let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config.dialect);
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config);
         debug_assert_eq!(prefix.list_content_col(), content_col);
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
 
@@ -1061,8 +1061,7 @@ impl<'a> Parser<'a> {
         // as inside the frame, so the probe could scan out of the item and a
         // dash run below it read as the caption's table.
         if marker == ':' && self.config.extensions.table_captions {
-            let prefix =
-                ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect);
+            let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
             let window = StrippedLines::new(&self.lines, self.pos, &prefix);
             return !super::blocks::tables::is_caption_followed_by_table(&window, self.pos);
         }
@@ -1119,8 +1118,7 @@ impl<'a> Parser<'a> {
         // as inside the frame, so the probe could scan out of the body and a
         // dash run below it read as the caption's table.
         if marker == ':' && self.config.extensions.table_captions {
-            let prefix =
-                ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect);
+            let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
             let window = StrippedLines::new(&self.lines, self.pos, &prefix);
             if super::blocks::tables::is_caption_followed_by_table(&window, self.pos) {
                 return None;
@@ -1183,8 +1181,7 @@ impl<'a> Parser<'a> {
         }
         // Read the lookahead through the open containers' prefix, so any
         // list/blockquote markers above the body come off first.
-        let prefix =
-            ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect);
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
         let stripped = StrippedLines::new(&self.lines, self.pos, &prefix);
         // `self.pos` is the blank line itself, so a marker on the very next
         // line reports zero further blanks. Anything more is two blank lines
@@ -2953,7 +2950,7 @@ impl<'a> Parser<'a> {
         let base = ContainerPrefix::from_stack(
             &self.containers.stack,
             self.dispatch_list_marker_consumed,
-            self.config.dialect,
+            self.config,
         );
         for k in current_bq_depth.max(1)..bq_depth {
             let prefix = base.with_extra_blockquotes(k - current_bq_depth);
@@ -3102,9 +3099,8 @@ impl<'a> Parser<'a> {
         // `content_col` is absolute in the frame left by every container
         // *below* this item, so the lookahead has to strip exactly those —
         // blockquote markers, and any footnote/definition content indent.
-        let prefix =
-            ContainerPrefix::from_stack(&self.containers.stack, false, self.config.dialect)
-                .without_innermost_list_advance();
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config)
+            .without_innermost_list_advance();
         let window = StrippedLines::new(&self.lines, self.pos, &prefix);
         let blank_count = first_content_line_term_lookahead(
             &window,
@@ -5265,7 +5261,7 @@ impl<'a> Parser<'a> {
         let dispatcher_prefix = ContainerPrefix::from_stack(
             &self.containers.stack,
             self.dispatch_list_marker_consumed,
-            self.config.dialect,
+            self.config,
         );
 
         // Setext heading folded over a list item's buffered first-line text.

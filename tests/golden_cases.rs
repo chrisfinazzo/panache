@@ -241,6 +241,7 @@ golden_test_cases!(
     bracketed_span_footnote_reflow_291,
     footnote_body_simple_table,
     simple_table_in_footnote_stops_at_note_marker,
+    simple_table_in_list_item_stops_at_sibling_marker,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
     footnote_numeric_continuation_idempotency_134,

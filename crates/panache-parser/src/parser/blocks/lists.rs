@@ -256,9 +256,43 @@ fn single_char_roman_shadowed_by_alpha(
     }
 }
 
+/// The `ParserOptions` bits [`try_parse_list_marker_with`] reads,
+/// separated out so consumers without config access at call time (the
+/// container-prefix line-run terminator) can capture them up front.
+/// Never reconstruct a synthetic `ParserOptions` for this: a future
+/// config read inside marker detection would silently see defaults.
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct ListMarkerDetect {
+    pub(crate) fancy_lists: bool,
+    pub(crate) example_lists: bool,
+    pub(crate) dialect: crate::Dialect,
+}
+
+impl ListMarkerDetect {
+    pub(crate) fn from_options(config: &ParserOptions) -> Self {
+        Self {
+            fancy_lists: config.extensions.fancy_lists,
+            example_lists: config.extensions.example_lists,
+            dialect: config.dialect,
+        }
+    }
+}
+
 pub(crate) fn try_parse_list_marker(
     line: &str,
     config: &ParserOptions,
+    open_alpha_hint: OpenListHint,
+) -> Option<ListMarkerMatch> {
+    try_parse_list_marker_with(
+        line,
+        ListMarkerDetect::from_options(config),
+        open_alpha_hint,
+    )
+}
+
+pub(crate) fn try_parse_list_marker_with(
+    line: &str,
+    detect: ListMarkerDetect,
     open_alpha_hint: OpenListHint,
 ) -> Option<ListMarkerMatch> {
     // Trailing newlines should not block bare-marker detection; the line `*\n`
@@ -302,7 +336,7 @@ pub(crate) fn try_parse_list_marker(
     }
 
     // Try ordered markers
-    if config.extensions.fancy_lists
+    if detect.fancy_lists
         && let Some(after_marker) = trimmed.strip_prefix("#.")
         && (after_marker.starts_with(' ')
             || after_marker.starts_with('\t')
@@ -320,7 +354,7 @@ pub(crate) fn try_parse_list_marker(
     }
 
     // Try example lists: (@) or (@label)
-    if config.extensions.example_lists
+    if detect.example_lists
         && let Some(rest) = trimmed.strip_prefix("(@")
     {
         // Check if it has a label or is just (@)
@@ -358,7 +392,7 @@ pub(crate) fn try_parse_list_marker(
 
     // Try parenthesized markers: (2), (a), (ii)
     if let Some(rest) = trimmed.strip_prefix('(') {
-        if config.extensions.fancy_lists {
+        if detect.fancy_lists {
             // Try decimal: (2)
             let digit_count = rest.chars().take_while(|c| c.is_ascii_digit()).count();
             if digit_count > 0
@@ -389,7 +423,7 @@ pub(crate) fn try_parse_list_marker(
         }
 
         // Try fancy lists if enabled (parenthesized markers)
-        if config.extensions.fancy_lists {
+        if detect.fancy_lists {
             // Try Roman numerals first (to avoid ambiguity with letters i, v, x, etc.)
 
             // Try lowercase Roman: (ii)
@@ -401,7 +435,7 @@ pub(crate) fn try_parse_list_marker(
                     len,
                     false,
                     open_alpha_hint,
-                    config.dialect,
+                    detect.dialect,
                 )
             {
                 let after_marker = &rest[len + 1..];
@@ -434,7 +468,7 @@ pub(crate) fn try_parse_list_marker(
                     len,
                     true,
                     open_alpha_hint,
-                    config.dialect,
+                    detect.dialect,
                 )
             {
                 let after_marker = &rest[len + 1..];
@@ -517,7 +551,7 @@ pub(crate) fn try_parse_list_marker(
     if digit_count > 0 && trimmed.len() > digit_count {
         // CommonMark restricts ordered list markers to 1-9 digits (spec §5.2).
         // Pandoc-markdown accepts arbitrary digit counts.
-        if config.dialect == crate::Dialect::CommonMark && digit_count > 9 {
+        if detect.dialect == crate::Dialect::CommonMark && digit_count > 9 {
             return None;
         }
 
@@ -532,8 +566,8 @@ pub(crate) fn try_parse_list_marker(
         // CommonMark §5.2: decimal `1)` markers are part of the core grammar.
         // Pandoc-markdown gates `)`-style ordered markers behind `fancy_lists`.
         if style == ListDelimiter::RightParen
-            && !config.extensions.fancy_lists
-            && config.dialect != crate::Dialect::CommonMark
+            && !detect.fancy_lists
+            && detect.dialect != crate::Dialect::CommonMark
         {
             return None;
         }
@@ -559,7 +593,7 @@ pub(crate) fn try_parse_list_marker(
     }
 
     // Try fancy lists if enabled (non-parenthesized)
-    if config.extensions.fancy_lists {
+    if detect.fancy_lists {
         // Try Roman numerals first, as they may overlap with letters
 
         // Try lowercase Roman: i. or ii)
@@ -572,7 +606,7 @@ pub(crate) fn try_parse_list_marker(
                 len,
                 false,
                 open_alpha_hint,
-                config.dialect,
+                detect.dialect,
             )
         {
             let style = if delim == b'.' {
@@ -612,7 +646,7 @@ pub(crate) fn try_parse_list_marker(
                 len,
                 true,
                 open_alpha_hint,
-                config.dialect,
+                detect.dialect,
             )
         {
             let style = if delim == b'.' {

@@ -15,7 +15,7 @@
 //! that row — never silent snapshot churn.
 
 use super::helpers::*;
-use crate::options::Dialect;
+use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::parser::blocks::container_prefix::{
     ContainerPrefix, FrameVerdict, StripOp, StrippedLines, advance_columns, strip_content_indent,
     strip_list_indent,
@@ -28,6 +28,22 @@ use crate::parser::utils::container_stack::{
     Container, byte_index_at_column, content_container_indent, gobbled_indent_prefix_len,
 };
 use crate::syntax::SyntaxKind;
+
+/// `ParserOptions` for the given dialect, with that dialect's default
+/// flavor and extensions. `from_stack` captures marker-detection bits
+/// off the full options, so the stack-shaped tests build one.
+fn opts(dialect: Dialect) -> ParserOptions {
+    let flavor = match dialect {
+        Dialect::Pandoc => Flavor::Pandoc,
+        Dialect::CommonMark => Flavor::CommonMark,
+    };
+    ParserOptions {
+        flavor,
+        dialect,
+        extensions: Extensions::for_flavor(flavor),
+        ..Default::default()
+    }
+}
 
 /// One `(ops, line)` shape pinned across every prefix-level helper.
 ///
@@ -304,7 +320,7 @@ fn list_item(content_col: usize) -> Container {
 #[test]
 fn from_stack_definition_above_list_orders_content_indent_first() {
     let stack = vec![definition(4), list(), list_item(2)];
-    let p = ContainerPrefix::from_stack(&stack, false, Dialect::CommonMark);
+    let p = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::CommonMark));
     assert!(matches!(
         p.ops(),
         [StripOp::ContentIndent(4), StripOp::ListAdvance(2)]
@@ -332,7 +348,7 @@ fn from_stack_content_indent_ops_sum_to_the_stack_accessor() {
         vec![Container::BlockQuote {}, footnote(4), list(), list_item(6)],
     ];
     for stack in &stacks {
-        let p = ContainerPrefix::from_stack(stack, false, Dialect::CommonMark);
+        let p = ContainerPrefix::from_stack(stack, false, &opts(Dialect::CommonMark));
         assert_eq!(
             p.content_indent(),
             content_container_indent(stack),
@@ -375,8 +391,8 @@ fn current_content_col_puts_a_footnote_width_in_the_list_slot() {
 #[test]
 fn lazy_blockquote_gobble_is_dialect_gated() {
     let stack = vec![Container::BlockQuote {}];
-    let pandoc = ContainerPrefix::from_stack(&stack, false, Dialect::Pandoc);
-    let commonmark = ContainerPrefix::from_stack(&stack, false, Dialect::CommonMark);
+    let pandoc = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::Pandoc));
+    let commonmark = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::CommonMark));
     assert_eq!(pandoc.strip("    deep"), "deep");
     assert_eq!(commonmark.strip("    deep"), "    deep");
     // A blank line is exempt from the gobble (it ends the quote instead).
@@ -596,7 +612,7 @@ fn caption_probe_frame_bound_admits_lazy_continuations() {
 #[test]
 fn div_closer_ends_lines_needs_the_div_outside() {
     let p = |stack: &[Container]| {
-        ContainerPrefix::from_stack(stack, false, Dialect::Pandoc).div_closer_ends_lines()
+        ContainerPrefix::from_stack(stack, false, &opts(Dialect::Pandoc)).div_closer_ends_lines()
     };
     assert!(p(&[fenced_div(0), definition(4)]));
     assert!(p(&[fenced_div(0), Container::BlockQuote {}]));
@@ -621,7 +637,7 @@ fn fenced_div(open_indent_cols: usize) -> Container {
 #[test]
 fn note_marker_bound_needs_a_footnote_on_the_stack() {
     let p = |stack: &[Container]| {
-        ContainerPrefix::from_stack(stack, false, Dialect::Pandoc).note_marker_op_bound()
+        ContainerPrefix::from_stack(stack, false, &opts(Dialect::Pandoc)).note_marker_op_bound()
     };
     assert_eq!(p(&[footnote(4)]), Some(0));
     assert_eq!(p(&[Container::BlockQuote {}, footnote(4)]), Some(1));
@@ -648,7 +664,7 @@ fn note_marker_ends_container_lines_on_the_stripped_tail() {
     let quoted_note = ContainerPrefix::from_stack(
         &[Container::BlockQuote {}, footnote(4)],
         false,
-        Dialect::Pandoc,
+        &opts(Dialect::Pandoc),
     );
     let raw = [
         "> [^1]: body",
@@ -675,8 +691,11 @@ fn note_marker_ends_container_lines_on_the_stripped_tail() {
 /// the op-index bound must be remapped with them.
 #[test]
 fn note_marker_bound_survives_without_innermost_list_advance() {
-    let inner_list_first =
-        ContainerPrefix::from_stack(&[list(), list_item(2), footnote(4)], false, Dialect::Pandoc);
+    let inner_list_first = ContainerPrefix::from_stack(
+        &[list(), list_item(2), footnote(4)],
+        false,
+        &opts(Dialect::Pandoc),
+    );
     assert_eq!(inner_list_first.note_marker_op_bound(), Some(1));
     assert_eq!(
         inner_list_first
@@ -686,8 +705,11 @@ fn note_marker_bound_survives_without_innermost_list_advance() {
         "the removed ListAdvance sat before the bound"
     );
 
-    let footnote_first =
-        ContainerPrefix::from_stack(&[footnote(4), list(), list_item(4)], false, Dialect::Pandoc);
+    let footnote_first = ContainerPrefix::from_stack(
+        &[footnote(4), list(), list_item(4)],
+        false,
+        &opts(Dialect::Pandoc),
+    );
     assert_eq!(footnote_first.note_marker_op_bound(), Some(0));
     assert_eq!(
         footnote_first
@@ -696,4 +718,80 @@ fn note_marker_bound_survives_without_innermost_list_advance() {
         Some(0),
         "the removed ListAdvance sat after the bound"
     );
+}
+
+/// `list_start_detect` tracks presence of an open list item: pandoc's
+/// `listStart` fence lives in `listContinuationLine`, so with no item
+/// run being collected there is nothing to fence.
+#[test]
+fn list_start_detect_needs_a_list_item_on_the_stack() {
+    let p = |stack: &[Container]| {
+        ContainerPrefix::from_stack(stack, false, &opts(Dialect::Pandoc))
+            .list_start_detect()
+            .is_some()
+    };
+    assert!(p(&[list(), list_item(2)]));
+    assert!(p(&[Container::BlockQuote {}, list(), list_item(2)]));
+    assert!(p(&[footnote(4), list(), list_item(4)]));
+    // No item run to fence.
+    assert!(!p(&[]));
+    assert!(!p(&[footnote(4)]));
+    assert!(!p(&[definition(4)]));
+}
+
+/// The three-way split, verified against `pandoc -f markdown -t
+/// native` over `10.  item` (content column 5, so a lazy band exists
+/// between pandoc's 3-column `nonindentSpaces` tolerance and the
+/// content column): a marker within 3 columns of the outer frame ends
+/// the run, one in the lazy band is collected as content (a table
+/// row), and one at the content column is nested-list content.
+#[test]
+fn list_start_ends_container_lines_three_way_split() {
+    use crate::parser::blocks::tables::LineView;
+
+    let prefix =
+        ContainerPrefix::from_stack(&[list(), list_item(5)], false, &opts(Dialect::Pandoc));
+    let raw = [
+        "10.  item",
+        "     x    y",
+        "   - sib",
+        "    - lazy",
+        "     - nested",
+    ];
+    let view = StrippedLines::new(&raw, 0, &prefix);
+    assert!(
+        !view.ends_container_lines(1),
+        "a line inside the item's frame is content"
+    );
+    assert!(
+        view.ends_container_lines(2),
+        "a marker within 3 columns of the outer frame ends the run"
+    );
+    assert!(
+        !view.ends_container_lines(3),
+        "the lazy band is a continuation, not a fence"
+    );
+    assert!(
+        !view.ends_container_lines(4),
+        "a marker at the content column is nested-list content"
+    );
+}
+
+/// The captured detection bits come from the caller's config: a fancy
+/// `a.` marker is a fence under Pandoc options but plain text under
+/// CommonMark ones, where `fancy_lists` is off.
+#[test]
+fn list_start_fence_respects_captured_config_bits() {
+    use crate::parser::blocks::tables::LineView;
+
+    let raw = ["- item", "  x    y", "a. alpha"];
+    for (dialect, fancy_fence) in [(Dialect::Pandoc, true), (Dialect::CommonMark, false)] {
+        let prefix = ContainerPrefix::from_stack(&[list(), list_item(2)], false, &opts(dialect));
+        let view = StrippedLines::new(&raw, 0, &prefix);
+        assert_eq!(
+            view.ends_container_lines(2),
+            fancy_fence,
+            "fancy-list fence under {dialect:?}"
+        );
+    }
 }
