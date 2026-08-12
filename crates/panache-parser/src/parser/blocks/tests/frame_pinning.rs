@@ -611,3 +611,89 @@ fn div_closer_ends_lines_needs_the_div_outside() {
 fn fenced_div(open_indent_cols: usize) -> Container {
     Container::FencedDiv { open_indent_cols }
 }
+
+/// `note_marker_op_bound` tracks *presence*, unlike the div flag's
+/// ordering: pandoc's note-marker fence lives in `noteBlock`'s
+/// `rawLine`, and everything above the note on the stack sits inside
+/// the note's collected raw, so any footnote below is enough. With no
+/// footnote at all there is nothing to fence -- `listLine` and
+/// `definitionListItem` collect a stray `[^x]:` as ordinary content.
+#[test]
+fn note_marker_bound_needs_a_footnote_on_the_stack() {
+    let p = |stack: &[Container]| {
+        ContainerPrefix::from_stack(stack, false, Dialect::Pandoc).note_marker_op_bound()
+    };
+    assert_eq!(p(&[footnote(4)]), Some(0));
+    assert_eq!(p(&[Container::BlockQuote {}, footnote(4)]), Some(1));
+    assert_eq!(p(&[footnote(4), Container::BlockQuote {}]), Some(0));
+    assert_eq!(p(&[list(), list_item(2), footnote(4)]), Some(1));
+    assert_eq!(p(&[footnote(4), list(), list_item(4)]), Some(0));
+    // No footnote on the stack: nothing to fence.
+    assert_eq!(p(&[list(), list_item(2)]), None);
+    assert_eq!(p(&[definition(4)]), None);
+    assert_eq!(p(&[]), None);
+}
+
+/// The marker test runs on the frame verdict's tail, not the raw line:
+/// inside a blockquote the raw line still carries its `>` prefix, which
+/// `try_parse_footnote_marker` (anchored at byte 0) would never match.
+/// And a marker that *reaches* the note's content column is note
+/// content -- `pandoc -f markdown -t native` collects it as a table
+/// row (the fence is `skipNonindentSpaces >> noteMarker`, at most 3
+/// spaces in the note's outer frame).
+#[test]
+fn note_marker_ends_container_lines_on_the_stripped_tail() {
+    use crate::parser::blocks::tables::LineView;
+
+    let quoted_note = ContainerPrefix::from_stack(
+        &[Container::BlockQuote {}, footnote(4)],
+        false,
+        Dialect::Pandoc,
+    );
+    let raw = [
+        "> [^1]: body",
+        ">     x    y",
+        "> [^2]: two",
+        ">     [^3]: not new",
+    ];
+    let view = StrippedLines::new(&raw, 0, &quoted_note);
+    assert!(
+        !view.ends_container_lines(1),
+        "a line inside the note's frame is content"
+    );
+    assert!(
+        view.ends_container_lines(2),
+        "the marker terminates through the quote's own prefix"
+    );
+    assert!(
+        !view.ends_container_lines(3),
+        "a marker at the note's content column is note content"
+    );
+}
+
+/// Dropping the innermost list advance renumbers the remaining ops, so
+/// the op-index bound must be remapped with them.
+#[test]
+fn note_marker_bound_survives_without_innermost_list_advance() {
+    let inner_list_first =
+        ContainerPrefix::from_stack(&[list(), list_item(2), footnote(4)], false, Dialect::Pandoc);
+    assert_eq!(inner_list_first.note_marker_op_bound(), Some(1));
+    assert_eq!(
+        inner_list_first
+            .without_innermost_list_advance()
+            .note_marker_op_bound(),
+        Some(0),
+        "the removed ListAdvance sat before the bound"
+    );
+
+    let footnote_first =
+        ContainerPrefix::from_stack(&[footnote(4), list(), list_item(4)], false, Dialect::Pandoc);
+    assert_eq!(footnote_first.note_marker_op_bound(), Some(0));
+    assert_eq!(
+        footnote_first
+            .without_innermost_list_advance()
+            .note_marker_op_bound(),
+        Some(0),
+        "the removed ListAdvance sat after the bound"
+    );
+}

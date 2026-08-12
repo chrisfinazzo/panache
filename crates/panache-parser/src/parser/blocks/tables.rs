@@ -12,6 +12,7 @@ use crate::parser::utils::helpers::{emit_line_tokens, emit_separator_tokens, str
 use crate::parser::utils::inline_emission;
 
 use super::container_prefix::{ContainerPrefix, FrameVerdict, StrippedLines};
+use super::reference_links::try_parse_footnote_marker;
 
 /// Read-only indexed view over lines for table detection scans. Two
 /// backings:
@@ -94,7 +95,29 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
         }
     }
     fn ends_container_lines(&self, i: usize) -> bool {
-        self.prefix().div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i])
+        let prefix = self.prefix();
+        if prefix.div_closer_ends_lines() && line_is_fenced_div_closer(self.raw()[i]) {
+            return true;
+        }
+        // Pandoc's `noteBlock` stops collecting at a new note marker
+        // with at most 3 spaces in the note's outer frame — a verdict
+        // failing at or before the note's own op. A failure past it
+        // means the line reached the note's frame, so the marker is
+        // note content (see `note_marker_op_bound`). The marker test
+        // runs on the resolved tail: inside a blockquote the raw line
+        // still carries its `>` prefix.
+        let Some(bound) = prefix.note_marker_op_bound() else {
+            return false;
+        };
+        match prefix.resolve(self.raw()[i]) {
+            FrameVerdict::Dedented { rest, op_index, .. }
+            | FrameVerdict::FakedIndent { rest, op_index }
+                if op_index <= bound =>
+            {
+                rest.starts_with("[^") && try_parse_footnote_marker(rest).is_some()
+            }
+            _ => false,
+        }
     }
 }
 

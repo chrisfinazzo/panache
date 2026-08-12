@@ -240,6 +240,7 @@ golden_test_cases!(
     fenced_div_missing_blank_line_340,
     bracketed_span_footnote_reflow_291,
     footnote_body_simple_table,
+    simple_table_in_footnote_stops_at_note_marker,
     footnote_continuation_idempotency,
     footnote_continuation_idempotency_reflow,
     footnote_numeric_continuation_idempotency_134,

@@ -119,6 +119,25 @@ pub(crate) struct ContainerPrefix {
     ///
     /// [`LineView::ends_container_lines`]: super::tables::LineView::ends_container_lines
     div_closer_ends_lines: bool,
+    /// Op index of the outermost `FootnoteDefinition`'s `ContentIndent`
+    /// op, when a footnote is on the stack. Pandoc collects a note's
+    /// raw lines in `noteBlock`, whose `rawLine` stops at a new note
+    /// marker reached by `skipNonindentSpaces >> noteMarker` — at most
+    /// 3 spaces in the note's *outer* frame. So a `[^x]:` line whose
+    /// frame verdict fails at or before this op ends the line run of
+    /// every container inside the note (their lines are part of the
+    /// note's collected raw), while a marker that reaches the note's
+    /// content column — a verdict failing only *past* this op, or not
+    /// at all — is note content, which pandoc collects as ordinary
+    /// text (e.g. a table row).
+    ///
+    /// Unlike [`Self::div_closer_ends_lines`] this tracks presence,
+    /// not ordering: everything pushed above the note sits inside its
+    /// collected raw either way. With no footnote on the stack there
+    /// is nothing to fence — pandoc's `listLine` and
+    /// `definitionListItem` have no note-marker guard, so a stray
+    /// marker there is ordinary content.
+    note_marker_op_bound: Option<usize>,
 }
 
 impl ContainerPrefix {
@@ -147,6 +166,7 @@ impl ContainerPrefix {
         // container pushed after it. See `div_closer_ends_lines`.
         let mut div_open = false;
         let mut div_closer_ends_lines = false;
+        let mut note_marker_op_bound = None;
         for c in stack {
             match c {
                 Container::BlockQuote { .. } => {
@@ -157,8 +177,17 @@ impl ContainerPrefix {
                     ops.push(StripOp::BlockQuoteMarker);
                     div_closer_ends_lines |= div_open;
                 }
-                Container::FootnoteDefinition { content_col, .. }
-                | Container::Definition { content_col, .. }
+                Container::FootnoteDefinition { content_col } => {
+                    if let Some((la, la_div)) = pending_list_advance.take() {
+                        ops.push(StripOp::ListAdvance(la));
+                        div_closer_ends_lines |= la_div;
+                    }
+                    // Outermost footnote wins: see `note_marker_op_bound`.
+                    note_marker_op_bound.get_or_insert(ops.len());
+                    ops.push(StripOp::ContentIndent(*content_col as u32));
+                    div_closer_ends_lines |= div_open;
+                }
+                Container::Definition { content_col, .. }
                 | Container::Admonition { content_col } => {
                     if let Some((la, la_div)) = pending_list_advance.take() {
                         ops.push(StripOp::ListAdvance(la));
@@ -200,6 +229,7 @@ impl ContainerPrefix {
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: dialect == Dialect::Pandoc,
             div_closer_ends_lines,
+            note_marker_op_bound,
         }
     }
 
@@ -241,9 +271,11 @@ impl ContainerPrefix {
             ops,
             list_marker_consumed_on_line_0: false,
             // No stack access here, so the div-vs-container ordering is
-            // unknowable; today's behaviour (collect the fence) stands.
+            // unknowable and no footnote op can be located; today's
+            // behaviour (collect the line) stands.
             lazy_blockquote_gobble: ctx.config.dialect == Dialect::Pandoc,
             div_closer_ends_lines: false,
+            note_marker_op_bound: None,
         }
     }
 
@@ -261,6 +293,7 @@ impl ContainerPrefix {
             list_marker_consumed_on_line_0: false,
             lazy_blockquote_gobble: false,
             div_closer_ends_lines: false,
+            note_marker_op_bound: None,
         }
     }
 
@@ -329,6 +362,7 @@ impl ContainerPrefix {
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: dialect == Dialect::Pandoc,
             div_closer_ends_lines: false,
+            note_marker_op_bound: None,
         }
     }
 
@@ -340,6 +374,13 @@ impl ContainerPrefix {
     /// line run of the container this prefix strips.
     pub fn div_closer_ends_lines(&self) -> bool {
         self.div_closer_ends_lines
+    }
+
+    /// See the field of the same name: the op a `[^x]:` line must fail
+    /// at (or before) to end the line run of the container this prefix
+    /// strips, when a footnote is on the stack.
+    pub fn note_marker_op_bound(&self) -> Option<usize> {
+        self.note_marker_op_bound
     }
 
     /// Total number of `BlockQuoteMarker` ops. Kept as a back-compat
@@ -389,6 +430,7 @@ impl ContainerPrefix {
             list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: false,
             div_closer_ends_lines: false,
+            note_marker_op_bound: None,
         }
     }
 
@@ -428,17 +470,27 @@ impl ContainerPrefix {
     /// `content_col` has to strip with this, not with the full recipe.
     pub fn without_innermost_list_advance(&self) -> Self {
         let mut ops = self.ops.clone();
+        let mut note_marker_op_bound = self.note_marker_op_bound;
         if let Some(i) = ops
             .iter()
             .rposition(|op| matches!(op, StripOp::ListAdvance(_)))
         {
             ops.remove(i);
+            // Removing an op renumbers the ones after it; remap any
+            // op-index bound. (`i == bound` cannot happen: bounds index
+            // `ContentIndent` ops.)
+            if let Some(bound) = &mut note_marker_op_bound
+                && i < *bound
+            {
+                *bound -= 1;
+            }
         }
         Self {
             ops,
             list_marker_consumed_on_line_0: self.list_marker_consumed_on_line_0,
             lazy_blockquote_gobble: self.lazy_blockquote_gobble,
             div_closer_ends_lines: self.div_closer_ends_lines,
+            note_marker_op_bound,
         }
     }
 

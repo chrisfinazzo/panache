@@ -225,3 +225,114 @@ fn stray_div_closer_in_a_definition_body_stays_a_table_row() {
         table.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Container line runs end at a new note marker
+//
+// pandoc collects a footnote's raw lines in `noteBlock`, whose `rawLine`
+// stops at a new note marker reached by `skipNonindentSpaces >> noteMarker`
+// -- at most 3 spaces in the note's *outer* frame. The fence applies to
+// everything nested inside the note (its lines are part of the note's
+// collected raw), but lives in `noteBlock` only: a plain list item's
+// `listLine` has no such guard, and pandoc collects a stray marker there
+// as ordinary content.
+
+fn footnote_definitions(node: &SyntaxNode) -> Vec<SyntaxNode> {
+    node.descendants()
+        .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
+        .collect()
+}
+
+/// `pandoc -f markdown -t native`: Note 1 holds Para + Table, Note 2
+/// survives -- the marker line is never a table row.
+#[test]
+fn simple_table_in_a_footnote_body_ends_at_a_note_marker() {
+    let input = "[^1]: body\n\n    A    B\n    --- ---\n    x    y\n[^2]: two\n\ntext[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let notes = footnote_definitions(&node);
+    assert_eq!(notes.len(), 2, "the second note survives the table scan");
+    let table = first_of(&notes[0], SyntaxKind::SIMPLE_TABLE).expect("table in note 1's body");
+    assert!(
+        !table.text().to_string().contains("[^2]"),
+        "the new note marker is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A marker AT the note's content column is note content: pandoc's fence
+/// allows at most 3 spaces in the note's outer frame, so
+/// `pandoc -f markdown -t native` collects this one as a table row and the
+/// trailing `[^2]` reference stays literal.
+#[test]
+fn note_marker_at_the_content_column_stays_a_table_row() {
+    let input =
+        "[^1]: body\n\n    A    B\n    --- ---\n    x    y\n    [^2]: two\n\ntext[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(footnote_definitions(&node).len(), 1);
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the body");
+    assert!(
+        table.text().to_string().contains("[^2]"),
+        "the indented marker is note content, collected as a row: {}",
+        table.text()
+    );
+}
+
+/// The fence lives in `noteBlock`, not `listLine`: with no footnote on the
+/// stack, `pandoc -f markdown -t native` itself collects the marker as a
+/// table row inside a plain list item, and the trailing `x[^2]` stays
+/// literal. Matching pandoc means leaving this shape alone.
+#[test]
+fn note_marker_after_a_plain_list_item_table_stays_a_table_row() {
+    let input = "- item\n\n  A    B\n  --- ---\n  x    y\n[^2]: two\n\nx[^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(footnote_definitions(&node).len(), 0);
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("[^2]"),
+        "no note on the stack, so the marker is a row: {}",
+        table.text()
+    );
+}
+
+/// The fence applies transitively to blocks nested inside the note's body:
+/// the note's collected raw contains their lines, so a scan running inside
+/// a list item in the note stops at the marker all the same.
+/// `pandoc -f markdown -t native`: Note 1 holds Para + BulletList [Para,
+/// Table], Note 2 survives.
+#[test]
+fn note_marker_ends_a_list_item_table_inside_a_footnote_body() {
+    let input = "[^1]: body\n\n    - item\n\n      A    B\n      --- ---\n      x    y\n[^2]: two\n\ntext[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let notes = footnote_definitions(&node);
+    assert_eq!(notes.len(), 2, "the second note survives the table scan");
+    let table = first_of(&notes[0], SyntaxKind::SIMPLE_TABLE).expect("item table in note 1");
+    assert!(
+        !table.text().to_string().contains("[^2]"),
+        "the new note marker is not a table row: {}",
+        table.text()
+    );
+}
