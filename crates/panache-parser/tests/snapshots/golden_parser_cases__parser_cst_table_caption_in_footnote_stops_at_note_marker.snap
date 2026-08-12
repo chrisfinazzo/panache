@@ -1,0 +1,67 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..73
+  FOOTNOTE_DEFINITION@0..54
+    FOOTNOTE_LABEL_START@0..2 "[^"
+    FOOTNOTE_LABEL_ID@2..3 "1"
+    FOOTNOTE_LABEL_END@3..4 "]"
+    FOOTNOTE_LABEL_COLON@4..5 ":"
+    WHITESPACE@5..6 " "
+    PARAGRAPH@6..8
+      TEXT@6..7 "q"
+      NEWLINE@7..8 "\n"
+    BLANK_LINE@8..9
+      BLANK_LINE@8..9 "\n"
+    SIMPLE_TABLE@9..54
+      TABLE_SEPARATOR@9..21
+        WHITESPACE@9..13 "    "
+        TABLE_SEP_DASHES@13..16 "---"
+        TABLE_SEP_WHITESPACE@16..17 " "
+        TABLE_SEP_DASHES@17..20 "---"
+        NEWLINE@20..21 "\n"
+      TABLE_ROW@21..31
+        WHITESPACE@21..25 "    "
+        TABLE_CELL@25..26
+          TEXT@25..26 "a"
+        WHITESPACE@26..29 "   "
+        TABLE_CELL@29..30
+          TEXT@29..30 "b"
+        NEWLINE@30..31 "\n"
+      TABLE_SEPARATOR@31..43
+        WHITESPACE@31..35 "    "
+        TABLE_SEP_DASHES@35..38 "---"
+        TABLE_SEP_WHITESPACE@38..39 " "
+        TABLE_SEP_DASHES@39..42 "---"
+        NEWLINE@42..43 "\n"
+      BLANK_LINE@43..44
+        WHITESPACE@43..44 "\n"
+        BLANK_LINE@44..44 ""
+      TABLE_CAPTION@44..54
+        WHITESPACE@44..48 "    "
+        TABLE_CAPTION_PREFIX@48..50 ": "
+        TEXT@50..53 "cap"
+        NEWLINE@53..54 "\n"
+  FOOTNOTE_DEFINITION@54..62
+    FOOTNOTE_LABEL_START@54..56 "[^"
+    FOOTNOTE_LABEL_ID@56..57 "2"
+    FOOTNOTE_LABEL_END@57..58 "]"
+    FOOTNOTE_LABEL_COLON@58..59 ":"
+    WHITESPACE@59..60 " "
+    PARAGRAPH@60..62
+      TEXT@60..61 "z"
+      NEWLINE@61..62 "\n"
+  BLANK_LINE@62..63
+    BLANK_LINE@62..63 "\n"
+  PARAGRAPH@63..73
+    TEXT@63..64 "x"
+    FOOTNOTE_REFERENCE@64..68
+      FOOTNOTE_LABEL_START@64..66 "[^"
+      FOOTNOTE_LABEL_ID@66..67 "1"
+      FOOTNOTE_LABEL_END@67..68 "]"
+    FOOTNOTE_REFERENCE@68..72
+      FOOTNOTE_LABEL_START@68..70 "[^"
+      FOOTNOTE_LABEL_ID@70..71 "2"
+      FOOTNOTE_LABEL_END@71..72 "]"
+    NEWLINE@72..73 "\n"

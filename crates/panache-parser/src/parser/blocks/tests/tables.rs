@@ -937,3 +937,142 @@ fn sibling_marker_is_no_multiline_closer() {
         "the sibling marker is not a closing separator"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The forward caption scans end at container line-run terminators
+//
+// The caption-continuation loops used to stop at `line_is_fenced_div_fence`
+// unconditionally — a looser predicate than the seam's: it fired on
+// openers and on `:::` with no div open (both ordinary caption content in
+// pandoc), while a note marker or sibling list start (no fence shape at
+// all) was folded straight into the caption. All shapes probed against
+// `pandoc -f markdown -t native`. One documented divergence stays: when
+// the terminator is a list start contiguous with the caption line, pandoc
+// drops the caption entirely (empty caption, `: cap` reparses as a
+// paragraph); panache treats the terminator like a blank line and keeps
+// the caption — same convention as the simple-table footer-rule
+// divergence in TODO.md, lossless and idempotent.
+
+/// `pandoc -f markdown -t native`: `[^2]: z` opens the second note; the
+/// caption is `cap` alone.
+#[test]
+fn caption_after_table_ends_at_a_note_marker() {
+    let input =
+        "[^1]: q\n\n    --- ---\n    a   b\n    --- ---\n\n    : cap\n[^2]: z\n\nx[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        !caption.text().to_string().contains("[^2]"),
+        "the new note marker is not caption content: {}",
+        caption.text()
+    );
+    let notes = node
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
+        .count();
+    assert_eq!(notes, 2, "the second note survives the caption scan");
+}
+
+/// `pandoc -f markdown -t native`: `- next` is a sibling item. (Pandoc
+/// additionally drops the caption on this contiguous shape — documented
+/// divergence, see the section comment.)
+#[test]
+fn caption_after_table_ends_at_a_sibling_marker() {
+    let input = "- q\n\n  --- ---\n  a   b\n  --- ---\n\n  : cap\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    let items = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .count();
+    assert_eq!(items, 2, "the sibling item survives the caption scan");
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        !caption.text().to_string().contains("next"),
+        "the sibling marker is not caption content: {}",
+        caption.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: with no div open, a `:::` line is
+/// caption content (`cap` SoftBreak `:::`), not a boundary.
+#[test]
+fn unmatched_fence_stays_caption_content() {
+    let input = "--- ---\na   b\n--- ---\n\n: cap\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        caption.text().to_string().contains(":::"),
+        "the unmatched fence is collected as caption content: {}",
+        caption.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: with the div open its closer still
+/// ends the caption run, and the div closes.
+#[test]
+fn div_closer_still_ends_the_caption() {
+    let input = "::: note\n--- ---\na   b\n--- ---\n\n: cap\n:::\n\nafter\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        !caption.text().to_string().contains(":::"),
+        "the open div's closer is not caption content: {}",
+        caption.text()
+    );
+    let div = first_of(&node, SyntaxKind::FENCED_DIV).expect("div");
+    assert!(
+        !div.text().to_string().contains("after"),
+        "the div closes at its fence: {}",
+        div.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: a `::: nested` opener inside an open
+/// div is caption content; the run ends at the first bare `:::` closer
+/// (caption = `cap ::: nested z`).
+#[test]
+fn nested_opener_stays_caption_content() {
+    let input = "::: note\n--- ---\na   b\n--- ---\n\n: cap\n::: nested\nz\n:::\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    let text = caption.text().to_string();
+    assert!(
+        text.contains("::: nested") && text.contains("z"),
+        "the nested opener is caption content: {text}",
+    );
+    assert!(
+        !text.trim_end().ends_with(":::"),
+        "the caption stops at the first bare closer: {text}",
+    );
+}

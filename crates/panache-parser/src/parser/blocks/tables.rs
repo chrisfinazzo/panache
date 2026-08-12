@@ -576,12 +576,15 @@ pub(crate) fn is_caption_followed_by_table(
         line.trim().is_empty() || lines.frame_verdict(i).reaches_frame()
     };
 
-    // Skip continuation lines of caption (non-blank lines).
-    // Stop at fenced-div fences (`:::`) — those close the enclosing div and
-    // must not be folded into the caption.
+    // Skip continuation lines of caption (non-blank lines). Stop where
+    // the enclosing container's line run ends — a `:::` closing an open
+    // div, a new note marker, a sibling list start, an HTML closer.
+    // Unmatched `:::` fences and `::: x` openers are ordinary caption
+    // content in pandoc (probed), so the run bound is the seam's, not a
+    // bare fence-shape test.
     while pos < lines.line_count()
         && !lines.line(pos).trim().is_empty()
-        && !line_is_fenced_div_fence(lines.line(pos))
+        && !lines.ends_container_lines(pos)
     {
         if !inside_container(pos) {
             return false;
@@ -599,6 +602,12 @@ pub(crate) fn is_caption_followed_by_table(
     }
 
     if pos < lines.line_count() && !inside_container(pos) {
+        return false;
+    }
+
+    // A grid at or past a run terminator is out of the caption's reach:
+    // nothing below the terminator can be this caption's table.
+    if pos < lines.line_count() && lines.ends_container_lines(pos) {
         return false;
     }
 
@@ -645,8 +654,15 @@ fn table_grid_starts_at(lines: &(impl LineView + ?Sized), pos: usize) -> bool {
         return true;
     }
 
-    // Header line followed by a separator (simple/pipe table with header).
-    if pos + 1 < lines.line_count() && !line.trim().is_empty() {
+    // Header line followed by a separator (simple/pipe table with
+    // header). A separator-shaped line that ends the container's run —
+    // a sibling `- -- --` is both a list start and a dash-group
+    // separator — is no evidence: the run ends before the would-be
+    // table's second line.
+    if pos + 1 < lines.line_count()
+        && !line.trim().is_empty()
+        && !lines.ends_container_lines(pos + 1)
+    {
         let next_line = lines.line(pos + 1);
         if try_parse_table_separator(next_line).is_some()
             || try_parse_pipe_separator(next_line).is_some()
@@ -668,7 +684,7 @@ fn caption_range_starting_at(
     let mut end = start + 1;
     while end < lines.line_count()
         && !lines.line(end).trim().is_empty()
-        && !line_is_fenced_div_fence(lines.line(end))
+        && !lines.ends_container_lines(end)
     {
         end += 1;
     }
@@ -812,18 +828,23 @@ fn find_caption_after_table(
         pos += 1;
     }
 
-    if pos >= lines.line_count() {
+    // A caption at or past a run terminator belongs to whatever follows
+    // the container, not to this table.
+    if pos >= lines.line_count() || lines.ends_container_lines(pos) {
         return None;
     }
 
     // Check if this line is a caption
     if is_table_caption_start(lines.line(pos)) {
         let caption_start = pos;
-        // Find end of caption (continues until blank line or fenced-div fence)
+        // Find end of caption: it continues until a blank line or the
+        // end of the enclosing container's line run (a `:::` closing an
+        // open div, a new note marker, a sibling list start). Unmatched
+        // fences and openers are caption content in pandoc (probed).
         let mut caption_end = caption_start + 1;
         while caption_end < lines.line_count()
             && !lines.line(caption_end).trim().is_empty()
-            && !line_is_fenced_div_fence(lines.line(caption_end))
+            && !lines.ends_container_lines(caption_end)
         {
             caption_end += 1;
         }
