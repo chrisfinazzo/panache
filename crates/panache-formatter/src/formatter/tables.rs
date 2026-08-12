@@ -1867,7 +1867,7 @@ fn pad_simple_cell(cell: &str, width: usize, alignment: Alignment) -> String {
 /// single space, and cell text is aligned within its field. This makes the
 /// result independent of the incoming column spacing, so two documents that
 /// parse to the same table format identically and the output is idempotent.
-pub fn format_simple_table(node: &SyntaxNode, config: &Config) -> String {
+pub fn format_simple_table(node: &SyntaxNode, config: &Config, indent: usize) -> String {
     if !node.text().to_string().is_ascii() {
         return node.text().to_string();
     }
@@ -1942,7 +1942,9 @@ pub fn format_simple_table(node: &SyntaxNode, config: &Config) -> String {
         output.push_str(&formatted_caption);
         output.push('\n');
     }
-    indent_table_block(&output, config.table_indent)
+    // Nested tables (definition/footnote bodies) add the container indent on
+    // top of the table's own self-indent, matching pandoc's writer.
+    indent_table_block(&output, config.table_indent + indent)
 }
 
 /// Extract column information from a multiline table separator. One
@@ -2234,7 +2236,7 @@ fn extract_multiline_table_data(node: &SyntaxNode, config: &Config) -> Multiline
 }
 
 /// Format a multiline table preserving column widths and structure
-pub fn format_multiline_table(node: &SyntaxNode, config: &Config) -> String {
+pub fn format_multiline_table(node: &SyntaxNode, config: &Config, indent: usize) -> String {
     // TODO: #398 follow-up; non-ASCII tables are preserved verbatim to avoid
     // misaligning wide (CJK) cells, but that also leaves the original borders
     // untouched — so a table whose top border is column-shaped
@@ -2443,7 +2445,9 @@ pub fn format_multiline_table(node: &SyntaxNode, config: &Config) -> String {
         output.push_str(&formatted_caption);
         output.push('\n');
     }
-    indent_table_block(&output, config.table_indent)
+    // Nested tables (definition/footnote bodies) add the container indent on
+    // top of the table's own self-indent, matching pandoc's writer.
+    indent_table_block(&output, config.table_indent + indent)
 }
 
 #[cfg(test)]

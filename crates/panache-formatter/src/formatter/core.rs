@@ -2563,7 +2563,7 @@ impl Formatter {
 
             SyntaxKind::SIMPLE_TABLE => {
                 log::trace!("Formatting simple table");
-                let formatted = tables::format_simple_table(node, &self.config);
+                let formatted = tables::format_simple_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
 
                 // Ensure blank line after if followed by block element
@@ -2577,7 +2577,7 @@ impl Formatter {
 
             SyntaxKind::MULTILINE_TABLE => {
                 // Format multiline table with proper alignment and column widths
-                let formatted = tables::format_multiline_table(node, &self.config);
+                let formatted = tables::format_multiline_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
             }
 
