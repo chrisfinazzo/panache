@@ -2851,6 +2851,16 @@ pub(crate) fn try_parse_grid_table(
             break;
         }
 
+        // A line ending the enclosing container's line run bounds the
+        // table like a blank line does. Today this is shape-disjoint
+        // belt-and-braces: every terminator (list start, note marker,
+        // div closer, HTML closer) already fails the grid-line checks
+        // below, so the scan stopped anyway — but the bound keeps that
+        // an invariant rather than a coincidence of the current shapes.
+        if view.ends_container_lines(end_pos) {
+            break;
+        }
+
         // Check for separator line
         if let Some(sep_cols) = try_parse_grid_separator(line) {
             // Check if this is a header separator (=)

@@ -692,3 +692,60 @@ fn pipe_table_in_a_footnote_body_ends_at_a_note_marker() {
         .collect();
     assert_eq!(notes.len(), 2, "the second note survives the table scan");
 }
+
+// ---------------------------------------------------------------------------
+// The grid-table scan ends at container line-run terminators
+//
+// Unlike the pipe scan, no terminator can shape-match a grid line: content
+// rows must open with `|`, and separator segments admit no spaces, so a
+// sibling list start, note marker, div closer, or HTML closer always
+// failed the grid-line checks and stopped the scan anyway. The scan still
+// consults `ends_container_lines` so the stop is an invariant, not a
+// coincidence of the current shapes; these pins document the behavior.
+
+/// `pandoc -f markdown -t native`: `- next` is a sibling item after the
+/// grid table, never a row.
+#[test]
+fn grid_table_in_a_list_item_ends_at_a_sibling_marker() {
+    let input = "- x\n\n  +---+---+\n  | a | b |\n  +---+---+\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    assert_eq!(list.kind(), SyntaxKind::LIST);
+    let items: Vec<_> = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .collect();
+    assert_eq!(items.len(), 2, "the sibling item survives the table scan");
+    let table = first_of(&items[0], SyntaxKind::GRID_TABLE).expect("table in item 1");
+    assert!(
+        !table.text().to_string().contains("next"),
+        "the sibling marker is not a table row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: the closing `:::` ends the div, never
+/// a grid row.
+#[test]
+fn grid_table_in_a_fenced_div_ends_at_the_closer() {
+    let input = "::: note\n+---+---+\n| a | b |\n+---+---+\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::GRID_TABLE).expect("table in the div");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer is not a table row: {}",
+        table.text()
+    );
+}
