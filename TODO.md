@@ -954,13 +954,9 @@ panache starts caching NodePtrs across edits.
     Two neighbouring gaps this uncovered, both of which predate it and reproduce
     without a quote:
 
-    - A marker-line *grid* table projects wrongly: `grid_table` builds its char
-      grid from each row node's whole text, so the item indent (and now the
-      quote markers) shift the `+` columns and the geometry pass reads phantom
-      columns. `- +---+---+` / `  | a | b |` / `  +===+===+` is a 5-column table
-      with an empty row where pandoc has 2 columns; the quoted form loses the
-      table entirely. The CST is right and the round-trip is stable --- the
-      projector has to skip line-prefix tokens.
+    - ~~A marker-line *grid* table projects wrongly~~: fixed --- `grid_table`
+      reads rows through `text_without_line_prefixes` (see the container-prefix
+      entry below), corpus cases 0542/0543.
     - `- > - a | b` / `  >   - | -` (list > quote > list) *panics* the formatter
       in `line_blocks.rs` ("marker presence verified upstream"). The lift is not
       involved: the inner item is already closed when the second line
@@ -1039,60 +1035,66 @@ panache starts caching NodePtrs across edits.
   or improve).
 
 - [ ] Give a line's **container prefix** one representation, so no consumer can
-  mistake prefix bytes for content. A line inside `> - a` carries structure
-  before its content (`>`, the marker's space, the item's indent), and that
-  structure is currently modeled three different ways --- as buffer
-  segments, as two named prefix slots, and as ordinary tokens inside the
-  innermost block. Each model has its own blind spot, and each blind spot
-  has produced a real divergence. The quoted marker-line table above was
-  one; these are the rest. Ranked by how much they will keep costing,
-  cheapest bounded step first in each.
+  mistake prefix bytes for content. The bounded steps landed; what remains
+  is the structural fix and the consumers still reading raw text.
 
-  - **Buffers count segments where they mean lines.** Seven gates in `core.rs`
-    read `buffer.segment_count() != 1` to ask "is only the marker line buffered
-    so far?" --- the five `maybe_open_*_in_new_list_item` helpers (fenced code,
-    line block, caption table, table with trailing caption, indented code),
-    `maybe_open_definition_term_in_new_list_item`, and the setext fold. Any
-    non-`Text` segment silently answers "no", which is exactly what hid the
-    quoted marker-line table. The setext fold
-    (`try_fold_list_item_buffer_into_setext`) has the same hole live today:
-    `> - Foo` / `>   ---` is `Header 2` inside the item in pandoc and
-    `Plain [Str "Foo", SoftBreak, Str "\8212"]` here, because the buffer holds
-    `[Text, BlockquoteMarker]`. The other six read safe only by *timing* ---
-    they run while the marker line itself dispatches, before a continuation
-    marker can be pushed --- which is an argument, not a guard. Step: give
-    `ListItemBuffer` a line-oriented API (`sole_text_segment` landed; a
-    `buffered_line_count` completes it) and take `segment_count` out of the
-    gates, so adding a structural segment kind cannot quietly change seven
-    decisions. Fixing setext needs the fold to re-inject the marker, so pin
-    losslessness first.
+  - [x] **Buffers count segments where they mean lines.** `ListItemBuffer` grew
+    the line-oriented API (`sole_text_segment`, `buffered_line_count`,
+    `is_text_only`), the six marker-line gates in `core.rs` guard on it
+    instead of `segment_count`, and the setext fold sees past buffered
+    marker segments and re-injects them between the heading's text and its
+    underline --- `> - Foo` / `>   ---` is now the `Header 2` pandoc reads
+    (pinned by the `setext_heading_in_quoted_list_item_*` golden pair and
+    losslessness tests).
 
-  - **`ContainerPrefixLine` hard-codes a two-level container order.**
-    `list_indent` then `bq_prefix` is the order `ContainerPrefix::split`
-    captures for `- > a`; a quoted item (`> - a`) needs the opposite, which the
-    commit above bought with a `bq_before_list` bool. That covers depth two and
-    stops there: `- > - a` has three ordered pieces and cannot be expressed at
-    all. Step: replace the two named slots with an ordered list of
-    `(piece kind, bytes)` built by walking the strip ops, so
-    `emit_container_prefix_tokens` emits in capture order and nesting depth
-    stops being a special case. `split`'s 3-tuple return has the same bound and
-    wants the same treatment.
+  - [x] **`ContainerPrefixLine` hard-codes a two-level container order.** The
+    two named slots and `bq_before_list` are an ordered
+    `(PrefixPieceKind, bytes)` list; `emit_container_prefix_tokens` emits in
+    capture order; `ContainerPrefix::split` became `split_pieces`, which
+    walks every strip op via the shared `prefix_pieces` walk (also backing
+    `walk_content_line_prefix`), so a `- > - a` frame's three pieces capture
+    instead of leaking the inner indent into reparse content.
 
-  - **Prefix bytes live inside content nodes, and nothing marks them as
-    prefix.** Losslessness has to put `>` and the item indent somewhere, and
-    that somewhere is the innermost block --- so a `TABLE_SEPARATOR`
-    legitimately contains a `BLOCK_QUOTE_MARKER` token. Any consumer reading
-    `node.text()` as content is then wrong by default, with nothing in the types
-    to say so. `grid_table` in `pandoc_ast.rs` is the live instance and needs no
-    quote to break: `- +---+---+` / `  | a | b |` / `  +===+===+` is two columns
-    in pandoc and five with an empty row here, because the item indent shifts
-    the `+` positions the geometry pass reads. Step (bounded): a shared "content
-    text" accessor that skips line-leading prefix tokens, used by `grid_layout`
-    and the formatter's table geometry. Step (real fix): tag prefix runs with
-    their own kind so skipping is structural rather than per-consumer --- a CST
-    shape change touching every snapshot, and the same principle as the
-    `pandoc_ast.rs` entry above (a structural fact the parser already knows
-    belongs in the CST, not recomputed downstream).
+  - [x] **Bounded step for prefix bytes inside content nodes.**
+    `text_without_line_prefixes` (in `syntax/tables.rs`) skips each
+    line-leading `WHITESPACE`/`BLOCK_QUOTE_MARKER` run; the pandoc-ast
+    `grid_table` projector and the formatter grid path read through it. That
+    fixed the phantom-column projection (`- +---+---+` five columns vs
+    pandoc's two; corpus cases 0542/0543), the quoted-table drop
+    (`BlockQuote []`), a quoted colspan grid losing its body rows in format
+    output, and a listed colspan grid collapsing to one escaped line on the
+    second pass (`{blockquote,list_item}_grid_table_colspan` goldens).
+
+  - [ ] **Real fix: tag prefix runs with their own kind** so skipping is
+    structural rather than per-consumer --- a CST shape change touching
+    every snapshot, and the same principle as the `pandoc_ast.rs` entry
+    above (a structural fact the parser already knows belongs in the CST,
+    not recomputed downstream). Until then `text_without_line_prefixes`
+    stays a heuristic: a line-leading `WHITESPACE` token that is genuine
+    content cannot be told apart from prefix.
+
+  - [ ] **Consumers still reading raw prefixed text**, migratable to the shared
+    accessor (or its structural successor): the pipe-table verbatim fallback
+    (`formatter/tables.rs` `format_pipe_table` early returns), the bq-only
+    `container_prefix_len`/`text_without_prefixes` family in the
+    simple/multiline paths (blind to a bare line-leading `WHITESPACE`, so a
+    list indent contributes zero), the ad-hoc skippers in `pandoc_ast.rs`
+    (`code_content_text`, `collect_html_block_text_skip_bq_markers`, its own
+    `container_prefix_len`, ...), and `extract_code_block` in
+    `crates/panache-formatter/src/utils.rs`, which ships `> `/indent bytes
+    to external formatters and linters.
+
+  - [ ] **`emit_as_block`'s ATX and HTML lifts stay `is_text_only`-gated**:
+    unlike the table/div lift they have no bq-prefix re-injection plumbing,
+    so a quoted item whose buffer holds marker segments skips them (`- # h`
+    lifts, `> - # h`'s continuation shapes do not).
+
+  - [ ] **A rowspan grid inside a container truncates at the boundary line**:
+    `- +--+--+` items and `> `-quoted tables end the `GRID_TABLE` at an
+    interior `+   +--+` row separator (in a list item the `+` even opens a
+    nested list), so the table's tail parses as sibling blocks where pandoc
+    keeps one table. Parser-side (table continuation rules), upstream of the
+    formatter's span layout.
 
 ## Parser - Coverage
 
