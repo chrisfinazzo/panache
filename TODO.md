@@ -1085,15 +1085,49 @@ panache starts caching NodePtrs across edits.
   `blockquote_nested_list_keeps_indent` and
   `quoted_band_marker_sibling_list` goldens.
 
-- [ ] A **nested blockquote on a quoted item's continuation line breaks
-  losslessness**: `> - a\n>   > nested quote\n> - b\n` fails both
-  losslessness and idempotency in `debug format --checks all` --- the CST
-  text reorders the input (`> -   > nested quote` before `a`), so this is
-  parser-side (the quoted item's buffered continuation mishandles the inner
-  `>` marker), and pass 2 then merges the quote line into the item text.
-  Pandoc keeps `> nested quote` as a `BlockQuote` block inside item `a`.
-  Pre-existing at `f60154d1` (probed while validating the quoted-list
-  flatten fix, which does not touch it).
+- [x] A **nested blockquote on a quoted item's continuation line breaks
+  losslessness**: `> - a\n>   > nested quote\n> - b\n` failed both
+  losslessness and idempotency --- the CST text reordered the input
+  (`> -   > nested quote` before `a`). Root cause: the deeper-`>` line hit
+  the `!can_nest` arm in `parse_line`, which only knew how to lazily
+  continue an open `Paragraph` *container*; with the item's text still in
+  the `ListItemBuffer` it started a fresh paragraph instead, emitting the
+  line ahead of the buffered `a`. (The original note's pandoc claim was
+  wrong: with no blank line before it the deeper `>` is *lazy continuation
+  text* of item `a` --- `Plain [a, SoftBreak, >, Space, nested, quote]` ---
+  since pandoc blockquotes never interrupt a paragraph; only after a blank
+  line does it become a nested `BlockQuote`.) Fixed by adding the
+  buffered-item arm (`append_lazy_continuation_line`), mirroring the depth-0
+  guard; CommonMark is untouched (`blank_before_blockquote` off means
+  `can_nest` is true there). Projection now matches pandoc-native exactly.
+  Pinned by `quoted_item_lazy_deeper_marker_stays_in_item_text` in
+  `blocks/tests/blockquotes.rs` and the
+  `quoted_item_lazy_deeper_quote_marker` parser golden.
+
+- [ ] The **blank-line variant still breaks losslessness**:
+  `> - a\n>\n>   > nested quote\n> - b\n` (blank quote line, so the nested
+  `BlockQuote` inside item `a` is legitimate and parses structurally like
+  pandoc) drops the outer `> ` of the nested-quote line from its position ---
+  the `BLOCK_QUOTE` child starts with bare `WHITESPACE "  "` --- and
+  re-emits it (plus the next line's) as `LINE_PREFIX` pairs in a stray
+  trailing `PLAIN` before item `b`. Both losslessness and idempotency fail.
+  Different mechanism from the lazy case above (the can-nest path's marker
+  bookkeeping around a quote nested in a quoted item); pre-existing at
+  `f60154d1` and unaffected by the lazy-continuation fix.
+
+- [ ] The formatter **drops a literal `>` word from quoted list items** (meaning
+  change): `> - a > b\n` formats to `> - a b\n`, deleting pandoc's `Str ">"` ---
+  losslessness and idempotency both pass, so the debug checks cannot catch
+  it. Cause: `ListReflow`/`ListSentence`/`ListSemantic` set
+  `strip_standalone_blockquote_markers` when the list sits in a blockquote,
+  and the consumer (`inline_layout.rs`) blanket-drops every standalone `>`
+  piece --- a workaround for quote markers leaking into the list reflow
+  stream, which also eats `>` pieces that are genuine text (including the
+  lazy-continuation text the fix above now parses correctly:
+  `> - a\n>   > nested quote\n` reflows to `> - a nested quote`). The
+  paragraph path handles this right (`> a\n> > b\n` keeps its `>`), so the
+  fix is to keep marker bytes out of the list piece stream instead of
+  stripping by shape. Pre-existing, independent of the parser fixes.
 
 - [ ] **A nested ordered list at the outer item's exact content column goes
   lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
