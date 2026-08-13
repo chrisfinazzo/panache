@@ -874,10 +874,10 @@ panache starts caching NodePtrs across edits.
   - Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache requires
     three.
 
-  - A spaced dash run after a list (`- x` items, then `- - - -`) is a sibling
-    `HorizontalRule` in pandoc but nests as the list's child here, and the
-    pandoc-ast projector then drops it from the projection entirely (CST is
-    lossless).
+  - [ ] A spaced dash run after a list (`- x` items, then `- - - -`) is a
+    sibling `HorizontalRule` in pandoc but nests as the list's child here,
+    and the pandoc-ast projector then drops it from the projection entirely
+    (CST is lossless).
 
 - [ ] A **non-bare note marker line's own text should open a block**, not a
   paragraph the indented lines lazily continue. Pandoc's `noteBlock`
