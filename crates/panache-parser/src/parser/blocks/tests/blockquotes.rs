@@ -1584,3 +1584,46 @@ fn quoted_band_marker_past_tolerance_is_lazy_continuation() {
         "`- c` should be lazy text inside item `b`, got:\n{tree:#?}"
     );
 }
+
+/// A deeper `>` on a quoted item's continuation line, with no blank line
+/// before it, is lazy continuation text of the item — pandoc's
+/// blockquotes never interrupt a paragraph, so `> - a` / `>   > q` is
+/// `Plain [a, SoftBreak, >, Space, q]`, not a nested quote. The buffered
+/// item text must stay ahead of the lazy line (the reorder here was a
+/// losslessness failure).
+#[test]
+fn quoted_item_lazy_deeper_marker_stays_in_item_text() {
+    for input in [
+        "> - a\n>   > nested quote\n> - b\n",
+        "> - a\n> > nested quote\n> - b\n",
+    ] {
+        let tree = parse_blocks(input);
+
+        assert_eq!(
+            tree.text().to_string(),
+            input,
+            "CST must reassemble to the source bytes, got:\n{tree:#?}"
+        );
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE),
+            1,
+            "the lazy `>` must not open a nested quote, got:\n{tree:#?}"
+        );
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH),
+            0,
+            "tight items hold PLAIN only; no paragraph may split off, got:\n{tree:#?}"
+        );
+        let items = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM);
+        assert_eq!(items.len(), 2, "two sibling items, got:\n{tree:#?}");
+        let first_item = items[0].text().to_string();
+        assert!(
+            first_item.contains("nested quote"),
+            "the lazy line belongs to item `a`, got:\n{tree:#?}"
+        );
+        assert!(
+            first_item.find('a').unwrap() < first_item.find("nested quote").unwrap(),
+            "item text `a` must precede the lazy line, got:\n{tree:#?}"
+        );
+    }
+}

@@ -4448,6 +4448,16 @@ impl<'a> Parser<'a> {
                         self.config,
                     );
                     return LineDispatch::consumed(1);
+                } else if self.is_list_item_content_open() {
+                    // A buffered list item is the open block here, so the
+                    // line is lazy continuation of it, same as the paragraph
+                    // arm above: pandoc reads `> - a` / `>   > q` as
+                    // `Plain [a, SoftBreak, >, Space, q]`. Starting a
+                    // paragraph instead would emit it ahead of the buffered
+                    // item text and reorder the document. The current-depth
+                    // `>` markers were buffered by the loop above.
+                    self.append_lazy_continuation_line(content_at_current_depth);
+                    return LineDispatch::consumed(1);
                 } else {
                     // Start new paragraph with the extra > as content
                     paragraphs::start_paragraph_if_needed(&mut self.containers, &mut self.builder);
