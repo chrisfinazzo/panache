@@ -1369,7 +1369,11 @@ impl Formatter {
                         // Skip BlockQuoteMarker tokens - we add prefixes dynamically
                         SyntaxKind::BLOCK_QUOTE_MARKER => continue,
 
-                        SyntaxKind::PARAGRAPH => {
+                        // PLAIN is pandoc's paragraph-demoted-by-RawBlock
+                        // wrapper (`> a` / `> <hr>`); it quotes like a
+                        // paragraph. The fallback arm would emit it without
+                        // the `> ` prefix, breaking losslessness.
+                        SyntaxKind::PARAGRAPH | SyntaxKind::PLAIN => {
                             // This arm emits paragraph lines itself rather
                             // than going through `format_node_sync`, so it
                             // needs its own checkpoint for the guard below.
