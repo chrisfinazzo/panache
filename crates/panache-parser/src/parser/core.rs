@@ -118,6 +118,66 @@ struct LazyFold<'l> {
     used_shifted_bq: bool,
 }
 
+/// Which fence rule a lazy-interrupt gate applies under Pandoc. Both are
+/// pandoc-probed; the split is between two different readers looking at the
+/// same lazy line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LazyFenceRule {
+    /// The paragraph `endline` guard
+    /// `notFollowedBy (lookAhead (char '`') >> codeBlockFenced)`: anchored on
+    /// a literal backtick, so a lazy `~~~` keeps continuing the paragraph.
+    BacktickOnly,
+    /// `rawListItem` stops collecting at any fenced code block, so the fence
+    /// ends the item regardless of fence char --- `> - a` / `   ~~~` is a
+    /// `CodeBlock` sibling of the list, while `> a` / `   ~~~` is not.
+    AnyFence,
+}
+
+/// Per-gate parameters for [`Parser::lazy_interrupts`].
+struct LazyInterruptContext {
+    fence_rule: LazyFenceRule,
+    /// Probe `is_div_closing_fence` on the raw line (issue #310). Paragraph
+    /// gate only: the #310 shape was calibrated against zero-marker lines and
+    /// the list-item form is unverified against pandoc.
+    probe_div_closer: bool,
+}
+
+impl LazyInterruptContext {
+    fn for_paragraph() -> Self {
+        Self {
+            fence_rule: LazyFenceRule::BacktickOnly,
+            probe_div_closer: true,
+        }
+    }
+
+    fn for_list_item() -> Self {
+        Self {
+            fence_rule: LazyFenceRule::AnyFence,
+            probe_div_closer: false,
+        }
+    }
+}
+
+/// Outcome of the lazy-interrupt probe list. The gates need the individual
+/// flags, not just the disjunction: the paragraph gate's `[Plain, RawBlock]`
+/// follow-up keys on `html` and `ends_gobble` after deciding laziness.
+struct LazyInterrupts {
+    hr: bool,
+    fence: bool,
+    heading: bool,
+    div_close: bool,
+    html: bool,
+    ends_gobble: bool,
+}
+
+impl LazyInterrupts {
+    /// True when any probe fires, i.e. the line is not lazy continuation
+    /// text.
+    fn any(&self) -> bool {
+        self.hr || self.fence || self.heading || self.div_close || self.html || self.ends_gobble
+    }
+}
+
 pub struct Parser<'a> {
     lines: Vec<&'a str>,
     pos: usize,
@@ -2373,6 +2433,11 @@ impl<'a> Parser<'a> {
     /// definition bodies, where a leading comment lifts to a `RawBlock`). Gated
     /// on Pandoc dialect so GFM/CommonMark footnotes stay byte-identical.
     /// Returns `Some(0)` when the block was emitted (no extra lines consumed).
+    ///
+    /// Not unified with [`Parser::lazy_interrupts`]: this answers a different
+    /// question (does the block *close on the marker line*?) via a synthetic
+    /// re-parse with emission side effects; the shared atom is
+    /// `html_block_cannot_interrupt`.
     fn try_dispatch_footnote_html_block(
         &mut self,
         first_line_content: &str,
@@ -3274,6 +3339,104 @@ impl<'a> Parser<'a> {
         html_blocks::pandoc_html_open_tag_closes(&self.lines, self.pos, &prefix)
     }
 
+    /// The shared lazy-interrupt probe list: does this reduced-marker line
+    /// interrupt the open paragraph (or list-item buffer) instead of folding
+    /// in as lazy continuation text?
+    ///
+    /// One predicate, two gates (paragraph and list item), differing only via
+    /// [`LazyInterruptContext`]. Kept as a probe list rather than delegating
+    /// to `detect_prepared`: the dispatcher context can't express the
+    /// `endline`-guard quirks (byte-0 anchoring in
+    /// `blockquote_gobble_ends_at`, the `blank_before_header` trim split
+    /// below), and hypothetical dispatch has payload side effects. A missing
+    /// probe fails *silently* --- the line becomes lazy inline text, caught
+    /// only by pandoc-diffing --- so each probe family carries a pandoc
+    /// corpus pin (0077, 0512/0513, 0525-0530).
+    ///
+    /// The probes run on `inner_content` (markers stripped; identical to
+    /// `line` for zero-marker lines): a reduced-marker line like `> # head`
+    /// under a depth-2 quote is not lazy at its own level, so the stripped
+    /// content decides the interruption (issue #429). The two exceptions
+    /// that read the raw `line` are called out inline.
+    fn lazy_interrupts(
+        &self,
+        line: &str,
+        inner_content: &str,
+        ctx: &LazyInterruptContext,
+    ) -> LazyInterrupts {
+        let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
+        // CommonMark §5.1: a thematic break is not paragraph-continuation
+        // text. Pandoc keeps the lazy text append in this case.
+        let hr = is_commonmark && try_parse_horizontal_rule(inner_content).is_some();
+        // Under Pandoc the quote's content is de-indented before the fence
+        // guard runs, so it sees the *folded* line: `> a` / `   ``` ` breaks
+        // the paragraph even though the source line is indented. Which fence
+        // chars count is the per-gate split --- see [`LazyFenceRule`].
+        //
+        // Separate from `blockquote_gobble_ends_at`, which asks whether the
+        // *quote* ends and reads the raw line at byte 0.
+        let fence = if is_commonmark {
+            code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
+        } else {
+            self.lazy_content_opens_fence(inner_content.trim_start_matches([' ', '\t']))
+                .is_some_and(|fence| match ctx.fence_rule {
+                    LazyFenceRule::BacktickOnly => fence.fence_char == '`',
+                    LazyFenceRule::AnyFence => true,
+                })
+        };
+        // An ATX heading interrupts a paragraph under CommonMark §4.2, and
+        // under Pandoc when `blank_before_header` is disabled
+        // (`markdown-blank_before_header`) --- the same predicate as
+        // `can_interrupt` in `AtxHeadingParser::detect_prepared`. A
+        // heading-shaped lazy line then ends the paragraph rather than being
+        // swallowed as its text (issue #428).
+        //
+        // This is a separate question from whether the *quote* ends:
+        // CommonMark asks it of the line as written, Pandoc of the line the
+        // fold hands to the quote, indent dropped. So under
+        // `-blank_before_header` both `# head` and ` # head` end the
+        // paragraph, but only the unindented one also ends the quote
+        // (`blockquote_gobble_ends_at`).
+        let heading_can_interrupt = is_commonmark || !self.config.extensions.blank_before_header;
+        let heading_probe = if is_commonmark {
+            inner_content
+        } else {
+            inner_content.trim_start_matches([' ', '\t'])
+        };
+        let heading = heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
+        // A fenced-div closing fence terminates the paragraph rather than
+        // being swallowed as lazy text --- but only while we're actually
+        // inside an open div. At the top level a lone `:::` is just text,
+        // which is what pandoc does (issue #310). Note this says nothing
+        // about the *quote*: a div opened inside it closes inside it, which
+        // the lazy fold works out. This one stays on the raw `line`: the
+        // #310 shape was calibrated against zero-marker lines and the
+        // reduced-marker form is unverified against pandoc.
+        let div_close = ctx.probe_div_closer
+            && self.config.extensions.fenced_divs
+            && self.in_fenced_div()
+            && fenced_divs::is_div_closing_fence(line);
+        // A paragraph-interrupting HTML block start on the lazy line ends
+        // the paragraph rather than folding in as `RawInline`: pandoc keeps
+        // the tag in the quote as its own `RawBlock`, CommonMark closes the
+        // quote and opens the block at the outer level (see the helper).
+        let html = self.lazy_html_block_interrupts(inner_content);
+        // Under Pandoc the rest of the question is the one the lazy fold
+        // asks: does the reader's gobble stop here? An ATX heading with
+        // `blank_before_header` off and a backtick code fence both end it,
+        // and neither is lazy paragraph text. Reads the raw `line` for its
+        // byte-0-anchored guards.
+        let ends_gobble = !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
+        LazyInterrupts {
+            hr,
+            fence,
+            heading,
+            div_close,
+            html,
+            ends_gobble,
+        }
+    }
+
     /// Pandoc's `notFollowedByHtmlCloser` on the quote gobble: inside
     /// markdown-in-html, a line opening with the close form of the open
     /// tag ends the quote instead of folding in as lazy content. The
@@ -4009,85 +4172,16 @@ impl<'a> Parser<'a> {
                 // (e.g. a thematic break) — instead the paragraph closes,
                 // any open blockquotes close, and the line opens that
                 // block at the outer level. Pandoc keeps the lazy text
-                // append in this case.
-                // The interrupt checks run on `inner_content` (markers
-                // stripped; identical to `line` for zero-marker lines): a
-                // reduced-marker line like `> # head` under a depth-2 quote
-                // is not lazy at its own level, so the stripped content
-                // decides the interruption (issue #429).
-                let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
-                let interrupts_via_hr =
-                    is_commonmark && try_parse_horizontal_rule(inner_content).is_some();
-                // Under Pandoc this is the `endline` guard
-                // `notFollowedBy (lookAhead (char '`') >> codeBlockFenced)`.
-                // The quote's content is de-indented before it runs, so the
-                // guard sees the *folded* line: `> a` / `   ``` ` breaks the
-                // paragraph even though the source line is indented. It is
-                // anchored on a literal backtick, so `   ~~~` keeps continuing
-                // the paragraph — unlike the list-item gate below, where any
-                // fence ends the item.
-                //
-                // Separate from `blockquote_gobble_ends_at`, which asks
-                // whether the *quote* ends and reads the raw line at byte 0.
-                let interrupts_via_fence = if is_commonmark {
-                    code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
-                } else {
-                    self.lazy_content_opens_fence(inner_content.trim_start_matches([' ', '\t']))
-                        .is_some_and(|fence| fence.fence_char == '`')
-                };
-                // An ATX heading interrupts a paragraph under CommonMark §4.2,
-                // and under Pandoc when `blank_before_header` is disabled
-                // (`markdown-blank_before_header`) — the same predicate as
-                // `can_interrupt` in `AtxHeadingParser::detect_prepared`. A
-                // heading-shaped lazy line then ends the paragraph rather
-                // than being swallowed as its text (issue #428).
-                //
-                // This is a separate question from whether the *quote* ends:
-                // CommonMark asks it of the line as written, Pandoc of the
-                // line the fold below hands to the quote, indent dropped. So
-                // under `-blank_before_header` both `# head` and ` # head`
-                // end the paragraph, but only the unindented one also ends
-                // the quote (`blockquote_gobble_ends_at`).
-                let heading_can_interrupt =
-                    is_commonmark || !self.config.extensions.blank_before_header;
-                let heading_probe = if is_commonmark {
-                    inner_content
-                } else {
-                    inner_content.trim_start_matches([' ', '\t'])
-                };
-                let interrupts_via_heading =
-                    heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
-                // A fenced-div closing fence terminates the paragraph rather
-                // than being swallowed as lazy text — but only while we're
-                // actually inside an open div. At the top level a lone `:::`
-                // is just text, which is what pandoc does (issue #310). Note
-                // this says nothing about the *quote*: a div opened inside it
-                // closes inside it, which the fold below works out.
-                // This one stays on the raw `line`: the #310 shape was
-                // calibrated against zero-marker lines and the reduced-marker
-                // form is unverified against pandoc.
-                let interrupts_via_div_close = self.config.extensions.fenced_divs
-                    && self.in_fenced_div()
-                    && fenced_divs::is_div_closing_fence(line);
-                // A paragraph-interrupting HTML block start on the lazy
-                // line ends the paragraph rather than folding in as
-                // `RawInline`: pandoc keeps the tag in the quote as its
-                // own `RawBlock`, CommonMark closes the quote and opens
-                // the block at the outer level (see the helper).
-                let interrupts_via_html = self.lazy_html_block_interrupts(inner_content);
-                // Under Pandoc the rest of the question is the one the fold
-                // below asks: does the reader's gobble stop here? An ATX
-                // heading with `blank_before_header` off and a backtick code
-                // fence both end it, and neither is lazy paragraph text.
-                let ends_gobble =
-                    !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
-                if !interrupts_via_hr
-                    && !interrupts_via_fence
-                    && !interrupts_via_heading
-                    && !interrupts_via_div_close
-                    && !interrupts_via_html
-                    && !ends_gobble
-                {
+                // append in this case. See `lazy_interrupts` for the probe
+                // list; the paragraph gate is the one that probes the
+                // fenced-div closer and anchors the fence rule on a
+                // backtick.
+                let interrupts = self.lazy_interrupts(
+                    line,
+                    inner_content,
+                    &LazyInterruptContext::for_paragraph(),
+                );
+                if !interrupts.any() {
                     if bq_depth > 0 {
                         // Buffer the explicit `>` markers we have into the
                         // paragraph (it's at the deeper blockquote level, so
@@ -4133,7 +4227,10 @@ impl<'a> Parser<'a> {
                 // finds the paragraph already closed and dispatches the
                 // tag inside the quote. Skipped when the gobble ends —
                 // there the quote closes and pandoc keeps the Para shape.
-                if interrupts_via_html && !is_commonmark && !ends_gobble {
+                if interrupts.html
+                    && self.config.dialect != crate::options::Dialect::CommonMark
+                    && !interrupts.ends_gobble
+                {
                     self.close_paragraph_as_plain_if_open();
                 }
             }
@@ -4155,42 +4252,15 @@ impl<'a> Parser<'a> {
             {
                 // Same interrupt rules as the paragraph gate above, including
                 // the `inner_content` check for reduced-marker lines (issues
-                // #428, #429); see `AtxHeadingParser::detect_prepared`.
-                let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
-                let interrupts_via_hr =
-                    is_commonmark && try_parse_horizontal_rule(inner_content).is_some();
-                // Pandoc's `rawListItem` stops collecting at a line that opens
-                // a fenced code block, so the fence ends the item instead of
-                // becoming its text. Unlike the paragraph guard above this is
-                // fence-char agnostic — `> - a` / `   ~~~` is a `CodeBlock`
-                // sibling of the list, while `> a` / `   ~~~` is not.
-                let interrupts_via_fence = if is_commonmark {
-                    code_blocks::try_parse_fence_open(inner_content, self.config.dialect).is_some()
-                } else {
-                    self.lazy_content_opens_fence(inner_content.trim_start_matches([' ', '\t']))
-                        .is_some()
-                };
-                let heading_can_interrupt =
-                    is_commonmark || !self.config.extensions.blank_before_header;
-                let heading_probe = if is_commonmark {
-                    inner_content
-                } else {
-                    inner_content.trim_start_matches([' ', '\t'])
-                };
-                let interrupts_via_heading =
-                    heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
-                // Same as the paragraph gate: an interrupting HTML block
-                // becomes the item's own `RawBlock` (pandoc) or closes
-                // the quote (CommonMark) instead of joining the buffer.
-                let interrupts_via_html = self.lazy_html_block_interrupts(inner_content);
-                let ends_gobble =
-                    !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
-                if !interrupts_via_hr
-                    && !interrupts_via_fence
-                    && !interrupts_via_heading
-                    && !interrupts_via_html
-                    && !ends_gobble
-                {
+                // #428, #429). The per-gate differences live in
+                // `LazyInterruptContext`: `rawListItem` is fence-char
+                // agnostic, and the fenced-div closer is not probed here.
+                let interrupts = self.lazy_interrupts(
+                    line,
+                    inner_content,
+                    &LazyInterruptContext::for_list_item(),
+                );
+                if !interrupts.any() {
                     if bq_depth > 0 {
                         let marker_info = self.marker_info_for_line(
                             blockquote_payload.as_ref(),

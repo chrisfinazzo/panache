@@ -377,6 +377,14 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
 
     /// Checks whether a line inside a definition should be treated as a plain continuation
     /// (and buffered into the definition PLAIN), rather than parsed as a new block.
+    ///
+    /// Not unified with `Parser::lazy_interrupts` (the blockquote gates'
+    /// probe list): the polarity is inverted, the probe set differs (marker
+    /// and indent policy, raw TeX, a catch-all `detect_prepared`), and the
+    /// HTML probe below deliberately lacks `html_block_cannot_interrupt` ---
+    /// so `<!-- c -->` ends a definition PLAIN even though it stays lazy
+    /// text in a quote. Whether that divergence matches pandoc is an open
+    /// question tracked in TODO.md.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn definition_plain_can_continue(
         &self,
