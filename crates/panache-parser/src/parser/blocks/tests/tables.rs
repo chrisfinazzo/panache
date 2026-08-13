@@ -1147,3 +1147,80 @@ fn table_closer_directly_before_note_marker_completes_the_table() {
         table.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The backward caption scan agrees with the forward one
+//
+// `find_caption_before_table` reconstructs, from the table's position, the
+// caption range the dispatcher's forward lookahead just validated. The two
+// must agree on where a caption run ends: after the forward scans moved to
+// `ends_container_lines`, a leftover fence-shape stop in the backward walk
+// let the dispatcher anchor a caption-led table whose parser then refused
+// the caption -- dropping the caption bytes and emitting the table twice
+// (a losslessness break). The backward walk now uses the seam, and the
+// caption-start checks exempt a fence-shaped previous line: when `: cap`
+// is actually block-dispatched below a fence shape, that line was consumed
+// structurally (an opener, or a closed div's closer) -- paragraph laziness
+// otherwise swallows the caption line before dispatch, as pandoc does.
+
+/// `pandoc -f markdown -t native`: the unmatched fence is caption
+/// content (caption `cap ::: mid`). Regression pin for the losslessness
+/// break: the caption bytes were dropped and the table emitted twice.
+#[test]
+fn backward_caption_scan_collects_an_unmatched_fence() {
+    let input = ": cap\n:::\nmid\n\n--- ---\nx   y\n--- ---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    let text = caption.text().to_string();
+    assert!(
+        text.contains(":::") && text.contains("mid"),
+        "the fence and its tail are caption content: {text}",
+    );
+}
+
+/// `pandoc -f markdown -t native`: `: cap` directly under the div's
+/// opening fence captions the table (the fence is structure, not a
+/// paragraph the colon line could define).
+#[test]
+fn caption_directly_under_a_div_opener_captions_the_table() {
+    let input = "::: note\n: cap\n\n--- ---\nx   y\n--- ---\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        caption.text().to_string().contains("cap"),
+        "the caption attaches: {}",
+        caption.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: `: cap` directly under a *closed*
+/// div's `:::` captions the table below it.
+#[test]
+fn caption_directly_under_a_closed_div_captions_the_table() {
+    let input = "::: note\nz\n:::\n: cap\n\n--- ---\nx   y\n--- ---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let caption = first_of(&node, SyntaxKind::TABLE_CAPTION).expect("caption");
+    assert!(
+        caption.text().to_string().contains("cap"),
+        "the caption attaches: {}",
+        caption.text()
+    );
+}

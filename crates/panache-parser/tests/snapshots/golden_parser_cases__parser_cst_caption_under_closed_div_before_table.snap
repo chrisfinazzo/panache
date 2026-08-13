@@ -1,0 +1,42 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..44
+  FENCED_DIV@0..15
+    DIV_FENCE_OPEN@0..9
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..8
+        TEXT@4..8 "note"
+      NEWLINE@8..9 "\n"
+    PARAGRAPH@9..11
+      TEXT@9..10 "z"
+      NEWLINE@10..11 "\n"
+    DIV_FENCE_CLOSE@11..15
+      TEXT@11..14 ":::"
+      NEWLINE@14..15 "\n"
+  SIMPLE_TABLE@15..44
+    TABLE_CAPTION@15..21
+      TABLE_CAPTION_PREFIX@15..17 ": "
+      TEXT@17..20 "cap"
+      NEWLINE@20..21 "\n"
+    BLANK_LINE@21..22
+      BLANK_LINE@21..22 "\n"
+    TABLE_SEPARATOR@22..30
+      TABLE_SEP_DASHES@22..25 "---"
+      TABLE_SEP_WHITESPACE@25..26 " "
+      TABLE_SEP_DASHES@26..29 "---"
+      NEWLINE@29..30 "\n"
+    TABLE_ROW@30..36
+      TABLE_CELL@30..31
+        TEXT@30..31 "x"
+      WHITESPACE@31..34 "   "
+      TABLE_CELL@34..35
+        TEXT@34..35 "y"
+      NEWLINE@35..36 "\n"
+    TABLE_SEPARATOR@36..44
+      TABLE_SEP_DASHES@36..39 "---"
+      TABLE_SEP_WHITESPACE@39..40 " "
+      TABLE_SEP_DASHES@40..43 "---"
+      NEWLINE@43..44 "\n"

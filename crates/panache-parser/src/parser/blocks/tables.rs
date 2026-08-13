@@ -728,6 +728,18 @@ fn find_caption_before_table(
 
     // If this line is NOT a caption start, it might be a continuation line
     // Scan backward through non-blank lines to find the caption start
+    // The caption start must sit at the top of its non-blank block —
+    // otherwise it is a lazy continuation of the paragraph above. A
+    // fence-shaped previous line is no bar: when the caption line is
+    // actually block-dispatched below one, that line was consumed
+    // structurally (the enclosing div's opener, or a closed div's
+    // closer — probed; paragraph laziness otherwise swallows the
+    // caption line before dispatch, matching pandoc's no-caption
+    // reading of the text case).
+    let starts_its_block = |p: usize| {
+        p == 0 || lines.line(p - 1).trim().is_empty() || line_is_fenced_div_fence(lines.line(p - 1))
+    };
+
     if !is_valid_caption_start_before_table(lines, pos) {
         // Not a caption start - check if there's a caption start above
         let mut scan_pos = pos;
@@ -735,8 +747,13 @@ fn find_caption_before_table(
             scan_pos -= 1;
             let line = lines.line(scan_pos);
 
-            // If we hit a blank line or fenced-div fence, we've gone too far
-            if line.trim().is_empty() || line_is_fenced_div_fence(line) {
+            // A blank line or the end of the enclosing container's line
+            // run means we've gone too far. This is the same bound the
+            // forward caption scans use — the two must agree, or a
+            // caption-led dispatch ends in a table whose parser refuses
+            // the caption and drops its bytes. An unmatched fence is
+            // caption content, exactly as in `caption_range_starting_at`.
+            if line.trim().is_empty() || lines.ends_container_lines(scan_pos) {
                 return None;
             }
 
@@ -745,7 +762,7 @@ fn find_caption_before_table(
                 if scan_pos < dispatch {
                     return None;
                 }
-                if scan_pos > 0 && !lines.line(scan_pos - 1).trim().is_empty() {
+                if !starts_its_block(scan_pos) {
                     return None;
                 }
                 if previous_nonblank_looks_like_table(lines, scan_pos) {
@@ -760,7 +777,7 @@ fn find_caption_before_table(
         if pos < dispatch {
             return None;
         }
-        if pos > 0 && !lines.line(pos - 1).trim().is_empty() {
+        if !starts_its_block(pos) {
             return None;
         }
         if previous_nonblank_looks_like_table(lines, pos) {
@@ -786,7 +803,11 @@ fn previous_nonblank_looks_like_table(lines: &(impl LineView + ?Sized), pos: usi
     // we must walk the whole block, not just the nearest line, to recognize
     // that this caption is the caption-after of a preceding table rather than a
     // caption-before of the following one. Stop at the next blank line or a
-    // fenced-div fence.
+    // fenced-div fence. The fence stop deliberately stays a shape test
+    // rather than the seam's `ends_container_lines`: a table above a
+    // *closed* div's `:::` is out of this caption's reach, but the div is
+    // no longer on the stack at dispatch, so the seam cannot see that
+    // boundary — only the fence shape can.
     while i > 0 {
         i -= 1;
         if lines.line(i).trim().is_empty() || line_is_fenced_div_fence(lines.line(i)) {

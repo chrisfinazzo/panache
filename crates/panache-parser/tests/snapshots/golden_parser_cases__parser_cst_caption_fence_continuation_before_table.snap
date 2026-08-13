@@ -1,0 +1,33 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..37
+  SIMPLE_TABLE@0..37
+    TABLE_CAPTION@0..14
+      TABLE_CAPTION_PREFIX@0..2 ": "
+      TEXT@2..5 "cap"
+      NEWLINE@5..6 "\n"
+      TEXT@6..9 ":::"
+      NEWLINE@9..10 "\n"
+      TEXT@10..13 "mid"
+      NEWLINE@13..14 "\n"
+    BLANK_LINE@14..15
+      BLANK_LINE@14..15 "\n"
+    TABLE_SEPARATOR@15..23
+      TABLE_SEP_DASHES@15..18 "---"
+      TABLE_SEP_WHITESPACE@18..19 " "
+      TABLE_SEP_DASHES@19..22 "---"
+      NEWLINE@22..23 "\n"
+    TABLE_ROW@23..29
+      TABLE_CELL@23..24
+        TEXT@23..24 "x"
+      WHITESPACE@24..27 "   "
+      TABLE_CELL@27..28
+        TEXT@27..28 "y"
+      NEWLINE@28..29 "\n"
+    TABLE_SEPARATOR@29..37
+      TABLE_SEP_DASHES@29..32 "---"
+      TABLE_SEP_WHITESPACE@32..33 " "
+      TABLE_SEP_DASHES@33..36 "---"
+      NEWLINE@36..37 "\n"
