@@ -811,3 +811,13 @@
 # measured from their own content start or every column reads as AlignDefault.
 540
 541
+
+# A grid table's continuation lines carry the enclosing containers' prefix
+# bytes (item indent, `>` markers) as leading tokens inside the row nodes,
+# and `analyze_grid` requires lines dedented to the table's own left edge.
+# The projector reads rows through `text_without_line_prefixes`, so 0542
+# (grid table as a list item's marker-line block) keeps pandoc's 2 columns
+# instead of reading phantom `+` positions, and 0543 (grid table in a
+# blockquote) projects the table instead of dropping it.
+542
+543

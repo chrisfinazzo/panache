@@ -3,6 +3,47 @@
 use super::ast::{AstChildren, support};
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 
+/// `node`'s text with each line's leading container-prefix tokens skipped.
+///
+/// A continuation line inside a block node carries the enclosing
+/// containers' prefix bytes (list indent as `WHITESPACE`, blockquote
+/// markers as `BLOCK_QUOTE_MARKER` plus their whitespace) as ordinary
+/// tokens at line start; line 0's prefix sits *outside* the node. So
+/// `node.text()` is line 0 dedented and lines 1..n still prefixed —
+/// wrong by construction for any consumer doing column geometry across
+/// lines (grid layout, table measurement).
+///
+/// This walk drops every line-leading run of {`WHITESPACE`,
+/// `BLOCK_QUOTE_MARKER`} tokens, treating the node start as a line
+/// start (a node whose first line is a continuation line opens with
+/// prefix tokens). That is sound for constructs whose content is
+/// flush-left on every line — grid and pipe table lines start with `+`
+/// or `|` — and a heuristic for anything else: a line-leading
+/// `WHITESPACE` token that is genuine content cannot be told apart
+/// from prefix until prefix runs carry their own kind in the CST (see
+/// the container-prefix entry in TODO.md).
+pub fn text_without_line_prefixes(node: &SyntaxNode) -> String {
+    let mut out = String::new();
+    let mut at_line_start = true;
+    for token in node
+        .descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+    {
+        match token.kind() {
+            SyntaxKind::WHITESPACE | SyntaxKind::BLOCK_QUOTE_MARKER if at_line_start => {}
+            SyntaxKind::NEWLINE | SyntaxKind::BLANK_LINE => {
+                out.push_str(token.text());
+                at_line_start = true;
+            }
+            _ => {
+                out.push_str(token.text());
+                at_line_start = false;
+            }
+        }
+    }
+    out
+}
+
 /// The separator-marker tokens (`TABLE_SEP_*`) of a `TABLE_SEPARATOR` node,
 /// in order. Skips the container prefix (`WHITESPACE` / blockquote markers)
 /// and the trailing `NEWLINE` so callers see only the separator's own
@@ -363,6 +404,47 @@ mod tests {
             table.caption().map(|caption| caption.text()),
             Some("Caption".to_string())
         );
+    }
+
+    #[test]
+    fn text_without_line_prefixes_drops_item_indent() {
+        // The item indent lives inside the row nodes as line-leading
+        // `WHITESPACE`; line 0's prefix sits outside the table node.
+        let input = "- +---+---+\n  | a | b |\n  +===+===+\n  | 1 | 2 |\n  +---+---+\n";
+        let tree = crate::parse(input, None);
+        let table = tree
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::GRID_TABLE)
+            .expect("grid table node");
+        assert_eq!(
+            text_without_line_prefixes(&table),
+            "+---+---+\n| a | b |\n+===+===+\n| 1 | 2 |\n+---+---+\n"
+        );
+    }
+
+    #[test]
+    fn text_without_line_prefixes_drops_blockquote_markers() {
+        let input = "> +---+---+\n> | a | b |\n> +===+===+\n> | 1 | 2 |\n> +---+---+\n";
+        let tree = crate::parse(input, None);
+        let table = tree
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::GRID_TABLE)
+            .expect("grid table node");
+        assert_eq!(
+            text_without_line_prefixes(&table),
+            "+---+---+\n| a | b |\n+===+===+\n| 1 | 2 |\n+---+---+\n"
+        );
+    }
+
+    #[test]
+    fn text_without_line_prefixes_keeps_unprefixed_text() {
+        let input = "+---+---+\n| a | b |\n+===+===+\n| 1 | 2 |\n+---+---+\n";
+        let tree = crate::parse(input, None);
+        let table = tree
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::GRID_TABLE)
+            .expect("grid table node");
+        assert_eq!(text_without_line_prefixes(&table), input);
     }
 
     #[test]

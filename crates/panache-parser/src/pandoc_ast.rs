@@ -22,6 +22,7 @@ use crate::SyntaxNode;
 use crate::parser::utils::attributes::decode_html_attr_entities;
 use crate::syntax::{
     SyntaxKind, SyntaxToken, code_span_payload, separator_column_segments, separator_marker_tokens,
+    text_without_line_prefixes,
 };
 use rowan::NodeOrToken;
 use serde_json::{Value, json};
@@ -3171,12 +3172,16 @@ fn simple_table_aligns(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<&'stati
 #[allow(clippy::needless_range_loop)]
 fn grid_table(node: &SyntaxNode) -> Option<TableData> {
     // Collect all lines except the caption, tagged with their parent kind.
+    // Continuation lines inside the row nodes carry the enclosing
+    // containers' prefix bytes (item indent, `>` markers) as leading
+    // tokens; `analyze_grid` requires lines dedented to the table's own
+    // left edge, so read the rows through the prefix-skipping accessor.
     let mut tagged: Vec<(SyntaxKind, String)> = Vec::new();
     for child in node.children() {
         if child.kind() == SyntaxKind::TABLE_CAPTION {
             continue;
         }
-        let text = child.text().to_string();
+        let text = text_without_line_prefixes(&child);
         for line in text.split_inclusive('\n') {
             let trimmed = line.trim_end_matches('\n');
             tagged.push((child.kind(), trimmed.to_string()));
