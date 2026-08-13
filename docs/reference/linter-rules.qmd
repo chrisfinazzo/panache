@@ -1675,6 +1675,66 @@ blank line above the run; if the marker is prose (`Prices range from $5` /
 sufficient on its own: any prose following the run would become lazy
 continuation of the final list item, and would need its own blank line too.
 
+### `table-column-count` {#table-column-count}
+
+Detects a pipe table row carrying more cells than its delimiter row declares.
+Those cells are dropped when the table is rendered.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No
+
+Diagnostic codes
+:   [`table-column-count`](#table-column-count)
+
+Description
+
+:   A pipe table's delimiter row owns its column count. Pandoc reads the count
+    off that row and then pads or truncates every other row to it, so a header
+    or data cell past the last column never reaches the output at all:
+
+    ```markdown
+    | a | b | c |
+    |---|---|
+    | 1 | 2 | 3 |
+    ```
+
+    renders as a two-column table holding only `a`, `b`, `1`, and `2`. The `c` and
+    `3` cells are silently discarded, which usually means the delimiter row was
+    mistyped rather than that the cells were unwanted.
+
+    The opposite mismatch is harmless and is not flagged: a row *shorter* than the
+    delimiter row is padded with empty cells, so no content is lost.
+
+    Under the `gfm` and `commonmark` flavors the mismatch is not a table at all ---
+    those dialects require the header to match the delimiter row cell-for-cell, and
+    the whole run stays a paragraph --- so this rule has nothing to flag there.
+
+**Example violation:**
+
+```markdown
+| a | b | c |
+|---|---|
+| 1 | 2 | 3 |
+```
+
+**Diagnostic:**
+
+```
+warning[table-column-count]: This row has 3 cells but the delimiter row declares
+2 columns; the 1 extra cell is dropped when the table is rendered
+ --> document.qmd:1:9
+```
+
+**Resolution:** there is no auto-fix because two different intentions are
+plausible and the rule cannot tell them apart. If the extra columns were meant,
+widen the delimiter row (`|---|---|---|`); if they were not, delete the surplus
+cells. The formatter leaves such a table byte-for-byte as written for the same
+reason: normalizing it would either discard the author's text or widen the
+delimiter row and change what pandoc renders.
+
 ### `math-syntax` {#math-syntax}
 
 Detects structural problems in the TeX content of inline (`$...$`) and display

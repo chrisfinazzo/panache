@@ -116,6 +116,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::link_text_is_url::LinkTextIsUrlRule),
         Box::new(rules::stray_fenced_div_markers::StrayFencedDivMarkersRule),
         Box::new(rules::swallowed_list_marker::SwallowedListMarkerRule),
+        Box::new(rules::table_column_count::TableColumnCountRule),
         Box::new(rules::footnote_after_image::FootnoteAfterImageRule),
         Box::new(rules::footnote_swallowed_by_bracket::FootnoteSwallowedByBracketRule),
         Box::new(rules::reversed_footnote_marker::ReversedFootnoteMarkerRule),

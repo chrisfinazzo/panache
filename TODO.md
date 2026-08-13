@@ -890,16 +890,51 @@ panache starts caching NodePtrs across edits.
     cell boundary, so `a \| b` over `---|---` was a table where pandoc has a
     `Para`.
 
-  - [ ] **Pipe table column counts should come from the delimiter row.**
-    `try_parse_pipe_table` is lenient --- a header may carry up to twice the
-    delimiter's cells --- while pandoc takes the count from the delimiter
-    and drops the surplus: `a | b | c` over `---|---` is 2 columns in pandoc
-    and 3 here, and `| a | b |` over `- |` is 1 versus 2. Top-level shapes
-    stay idempotent only because the formatter re-emits panache's own count.
-    The marker-line gate above therefore requires the column-exact form
-    (`opens_column_exact_pipe_table`); shapes like `- | a | b |` / `  - |`
-    keep the old nested-list reading until this is fixed. Touches the
-    projector and the formatter, not just the parser.
+  - [x] **Pipe table column counts now come from the delimiter row.**
+    `try_parse_pipe_table` used to be lenient --- a header could carry up to
+    twice the delimiter's cells --- while pandoc takes the count from the
+    delimiter and drops the surplus, so `a | b | c` over `---|---` was 3
+    columns here and 2 in pandoc, and `| a | b |` over `- |` was 2 versus 1.
+    Landed across all four consumers:
+
+    - Parser: the `±2x` bound is gone in the Pandoc dialect, which puts no
+      ceiling on the surplus at all (`a|b|c|d|e|f|g` over `---|---` is a
+      two-column `Table`, where panache read a `Para`). GFM parts ways and is
+      now stricter, not more lenient: `cmark-gfm` requires the header to match
+      the delimiter row cell-for-cell and leaves the whole run a `Para`
+      otherwise, so the CommonMark dialect gates on an exact match.
+    - Projector: `pipe_table` took `cols` as the max of header, body, and
+      delimiter counts; it is `aligns.len()`, truncating surplus cells
+      (`cells_to_plain_blocks` already padded short ones). The column
+      segmentation moved onto the typed wrapper (`PipeTable::column_count` /
+      `separator_column_segments`) so the projector and the linter cannot
+      disagree about what a column is.
+    - Formatter: rows short of the count are padded, so the delimiter row keeps
+      its columns. A row with *surplus* cells leaves the table byte-for-byte as
+      written --- normalizing it would either delete the author's text or widen
+      the delimiter row and change what pandoc renders. This is what makes the
+      round-trip stable rather than the old "the formatter re-emits panache's
+      own count".
+    - Linter: `table-column-count` (warning, no fix --- widen the delimiter row
+      or delete the cells is the author's call) flags each row whose cells the
+      render drops.
+
+    The marker-line gate no longer needs the column-exact form:
+    `opens_column_exact_pipe_table` became `opens_multiline_pipe_table`, and
+    `- | a | b |` / `  - |` is the `BulletList [[Table …]]` pandoc reads instead
+    of a nested list.
+
+    Relaxing that gate exposed a latent formatter bug: the splice that puts a
+    table-first item's first line on the marker line sliced a fixed
+    `content_indent` bytes off it, which is only right when the table came back
+    indented. On a verbatim table it ate the leading `| ` and deleted a cell on
+    every further pass. It strips the indent only when it is there now.
+
+    `table_ordered_marker_first_line_caption` was the fixture pinning the old
+    divergence --- `bf02d162` kept "the overflow cell pandoc drops ... as a real
+    column" on purpose --- so it is now a verbatim no-op. Its normalization
+    coverage moved to a column-exact sibling (`..._caption_exact`), which also
+    pins the short-row padding.
 
   - [ ] A **quoted** item's marker-line table is out of the lift's reach:
     `> - a | b` / `>   - | -` is `BlockQuote [BulletList [[Table …]]]` in

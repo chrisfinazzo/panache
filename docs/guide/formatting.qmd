@@ -693,6 +693,19 @@ Output
       |     1 | 1    | 1       |   1    |
     ```
 
+The separator row owns the table's column count. Pandoc reads the count from
+that row and pads or truncates every other row to it, so Panache does the same:
+a row short of the count gains empty cells, keeping the separator row's columns
+intact.
+
+A row carrying *more* cells than the separator row declares is left alone.
+Pandoc discards those cells when rendering, and there is no pipe syntax that
+keeps them without also widening the separator row and changing the rendered
+column count---so the whole table is emitted byte-for-byte as written rather
+than having its content deleted. The
+[`table-column-count`](../reference/linter-rules.qmd#table-column-count) lint
+rule flags the mismatch so it can be resolved deliberately.
+
 ### Grid Tables
 
 Grid tables are normalized to have consistent spacing and alignment. They are

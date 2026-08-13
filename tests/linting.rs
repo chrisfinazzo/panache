@@ -1337,3 +1337,28 @@ fn test_citation_nonbreaking_space() {
             .is_some_and(|f| f.edits.len() == 1 && f.edits[0].replacement == "\\ ")
     }));
 }
+
+#[test]
+fn test_table_column_count() {
+    let diagnostics = lint_file("table_column_count.md");
+    let flagged: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "table-column-count")
+        .collect();
+
+    // Only the middle table overflows: its header and its one body row each
+    // carry a third cell the two-column delimiter row drops. The matched
+    // table and the short-row table are clean.
+    assert_eq!(flagged.len(), 2, "got: {flagged:?}");
+    let lines: Vec<usize> = flagged.iter().map(|d| d.location.line).collect();
+    assert_eq!(lines, vec![12, 14]);
+    assert!(
+        flagged.iter().all(|d| d.fix.is_none()),
+        "the repair is ambiguous, so no fix ships"
+    );
+    assert!(
+        flagged[0].message.contains("declares 2 columns"),
+        "message names the delimiter's count: {}",
+        flagged[0].message
+    );
+}

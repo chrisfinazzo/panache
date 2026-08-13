@@ -31,6 +31,7 @@ pub mod quarto_schema;
 pub mod reversed_footnote_marker;
 pub mod stray_fenced_div_markers;
 pub mod swallowed_list_marker;
+pub mod table_column_count;
 pub mod undefined_anchor;
 pub mod undefined_references;
 pub mod unspaced_citation;
