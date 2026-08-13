@@ -1551,21 +1551,48 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   the same shape puts a deeper-indented `</div>` (past the closer's column
   bound, so correctly gobbled) inline instead of as the quote's `RawBlock`.
 
-- [ ] Migrate the remaining scans' **ad-hoc container bounds** onto
-  `ends_container_lines`, one scan per commit with pandoc probes. The
-  caption scans (`is_caption_followed_by_table`,
-  `caption_range_starting_at`, `find_caption_before_table`,
-  `previous_nonblank_looks_like_table`, `find_caption_after_table`,
-  `is_valid_caption_start_before_table`) each test
-  `line_is_fenced_div_fence` *unconditionally* --- a looser predicate than
-  the seam's (it accepts openers, and fires with no div open), so migrating
-  them is a behavior change needing its own pins, and the backward scans run
-  upward, where "ends the run" is direction-inverted. The pipe scan stops on
-  "no `|`" (a `:::` happens to stop it, by accident), the grid scan has no
-  bound at all, and the multiline scan's `crossed_scope_boundary`
-  deliberately differs (any fence including openers, bq-blank handling) and
-  indexes raw lines, so it needs threading onto `LineView` first.
-  `table_grid_starts_at`'s `pos + 1` stays unvetted.
+- [x] Migrate the remaining scans' **ad-hoc container bounds** onto
+  `ends_container_lines`. Landed one scan per commit, all pandoc-probed:
+  pipe rows, the grid loop (shape-disjoint, bound kept as invariant), the
+  multiline scan (`crossed_scope_boundary` deleted --- openers and unmatched
+  fences are rows, the run breaks at the seam and at bq raw blanks,
+  terminator-shaped sibling closers rejected), the forward caption scans
+  (unmatched fences and openers are caption content; note markers and list
+  starts end the run; `table_grid_starts_at`'s `pos + 1` gated), and the
+  backward caption scan (aligned with the forward bound after the
+  disagreement dropped caption bytes --- a losslessness break caught
+  mid-migration). On the way: `div_closer_ends_lines` widened to presence
+  (an innermost div's own content parse carries the closer guard --- the
+  ordering gate missed tables directly in a div), and `find_table_end` now
+  accepts a closing separator abutting a run terminator (pandoc keeps the
+  table in all three shapes).
+
+  Two fence-shape tests remain by design, both probed: the caption-start context
+  checks (`is_valid_caption_start_before_table`, `starts_its_block`) ask "was
+  the line above consumed structurally", which paragraph laziness shields for
+  text fences, and `previous_nonblank_looks_like_table` bounds the previous
+  block at a *closed* div's `:::`, which is off the stack at dispatch and
+  invisible to the seam. New documented divergence, footer-rule family: a list
+  start abutting `: cap` makes pandoc drop the caption entirely (empty caption,
+  `: cap` reparses as a paragraph); panache treats the terminator like a blank
+  line and keeps the caption.
+
+- [ ] Probe findings from the seam migration, **untriaged candidates** (each
+  needs confirming against existing fixtures/allowlists before being called
+  a bug):
+  - A pipe table starting on a list item's marker line (`- a | b` / `  ---|---`
+    / `  c | d`) parses as a `Plain` here but as `BulletList [Table]` in pandoc;
+    same for a footnote body whose marker line is bare (`[^1]:` + indented pipe
+    table).
+  - A pipe table claims a `[^1]: a | b` dispatch line as its header row where
+    pandoc reads the note first (`Note [Table]`) --- registry precedence, not a
+    scan bound.
+  - Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache requires
+    three.
+  - A spaced dash run after a list (`- x` items, then `- - - -`) is a sibling
+    `HorizontalRule` in pandoc but nests as the list's child here, and the
+    pandoc-ast projector then drops it from the projection entirely (CST is
+    lossless).
 
 - [ ] Terminator-adjacent **headered simple tables should degrade to a
   paragraph** the way pandoc's footer rule makes them: when a contiguous
