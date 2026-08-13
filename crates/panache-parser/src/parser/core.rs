@@ -189,6 +189,14 @@ pub struct Parser<'a> {
     /// The first line after a metadata block is treated as if it has a blank line before it,
     /// matching Pandoc's behavior of allowing headings etc. directly after frontmatter.
     after_metadata_block: bool,
+    /// True when the previous line opened a footnote definition whose marker
+    /// line carried no content (`[^1]:` alone). Pandoc's `noteBlock` drops
+    /// that line with `optional blankline >> optional indentSpaces` and
+    /// reparses the collected body as a standalone document, so the next line
+    /// is the body's *first* line: `blank_before_header` is satisfied there,
+    /// and four further columns are an indented code block rather than lazy
+    /// paragraph text. Consumed (taken) by `parse_inner_content`.
+    at_note_body_start: bool,
     /// True while `dispatch_bq_after_list_item` is routing the post-marker
     /// content of a `- > <block>` shape through `parse_inner_content`. In
     /// that path the LIST_MARKER + WHITESPACE bytes for `lines[self.pos]`
@@ -217,6 +225,7 @@ impl<'a> Parser<'a> {
             config,
             block_registry: BlockParserRegistry::new(),
             after_metadata_block: false,
+            at_note_body_start: false,
             dispatch_list_marker_consumed: false,
             diagnostics: Diagnostics::new(),
         }
@@ -1535,6 +1544,9 @@ impl<'a> Parser<'a> {
             if !newline_str.is_empty() {
                 self.builder.token(SyntaxKind::NEWLINE.into(), newline_str);
             }
+            // The body starts on the next line, and pandoc reparses it from
+            // scratch — see `at_note_body_start`.
+            self.at_note_body_start = true;
             return 0;
         }
 
@@ -5492,7 +5504,11 @@ impl<'a> Parser<'a> {
         // without an intervening blank line). Similarly, the first line after a metadata
         // block (YAML/Pandoc title/MMD title) is treated as having a blank before it.
         let after_metadata_block = std::mem::replace(&mut self.after_metadata_block, false);
-        let has_blank_before = if self.pos == 0 || after_metadata_block {
+        // A bare `[^1]:` marker line leaves the body to start here, and pandoc
+        // parses that body as a standalone document — so this line sits at a
+        // fresh block context, strict blank included.
+        let at_note_body_start = std::mem::replace(&mut self.at_note_body_start, false);
+        let has_blank_before = if self.pos == 0 || after_metadata_block || at_note_body_start {
             true
         } else {
             let prev_line = self.lines[self.pos - 1];
@@ -5522,7 +5538,7 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
-        let has_blank_before_strict = at_document_start || prev_line_blank;
+        let has_blank_before_strict = at_document_start || prev_line_blank || at_note_body_start;
 
         dispatcher_ctx.has_blank_before = has_blank_before;
         dispatcher_ctx.has_blank_before_strict = has_blank_before_strict;

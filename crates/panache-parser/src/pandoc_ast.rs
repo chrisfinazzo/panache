@@ -4886,12 +4886,7 @@ fn footnote_reference_inline(node: &SyntaxNode) -> Inline {
     let Some(label) = footnote_label(node) else {
         return Inline::Unsupported("FOOTNOTE_REFERENCE".to_string());
     };
-    let blocks = REFS_CTX.with(|c| {
-        c.borrow()
-            .footnotes
-            .get(&label)
-            .map(|bs| bs.iter().map(clone_block).collect::<Vec<_>>())
-    });
+    let blocks = REFS_CTX.with(|c| c.borrow().footnotes.get(&label).map(|bs| bs.to_vec()));
     match blocks {
         Some(bs) => Inline::Note(bs),
         // Unresolved footnote reference: pandoc emits the original bytes as
@@ -5158,7 +5153,7 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
         }
         // Try to detect an open quote at position i.
         let Inline::Str(s) = &inlines[i] else {
-            out.push(clone_inline(&inlines[i]));
+            out.push(inlines[i].clone());
             consumed[i] = true;
             continue;
         };
@@ -5238,7 +5233,7 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
                             }
                         }
                     } else {
-                        content.push(clone_inline(inline));
+                        content.push(inline.clone());
                     }
                     consumed[j] = true;
                 }
@@ -5246,7 +5241,7 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
                 continue;
             }
         }
-        out.push(clone_inline(&inlines[i]));
+        out.push(inlines[i].clone());
         consumed[i] = true;
     }
     out
@@ -5311,109 +5306,6 @@ fn find_matching_close(
         }
     }
     None
-}
-
-fn clone_inline(inline: &Inline) -> Inline {
-    match inline {
-        Inline::Str(s) => Inline::Str(s.clone()),
-        Inline::Space => Inline::Space,
-        Inline::SoftBreak => Inline::SoftBreak,
-        Inline::LineBreak => Inline::LineBreak,
-        Inline::Emph(c) => Inline::Emph(c.iter().map(clone_inline).collect()),
-        Inline::Strong(c) => Inline::Strong(c.iter().map(clone_inline).collect()),
-        Inline::Strikeout(c) => Inline::Strikeout(c.iter().map(clone_inline).collect()),
-        Inline::Superscript(c) => Inline::Superscript(c.iter().map(clone_inline).collect()),
-        Inline::Subscript(c) => Inline::Subscript(c.iter().map(clone_inline).collect()),
-        Inline::Code(a, s) => Inline::Code(a.clone(), s.clone()),
-        Inline::Link(a, t, u, ti) => Inline::Link(
-            a.clone(),
-            t.iter().map(clone_inline).collect(),
-            u.clone(),
-            ti.clone(),
-        ),
-        Inline::Image(a, t, u, ti) => Inline::Image(
-            a.clone(),
-            t.iter().map(clone_inline).collect(),
-            u.clone(),
-            ti.clone(),
-        ),
-        Inline::Math(k, c) => Inline::Math(k, c.clone()),
-        Inline::Span(a, c) => Inline::Span(a.clone(), c.iter().map(clone_inline).collect()),
-        Inline::RawInline(f, c) => Inline::RawInline(f.clone(), c.clone()),
-        Inline::Quoted(k, c) => Inline::Quoted(k, c.iter().map(clone_inline).collect()),
-        Inline::Note(blocks) => Inline::Note(blocks.iter().map(clone_block).collect()),
-        Inline::Cite(citations, text) => Inline::Cite(
-            citations
-                .iter()
-                .map(|c| Citation {
-                    id: c.id.clone(),
-                    prefix: c.prefix.iter().map(clone_inline).collect(),
-                    suffix: c.suffix.iter().map(clone_inline).collect(),
-                    mode: c.mode,
-                    note_num: c.note_num,
-                    hash: c.hash,
-                })
-                .collect(),
-            text.iter().map(clone_inline).collect(),
-        ),
-        Inline::Unsupported(s) => Inline::Unsupported(s.clone()),
-    }
-}
-
-fn clone_block(b: &Block) -> Block {
-    match b {
-        Block::Para(c) => Block::Para(c.iter().map(clone_inline).collect()),
-        Block::Plain(c) => Block::Plain(c.iter().map(clone_inline).collect()),
-        Block::Header(lvl, a, c) => {
-            Block::Header(*lvl, a.clone(), c.iter().map(clone_inline).collect())
-        }
-        Block::BlockQuote(blocks) => Block::BlockQuote(blocks.iter().map(clone_block).collect()),
-        Block::CodeBlock(a, s) => Block::CodeBlock(a.clone(), s.clone()),
-        Block::HorizontalRule => Block::HorizontalRule,
-        Block::BulletList(items) => Block::BulletList(
-            items
-                .iter()
-                .map(|item| item.iter().map(clone_block).collect())
-                .collect(),
-        ),
-        Block::OrderedList(start, style, delim, items) => Block::OrderedList(
-            *start,
-            style,
-            delim,
-            items
-                .iter()
-                .map(|item| item.iter().map(clone_block).collect())
-                .collect(),
-        ),
-        Block::RawBlock(f, c) => Block::RawBlock(f.clone(), c.clone()),
-        Block::Table(_) => Block::Unsupported("Table".to_string()),
-        Block::Div(a, blocks) => Block::Div(a.clone(), blocks.iter().map(clone_block).collect()),
-        Block::LineBlock(lines) => Block::LineBlock(
-            lines
-                .iter()
-                .map(|line| line.iter().map(clone_inline).collect())
-                .collect(),
-        ),
-        Block::DefinitionList(items) => Block::DefinitionList(
-            items
-                .iter()
-                .map(|(term, defs)| {
-                    (
-                        term.iter().map(clone_inline).collect(),
-                        defs.iter()
-                            .map(|d| d.iter().map(clone_block).collect())
-                            .collect(),
-                    )
-                })
-                .collect(),
-        ),
-        Block::Figure(a, caption, body) => Block::Figure(
-            a.clone(),
-            caption.iter().map(clone_block).collect(),
-            body.iter().map(clone_block).collect(),
-        ),
-        Block::Unsupported(s) => Block::Unsupported(s.clone()),
-    }
 }
 
 fn smart_dashes_and_ellipsis(s: &str) -> String {

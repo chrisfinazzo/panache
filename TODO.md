@@ -812,10 +812,42 @@ panache starts caching NodePtrs across edits.
   needs confirming against existing fixtures/allowlists before being called
   a bug):
 
-  - A pipe table starting on a list item's marker line (`- a | b` / `  ---|---`
-    / `  c | d`) parses as a `Plain` here but as `BulletList [Table]` in pandoc;
-    same for a footnote body whose marker line is bare (`[^1]:` + indented pipe
-    table).
+  - [x] A pipe table opening a **container body** parsed as a `Plain`/`Para`
+    where pandoc gives `BulletList [Table]` / `Note [Table]`. Two
+    independent causes, both fixed:
+
+    The list-item lift (`try_emit_table_or_div_lift`) gated on a leading
+    `|`/`+`/`:` byte, so the leading-pipe-less form (`- a | b` / `  ---|---`)
+    never reached the reparse. The gate is now `opens_table_or_div`, which also
+    accepts a `|`-bearing header followed by a delimiter row. It runs on the
+    *stripped* text, so a marker-only item (`-` + indented table) lifts too: its
+    buffered leading newline is held out, the block's own line becomes line 0
+    (`strip_list_item_indent_from`), and the newline is re-emitted ahead of the
+    graft.
+
+    A **bare `[^1]:` marker line** never handed its body line to the block
+    dispatcher at all --- `previous_block_requires_blank_before_heading` sees
+    the open `FootnoteDefinition` and reports "no blank before", so every body
+    line was lazy paragraph text. Pandoc's `noteBlock` drops the marker line
+    with `optional blankline >> optional indentSpaces` and reparses the body as
+    a standalone document, so that line is the body's first: the new
+    `at_note_body_start` flag (set on the bare-marker path, taken in
+    `parse_inner_content`, same shape as `after_metadata_block`) makes both
+    `has_blank_before` and `has_blank_before_strict` true there. Headings,
+    indented code, and tables now open a bare-marker note body like pandoc; the
+    non-bare form (`[^1]: y` + `    # head`) keeps its lazy continuation.
+
+    Two bugs behind it, both pre-existing and both hit by the new shapes:
+    `AtxHeadingParser` and `HorizontalRuleParser` render from `lines.first()`
+    and dropped the `ContentIndent` bytes that view strips (a losslessness break
+    inside any footnote/definition/admonition body) --- they now call the shared
+    `emit_content_indent`; and the formatter's `FOOTNOTE_DEFINITION` arm ran a
+    non-foldable first child straight onto the marker line
+    (`[^1]:    | a | b |`, ```` [^1]:    ``` ````), which no longer round-trips ---
+    the marker line is terminated first. The projector's hand-written
+    `clone_block` also had a `Block::Table(_) => Unsupported` hole, so a table
+    inside a `Note` projected as `Unsupported "Table"`; both it and
+    `clone_inline` were redundant with the derived `Clone` and are gone.
 
   - A pipe table claims a `[^1]: a | b` dispatch line as its header row where
     pandoc reads the note first (`Note [Table]`) --- registry precedence, not a

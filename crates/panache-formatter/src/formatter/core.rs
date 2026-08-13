@@ -1148,6 +1148,14 @@ impl Formatter {
                             self.format_node_sync(child, child_indent);
                             continue;
                         }
+
+                        // Every other block kind is rendered indented to
+                        // `child_indent` on its own line (tables, code blocks,
+                        // lists, divs, ...), so the marker line has to be
+                        // terminated first — otherwise the block collapses onto
+                        // the colon (`[^1]:    | a | b |`), which reparses as
+                        // marker-line text rather than the body block it was.
+                        self.output.push('\n');
                     }
 
                     // Format blocks with indentation

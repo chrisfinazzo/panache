@@ -1224,3 +1224,110 @@ fn caption_directly_under_a_closed_div_captions_the_table() {
         caption.text()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Pipe tables that open a container's body
+//
+// pandoc reparses a container's collected raw lines from the content
+// column (`listLine`, `noteBlock`), so a pipe table is recognized there
+// exactly as it is at top level — including the leading-pipe-less form,
+// whose first line is a bare `a | b` rather than a `|`-fenced row.
+
+/// `pandoc -f markdown -t native`: `BulletList [[Table …]]`. The
+/// marker-line lift used to gate on a leading `|`/`+`/`:` byte, so the
+/// pipe-less header fell through to the item's `Plain`.
+#[test]
+fn leading_pipeless_pipe_table_on_a_list_item_marker_line_lifts() {
+    let input = "- a | b\n  ---|---\n  c | d\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let item = first_of(&node, SyntaxKind::LIST_ITEM).expect("list item");
+    assert_eq!(
+        child_kinds(&item)
+            .into_iter()
+            .filter(|k| *k == SyntaxKind::PIPE_TABLE)
+            .count(),
+        1,
+        "the table is a direct item child, not `Plain` text: {:?}",
+        child_kinds(&item)
+    );
+    assert_eq!(header_cells(&item), vec!["a", "b"]);
+}
+
+/// The same shape with the table opening on the item's first
+/// continuation line: `pandoc -f markdown -t native` is
+/// `BulletList [[Table …]]` there too.
+#[test]
+fn leading_pipeless_pipe_table_under_a_bare_list_marker_lifts() {
+    let input = "-\n  a | b\n  ---|---\n  c | d\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let item = first_of(&node, SyntaxKind::LIST_ITEM).expect("list item");
+    assert!(
+        first_of(&item, SyntaxKind::PIPE_TABLE).is_some(),
+        "the table is lifted out of the item's buffered text: {:?}",
+        child_kinds(&item)
+    );
+}
+
+/// A bare `[^1]:` marker line makes the next line the first line of the
+/// note's reparsed body, so pandoc's `blank_before_header` /
+/// indented-code rules measure from there. `pandoc -f markdown -t
+/// native`: `Note [Table …]`.
+#[test]
+fn pipe_table_opening_a_bare_marker_footnote_body_is_a_table() {
+    let input = "[^1]:\n    a | b\n    ---|---\n    c | d\n\nx[^1]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let note = first_of(&node, SyntaxKind::FOOTNOTE_DEFINITION).expect("note");
+    assert!(
+        first_of(&note, SyntaxKind::PIPE_TABLE).is_some(),
+        "the note body opens with a table: {:?}",
+        child_kinds(&note)
+    );
+}
+
+/// Same rule, other constructs: an ATX heading and an indented code
+/// block open a bare-marker note body. `pandoc -f markdown -t native`
+/// gives `Note [Header …]` and `Note [CodeBlock …]`.
+#[test]
+fn bare_marker_footnote_body_starts_a_fresh_block_context() {
+    let heading = parse_blocks("[^1]:\n    # head\n\nx[^1]\n");
+    assert!(
+        first_of(&heading, SyntaxKind::HEADING).is_some(),
+        "`# head` is a heading, not lazy paragraph text"
+    );
+
+    let code = parse_blocks("[^1]:\n        code\n\nx[^1]\n");
+    assert!(
+        first_of(&code, SyntaxKind::CODE_BLOCK).is_some(),
+        "8 columns is 4 past the note's content column: indented code"
+    );
+}
+
+/// The non-bare form is unchanged: the marker line's text opens a
+/// paragraph, so `# head` under it is lazy continuation
+/// (`pandoc -f markdown -t native`: `Note [Para [y, SoftBreak, #, head]]`).
+#[test]
+fn footnote_body_after_marker_line_text_keeps_lazy_continuation() {
+    let node = parse_blocks("[^1]: y\n    # head\n\nx[^1]\n");
+    assert!(
+        first_of(&node, SyntaxKind::HEADING).is_none(),
+        "the heading cannot interrupt the marker line's paragraph"
+    );
+}

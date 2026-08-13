@@ -14,6 +14,7 @@ use crate::parser::blocks::html_blocks::{
     HtmlBlockType, count_tag_balance, is_pandoc_matched_pair_tag, try_parse_html_block_start,
 };
 use crate::parser::blocks::paragraphs::update_display_math_state;
+use crate::parser::blocks::tables::try_parse_pipe_separator;
 use crate::parser::inlines::code_spans::pending_code_span_openers;
 use crate::parser::utils::container_stack::{
     OpenDisplayMath, gobble_chain_prefix_len as item_indent_prefix_len,
@@ -685,22 +686,29 @@ fn try_emit_table_or_div_lift(
     config: &ParserOptions,
     gobble: &[usize],
 ) -> bool {
-    let first_line = text.split_inclusive('\n').next().unwrap_or(text);
-    let first_line_no_nl = first_line
-        .strip_suffix("\r\n")
-        .or_else(|| first_line.strip_suffix('\n'))
-        .unwrap_or(first_line);
-    let trimmed = first_line_no_nl.trim_start();
-    let first_byte = trimmed.as_bytes().first().copied();
-    if !matches!(first_byte, Some(b'|') | Some(b'+') | Some(b':')) {
-        return false;
-    }
+    // A marker-only item (`-` with the block starting on the next line)
+    // buffers the marker line's newline as an empty line 0. Hold it out so
+    // the block's own first line becomes line 0 — and so it is stripped like
+    // the continuation line it is, rather than skipped by the marker-line
+    // convention `strip_list_item_indent` encodes. It is re-emitted as a
+    // NEWLINE token ahead of the grafted block.
+    let leading_newline = if text.starts_with("\r\n") {
+        "\r\n"
+    } else if text.starts_with('\n') {
+        "\n"
+    } else {
+        ""
+    };
+    let body = &text[leading_newline.len()..];
 
     let (parse_text, prefixes) = if gobble.is_empty() {
-        (text.to_string(), Vec::new())
+        (body.to_string(), Vec::new())
     } else {
-        strip_list_item_indent(text, gobble)
+        strip_list_item_indent_from(body, gobble, leading_newline.is_empty())
     };
+    if !opens_table_or_div(&parse_text) {
+        return false;
+    }
 
     let refdefs = config.refdef_labels.clone().unwrap_or_default();
     let inner_root = crate::parser::parse_with_refdefs(&parse_text, Some(config.clone()), refdefs);
@@ -725,8 +733,37 @@ fn try_emit_table_or_div_lift(
         .map(ContainerPrefixLine::list_only)
         .collect();
     let mut prefix_state = ContainerPrefixState::new(prefix_lines);
+    if !leading_newline.is_empty() {
+        builder.token(SyntaxKind::NEWLINE.into(), leading_newline);
+    }
     graft_node(builder, first, &mut prefix_state);
     true
+}
+
+/// Cheap pre-filter for [`try_emit_table_or_div_lift`]: does this text
+/// even *look* like it opens a table or a fenced div? The reparse the
+/// lift performs is the expensive part and every buffered list item
+/// reaches it, so prose has to be rejected before one is spent.
+///
+/// A grid table, a `|`-fenced pipe table, a caption line, and a fenced
+/// div are all identified by their first byte. A leading-pipe-less pipe
+/// table (`a | b` / `---|---`) is not — pandoc's `pipeTable` accepts it
+/// all the same — so it is recognized by a `|` in the header plus a
+/// delimiter row directly under it.
+fn opens_table_or_div(text: &str) -> bool {
+    let mut lines = text.split_inclusive('\n');
+    let Some(first) = lines.next() else {
+        return false;
+    };
+    let trimmed = trim_end_newlines(first).trim_start();
+    if matches!(trimmed.as_bytes().first(), Some(b'|' | b'+' | b':')) {
+        return true;
+    }
+    trimmed.contains('|')
+        && lines
+            .next()
+            .and_then(|second| try_parse_pipe_separator(trim_end_newlines(second)))
+            .is_some()
 }
 
 fn graft_node_retag_root(
@@ -753,10 +790,23 @@ fn graft_node_retag_root(
 /// its post-marker spaces. Returns the stripped text plus a per-line
 /// prefix vector for losslessness re-injection during graft.
 fn strip_list_item_indent(text: &str, gobble: &[usize]) -> (String, Vec<String>) {
+    strip_list_item_indent_from(text, gobble, true)
+}
+
+/// [`strip_list_item_indent`] with the marker-line convention made
+/// explicit. `skip_first_line` is false when the caller already peeled the
+/// marker line off `text` (see the marker-only branch in
+/// [`try_emit_table_or_div_lift`]), so line 0 carries the item's indent
+/// like every other continuation line and must be stripped too.
+fn strip_list_item_indent_from(
+    text: &str,
+    gobble: &[usize],
+    skip_first_line: bool,
+) -> (String, Vec<String>) {
     let mut stripped = String::with_capacity(text.len());
     let mut prefixes: Vec<String> = Vec::new();
     for (i, line) in text.split_inclusive('\n').enumerate() {
-        if i == 0 {
+        if i == 0 && skip_first_line {
             prefixes.push(String::new());
             stripped.push_str(line);
             continue;

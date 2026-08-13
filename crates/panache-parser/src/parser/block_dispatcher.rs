@@ -296,6 +296,20 @@ pub(crate) trait BlockParser {
 // ============================================================================
 
 /// Horizontal rule parser
+/// Re-emit the content-container indent (`ContentIndent`) that
+/// [`StrippedLines::first`] took off this line, so the CST keeps every byte.
+///
+/// Only content containers (footnote definitions, definition bodies,
+/// admonitions) put anything here — a list or blockquote prefix is emitted by
+/// the container machinery instead. A parser that renders from `lines.first()`
+/// rather than from the raw line therefore has to call this first, or the
+/// stripped columns are simply lost.
+fn emit_content_indent(builder: &mut GreenNodeBuilder<'static>, ctx: &BlockContext) {
+    if let Some(indent_str) = ctx.indent_to_emit {
+        builder.token(crate::syntax::SyntaxKind::WHITESPACE.into(), indent_str);
+    }
+}
+
 pub(crate) struct HorizontalRuleParser;
 
 impl BlockParser for HorizontalRuleParser {
@@ -328,11 +342,12 @@ impl BlockParser for HorizontalRuleParser {
 
     fn parse_prepared(
         &self,
-        _ctx: &BlockContext,
+        ctx: &BlockContext,
         builder: &mut GreenNodeBuilder<'static>,
         lines: &StrippedLines<'_, '_>,
         _payload: Option<&dyn Any>,
     ) -> usize {
+        emit_content_indent(builder, ctx);
         emit_horizontal_rule(builder, lines.first());
         1 // Consumed 1 line
     }
@@ -384,6 +399,7 @@ impl BlockParser for AtxHeadingParser {
             .and_then(|p| p.downcast_ref::<usize>().copied())
             .or_else(|| try_parse_atx_heading(content))
             .unwrap_or(1);
+        emit_content_indent(builder, ctx);
         emit_atx_heading(builder, content, heading_level, ctx.config);
         1
     }

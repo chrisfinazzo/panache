@@ -1,0 +1,47 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..45
+  FOOTNOTE_DEFINITION@0..38
+    FOOTNOTE_LABEL_START@0..2 "[^"
+    FOOTNOTE_LABEL_ID@2..3 "1"
+    FOOTNOTE_LABEL_END@3..4 "]"
+    FOOTNOTE_LABEL_COLON@4..5 ":"
+    NEWLINE@5..6 "\n"
+    PIPE_TABLE@6..38
+      TABLE_HEADER@6..16
+        WHITESPACE@6..10 "    "
+        TABLE_CELL@10..11
+          TEXT@10..11 "a"
+        WHITESPACE@11..12 " "
+        TEXT@12..13 "|"
+        WHITESPACE@13..14 " "
+        TABLE_CELL@14..15
+          TEXT@14..15 "b"
+        NEWLINE@15..16 "\n"
+      TABLE_SEPARATOR@16..28
+        WHITESPACE@16..20 "    "
+        TABLE_SEP_DASHES@20..23 "---"
+        TABLE_SEP_DELIM@23..24 "|"
+        TABLE_SEP_DASHES@24..27 "---"
+        NEWLINE@27..28 "\n"
+      TABLE_ROW@28..38
+        WHITESPACE@28..32 "    "
+        TABLE_CELL@32..33
+          TEXT@32..33 "c"
+        WHITESPACE@33..34 " "
+        TEXT@34..35 "|"
+        WHITESPACE@35..36 " "
+        TABLE_CELL@36..37
+          TEXT@36..37 "d"
+        NEWLINE@37..38 "\n"
+  BLANK_LINE@38..39
+    BLANK_LINE@38..39 "\n"
+  PARAGRAPH@39..45
+    TEXT@39..40 "x"
+    FOOTNOTE_REFERENCE@40..44
+      FOOTNOTE_LABEL_START@40..42 "[^"
+      FOOTNOTE_LABEL_ID@42..43 "1"
+      FOOTNOTE_LABEL_END@43..44 "]"
+    NEWLINE@44..45 "\n"

@@ -1473,7 +1473,7 @@ fn emit_table_row(
 
 /// Check if a line is a pipe table separator line.
 /// Returns the column alignments if it's a valid separator.
-fn try_parse_pipe_separator(line: &str) -> Option<Vec<Alignment>> {
+pub(crate) fn try_parse_pipe_separator(line: &str) -> Option<Vec<Alignment>> {
     let trimmed = line.trim();
 
     // Must contain at least one pipe
