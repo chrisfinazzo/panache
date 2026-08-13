@@ -531,52 +531,36 @@ impl Formatter {
         for line in list_output.lines() {
             let trimmed_line = line.trim_start();
             // A partial (rowspan) grid separator (`+   +---+`) shape-matches
-            // a `+` list marker but is table structure; re-emitting it
-            // trimmed would drop the item indent it needs to stay a table
-            // continuation line on reparse.
+            // a `+` list marker but is table structure, not a new item.
             let starts_with_list_marker = Self::starts_with_list_marker(trimmed_line)
                 && !tables::is_partial_grid_separator(trimmed_line);
-            if line.is_empty() {
+            if trimmed_line.is_empty() {
                 self.output.push_str(blank_prefix);
                 in_list_item_continuation = false;
             } else if line.starts_with("> ") {
-                let rest = line.trim_start_matches("> ");
-                let trimmed_rest = rest.trim_start();
+                let trimmed_rest = line.trim_start_matches("> ").trim_start();
                 if trimmed_rest.is_empty() {
                     self.output.push_str(blank_prefix);
                     in_list_item_continuation = false;
                     self.output.push('\n');
                     continue;
                 }
-                let starts_with_marker_after_quote = Self::starts_with_list_marker(trimmed_rest)
+                // A nested BLOCK_QUOTE rendered inside the list arrives with
+                // its own `> ` prefixes; it only needs the base indent.
+                self.output.push_str(base_indent);
+                self.output.push_str(line);
+                in_list_item_continuation = Self::starts_with_list_marker(trimmed_rest)
                     && !tables::is_partial_grid_separator(trimmed_rest);
-                if starts_with_marker_after_quote {
-                    self.output.push_str(base_indent);
-                    self.output.push_str("> ");
-                    self.output.push_str(trimmed_rest);
-                    in_list_item_continuation = true;
-                } else {
-                    self.output.push_str(base_indent);
-                    self.output.push_str(line);
-                    in_list_item_continuation = false;
-                }
-            } else if starts_with_list_marker {
-                self.output.push_str(content_prefix);
-                self.output.push_str(trimmed_line);
-                in_list_item_continuation = true;
-            } else if in_list_item_continuation && line.starts_with(char::is_whitespace) {
-                if trimmed_line.is_empty() {
-                    self.output.push_str(blank_prefix);
-                    in_list_item_continuation = false;
-                } else {
-                    self.output.push_str(content_prefix);
-                    self.output.push_str("  ");
-                    self.output.push_str(trimmed_line);
-                }
             } else {
+                // Keep the line's own indentation: the list renderer already
+                // placed nested lists and continuation lines at their items'
+                // content columns. Re-deriving it here (trimming marker
+                // lines, rewriting continuations to a fixed two spaces)
+                // flattened nested lists to quote level -- a meaning change.
                 self.output.push_str(content_prefix);
                 self.output.push_str(line);
-                in_list_item_continuation = false;
+                in_list_item_continuation = starts_with_list_marker
+                    || (in_list_item_continuation && line.starts_with(char::is_whitespace));
             }
             self.output.push('\n');
         }
