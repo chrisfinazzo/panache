@@ -1038,6 +1038,62 @@ panache starts caching NodePtrs across edits.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
+- [ ] Give a line's **container prefix** one representation, so no consumer can
+  mistake prefix bytes for content. A line inside `> - a` carries structure
+  before its content (`>`, the marker's space, the item's indent), and that
+  structure is currently modeled three different ways --- as buffer
+  segments, as two named prefix slots, and as ordinary tokens inside the
+  innermost block. Each model has its own blind spot, and each blind spot
+  has produced a real divergence. The quoted marker-line table above was
+  one; these are the rest. Ranked by how much they will keep costing,
+  cheapest bounded step first in each.
+
+  - **Buffers count segments where they mean lines.** Seven gates in `core.rs`
+    read `buffer.segment_count() != 1` to ask "is only the marker line buffered
+    so far?" --- the five `maybe_open_*_in_new_list_item` helpers (fenced code,
+    line block, caption table, table with trailing caption, indented code),
+    `maybe_open_definition_term_in_new_list_item`, and the setext fold. Any
+    non-`Text` segment silently answers "no", which is exactly what hid the
+    quoted marker-line table. The setext fold
+    (`try_fold_list_item_buffer_into_setext`) has the same hole live today:
+    `> - Foo` / `>   ---` is `Header 2` inside the item in pandoc and
+    `Plain [Str "Foo", SoftBreak, Str "\8212"]` here, because the buffer holds
+    `[Text, BlockquoteMarker]`. The other six read safe only by *timing* ---
+    they run while the marker line itself dispatches, before a continuation
+    marker can be pushed --- which is an argument, not a guard. Step: give
+    `ListItemBuffer` a line-oriented API (`sole_text_segment` landed; a
+    `buffered_line_count` completes it) and take `segment_count` out of the
+    gates, so adding a structural segment kind cannot quietly change seven
+    decisions. Fixing setext needs the fold to re-inject the marker, so pin
+    losslessness first.
+
+  - **`ContainerPrefixLine` hard-codes a two-level container order.**
+    `list_indent` then `bq_prefix` is the order `ContainerPrefix::split`
+    captures for `- > a`; a quoted item (`> - a`) needs the opposite, which the
+    commit above bought with a `bq_before_list` bool. That covers depth two and
+    stops there: `- > - a` has three ordered pieces and cannot be expressed at
+    all. Step: replace the two named slots with an ordered list of
+    `(piece kind, bytes)` built by walking the strip ops, so
+    `emit_container_prefix_tokens` emits in capture order and nesting depth
+    stops being a special case. `split`'s 3-tuple return has the same bound and
+    wants the same treatment.
+
+  - **Prefix bytes live inside content nodes, and nothing marks them as
+    prefix.** Losslessness has to put `>` and the item indent somewhere, and
+    that somewhere is the innermost block --- so a `TABLE_SEPARATOR`
+    legitimately contains a `BLOCK_QUOTE_MARKER` token. Any consumer reading
+    `node.text()` as content is then wrong by default, with nothing in the types
+    to say so. `grid_table` in `pandoc_ast.rs` is the live instance and needs no
+    quote to break: `- +---+---+` / `  | a | b |` / `  +===+===+` is two columns
+    in pandoc and five with an empty row here, because the item indent shifts
+    the `+` positions the geometry pass reads. Step (bounded): a shared "content
+    text" accessor that skips line-leading prefix tokens, used by `grid_layout`
+    and the formatter's table geometry. Step (real fix): tag prefix runs with
+    their own kind so skipping is structural rather than per-consumer --- a CST
+    shape change touching every snapshot, and the same principle as the
+    `pandoc_ast.rs` entry above (a structural fact the parser already knows
+    belongs in the CST, not recomputed downstream).
+
 ## Parser - Coverage
 
 This section tracks implementation status of Pandoc Markdown features based on
