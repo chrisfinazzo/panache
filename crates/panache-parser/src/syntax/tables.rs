@@ -1,7 +1,66 @@
 //! Table AST node wrappers.
 
 use super::ast::{AstChildren, support};
-use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode};
+use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
+
+/// The separator-marker tokens (`TABLE_SEP_*`) of a `TABLE_SEPARATOR` node,
+/// in order. Skips the container prefix (`WHITESPACE` / blockquote markers)
+/// and the trailing `NEWLINE` so callers see only the separator's own
+/// structure.
+pub fn separator_marker_tokens(separator: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
+    separator
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| {
+            matches!(
+                t.kind(),
+                SyntaxKind::TABLE_SEP_DELIM
+                    | SyntaxKind::TABLE_SEP_DASHES
+                    | SyntaxKind::TABLE_SEP_EQUALS
+                    | SyntaxKind::TABLE_SEP_COLON
+                    | SyntaxKind::TABLE_SEP_WHITESPACE
+            )
+        })
+}
+
+/// A pipe-table delimiter row split into one segment of marker tokens per
+/// column. This is the authoritative definition of how many columns a pipe
+/// table has: pandoc's `pipeTable` reads the count off the delimiter row and
+/// pads or truncates every other row to it.
+///
+/// Reproduces pandoc's
+/// `raw.trim().trim_start_matches('|').trim_end_matches('|').split('|')`:
+/// trim interior whitespace at the ends, drop the bounding delimiter runs,
+/// then take one column per interior delimiter gap. A delimiter row always
+/// declares at least one column.
+pub fn separator_column_segments(separator: &SyntaxNode) -> Vec<Vec<SyntaxToken>> {
+    let toks: Vec<SyntaxToken> = separator_marker_tokens(separator).collect();
+    let is_ws = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_WHITESPACE;
+    let is_delim = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_DELIM;
+    // Trim leading/trailing interior whitespace (mirrors `raw.trim()`).
+    let lo = toks.iter().position(|t| !is_ws(t));
+    let hi = toks.iter().rposition(|t| !is_ws(t));
+    let inner = match (lo, hi) {
+        (Some(lo), Some(hi)) => &toks[lo..=hi],
+        _ => &[][..], // whitespace-only: empty inner → one default column below
+    };
+    // Drop bounding delimiter runs (`trim_start/end_matches('|')`).
+    let lead = inner.iter().take_while(|t| is_delim(t)).count();
+    let inner = &inner[lead..];
+    let trail = inner.iter().rev().take_while(|t| is_delim(t)).count();
+    let inner = &inner[..inner.len() - trail];
+
+    let mut segments = Vec::new();
+    let mut seg_start = 0usize;
+    for (i, t) in inner.iter().enumerate() {
+        if is_delim(t) {
+            segments.push(inner[seg_start..i].to_vec());
+            seg_start = i + 1;
+        }
+    }
+    segments.push(inner[seg_start..].to_vec());
+    segments
+}
 
 pub struct PipeTable(SyntaxNode);
 
@@ -34,6 +93,28 @@ impl PipeTable {
     /// Returns all table rows.
     pub fn rows(&self) -> AstChildren<TableRow> {
         support::children(&self.0)
+    }
+
+    /// The delimiter row, which owns the table's column count.
+    pub fn separator(&self) -> Option<SyntaxNode> {
+        self.0
+            .children()
+            .find(|c| c.kind() == SyntaxKind::TABLE_SEPARATOR)
+    }
+
+    /// How many columns the delimiter row declares. Cells past this count are
+    /// dropped when the table is rendered, and rows short of it are padded.
+    pub fn column_count(&self) -> Option<usize> {
+        self.separator()
+            .map(|sep| separator_column_segments(&sep).len())
+    }
+
+    /// Every row that carries cells, header included. `TABLE_HEADER` is a
+    /// distinct kind from `TABLE_ROW`, so [`Self::rows`] alone skips it.
+    pub fn cell_rows(&self) -> impl Iterator<Item = SyntaxNode> {
+        self.0
+            .children()
+            .filter(|c| matches!(c.kind(), SyntaxKind::TABLE_HEADER | SyntaxKind::TABLE_ROW))
     }
 }
 

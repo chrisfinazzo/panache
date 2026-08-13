@@ -626,3 +626,53 @@ fn test_simple_table_dash_run_is_content_width_plus_two() {
     let sep = result.lines().nth(1).unwrap();
     assert_eq!(sep, "--------------- -------", "got:\n{result}");
 }
+
+// ---------------------------------------------------------------------------
+// The delimiter row owns the column count
+//
+// Pandoc reads a pipe table's column count off the delimiter row and pads or
+// truncates every other row to it. The formatter must not re-emit a count of
+// its own: doing so silently changes what pandoc renders.
+// ---------------------------------------------------------------------------
+
+/// A row short of the delimiter's count is padded out, so the delimiter row
+/// keeps all three of its columns (`pandoc -f markdown` reads three columns,
+/// the header's third one empty).
+#[test]
+fn short_rows_are_padded_to_the_delimiter_count() {
+    let config = ConfigBuilder::default().table_indent(0).build();
+    let input = "a | b\n---|---|---\n1 | 2 | 3\n";
+    let expected = "| a   | b   |     |\n| --- | --- | --- |\n| 1   | 2   | 3   |\n";
+
+    let result = format(input, Some(config.clone()), None);
+    assert_eq!(result, expected, "got:\n{result}");
+    assert_eq!(format(&result, Some(config), None), result, "idempotent");
+}
+
+/// A row carrying more cells than the delimiter row allows is left exactly as
+/// written. Pandoc drops those cells on render, so reformatting the table
+/// would either delete the author's text or widen the delimiter row and
+/// change the rendered column count.
+#[test]
+fn surplus_cells_leave_the_table_verbatim() {
+    let config = ConfigBuilder::default().table_indent(0).build();
+    let input = "a | b | c\n---|---\n1 | 2 | 3\n";
+
+    let result = format(input, Some(config.clone()), None);
+    assert_eq!(result, input, "got:\n{result}");
+    assert_eq!(format(&result, Some(config), None), result, "idempotent");
+}
+
+/// A surplus-cell table on a list marker line stays verbatim too. The splice
+/// that puts the table's first line on the marker line used to slice a fixed
+/// number of bytes off it, which ate the leading `| ` of an unindented
+/// verbatim table and deleted a cell on every further pass.
+#[test]
+fn surplus_cells_in_a_list_item_leave_the_table_verbatim() {
+    let config = ConfigBuilder::default().table_indent(0).build();
+    let input = "- | a | b |\n  - |\n";
+
+    let result = format(input, Some(config.clone()), None);
+    assert_eq!(result, input, "got:\n{result}");
+    assert_eq!(format(&result, Some(config), None), result, "idempotent");
+}

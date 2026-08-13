@@ -1759,27 +1759,19 @@ fn emit_pipe_table_row(
 /// row and delimiter row agree on their column count, returning the lines
 /// it would consume.
 ///
-/// [`try_parse_pipe_table`] is deliberately lenient about that count: a
-/// header may carry up to twice the delimiter's cells and still parse.
-/// Pandoc instead takes the column count from the delimiter row and drops
-/// the surplus, so a mismatched table is a known divergence (TODO.md) whose
-/// formatted delimiter row does not re-parse to the same shape. Callers that
-/// *choose* to build a table out of a line another parser would claim need
-/// the exact form, so their choice survives a format round-trip.
-pub(crate) fn opens_column_exact_pipe_table(
+/// A table of two lines or more is one whose delimiter row is the line after
+/// the dispatch line, which is what makes the caller's claim safe: the
+/// delimiter row owns the column count, so a header with surplus cells
+/// re-parses to the same shape after formatting (the formatter leaves such a
+/// table byte-for-byte as written rather than writing a column count of its
+/// own).
+pub(crate) fn opens_multiline_pipe_table(
     window: &StrippedLines<'_, '_>,
     config: &ParserOptions,
 ) -> Option<usize> {
-    let start = window.pos();
     let mut probe = GreenNodeBuilder::new();
     let consumed = try_parse_pipe_table(window, &mut probe, config)?;
-    if consumed < 2 {
-        return None;
-    }
-    // The same frame-anchored rows `try_parse_pipe_table` measured.
-    let frame = UniformStripView(window);
-    let alignments = try_parse_pipe_separator(frame.line(start + 1))?;
-    (parse_pipe_table_row(frame.line(start)).len() == alignments.len()).then_some(consumed)
+    (consumed >= 2).then_some(consumed)
 }
 
 /// Try to parse a pipe table starting at the given position.
@@ -1875,12 +1867,16 @@ pub(crate) fn try_parse_pipe_table(
     // Parse header cells
     let header_cells = parse_pipe_table_row(window.line(actual_start));
 
-    // Number of columns should match (approximately - be lenient)
-    if header_cells.len() != alignments.len() && !header_cells.is_empty() {
-        // Only fail if very different
-        if header_cells.len() < alignments.len() / 2 || header_cells.len() > alignments.len() * 2 {
-            return None;
-        }
+    // How the two dialects treat a header that does not match the delimiter
+    // row cell-for-cell is where they part. Pandoc's `pipeTable` puts no
+    // bound on it at all: the delimiter row *is* the column count, and every
+    // other row is padded or truncated to it downstream, so
+    // `a|b|c|d|e|f|g` over `---|---` is still a two-column `Table`. GFM
+    // refuses the shape outright --- "the header row must match the
+    // delimiter row in the number of cells" --- and `pandoc -f gfm` leaves
+    // the whole run as one `Para`.
+    if config.dialect == Dialect::CommonMark && header_cells.len() != alignments.len() {
+        return None;
     }
 
     // Find table end (first blank line or end of input). A line ending

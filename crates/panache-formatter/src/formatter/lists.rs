@@ -1452,8 +1452,22 @@ impl Formatter {
                             }
                             _ => tables::format_grid_table(&child, &self.config, content_indent),
                         };
+                        // The marker prefix replaces the table's own first-line
+                        // indent. `format_pipe_table` normally writes exactly
+                        // `content_indent` spaces there, but it returns a table
+                        // it declines to reformat (surplus cells past the
+                        // delimiter row's column count) byte-for-byte instead,
+                        // and that text carries no indent at all. Strip the
+                        // indent only when it is really there — slicing it off
+                        // blindly ate the first cell of a verbatim table, and
+                        // did it again on every further pass.
+                        let first_line_indent = " ".repeat(content_indent);
                         self.output.push_str(&prefix);
-                        self.output.push_str(&table_str[content_indent..]);
+                        self.output.push_str(
+                            table_str
+                                .strip_prefix(&first_line_indent)
+                                .unwrap_or(&table_str),
+                        );
                     } else {
                         self.format_node_sync(&child, content_indent);
                     }

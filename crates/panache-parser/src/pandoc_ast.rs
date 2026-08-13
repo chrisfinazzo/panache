@@ -20,7 +20,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::SyntaxNode;
 use crate::parser::utils::attributes::decode_html_attr_entities;
-use crate::syntax::{SyntaxKind, SyntaxToken, code_span_payload};
+use crate::syntax::{
+    SyntaxKind, SyntaxToken, code_span_payload, separator_column_segments, separator_marker_tokens,
+};
 use rowan::NodeOrToken;
 use serde_json::{Value, json};
 
@@ -2679,15 +2681,18 @@ fn pipe_table(node: &SyntaxNode) -> Option<TableData> {
             _ => {}
         }
     }
-    let cols = header_cells
-        .len()
-        .max(body_rows.iter().map(Vec::len).max().unwrap_or(0))
-        .max(aligns.len());
+    // The delimiter row owns the column count. Pandoc's `pipeTable` reads it
+    // from `pipeBreak` and pads or truncates every row to it, so a surplus
+    // header cell (`a | b | c` over `---|---`) never reaches the output and a
+    // short row (`a | b` over `---|---|---`) gains an empty one.
+    // `cells_to_plain_blocks` pads; the truncation is here.
+    let cols = aligns.len();
     if cols == 0 {
         return None;
     }
-    while aligns.len() < cols {
-        aligns.push("AlignDefault");
+    header_cells.truncate(cols);
+    for row in &mut body_rows {
+        row.truncate(cols);
     }
     let head_rows = if header_cells.is_empty() {
         Vec::new()
@@ -2853,26 +2858,6 @@ fn pipe_table_caption(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) {
     (coalesce_inlines(out), caption_attr)
 }
 
-/// The separator-marker tokens (`TABLE_SEP_*`) of a `TABLE_SEPARATOR` node,
-/// in order. Skips the container prefix (`WHITESPACE` / blockquote markers)
-/// and the trailing `NEWLINE` so callers see only the separator's own
-/// structure.
-fn separator_marker_tokens(separator: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
-    separator
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .filter(|t| {
-            matches!(
-                t.kind(),
-                SyntaxKind::TABLE_SEP_DELIM
-                    | SyntaxKind::TABLE_SEP_DASHES
-                    | SyntaxKind::TABLE_SEP_EQUALS
-                    | SyntaxKind::TABLE_SEP_COLON
-                    | SyntaxKind::TABLE_SEP_WHITESPACE
-            )
-        })
-}
-
 /// Alignment of one separator segment (a slice of marker tokens between
 /// delimiters). Mirrors the old `s.trim()` + leading/trailing-colon check:
 /// the segment is left/right aligned when its first/last non-whitespace
@@ -2902,35 +2887,13 @@ fn separator_has_colon(separator: &SyntaxNode) -> bool {
 }
 
 fn pipe_separator_aligns(separator: &SyntaxNode) -> Vec<&'static str> {
-    // Reproduce the old `raw.trim().trim_start_matches('|').trim_end_matches('|').split('|')`:
-    // trim interior whitespace at the ends, drop the bounding delimiter runs,
-    // then one column per interior delimiter gap.
-    let toks: Vec<SyntaxToken> = separator_marker_tokens(separator).collect();
-    let is_ws = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_WHITESPACE;
-    let is_delim = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_DELIM;
-    // Trim leading/trailing interior whitespace (mirrors `raw.trim()`).
-    let lo = toks.iter().position(|t| !is_ws(t));
-    let hi = toks.iter().rposition(|t| !is_ws(t));
-    let inner = match (lo, hi) {
-        (Some(lo), Some(hi)) => &toks[lo..=hi],
-        _ => &[][..], // whitespace-only: empty inner → one default column below
-    };
-    // Drop bounding delimiter runs (`trim_start/end_matches('|')`).
-    let lead = inner.iter().take_while(|t| is_delim(t)).count();
-    let inner = &inner[lead..];
-    let trail = inner.iter().rev().take_while(|t| is_delim(t)).count();
-    let inner = &inner[..inner.len() - trail];
-    // One column per delimiter-separated segment (segments = interior delims + 1).
-    let mut aligns = Vec::new();
-    let mut seg_start = 0usize;
-    for (i, t) in inner.iter().enumerate() {
-        if is_delim(t) {
-            aligns.push(segment_align(&inner[seg_start..i]));
-            seg_start = i + 1;
-        }
-    }
-    aligns.push(segment_align(&inner[seg_start..]));
-    aligns
+    // One column per delimiter-separated segment. The segmentation is the
+    // typed wrapper's (`PipeTable::column_count` counts the same segments), so
+    // the projector and the linter cannot disagree about what a column is.
+    separator_column_segments(separator)
+        .iter()
+        .map(|seg| segment_align(seg))
+        .collect()
 }
 
 fn cells_to_plain_blocks(cells: Vec<Vec<Inline>>, cols: usize) -> Vec<GridCell> {

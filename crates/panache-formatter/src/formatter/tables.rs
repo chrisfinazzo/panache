@@ -726,12 +726,45 @@ fn calculate_grid_column_widths(rows: &[Vec<String>]) -> Vec<usize> {
 
 /// Format a pipe table with consistent alignment and padding
 pub fn format_pipe_table(node: &SyntaxNode, config: &Config, indent: usize) -> String {
-    let table_data = extract_pipe_table_data(node, config);
+    let mut table_data = extract_pipe_table_data(node, config);
     let mut output = String::new();
 
     // Early return if no rows
     if table_data.rows.is_empty() {
         return node.text().to_string();
+    }
+
+    // The delimiter row owns the column count: pandoc reads it off `pipeBreak`
+    // and pads or truncates every other row to it. Emitting a count of our own
+    // changes what pandoc renders, so the two mismatch directions are handled
+    // separately.
+    //
+    // A row *short* of the count is padded here, exactly as pandoc pads it, so
+    // the delimiter row we write back out keeps all of its columns.
+    //
+    // A row with *surplus* cells is a shape pandoc truncates on render. There
+    // is no pipe syntax that keeps those cells without also widening the
+    // delimiter row --- which would change the rendered column count --- so the
+    // table is left byte-for-byte as written rather than having the author's
+    // text deleted. The `table-column-count` lint rule points at it instead.
+    //
+    // "Byte-for-byte" covers the whole node, caption included, and the block
+    // indent below is skipped with it. That is deliberate, not an oversight:
+    // these rows keep their original per-line indent, so adding `table-indent`
+    // on top can push a continuation line past pandoc's 3-column bound. On the
+    // `table_ordered_marker_first_line_caption` fixture it turns the top-level
+    // `Table` into an `OrderedList [[Table]]`. Since the rows cannot move, a
+    // normalized caption underneath them would only make the table look half
+    // formatted --- one untouched block plus one diagnostic is the clearer
+    // contract.
+    let cols = table_data.alignments.len();
+    if cols > 0 {
+        if table_data.rows.iter().any(|row| row.len() > cols) {
+            return node.text().to_string();
+        }
+        for row in &mut table_data.rows {
+            row.resize(cols, String::new());
+        }
     }
 
     let widths = calculate_column_widths(&table_data.rows);

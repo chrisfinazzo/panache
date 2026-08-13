@@ -1693,3 +1693,172 @@ fn escaped_pipe_alone_does_not_open_a_header_row() {
         "the escaped pipe stays inside the first cell"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The delimiter row owns the column count
+//
+// Pandoc's `pipeTable` takes the column count from the delimiter row and
+// pads or truncates every other row to it, with no bound at all on how far
+// the header may overshoot. GFM parts ways: `cmark-gfm` refuses a table
+// whose header does not match the delimiter cell-for-cell, and the whole
+// run stays a paragraph.
+// ---------------------------------------------------------------------------
+
+/// `pandoc -f markdown -t native` on `a | b | c` + `---|---`: a two-column
+/// `Table`, with the surplus header cell and the surplus body cell dropped.
+#[test]
+fn pipe_table_columns_come_from_the_delimiter_row() {
+    let input = "a | b | c\n---|---\n1 | 2 | 3\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+        "the surplus header cell does not stop the table"
+    );
+
+    let native = crate::to_pandoc_ast(&node);
+    assert_eq!(
+        native.matches("AlignDefault , ColWidthDefault").count(),
+        2,
+        "the delimiter row's two cells are the column count: {native}"
+    );
+    assert!(
+        !native.contains("Str \"c\""),
+        "the surplus header cell is dropped: {native}"
+    );
+    assert!(
+        !native.contains("Str \"3\""),
+        "the surplus body cell is dropped: {native}"
+    );
+}
+
+/// The other direction: a delimiter row with more cells than the header
+/// pads the header out (`| a | b |` over `---|---|---` is three columns,
+/// the last one empty).
+#[test]
+fn a_longer_delimiter_row_pads_the_header() {
+    let input = "a | b\n---|---|---\n1 | 2 | 3\n";
+    let node = parse_blocks(input);
+
+    let native = crate::to_pandoc_ast(&node);
+    assert_eq!(
+        native.matches("AlignDefault , ColWidthDefault").count(),
+        3,
+        "the delimiter row's three cells are the column count: {native}"
+    );
+    assert!(
+        native.contains("Str \"3\""),
+        "the body row fills the third column: {native}"
+    );
+}
+
+/// A single-cell delimiter row is a single-column table, however wide the
+/// header is (`pandoc -f markdown -t native` on `| a | b |` + `- |`).
+#[test]
+fn a_one_cell_delimiter_row_is_a_one_column_table() {
+    let input = "| a | b |\n- |\n| 1 | 2 |\n";
+    let node = parse_blocks(input);
+
+    let native = crate::to_pandoc_ast(&node);
+    assert_eq!(
+        native.matches("AlignDefault , ColWidthDefault").count(),
+        1,
+        "the delimiter row has one cell: {native}"
+    );
+}
+
+/// Pandoc puts no ceiling on the header's surplus: seven header cells over
+/// a two-cell delimiter row is still a two-column `Table`, where panache
+/// used to cut off at twice the delimiter's count and read a `Para`.
+#[test]
+fn header_surplus_has_no_upper_bound() {
+    let input = "a|b|c|d|e|f|g\n---|---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+        "no ceiling on the surplus"
+    );
+}
+
+/// GFM requires the counts to match exactly; a mismatch is not a table at
+/// all (`pandoc -f gfm -t html` renders one `<p>`), in either direction.
+#[test]
+fn gfm_requires_an_exact_column_match() {
+    for input in [
+        "a|b|c\n---|---\n1|2|3\n",
+        "a|b\n---|---|---\n1|2|3\n",
+        "a|b|c|d|e|f|g\n---|---\n",
+    ] {
+        let node = parse_blocks_gfm(input);
+
+        assert_eq!(
+            node.text().to_string(),
+            input,
+            "parser must remain lossless on {input:?}"
+        );
+        assert!(
+            first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+            "gfm refuses a mismatched delimiter row: {input:?}"
+        );
+    }
+}
+
+/// The matching shape still parses under GFM, so the gate above is about
+/// the mismatch and not about pipe tables in general.
+#[test]
+fn gfm_still_reads_a_matched_pipe_table() {
+    let node = parse_blocks_gfm("a|b\n---|---\n1|2\n");
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+        "a matched delimiter row is a gfm table"
+    );
+}
+
+/// A marker-shaped delimiter row narrower than its header is still the
+/// delimiter row. `pandoc -f markdown -t native` on `- | a | b |` + `  - |`:
+/// `BulletList [[Table …]]`, one column wide, holding only `a`. This needed
+/// the column-exact form while the formatter re-emitted a column count of its
+/// own; it now leaves a surplus-cell table verbatim, so the shape round-trips.
+#[test]
+fn marker_shaped_delimiter_row_may_be_narrower_than_its_header() {
+    let input = "- | a | b |\n  - |\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let item = first_of(&node, SyntaxKind::LIST_ITEM).expect("list item");
+    let table = first_of(&item, SyntaxKind::PIPE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- |"),
+        "the marker-shaped line is the delimiter row: {}",
+        table.text()
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        1,
+        "no nested list opens on the delimiter row"
+    );
+
+    let native = crate::to_pandoc_ast(&node);
+    assert_eq!(
+        native.matches("AlignDefault , ColWidthDefault").count(),
+        1,
+        "the delimiter row declares one column: {native}"
+    );
+}

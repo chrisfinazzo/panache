@@ -1712,13 +1712,10 @@ impl<'a> Parser<'a> {
         // Probe the real parser at the marker line, in the item's own frame
         // (the stack top is this item, so `from_stack` sees any enclosing
         // blockquote / footnote / definition indent too). A table consuming
-        // two lines or more is one whose delimiter row is this line, and the
-        // column-exact form keeps the choice round-trippable — a header with
-        // surplus cells re-parses differently once the formatter has written
-        // the delimiter row back out.
+        // two lines or more is one whose delimiter row is this line.
         let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config);
         let window = StrippedLines::new(&self.lines, self.pos - 1, &prefix);
-        if tables::opens_column_exact_pipe_table(&window, self.config).is_none() {
+        if tables::opens_multiline_pipe_table(&window, self.config).is_none() {
             return false;
         }
 
