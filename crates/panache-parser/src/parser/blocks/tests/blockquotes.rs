@@ -1005,6 +1005,150 @@ fn tilde_fence_on_a_lazy_line_folds_into_the_quote() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::CODE_BLOCK), 1);
 }
 
+/// Pandoc stops the quoted paragraph at a strict-block HTML tag on a lazy
+/// line: `> a` / `<hr>` is `BlockQuote [Plain "a", RawBlock "<hr>"]`. The
+/// tag folds into the quote as its own block and the interrupted
+/// paragraph demotes to Plain, mirroring the top-level `a` / `<hr>` shape.
+#[test]
+fn pandoc_lazy_html_block_interrupts_the_quoted_paragraph() {
+    let input = "> a\n<hr>\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE]
+    );
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PLAIN), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 0);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
+}
+
+/// The fold drops the lazy line's indentation before the quote's content
+/// parse sees it, so an indented `<hr>` interrupts all the same.
+#[test]
+fn pandoc_indented_lazy_html_block_still_interrupts() {
+    let input = "> a\n  <hr>\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PLAIN), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 0);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
+}
+
+/// A close-form strict-block tag interrupts too: `> a` / `</div>` is
+/// `BlockQuote [Plain "a", RawBlock "</div>"]` (no div open anywhere, so
+/// the closer is quote content, not a quote terminator).
+#[test]
+fn pandoc_lazy_html_closer_becomes_the_quotes_raw_block() {
+    let input = "> a\n</div>\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE]
+    );
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PLAIN), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 0);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
+}
+
+/// The same fold at depth two: a one-marker `<hr>` line lands in the
+/// inner quote as its RawBlock.
+#[test]
+fn pandoc_lazy_html_block_folds_into_the_innermost_quote() {
+    let input = "> > a\n> <hr>\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(quotes.len(), 2);
+    assert_eq!(count_nodes_of_type(&quotes[1], SyntaxKind::PLAIN), 1);
+    assert_eq!(count_nodes_of_type(&quotes[1], SyntaxKind::HTML_BLOCK), 1);
+}
+
+/// Pandoc's `isInlineTag` set does NOT interrupt: an inline-block tag or
+/// an HTML comment on the lazy line stays paragraph text (`RawInline`).
+#[test]
+fn pandoc_lazy_inline_tags_stay_quoted_paragraph_text() {
+    for input in ["> a\n<button>\n", "> a\n<!-- c -->\n"] {
+        let tree = parse_blocks(input);
+        let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+        assert_eq!(
+            count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH),
+            1,
+            "{input:?} must keep the paragraph"
+        );
+        assert_eq!(
+            count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK),
+            0,
+            "{input:?} must not open an HTML block"
+        );
+    }
+}
+
+/// Declarations and CDATA are not raw HTML to pandoc-markdown; the lazy
+/// line stays paragraph text. So does an open tag with no `>` anywhere
+/// ahead (pandoc's `htmlTag` never matches an unclosed tag).
+#[test]
+fn pandoc_lazy_non_tag_html_shapes_stay_paragraph_text() {
+    for input in [
+        "> a\n<!DOCTYPE html>\n",
+        "> a\n<![CDATA[x]]>\n",
+        "> a\n<div\n",
+    ] {
+        let tree = parse_blocks(input);
+        let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+        assert_eq!(
+            count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH),
+            1,
+            "{input:?} must keep the paragraph"
+        );
+        assert_eq!(
+            count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK),
+            0,
+            "{input:?} must not open an HTML block"
+        );
+    }
+}
+
+/// The same interruption applies to a quoted list item's buffered text:
+/// `> - a` / `<hr>` is `BulletList [[Plain "a", RawBlock "<hr>"]]` inside
+/// the quote — the tag becomes the item's block, not its inline text.
+#[test]
+fn pandoc_lazy_html_block_interrupts_the_quoted_list_item() {
+    let input = "> - a\n<hr>\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    let items = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM);
+    assert_eq!(items.len(), 1);
+    assert_eq!(count_nodes_of_type(&items[0], SyntaxKind::HTML_BLOCK), 1);
+}
+
+/// CommonMark: a type-6 HTML block start is not paragraph-continuation
+/// text, so laziness does not fire — the quote closes and the HTML block
+/// forms at the outer level (and the quote's paragraph stays a Para).
+#[test]
+fn commonmark_lazy_html_block_line_ends_the_quote() {
+    let input = "> a\n<hr>\n";
+    let tree = parse_blocks_gfm(input);
+
+    assert_eq!(tree.text().to_string(), input, "parser must be lossless");
+    assert_eq!(
+        tree.children().map(|node| node.kind()).collect::<Vec<_>>(),
+        vec![SyntaxKind::BLOCK_QUOTE, SyntaxKind::HTML_BLOCK]
+    );
+    let quotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
+    assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 0);
+}
+
 /// `notFollowedBy (inList >> listStart)`: a list marker ends the gobble
 /// only while the quote is itself inside a list item. A list opened inside
 /// the quote is quote content, so the marker line continues it.

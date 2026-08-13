@@ -753,3 +753,14 @@
 # child. A heading at the same column is not: it stays in the item, which is why
 # the close is gated on the fenced-code parser and not on every interrupter.
 513
+
+# A paragraph-interrupting HTML block on a *lazy* quote line folds into the
+# quote as its own `RawBlock` and demotes the interrupted paragraph to
+# `Plain` (pandoc's `[Plain, RawBlock]` rule): 0525 the open form (`<hr>`),
+# 0526 the close form (`</div>`, no div open anywhere). Inline-block tags,
+# comments, declarations, and unclosed opens stay lazy paragraph text. 0527
+# pins the list-item twin at the top level, where the tag becomes the item's
+# block instead of joining its inline text.
+525
+526
+527

@@ -3208,6 +3208,72 @@ impl<'a> Parser<'a> {
         self.div_closer_ends_blockquote(line) || self.html_closer_ends_blockquote(line)
     }
 
+    /// Whether a lazy line opens an HTML block that interrupts the open
+    /// paragraph (or a list item's buffered text) inside a blockquote.
+    ///
+    /// Mirrors the dispatcher's HTML detection for the lazy path, which
+    /// never reaches it: under Pandoc the quote's content parse stops a
+    /// paragraph at a strict-block tag (`isBlockTag` minus the
+    /// `isInlineTag` special cases — `html_block_cannot_interrupt`), so
+    /// `> a` / `<hr>` is `BlockQuote [Plain "a", RawBlock "<hr>"]`, not
+    /// lazy inline text. Declarations and CDATA are not raw HTML to
+    /// pandoc-markdown, and an open tag with no unquoted `>` anywhere
+    /// ahead never matches `htmlTag`; both stay paragraph text. Under
+    /// CommonMark a type 1-6 start is not paragraph-continuation text
+    /// (spec §5.1), so laziness does not fire and the quote closes.
+    ///
+    /// `inner_content` is the line with its `>` markers stripped, same
+    /// as the other interrupt probes (issues #428, #429).
+    fn lazy_html_block_interrupts(&self, inner_content: &str) -> bool {
+        if !self.config.extensions.raw_html {
+            return false;
+        }
+        if self.config.dialect == crate::options::Dialect::CommonMark {
+            // The dispatcher's gate: `<` within three columns of indent.
+            let bytes = inner_content.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() && i < 3 && bytes[i] == b' ' {
+                i += 1;
+            }
+            if bytes.get(i) != Some(&b'<') {
+                return false;
+            }
+            return html_blocks::try_parse_html_block_start(inner_content, true).is_some_and(
+                |block_type| {
+                    !super::block_dispatcher::html_block_cannot_interrupt(
+                        &block_type,
+                        inner_content,
+                        false,
+                    )
+                },
+            );
+        }
+        // Pandoc: the fold de-indents the lazy line before the quote's
+        // content parse sees it, so probe the trimmed content.
+        let probe = inner_content.trim_start_matches([' ', '\t']);
+        if !probe.starts_with('<') {
+            return false;
+        }
+        let Some(block_type) = html_blocks::try_parse_html_block_start(probe, false) else {
+            return false;
+        };
+        if !matches!(block_type, html_blocks::HtmlBlockType::BlockTag { .. }) {
+            return false;
+        }
+        if super::block_dispatcher::html_block_cannot_interrupt(&block_type, probe, true) {
+            return false;
+        }
+        // Same completeness rule as the dispatcher: an open tag whose
+        // unquoted `>` never arrives stays paragraph text. The prefix
+        // strips later lines' `>` markers so they don't count as the
+        // tag's closing bracket; the innermost list advance is dropped
+        // because a lazy line never reaches the item's content column
+        // (`ListAdvance` would blindly eat the tag's first columns).
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config)
+            .without_innermost_list_advance();
+        html_blocks::pandoc_html_open_tag_closes(&self.lines, self.pos, &prefix)
+    }
+
     /// Pandoc's `notFollowedByHtmlCloser` on the quote gobble: inside
     /// markdown-in-html, a line opening with the close form of the open
     /// tag ends the quote instead of folding in as lazy content. The
@@ -4003,6 +4069,12 @@ impl<'a> Parser<'a> {
                 let interrupts_via_div_close = self.config.extensions.fenced_divs
                     && self.in_fenced_div()
                     && fenced_divs::is_div_closing_fence(line);
+                // A paragraph-interrupting HTML block start on the lazy
+                // line ends the paragraph rather than folding in as
+                // `RawInline`: pandoc keeps the tag in the quote as its
+                // own `RawBlock`, CommonMark closes the quote and opens
+                // the block at the outer level (see the helper).
+                let interrupts_via_html = self.lazy_html_block_interrupts(inner_content);
                 // Under Pandoc the rest of the question is the one the fold
                 // below asks: does the reader's gobble stop here? An ATX
                 // heading with `blank_before_header` off and a backtick code
@@ -4013,6 +4085,7 @@ impl<'a> Parser<'a> {
                     && !interrupts_via_fence
                     && !interrupts_via_heading
                     && !interrupts_via_div_close
+                    && !interrupts_via_html
                     && !ends_gobble
                 {
                     if bq_depth > 0 {
@@ -4052,6 +4125,16 @@ impl<'a> Parser<'a> {
                         );
                     }
                     return LineDispatch::consumed(1);
+                }
+                // Pandoc's `[Plain, RawBlock]` rule on the lazy path: an
+                // interrupting HTML block retags the paragraph wrapper as
+                // `PLAIN` (the analogue of `html_block_demotes_paragraph_
+                // to_plain` on the dispatcher path). The fold below then
+                // finds the paragraph already closed and dispatches the
+                // tag inside the quote. Skipped when the gobble ends —
+                // there the quote closes and pandoc keeps the Para shape.
+                if interrupts_via_html && !is_commonmark && !ends_gobble {
+                    self.close_paragraph_as_plain_if_open();
                 }
             }
             // Lazy continuation of a list item's open content (its
@@ -4096,11 +4179,16 @@ impl<'a> Parser<'a> {
                 };
                 let interrupts_via_heading =
                     heading_can_interrupt && try_parse_atx_heading(heading_probe).is_some();
+                // Same as the paragraph gate: an interrupting HTML block
+                // becomes the item's own `RawBlock` (pandoc) or closes
+                // the quote (CommonMark) instead of joining the buffer.
+                let interrupts_via_html = self.lazy_html_block_interrupts(inner_content);
                 let ends_gobble =
                     !is_commonmark && self.blockquote_gobble_ends_at(line, inner_content);
                 if !interrupts_via_hr
                     && !interrupts_via_fence
                     && !interrupts_via_heading
+                    && !interrupts_via_html
                     && !ends_gobble
                 {
                     if bq_depth > 0 {

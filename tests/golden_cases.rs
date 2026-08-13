@@ -162,6 +162,7 @@ golden_test_cases!(
     blankline_concatenation,
     blockquote_depth_change,
     blockquote_html_block,
+    blockquote_lazy_html_block_interrupt,
     blockquote_lazy_line_folds,
     blockquote_lazy_fence_payload,
     blockquote_in_fenced_div_idempotency_310,
