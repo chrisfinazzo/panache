@@ -5,7 +5,7 @@
 
 use crate::options::{Dialect, ParserOptions};
 use crate::parser::blocks::container_prefix::{
-    ContainerPrefixLine, ContainerPrefixState, emit_container_prefix_tokens,
+    ContainerPrefixLine, ContainerPrefixState, emit_grafted_token,
 };
 use crate::parser::blocks::figures::paragraph_is_standalone_image;
 use crate::parser::blocks::headings::{emit_atx_heading, try_parse_atx_heading};
@@ -951,29 +951,6 @@ fn graft_node(
         }
     }
     builder.finish_node();
-}
-
-fn emit_grafted_token(
-    builder: &mut GreenNodeBuilder<'static>,
-    kind: SyntaxKind,
-    text: &str,
-    prefix: &mut Option<ContainerPrefixState>,
-) {
-    if let Some(state) = prefix.as_mut() {
-        if state.at_line_start {
-            if let Some(line_prefix) = state.prefixes.get(state.line_idx) {
-                emit_container_prefix_tokens(builder, line_prefix);
-            }
-            state.at_line_start = false;
-        }
-        builder.token(kind.into(), text);
-        if kind == SyntaxKind::NEWLINE || kind == SyntaxKind::BLANK_LINE {
-            state.line_idx += 1;
-            state.at_line_start = true;
-        }
-    } else {
-        builder.token(kind.into(), text);
-    }
 }
 
 #[cfg(test)]

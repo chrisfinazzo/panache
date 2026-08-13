@@ -7,7 +7,7 @@ use rowan::GreenNodeBuilder;
 
 use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
 use super::container_prefix::{
-    ContainerPrefix, ContainerPrefixLine, ContainerPrefixState, emit_container_prefix_tokens,
+    ContainerPrefix, ContainerPrefixLine, ContainerPrefixState, emit_grafted_token,
 };
 use crate::parser::utils::attributes::emit_html_attrs_node;
 use crate::parser::utils::helpers::{strip_leading_spaces, strip_newline};
@@ -2758,36 +2758,6 @@ fn graft_subtree_as(
         }
     }
     builder.finish_node();
-}
-
-/// Emit a single token while optionally injecting blockquote prefix
-/// tokens at line starts. When `bq` is `None`, this is a plain
-/// `builder.token()` passthrough.
-fn emit_grafted_token(
-    builder: &mut GreenNodeBuilder<'static>,
-    kind: SyntaxKind,
-    text: &str,
-    bq: &mut Option<ContainerPrefixState>,
-) {
-    if let Some(state) = bq.as_mut() {
-        if state.at_line_start {
-            if let Some(line_prefix) = state.prefixes.get(state.line_idx) {
-                emit_container_prefix_tokens(builder, line_prefix);
-            }
-            state.at_line_start = false;
-        }
-        builder.token(kind.into(), text);
-        // `BLANK_LINE` token represents an entirely blank source line —
-        // its text is `\n`. Treat both `NEWLINE` and the `BLANK_LINE`
-        // token as line-ending so the per-line prefix index advances
-        // correctly.
-        if kind == SyntaxKind::NEWLINE || kind == SyntaxKind::BLANK_LINE {
-            state.line_idx += 1;
-            state.at_line_start = true;
-        }
-    } else {
-        builder.token(kind.into(), text);
-    }
 }
 
 /// Emit a captured per-line bq prefix as a stream of `BLOCK_QUOTE_MARKER`

@@ -1733,6 +1733,40 @@ pub(crate) fn emit_container_prefix_tokens(
     }
 }
 
+/// Emit a single token while optionally injecting the current line's
+/// container prefix tokens at line starts. When `prefix` is `None`, this
+/// is a plain `builder.token()` passthrough.
+///
+/// Shared by the graft walkers in `list_item_buffer` and `html_blocks`,
+/// which re-inject held-out per-line prefixes when splicing a reparsed
+/// subtree back into the host tree.
+pub(crate) fn emit_grafted_token(
+    builder: &mut GreenNodeBuilder<'static>,
+    kind: SyntaxKind,
+    text: &str,
+    prefix: &mut Option<ContainerPrefixState>,
+) {
+    if let Some(state) = prefix.as_mut() {
+        if state.at_line_start {
+            if let Some(line_prefix) = state.prefixes.get(state.line_idx) {
+                emit_container_prefix_tokens(builder, line_prefix);
+            }
+            state.at_line_start = false;
+        }
+        builder.token(kind.into(), text);
+        // A `BLANK_LINE` token represents an entirely blank source line —
+        // its text is `\n`. Treat both `NEWLINE` and the `BLANK_LINE`
+        // token as line-ending so the per-line prefix index advances
+        // correctly.
+        if kind == SyntaxKind::NEWLINE || kind == SyntaxKind::BLANK_LINE {
+            state.line_idx += 1;
+            state.at_line_start = true;
+        }
+    } else {
+        builder.token(kind.into(), text);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
