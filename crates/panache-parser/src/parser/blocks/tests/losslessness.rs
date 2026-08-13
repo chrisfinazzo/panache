@@ -631,6 +631,30 @@ fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
 }
 
 #[test]
+fn test_losslessness_tables_in_blockquote_in_footnote() {
+    // The footnote body's content indent precedes the blockquote marker on
+    // the table's dispatch line, so the core's blockquote opener already
+    // emitted those bytes as WHITESPACE. `emit_or_dispatch_tail` used to
+    // re-emit them as LINE_PREFIX, duplicating the indent
+    // (`    > A    B` round-tripped as `    >     A    B`). All four table
+    // types share the helper, so all four are pinned.
+    for input in [
+        // simple
+        "[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n",
+        // pipe
+        "[^1]: body\n\n    > | A | B |\n    > |---|---|\n    > | x | y |\n",
+        // grid
+        "[^1]: body\n\n    > +---+---+\n    > | A | B |\n    > +===+===+\n    > | x | y |\n    > +---+---+\n",
+        // multiline
+        "[^1]: body\n\n    > ----- -----\n    > A     B\n    > ----- -----\n    > x     y\n    >\n    > ----- -----\n",
+    ] {
+        let config = ParserOptions::default();
+        let tree = Parser::new(input, &config).parse();
+        assert_eq!(tree.text().to_string(), input, "input: {input:?}");
+    }
+}
+
+#[test]
 fn test_consecutive_top_level_setext_headings_still_form_headings() {
     // pandoc gives three `Header 2`s with no intervening blank lines.
     let input = "a\n---\nc\n---\ne\n---\n";

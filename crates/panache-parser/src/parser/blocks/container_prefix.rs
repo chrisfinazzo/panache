@@ -731,6 +731,11 @@ impl ContainerPrefix {
                 StripOp::BlockQuoteMarker => {
                     let run = blockquote_run_len(&ops[i..]);
                     s = strip_bq_with_gobble(s, run, self.lazy_blockquote_gobble);
+                    // Indent stripped before a blockquote marker is part of
+                    // the quote's opener prefix, which the core emitted when
+                    // it opened the quote on this line — reporting it here
+                    // would make the caller emit those bytes twice.
+                    emit = None;
                     i += run;
                 }
                 StripOp::ContentIndent(n) => {
