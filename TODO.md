@@ -936,11 +936,36 @@ panache starts caching NodePtrs across edits.
     coverage moved to a column-exact sibling (`..._caption_exact`), which also
     pins the short-row padding.
 
-  - [ ] A **quoted** item's marker-line table is out of the lift's reach:
-    `> - a | b` / `>   - | -` is `BlockQuote [BulletList [[Table …]]]` in
-    pandoc but stays a nested list here. The item's buffer carries a
-    `BlockquoteMarker` segment, and both structural lifts gate on all-`Text`
-    segments.
+  - [x] **A quoted item's marker-line table now lifts too.** `> - a | b` /
+    `>   - | -` is `BlockQuote [BulletList [[Table …]]]` in pandoc but
+    stayed a nested list here, because the item's buffer carries the
+    continuation line's `>` as a `BlockquoteMarker` segment and both the
+    delimiter-buffering gate and the lift itself counted on all-`Text`
+    segments. The markers are structure, not text: the gate asks for the
+    buffer's sole `Text` segment instead of a segment count, and the
+    table/div lift reads them back out as per-line prefixes
+    (`ListItemBuffer::blockquote_prefixes`) which graft re-injects ahead of
+    the item indent --- the order a quoted item's line actually carries them
+    in, so `ContainerPrefixLine` grew a `bq_before_list` flag next to the
+    `list_indent`-first order `ContainerPrefix::split` captures for `- > a`.
+    Nested quotes (`> > - a | b`) and the marker-only form fall out of the
+    same path.
+
+    Two neighbouring gaps this uncovered, both of which predate it and reproduce
+    without a quote:
+
+    - A marker-line *grid* table projects wrongly: `grid_table` builds its char
+      grid from each row node's whole text, so the item indent (and now the
+      quote markers) shift the `+` columns and the geometry pass reads phantom
+      columns. `- +---+---+` / `  | a | b |` / `  +===+===+` is a 5-column table
+      with an empty row where pandoc has 2 columns; the quoted form loses the
+      table entirely. The CST is right and the round-trip is stable --- the
+      projector has to skip line-prefix tokens.
+    - `- > - a | b` / `  >   - | -` (list > quote > list) *panics* the formatter
+      in `line_blocks.rs` ("marker presence verified upstream"). The lift is not
+      involved: the inner item is already closed when the second line
+      dispatches, so `try_buffer_marker_line_table_delimiter` never runs and
+      `- | -` opens a nested list whose content is a line block.
 
   - [ ] A spaced dash run after a list (`- x` items, then `- - - -`) is a
     sibling `HorizontalRule` in pandoc but nests as the list's child here,

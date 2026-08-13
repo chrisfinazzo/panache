@@ -2560,6 +2560,7 @@ fn emit_html_block_body_lifted_bq(
         prefix_lines.push(ContainerPrefixLine {
             list_indent: li.to_string(),
             bq_prefix: bq.to_string(),
+            bq_before_list: false,
         });
         stripped_lines.push(inner);
     }
@@ -2609,6 +2610,7 @@ fn emit_html_block_body_lifted_bq_messy(
         prefix_lines.push(ContainerPrefixLine {
             list_indent: li.to_string(),
             bq_prefix: bq.to_string(),
+            bq_before_list: false,
         });
         stripped_lines.push(inner);
     }

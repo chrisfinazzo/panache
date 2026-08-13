@@ -1693,15 +1693,11 @@ impl<'a> Parser<'a> {
         let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last() else {
             return false;
         };
-        // Exactly one `Text` segment — the same all-`Text` precondition the
-        // lift itself gates on, so this never buffers a line the lift cannot
-        // use. A quoted item (`> - a | b`) carries a `BlockquoteMarker`
-        // segment and falls out here; that shape stays a nested list (see
-        // TODO.md).
-        if buffer.segment_count() != 1 {
-            return false;
-        }
-        let Some(first) = buffer.first_text() else {
+        // Exactly one line buffered so far, so the marker line is the header
+        // row. A quoted item (`> - a | b`) has this line's `>` marker in the
+        // buffer already — a structural segment the lift puts back at graft
+        // time, not buffered text.
+        let Some(first) = buffer.sole_text_segment() else {
             return false;
         };
         // One line, and one that could be a header row at all.

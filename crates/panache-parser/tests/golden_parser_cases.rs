@@ -679,6 +679,7 @@ golden_test_cases!(
     list_item_pipe_table_caption_before,
     list_item_pipe_table_caption_keyword_after_pandoc,
     list_item_pipe_table_continuation_blank_pandoc,
+    list_item_pipe_table_marker_line_blockquote_pandoc,
     list_item_pipe_table_marker_line_no_separator_pandoc,
     list_item_pipe_table_marker_line_pandoc,
     list_item_simple_table_self_indent_pandoc,

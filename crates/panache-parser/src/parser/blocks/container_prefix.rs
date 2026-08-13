@@ -1656,6 +1656,12 @@ pub(crate) struct ContainerPrefixLine {
     /// except for the run trailing the last `>` — see
     /// [`emit_container_prefix_tokens`].
     pub bq_prefix: String,
+    /// Emit `bq_prefix` *before* `list_indent`, for a line whose quote
+    /// encloses the list rather than the other way round (`> - a`, whose
+    /// continuation lines read `>   ...`). The default order is the one
+    /// [`ContainerPrefix::split`] captures: list indent first, then the
+    /// quote markers it precedes (`- > a`).
+    pub bq_before_list: bool,
 }
 
 impl ContainerPrefixLine {
@@ -1667,6 +1673,7 @@ impl ContainerPrefixLine {
         Self {
             list_indent: String::new(),
             bq_prefix,
+            bq_before_list: false,
         }
     }
 
@@ -1674,6 +1681,17 @@ impl ContainerPrefixLine {
         Self {
             list_indent,
             bq_prefix: String::new(),
+            bq_before_list: false,
+        }
+    }
+
+    /// A line inside a quoted list item: the quote's markers, then the
+    /// item's own indent.
+    pub fn bq_then_list(bq_prefix: String, list_indent: String) -> Self {
+        Self {
+            list_indent,
+            bq_prefix,
+            bq_before_list: true,
         }
     }
 }
@@ -1691,16 +1709,27 @@ pub(crate) fn emit_container_prefix_tokens(
     builder: &mut GreenNodeBuilder<'static>,
     line: &ContainerPrefixLine,
 ) {
-    if !line.list_indent.is_empty() {
-        builder.token(SyntaxKind::WHITESPACE.into(), &line.list_indent);
-    }
-    for ch in line.bq_prefix.chars() {
-        if ch == '>' {
-            builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-        } else {
-            let mut buf = [0u8; 4];
-            builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
+    let emit_list_indent = |builder: &mut GreenNodeBuilder<'static>| {
+        if !line.list_indent.is_empty() {
+            builder.token(SyntaxKind::WHITESPACE.into(), &line.list_indent);
         }
+    };
+    let emit_bq_prefix = |builder: &mut GreenNodeBuilder<'static>| {
+        for ch in line.bq_prefix.chars() {
+            if ch == '>' {
+                builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
+            } else {
+                let mut buf = [0u8; 4];
+                builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
+            }
+        }
+    };
+    if line.bq_before_list {
+        emit_bq_prefix(builder);
+        emit_list_indent(builder);
+    } else {
+        emit_list_indent(builder);
+        emit_bq_prefix(builder);
     }
 }
 

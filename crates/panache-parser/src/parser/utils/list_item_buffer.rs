@@ -136,6 +136,57 @@ impl ListItemBuffer {
         }
     }
 
+    /// The buffer's only `Text` segment, when it leads and every other
+    /// segment is a structural blockquote marker.
+    ///
+    /// A quoted item (`> - a | b`) buffers the *next* line's `>` marker
+    /// before that line's text reaches the block dispatcher, so "the
+    /// buffer holds exactly one line so far" cannot be answered by
+    /// counting segments.
+    pub(crate) fn sole_text_segment(&self) -> Option<&str> {
+        let text = self.first_text()?;
+        self.segments[1..]
+            .iter()
+            .all(|s| matches!(s, ListItemContent::BlockquoteMarker { .. }))
+            .then_some(text)
+    }
+
+    /// The blockquote prefix bytes each buffered line carries, indexed by
+    /// line of [`Self::get_text_for_parsing`] (whose text has them held
+    /// out). Lines without a marker get an empty entry; the vector is
+    /// short when the trailing lines carry none.
+    fn blockquote_prefixes(&self) -> Vec<String> {
+        let mut prefixes: Vec<String> = Vec::new();
+        if !self
+            .segments
+            .iter()
+            .any(|s| matches!(s, ListItemContent::BlockquoteMarker { .. }))
+        {
+            return prefixes;
+        }
+        let mut line = 0usize;
+        for segment in &self.segments {
+            match segment {
+                ListItemContent::Text(text) => line += text.matches('\n').count(),
+                ListItemContent::BlockquoteMarker {
+                    leading_spaces,
+                    has_trailing_space,
+                } => {
+                    if prefixes.len() <= line {
+                        prefixes.resize(line + 1, String::new());
+                    }
+                    let entry = &mut prefixes[line];
+                    entry.extend(std::iter::repeat_n(' ', *leading_spaces));
+                    entry.push('>');
+                    if *has_trailing_space {
+                        entry.push(' ');
+                    }
+                }
+            }
+        }
+        prefixes
+    }
+
     /// If the buffered text begins with a Pandoc matched-pair HTML open
     /// tag (e.g. `<div ...>`, `<section>`, `<pre>`, `<video>`) whose
     /// opens outnumber its closes in the buffered text, return the tag
@@ -436,12 +487,18 @@ impl ListItemBuffer {
             // lines, reparse via the block dispatcher, accept a single root
             // node whose kind is in the allowlist and that consumes the
             // whole buffer.
-            if self
-                .segments
-                .iter()
-                .all(|s| matches!(s, ListItemContent::Text(_)))
-                && try_emit_table_or_div_lift(builder, &text, config, gobble)
-            {
+            //
+            // Unlike the lifts above, this one runs on a buffer holding
+            // blockquote markers too (`> - a | b` / `>   - | -`): the markers
+            // are already held out of `text`, so they only have to be put
+            // back at graft time alongside the item indent.
+            if try_emit_table_or_div_lift(
+                builder,
+                &text,
+                config,
+                gobble,
+                &self.blockquote_prefixes(),
+            ) {
                 return;
             }
         }
@@ -680,11 +737,17 @@ pub(crate) fn emit_html_block_lift_from_stripped(
 /// strict single-root + total-end-coverage gate makes "lift failed"
 /// indistinguishable from "buffer is not actually a table/div" — the
 /// caller falls through to its PLAIN/PARAGRAPH wrapper.
+///
+/// `bq_prefixes` are the per-line blockquote marker bytes the buffer held
+/// out of `text` (empty outside a quote); they are re-injected ahead of
+/// the item indent at graft time, which is the order they sit in on a
+/// quoted item's line (`>   | - | - |`).
 fn try_emit_table_or_div_lift(
     builder: &mut GreenNodeBuilder<'static>,
     text: &str,
     config: &ParserOptions,
     gobble: &[usize],
+    bq_prefixes: &[String],
 ) -> bool {
     // A marker-only item (`-` with the block starting on the next line)
     // buffers the marker line's newline as an empty line 0. Hold it out so
@@ -700,8 +763,15 @@ fn try_emit_table_or_div_lift(
         ""
     };
     let body = &text[leading_newline.len()..];
+    // Peeling the marker line renumbers the lines, so its (always empty —
+    // the enclosing quote emitted that `>` itself) entry goes with it.
+    let bq_prefixes = if leading_newline.is_empty() {
+        bq_prefixes
+    } else {
+        bq_prefixes.get(1..).unwrap_or_default()
+    };
 
-    let (parse_text, prefixes) = if gobble.is_empty() {
+    let (parse_text, list_prefixes) = if gobble.is_empty() {
         (body.to_string(), Vec::new())
     } else {
         strip_list_item_indent_from(body, gobble, leading_newline.is_empty())
@@ -728,9 +798,13 @@ fn try_emit_table_or_div_lift(
         return false;
     }
 
-    let prefix_lines: Vec<ContainerPrefixLine> = prefixes
-        .into_iter()
-        .map(ContainerPrefixLine::list_only)
+    let prefix_lines: Vec<ContainerPrefixLine> = (0..list_prefixes.len().max(bq_prefixes.len()))
+        .map(|i| {
+            ContainerPrefixLine::bq_then_list(
+                bq_prefixes.get(i).cloned().unwrap_or_default(),
+                list_prefixes.get(i).cloned().unwrap_or_default(),
+            )
+        })
         .collect();
     let mut prefix_state = ContainerPrefixState::new(prefix_lines);
     if !leading_newline.is_empty() {
@@ -904,6 +978,34 @@ mod tests {
         let mut buffer = ListItemBuffer::new();
         buffer.push_text("", &ParserOptions::default());
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn test_sole_text_segment_sees_past_blockquote_markers() {
+        let config = ParserOptions::default();
+        let mut buffer = ListItemBuffer::new();
+        buffer.push_text("a | b\n", &config);
+        buffer.push_blockquote_marker(0, true);
+        assert_eq!(buffer.sole_text_segment(), Some("a | b\n"));
+
+        buffer.push_text("  - | -\n", &config);
+        assert_eq!(buffer.sole_text_segment(), None);
+    }
+
+    #[test]
+    fn test_blockquote_prefixes_are_indexed_by_line() {
+        let config = ParserOptions::default();
+        let mut buffer = ListItemBuffer::new();
+        assert!(buffer.blockquote_prefixes().is_empty());
+
+        buffer.push_text("a | b\n", &config);
+        buffer.push_blockquote_marker(0, true);
+        buffer.push_blockquote_marker(0, true);
+        buffer.push_text("  - | -\n", &config);
+        assert_eq!(
+            buffer.blockquote_prefixes(),
+            vec!["".to_string(), "> > ".to_string()]
+        );
     }
 
     #[test]
