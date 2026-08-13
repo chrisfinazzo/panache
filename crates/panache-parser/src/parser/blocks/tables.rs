@@ -3593,11 +3593,26 @@ pub(crate) fn try_parse_multiline_table(
         if line.trim().is_empty() {
             found_blank_line = true;
             pos += 1;
+            // A post-blank line that fails the container frame ends the
+            // run: pandoc's list-item collection only continues past a
+            // blank with a line reaching the content column, so a
+            // dedented `- --- ---` is a horizontal rule outside the
+            // item (never a list start --- `bulletListStart` refuses
+            // hrule shapes), not this table's closer.
+            if pos < lines.len()
+                && !window.line(pos).trim().is_empty()
+                && matches!(
+                    window.frame_verdict(pos),
+                    FrameVerdict::Dedented { .. } | FrameVerdict::FakedIndent { .. }
+                )
+            {
+                break;
+            }
             // Check if next line is a valid closing separator for this table
             // shape. A container-ending line is never a closer, even when it
-            // is separator-shaped: a sibling `- --- ---` is a list start
-            // whose run boundary comes first (probed; the loop head only
-            // catches it on the next iteration, after this peek).
+            // is separator-shaped: the run boundary comes first (probed; the
+            // loop head only catches it on the next iteration, after this
+            // peek).
             if pos < lines.len() && !window.ends_container_lines(pos) {
                 let next = window.line(pos);
                 let is_valid_closer = if is_full_width_start {

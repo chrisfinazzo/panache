@@ -301,6 +301,15 @@ pub(crate) fn try_parse_list_marker_with(
     let (_indent_cols, indent_bytes) = leading_indent(line);
     let trimmed = &line[indent_bytes..];
 
+    // A thematic-break line is never a list marker: pandoc's
+    // `bulletListStart` runs `notFollowedBy' hrule` and CommonMark 4.1 gives
+    // the break precedence, so `- - -` and `* * *` resolve toward the rule.
+    // Tested at any indent --- a deeper spaced run is a rule inside the
+    // enclosing item (or indented code), still never a marker.
+    if crate::parser::blocks::horizontal_rules::try_parse_horizontal_rule(trimmed).is_some() {
+        return None;
+    }
+
     // Try bullet markers (including task lists)
     if let Some(ch) = trimmed.chars().next()
         && matches!(ch, '*' | '+' | '-')

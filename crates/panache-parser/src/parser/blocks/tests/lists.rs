@@ -698,6 +698,108 @@ fn horizontal_rule_in_depth_two_list_item() {
 }
 
 #[test]
+fn spaced_dash_rule_after_list_is_sibling() {
+    // pandoc (both dialects): a spaced dash run after a blank line is a
+    // thematic break, never a new list item (`bulletListStart` runs
+    // `notFollowedBy' hrule`; CommonMark 4.1 gives the break precedence).
+    // The list must close so the rule is the document's block, not the
+    // list's child.
+    let input = "- a\n- b\n\n- - - -\n";
+    let tree = parse_blocks(input);
+    let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
+        .expect("spaced dash run should parse as HORIZONTAL_RULE");
+    assert_eq!(list_item_depth(&hr), 0, "rule must be a list sibling");
+    assert!(
+        hr.ancestors().all(|a| a.kind() != SyntaxKind::LIST),
+        "rule must not nest inside the LIST"
+    );
+    let list = find_first(&tree, SyntaxKind::LIST).expect("should find list");
+    assert_eq!(count_children(&list, SyntaxKind::LIST_ITEM), 2);
+}
+
+#[test]
+fn spaced_star_rule_after_list_is_sibling() {
+    // Same precedence rule for the `*` bullet/rule collision.
+    let input = "* a\n* b\n\n* * *\n";
+    let tree = parse_blocks(input);
+    let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
+        .expect("spaced star run should parse as HORIZONTAL_RULE");
+    assert!(
+        hr.ancestors().all(|a| a.kind() != SyntaxKind::LIST),
+        "rule must not nest inside the LIST"
+    );
+}
+
+#[test]
+fn spaced_dash_rule_at_item_content_col_stays_in_item() {
+    // pandoc (both dialects): `BulletList [[Para "a", HorizontalRule]]` --- a
+    // rule indented to the item's content column belongs to the item.
+    let input = "- a\n\n  - - - -\n";
+    let tree = parse_blocks(input);
+    let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
+        .expect("indented dash run should parse as HORIZONTAL_RULE");
+    assert_eq!(list_item_depth(&hr), 1, "rule should sit in the item");
+}
+
+#[test]
+fn deeply_indented_spaced_dash_rule_stays_in_item_without_sublist() {
+    // pandoc (both dialects): still `BulletList [[Para "a", HorizontalRule]]`.
+    // Four raw columns are two effective columns inside the item, so the line
+    // is a rule there --- not a sublist whose first item swallows a `- - -`.
+    let input = "- a\n\n    - - - -\n";
+    let tree = parse_blocks(input);
+    let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
+        .expect("indented dash run should parse as HORIZONTAL_RULE");
+    assert_eq!(list_item_depth(&hr), 1, "rule should sit in the item");
+    assert_eq!(
+        find_all(&tree, SyntaxKind::LIST).len(),
+        1,
+        "no sublist must open for the rule line"
+    );
+}
+
+#[test]
+fn spaced_dash_rule_without_blank_line_is_lazy_text() {
+    // pandoc -f markdown: a rule cannot interrupt a paragraph, and the line
+    // is not a sibling item either, so it folds into item b's text
+    // (`Plain [Str "b", SoftBreak, Str "-", ...]`).
+    let input = "- a\n- b\n- - - -\n";
+    let tree = parse_blocks(input);
+    assert!(
+        find_first(&tree, SyntaxKind::HORIZONTAL_RULE).is_none(),
+        "rule must not interrupt the item's paragraph under pandoc"
+    );
+    let list = find_first(&tree, SyntaxKind::LIST).expect("should find list");
+    assert_eq!(
+        count_children(&list, SyntaxKind::LIST_ITEM),
+        2,
+        "dash run must not open a third item"
+    );
+}
+
+#[test]
+fn spaced_dash_rule_without_blank_line_interrupts_under_commonmark() {
+    // pandoc -f commonmark: a thematic break interrupts the paragraph and
+    // ends the list --- the dialect counterpart of the lazy-text test above.
+    let input = "- a\n- b\n- - - -\n";
+    let config = ParserOptions {
+        flavor: Flavor::CommonMark,
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        dialect: crate::Dialect::CommonMark,
+        ..Default::default()
+    };
+    let tree = parse_blocks_with_config(input, &config);
+    let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
+        .expect("spaced dash run should interrupt the paragraph under CommonMark");
+    assert!(
+        hr.ancestors().all(|a| a.kind() != SyntaxKind::LIST),
+        "rule must be a sibling of the closed LIST"
+    );
+    let list = find_first(&tree, SyntaxKind::LIST).expect("should find list");
+    assert_eq!(count_children(&list, SyntaxKind::LIST_ITEM), 2);
+}
+
+#[test]
 fn atx_heading_in_depth_two_list_item() {
     // pandoc (both dialects): Header nested in the inner item.
     let input = "- outer\n\n  - inner\n\n    # head\n";
