@@ -59,6 +59,8 @@ pub mod tests {
     pub mod definition_lists;
     #[path = "figures.rs"]
     pub mod figures;
+    #[path = "footnote_marker_line.rs"]
+    pub mod footnote_marker_line;
     #[path = "frame_pinning.rs"]
     pub mod frame_pinning;
     #[path = "headings.rs"]

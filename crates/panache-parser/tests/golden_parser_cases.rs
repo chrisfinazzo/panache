@@ -334,6 +334,7 @@ golden_test_cases!(
     footnote_body_table_caption,
     footnote_bare_marker_body_heading,
     footnote_bare_marker_body_table,
+    footnote_marker_line_blocks,
     list_item_table_first_pipeless,
     list_item_table_under_bare_marker,
     simple_table_in_footnote_stops_at_note_marker,

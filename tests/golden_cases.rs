@@ -250,6 +250,7 @@ golden_test_cases!(
     footnote_body_simple_table,
     footnote_bare_marker_body_heading,
     footnote_bare_marker_body_table,
+    footnote_marker_line_blocks,
     simple_table_in_footnote_stops_at_note_marker,
     simple_table_in_list_item_stops_at_sibling_marker,
     pipe_table_in_footnote_stops_at_note_marker,

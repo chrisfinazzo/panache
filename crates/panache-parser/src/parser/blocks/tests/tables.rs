@@ -1466,16 +1466,10 @@ fn footnote_body_after_marker_line_text_keeps_lazy_continuation() {
 /// `pandoc -f markdown -t native` on `[^1]: a | b` + a 4-column-indented
 /// delimiter and row: `Note [Table …]`. The pipe table cannot start on the
 /// marker line because its delimiter row is indented past
-/// `nonindentSpaces`, so the note claims the line.
-///
-/// Known, remaining divergence (TODO.md): panache leaves the marker line's
-/// own text a paragraph the indented lines lazily continue, so the body is
-/// a `Para` where pandoc — which reparses the whole note body dedented —
-/// gets the `Table`. That is not table-specific: an hrule, a list, a
-/// blockquote, and a code fence on a non-bare marker line diverge the same
-/// way, and only a heading is meant to stay lazy (`blank_before_header`).
-/// What this pins is the block-level verdict: the note owns the line, and
-/// no table swallows the marker.
+/// `nonindentSpaces`, so the note claims the line — and the note's own
+/// body reparse (which sees the delimiter dedented to its content column)
+/// then reads the body as the table. See the marker-line dispatch in
+/// `handle_footnote_open_effect` and the `footnote_marker_line` tests.
 #[test]
 fn indented_delimiter_leaves_the_note_marker_to_the_note() {
     let input = "x[^1]\n\n[^1]: a | b\n    --- | ---\n    c | d\n";
@@ -1492,8 +1486,15 @@ fn indented_delimiter_leaves_the_note_marker_to_the_note() {
         "the whole body stays inside the note: {}",
         note.text()
     );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("note body should be a table");
     assert!(
-        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        table
+            .ancestors()
+            .any(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION),
+        "the table belongs to the note, not the top level"
+    );
+    assert!(
+        !table.text().to_string().contains("[^1]:"),
         "no table claims the marker line as its header row"
     );
 }

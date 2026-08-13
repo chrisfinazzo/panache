@@ -1613,6 +1613,10 @@ impl<'a> Parser<'a> {
             return extras;
         }
 
+        if let Some(extras) = self.try_dispatch_footnote_marker_line_block(first_line_content) {
+            return extras;
+        }
+
         paragraphs::start_paragraph_if_needed(&mut self.containers, &mut self.builder);
         paragraphs::append_paragraph_line(
             &mut self.containers,
@@ -2624,6 +2628,181 @@ impl<'a> Parser<'a> {
             &ContainerPrefix::default(),
             wrapper_kind,
             html_blocks::SoftbreakFusion::None,
+            self.config,
+        );
+        Some(0)
+    }
+
+    /// Dispatch a block construct that opens on a non-bare footnote marker
+    /// line's own text: `[^1]: a | b` + separator is a table, `[^1]: ***` a
+    /// thematic break, `- li` a list, `> q` a blockquote, a fence a code
+    /// block, and text over a `===`/`---` underline a setext heading.
+    ///
+    /// Pandoc's `noteBlock` collects the note's raw lines and reparses them
+    /// from scratch, so the post-marker text sits at a fresh block context —
+    /// but one still carrying the column of the marker's trailing space,
+    /// which defeats margin-anchored constructs: an ATX heading, a line
+    /// block, or a fenced div stays lazy paragraph text (`[^1]: # h` is a
+    /// `Para` even with `blank_before_header` disabled; all verified against
+    /// `pandoc -f markdown -t native`). That split maps onto the dispatcher's
+    /// blank flags as the non-strict `has_blank_before` alone, plus the
+    /// allowlist below.
+    ///
+    /// Returns `Some(extras)` (source lines consumed beyond the marker line)
+    /// when a block was emitted; `None` falls through to the paragraph path.
+    fn try_dispatch_footnote_marker_line_block(
+        &mut self,
+        first_line_content: &str,
+    ) -> Option<usize> {
+        if self.config.dialect != crate::options::Dialect::Pandoc {
+            return None;
+        }
+
+        // Synthetic window: line 0 is the post-marker text (its prefix — the
+        // marker and its trailing spaces — was already emitted upstream);
+        // later lines are raw, stripped by the real container-stack prefix,
+        // which already carries the just-pushed footnote's content indent.
+        let mut synthetic: Vec<&str> = Vec::with_capacity(self.lines.len() - self.pos);
+        synthetic.push(first_line_content);
+        synthetic.extend_from_slice(&self.lines[self.pos + 1..]);
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
+        let window = StrippedLines::new(&synthetic, 0, &prefix);
+
+        let ctx = BlockContext {
+            has_blank_before: true,
+            has_blank_before_strict: false,
+            at_document_start: false,
+            in_fenced_div: self.in_fenced_div(),
+            fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
+            fenced_div_wraps_list: self.fenced_div_wraps_innermost_list(),
+            myst_directive_closer: self.innermost_myst_directive_closer(),
+            blockquote_depth: self.current_blockquote_depth(),
+            config: self.config,
+            diags: self.diagnostics.clone(),
+            // The frame the raw continuation lines carry — the same value the
+            // main loop passes when it dispatches body lines after a bare
+            // marker. Line 0 carries no indent (the marker ate it), which
+            // the fence-column arithmetic reads as "at the content column".
+            content_indent: self.content_container_indent_to_strip(),
+            indent_to_emit: None,
+            list_indent_info: None,
+            in_list: false,
+            in_definition_list: false,
+            in_marker_only_list_item: false,
+            list_item_unclosed_html_block_tag: None,
+            open_code_span_openers: Vec::new(),
+            paragraph_open: false,
+            list_item_content_open: false,
+            next_line: self.lines.get(self.pos + 1).map(|line| prefix.strip(line)),
+            open_alpha_hint: lists::OpenListHint::None,
+        };
+
+        let block_match = self.block_registry.detect_prepared(&ctx, &window)?;
+        match self.block_registry.parser_name(&block_match) {
+            // Leaf parsers whose `parse_prepared` fully emits from the
+            // window. Everything else on the registry either must stay lazy
+            // (ATX headings, line blocks, fenced divs, raw TeX) or keeps its
+            // existing marker-line handling (HTML blocks, definition terms).
+            "table" | "horizontal_rule" | "fenced_code_block" | "setext_heading" => {
+                let consumed = self.block_registry.parse_prepared(
+                    &block_match,
+                    &ctx,
+                    &mut self.builder,
+                    &window,
+                );
+                Some(consumed.saturating_sub(1))
+            }
+            "list" => self.open_footnote_marker_line_list(first_line_content),
+            "blockquote" => self.open_footnote_marker_line_blockquote(&block_match),
+            _ => None,
+        }
+    }
+
+    /// Open a list whose first item sits on the footnote marker line
+    /// (`[^1]: - li`). Mirrors the list arm of
+    /// [`Parser::handle_definition_list_effect`].
+    fn open_footnote_marker_line_list(&mut self, first_line_content: &str) -> Option<usize> {
+        let marker_match =
+            try_parse_list_marker(first_line_content, self.config, lists::OpenListHint::None)?;
+        let (indent_cols, indent_bytes) = leading_indent(first_line_content);
+
+        self.builder.start_node(SyntaxKind::LIST.into());
+        self.containers.push(Container::List {
+            marker: marker_match.marker.clone(),
+            base_indent_cols: indent_cols,
+            has_blank_between_items: false,
+        });
+
+        let list_item = ListItemEmissionInput {
+            content: first_line_content,
+            marker_len: marker_match.marker_len,
+            spaces_after_cols: marker_match.spaces_after_cols,
+            spaces_after_bytes: marker_match.spaces_after_bytes,
+            indent_cols,
+            indent_bytes,
+            virtual_marker_space: marker_match.virtual_marker_space,
+        };
+
+        let finish = if let Some(nested_marker) = is_content_nested_bullet_marker(
+            first_line_content,
+            marker_match.marker_len,
+            marker_match.spaces_after_bytes,
+        ) {
+            lists::add_list_item_with_nested_empty_list(
+                &mut self.containers,
+                &mut self.builder,
+                &list_item,
+                nested_marker,
+                self.config,
+            );
+            lists::ListItemFinish::Done
+        } else {
+            lists::add_list_item(
+                &mut self.containers,
+                &mut self.builder,
+                &list_item,
+                self.config,
+            )
+        };
+        Some(self.dispatch_bq_after_list_item(finish))
+    }
+
+    /// Open a blockquote on the footnote marker line (`[^1]: > q`). Mirrors
+    /// the blockquote arm of [`Parser::handle_definition_list_effect`]: the
+    /// quoted text is appended as paragraph content, and continuation lines
+    /// reach the open containers through the main loop.
+    fn open_footnote_marker_line_blockquote(
+        &mut self,
+        block_match: &super::block_dispatcher::PreparedBlockMatch,
+    ) -> Option<usize> {
+        let prepared = block_match
+            .payload
+            .as_ref()?
+            .downcast_ref::<BlockQuotePrepared>()?;
+        let inner = prepared.inner_content.as_str();
+        // A bare `>` marker keeps today's paragraph fallback (its newline
+        // bytes belong to the paragraph path).
+        if strip_newline(inner).0.trim().is_empty() {
+            return None;
+        }
+
+        for level in 0..prepared.depth {
+            self.builder.start_node(SyntaxKind::BLOCK_QUOTE.into());
+            if let Some(info) = prepared.marker_info.get(level) {
+                blockquotes::emit_one_blockquote_marker(
+                    &mut self.builder,
+                    info.leading_spaces,
+                    info.has_trailing_space,
+                );
+            }
+            self.containers.push(Container::BlockQuote {});
+        }
+
+        paragraphs::start_paragraph_if_needed(&mut self.containers, &mut self.builder);
+        paragraphs::append_paragraph_line(
+            &mut self.containers,
+            &mut self.builder,
+            inner,
             self.config,
         );
         Some(0)
@@ -5392,6 +5571,7 @@ impl<'a> Parser<'a> {
                 if in_footnote_definition
                     && self.config.extensions.blank_before_blockquote
                     && current_bq_depth == 0
+                    && !self.at_note_body_start
                     && !blockquotes::can_start_blockquote(
                         self.pos,
                         &self.lines,
@@ -5401,6 +5581,10 @@ impl<'a> Parser<'a> {
                     // Respect blank_before_blockquote even when `>` appears only
                     // after stripping content-container indentation (e.g. footnotes).
                     // In that case the marker should be treated as paragraph text.
+                    // A bare marker's first body line is exempt: pandoc reparses
+                    // the note body from scratch, so a quote there is
+                    // document-start-startable (`[^1]:` + `    > q` is
+                    // `Note [BlockQuote …]`).
                 } else {
                     // If definition/list plain text is buffered, flush it before opening nested
                     // blockquotes so block order remains lossless and stable across reparse.
