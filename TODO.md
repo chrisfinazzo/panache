@@ -1021,6 +1021,23 @@ panache starts caching NodePtrs across edits.
   blockquote are not idempotent" entry above, but reproduces without a
   blockquote.
 
+- [ ] `analyze_grid` cannot model a **rowspan cell whose text sits on a sub-row
+  separator line**, and the projector drops cells for it:
+  `grid_table_rowspan_aligned`'s `| spans  +--------+` hybrid projects as
+  one body row holding a single `RowSpan 1` cell (`group spans rows`) ---
+  the `1.5` / `22.0` value cells and the second `Row` vanish, where pandoc
+  keeps two rows with `RowSpan 2` on the first column. Root cause
+  (`crates/panache-parser/src/grid_layout.rs`): `is_sep_line` requires every
+  char in `+-=:| `, so the text-carrying hybrid is not sep-style, never
+  enters `row_seps`, and the row band it should split in two stays one band.
+  Blank-interior hybrids are fine (`grid_table_rowspan_colspan_2d` and the
+  `+   +---+` partial-separator shapes all match pandoc). Fixing it means
+  per-column row boundaries (the hybrid rules only the columns its `+--+`
+  run covers), which is a change to the tiling model --- today a row
+  boundary is a whole line index. The formatter is unaffected: its widths
+  read the source borders rather than the tiling (see the comment in
+  `format_unified_spanning_grid_table`), so the gap is projector-only.
+
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
   and the refs/heading-id reparse helpers) re-tokenize source the CST should
