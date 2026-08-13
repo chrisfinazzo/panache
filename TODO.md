@@ -1024,16 +1024,50 @@ panache starts caching NodePtrs across edits.
   `simple_table_{in_list_item_stops_at,closer_kept_before}_sibling_marker`
   goldens.
 
-- [ ] The list-start fence stops at pandoc's plain `nonindentSpaces` (<= 3
-  columns in the outer frame). For a **nested list with a positive base
-  indent**, pandoc's tolerance is base+3 in the outer list's frame --- a
-  marker in the base+1..base+3 band (e.g. 4-5 columns under a base-2 inner
-  list) terminates there but stays collected-as-content here. Honoring it
-  today trips a formatter reindent cascade that destroys the marker on the
-  second pass (`- x` at 5 columns reflows to 4, then loses its marker), so
-  the band is deliberately excluded (`list_start_detect` doc comment). Fix
-  the downstream cascade first, then widen the bound to
-  `List::base_indent_cols + 3`.
+- [x] The **list-start fence is per nesting level**, not the flat
+  `nonindentSpaces` (<= 3 columns in the section frame) it stopped at.
+  Pandoc parses each nested list inside the enclosing item's content
+  reparse, so `listStart`'s 3-column tolerance is measured from the start of
+  whichever band `[c_{j-1}, c_j)` of the open items' content-column ladder
+  the marker falls in --- anchored at the *enclosing item's content column*,
+  not the list's own base indent as this entry first guessed
+  (`List::base_indent_cols + 3` misclassifies a list indented past the outer
+  content column; probed). `ContainerPrefix` now captures the ladder for the
+  fence, and `band_fence_level` applies the same rule at marker dispatch: a
+  band marker is never lazy text, continues the band's list as a sibling
+  item when the marker kind matches, and otherwise replaces it with a new
+  list inside the enclosing item (which also fixes the offset-1..3 marker
+  under a nested list of a different kind attaching as a sibling of the
+  *outer* list). The feared formatter reindent cascade came from the old
+  wrong attachment: with the new list a child of the enclosing item, it
+  reformats to that item's content column and reparses identically ---
+  losslessness, idempotency, and pandoc-AST meaning preservation all probed.
+  Pinned by the `list_start` band pins in `tests/frame_pinning.rs` and the
+  `nested_list_band_marker_terminates_item` /
+  `simple_table_in_nested_item_stops_at_band_marker` goldens in both suites.
+
+- [ ] **Blockquoted band markers mis-nest and vanish from the AST**:
+  `> - a\n>   10.  b\n>     - c\n` parses `- c` through the nested-list path
+  with the inner item already closed but its LIST node still open, emitting
+  a `LIST` directly inside a `LIST` (no `LIST_ITEM` between), which the
+  pandoc-ast projector silently drops --- the CST is lossless but
+  linter/LSP/formatter consumers never see the list. Pandoc makes it a
+  sibling `BulletList` inside item `a`, like the unquoted band cases. Root
+  cause is upstream of `band_fence_level`: inside the blockquote
+  continuation the inner `ListItem` is off the stack by dispatch time, so
+  `current_content_col` is the *outer* item's column and the
+  `indent >= current_content_col` branch fires; `band_fence_level` correctly
+  sees no open inner item and stays out of it. Pre-existing (identical CST
+  at `89bc3cdb`, before the band fence).
+
+- [ ] **A nested ordered list at the outer item's exact content column goes
+  lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
+  item's content column) merges into the paragraph as `a 10. b` instead of
+  opening a nested `OrderedList` the way pandoc does. Bullets at the same
+  position nest fine; something in the ordered-marker path (the deep-ordered
+  drift matcher or the marker-line interceptors) eats it before the
+  `indent >= current_content_col` branch. Pre-existing (identical at
+  `89bc3cdb`).
 
 - [x] A **simple table in a blockquote in a footnote body is not lossless**:
   `[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n` parses with
