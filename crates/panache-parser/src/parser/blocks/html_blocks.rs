@@ -3558,7 +3558,15 @@ pub(crate) fn pandoc_html_open_tag_closes(
     }
     let mut quote: Option<u8> = None;
     for (offset, line) in lines.iter().enumerate().skip(start_pos) {
-        let inner = prefix.strip(line);
+        // Line 0 must be stripped the way the dispatcher's `first()` is:
+        // a continuation-line dispatch skips the innermost `ListAdvance`,
+        // whose blind column advance would otherwise eat the tag's first
+        // bytes on an under-indented line (`- a` / `<hr>` at column 0).
+        let inner = if offset == start_pos {
+            prefix.strip_line_0_for_emission(line)
+        } else {
+            prefix.strip(line)
+        };
         let bytes = inner.as_bytes();
         let mut i = 0usize;
         if offset == start_pos {
