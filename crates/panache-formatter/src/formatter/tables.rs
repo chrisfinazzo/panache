@@ -493,6 +493,69 @@ fn extract_row_cells(row_node: &SyntaxNode, config: &Config) -> Vec<String> {
     cells
 }
 
+/// Byte length of the block-quote prefix at the start of `node`: the
+/// `BLOCK_QUOTE_MARKER` tokens and the single space each of them consumes.
+///
+/// A table nested in a block quote carries its own marker on every line it
+/// owns, but the *first* line's marker belongs to the enclosing `BLOCK_QUOTE`
+/// and so sits outside the table node. Column geometry is byte offsets into
+/// these lines, so the header would otherwise be measured from a different
+/// origin than the separator and rows.
+fn container_prefix_len(node: &SyntaxNode) -> usize {
+    let mut len = 0;
+    let mut after_marker = false;
+    for element in node.children_with_tokens() {
+        let Some(token) = element.into_token() else {
+            break;
+        };
+        match token.kind() {
+            SyntaxKind::BLOCK_QUOTE_MARKER => {
+                len += token.text().len();
+                after_marker = true;
+            }
+            SyntaxKind::WHITESPACE if after_marker => {
+                len += token.text().len();
+                after_marker = false;
+            }
+            _ => break,
+        }
+    }
+    len
+}
+
+/// Rebuild a table line (or multi-line row) from its tokens with every
+/// block-quote prefix stripped, rendering child nodes through `render_node`.
+///
+/// See `container_prefix_len`: markers only ever appear at a line start, so
+/// dropping every `BLOCK_QUOTE_MARKER` and the `WHITESPACE` immediately after
+/// it leaves text whose byte offsets match the separator's dash geometry.
+fn text_without_prefixes(node: &SyntaxNode, render_node: impl Fn(&SyntaxNode) -> String) -> String {
+    let mut out = String::new();
+    let mut after_marker = false;
+    for element in node.children_with_tokens() {
+        match element {
+            NodeOrToken::Token(token) => match token.kind() {
+                SyntaxKind::BLOCK_QUOTE_MARKER => after_marker = true,
+                SyntaxKind::WHITESPACE if after_marker => after_marker = false,
+                _ => {
+                    out.push_str(token.text());
+                    after_marker = false;
+                }
+            },
+            NodeOrToken::Node(child) => {
+                out.push_str(&render_node(&child));
+                after_marker = false;
+            }
+        }
+    }
+    out
+}
+
+/// `text_without_prefixes` keeping child nodes verbatim.
+fn raw_text_without_prefixes(node: &SyntaxNode) -> String {
+    text_without_prefixes(node, |child| child.text().to_string())
+}
+
 /// Extract alignments from separator line (e.g., "|:---|---:|:---:|")
 /// The separator-marker tokens (`TABLE_SEP_*`) of a `TABLE_SEPARATOR` node,
 /// in order. Skips the container prefix (`WHITESPACE` / blockquote markers)
@@ -1641,10 +1704,12 @@ struct SimpleColumn {
 /// Extract column positions from a simple table separator line.
 /// Returns column boundaries and default alignments.
 fn extract_simple_table_columns(separator: &SyntaxNode) -> Vec<SimpleColumn> {
-    // One column per dash run, byte offsets relative to the node start (= line
-    // start, leading whitespace/prefix included) so they line up with the
-    // header line the alignment pass indexes into. End is exclusive.
-    let node_start = u32::from(separator.text_range().start());
+    // One column per dash run, byte offsets relative to the start of the line's
+    // own content (past any block-quote prefix, leading whitespace kept) so they
+    // line up with the header line the alignment pass indexes into. End is
+    // exclusive.
+    let node_start =
+        u32::from(separator.text_range().start()) + container_prefix_len(separator) as u32;
     separator_marker_tokens(separator)
         .filter(|t| t.kind() == SyntaxKind::TABLE_SEP_DASHES)
         .map(|t| {
@@ -1768,7 +1833,7 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                 // closing dash line of a table with a closer is a second
                 // TABLE_SEPARATOR child and must not clobber it.
                 if columns.is_empty() {
-                    separator_line = child.text().to_string();
+                    separator_line = raw_text_without_prefixes(&child);
 
                     // Extract column positions
                     columns = extract_simple_table_columns(&child);
@@ -1776,8 +1841,7 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
             }
             SyntaxKind::TABLE_HEADER => {
                 // Always preserve RAW text for alignment detection
-                let raw_text = child.text().to_string();
-                header_line = Some(raw_text);
+                header_line = Some(raw_text_without_prefixes(&child));
 
                 // Try to extract from TABLE_CELL nodes for content
                 let cells = extract_row_cells(&child, config);
@@ -1793,7 +1857,7 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                     // Remember the first data row's raw text for headerless
                     // alignment detection.
                     if first_data_row_line.is_none() {
-                        first_data_row_line = Some(child.text().to_string());
+                        first_data_row_line = Some(raw_text_without_prefixes(&child));
                     }
 
                     // Try to extract from TABLE_CELL nodes first
@@ -1948,11 +2012,12 @@ pub fn format_simple_table(node: &SyntaxNode, config: &Config, indent: usize) ->
 }
 
 /// Extract column information from a multiline table separator. One
-/// `(start, end)` per dash run, byte offsets relative to the node start
-/// (leading whitespace preserved, as the old line-relative offsets were),
-/// end exclusive.
+/// `(start, end)` per dash run, byte offsets relative to the start of the
+/// line's own content (past any block-quote prefix, leading whitespace
+/// preserved, as the old line-relative offsets were), end exclusive.
 fn extract_multiline_columns(separator: &SyntaxNode) -> Vec<(usize, usize)> {
-    let node_start = u32::from(separator.text_range().start());
+    let node_start =
+        u32::from(separator.text_range().start()) + container_prefix_len(separator) as u32;
     separator_marker_tokens(separator)
         .filter(|t| t.kind() == SyntaxKind::TABLE_SEP_DASHES)
         .map(|t| {
@@ -2084,24 +2149,15 @@ fn extract_cells_from_table_cell_nodes(
     column_positions: &[(usize, usize)],
 ) -> Vec<Vec<String>> {
     // Format TABLE_CELL inline content, then extract multi-line text
-    let mut formatted_text = String::new();
-
-    for child in row.children_with_tokens() {
-        match child {
-            rowan::NodeOrToken::Token(token) => {
-                formatted_text.push_str(token.text());
-            }
-            rowan::NodeOrToken::Node(node) => {
-                if node.kind() == SyntaxKind::TABLE_CELL {
-                    // Format the inline content within the cell
-                    formatted_text.push_str(&format_cell_content(&node, config));
-                } else {
-                    // Other nodes (shouldn't happen in well-formed CST)
-                    formatted_text.push_str(&node.text().to_string());
-                }
-            }
+    let formatted_text = text_without_prefixes(row, |node| {
+        if node.kind() == SyntaxKind::TABLE_CELL {
+            // Format the inline content within the cell
+            format_cell_content(node, config)
+        } else {
+            // Other nodes (shouldn't happen in well-formed CST)
+            node.text().to_string()
         }
-    }
+    });
 
     extract_multiline_cells(&formatted_text, column_positions)
 }
@@ -2137,7 +2193,7 @@ fn extract_multiline_table_data(node: &SyntaxNode, config: &Config) -> Multiline
             SyntaxKind::TABLE_HEADER => {
                 has_header = true;
                 // Always use raw text for alignment detection - it preserves original spacing
-                header_text = child.text().to_string();
+                header_text = raw_text_without_prefixes(&child);
             }
             SyntaxKind::TABLE_ROW => {
                 // Slice cells on the pandoc column spans (gap text belongs to
@@ -2213,7 +2269,7 @@ fn extract_multiline_table_data(node: &SyntaxNode, config: &Config) -> Multiline
             .find(|c| c.kind() == SyntaxKind::TABLE_ROW)
             .unwrap();
         // Use raw text to preserve original spacing for alignment detection
-        let first_row_text = first_row_node.text().to_string();
+        let first_row_text = raw_text_without_prefixes(&first_row_node);
         for &(col_start, col_end) in &column_positions {
             alignments.push(determine_multiline_alignment(
                 &first_row_text,

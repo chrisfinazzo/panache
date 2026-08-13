@@ -601,11 +601,17 @@ panache starts caching NodePtrs across edits.
   paragraph). If the multiline check is ever narrowed, the single-column
   shape needs its own gate back.
 
-- [ ] Simple tables inside a blockquote are **not idempotent**:
+- [x] Simple tables inside a blockquote are **not idempotent**:
   `> A    B\n> --- ---\n> x    y\n` reformats to `>   A B` / `>   x y` on
-  pass 2, shifting cells out of their columns. Unrelated to the div bound
-  (reproduces on the bare quote, and before the fix too), but it means
-  `debug format --checks all` fails on any such document.
+  pass 2, shifting cells out of their columns. Fixed in the formatter: the
+  separator's dash offsets were measured from the node start, which on a
+  continuation line includes the `BLOCK_QUOTE_MARKER` prefix, while the
+  header line never carries one (its prefix belongs to the enclosing
+  `BLOCK_QUOTE`). Alignment detection therefore indexed the header two bytes
+  off and read `Right` where pandoc reads `Left`/`Center`. Both simple and
+  multiline tables now measure every line from its own content start; the
+  multiline path had the same skew and was additionally splicing `>` into
+  cell text.
 
 ### Architecture
 
