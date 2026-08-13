@@ -1,0 +1,6 @@
+[ BlockQuote
+    [ Div
+        ( "" , [ "note" ] , [] )
+        [ BlockQuote [ Para [ Str "inner" ] ] ]
+    ]
+]

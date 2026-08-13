@@ -1,0 +1,7 @@
+[ BlockQuote
+    [ BlockQuote
+        [ Div
+            ( "" , [ "d" ] , [] ) [ BlockQuote [ Para [ Str "a" ] ] ]
+        ]
+    ]
+]

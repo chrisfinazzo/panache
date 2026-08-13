@@ -33,14 +33,32 @@ pub(in crate::parser) fn can_start_blockquote(
     }
     // First child of a fenced div: the opener line is not blank, but Pandoc
     // treats the start of a div like the start of the document.
-    if fenced_divs_enabled
-        && crate::parser::blocks::fenced_divs::try_parse_div_fence_open(lines[pos - 1]).is_some()
-    {
+    if opens_fenced_div_at_depth(lines[pos - 1], 0, fenced_divs_enabled) {
         return true;
     }
     // If we're already in a blockquote, nested blockquotes need blank line too
     // (blank_before_blockquote extension)
     false
+}
+
+/// Whether `line` opens a fenced div once `depth` enclosing blockquote
+/// markers are stripped from it.
+///
+/// The line after a `::: {...}` opener is quote-startable because Pandoc
+/// treats it like the start of the document. That holds at any nesting
+/// depth, so a div inside a quote (`> ::: note` / `> > quoted`) gets the
+/// same hatch.
+pub(in crate::parser) fn opens_fenced_div_at_depth(
+    line: &str,
+    depth: usize,
+    fenced_divs_enabled: bool,
+) -> bool {
+    if !fenced_divs_enabled {
+        return false;
+    }
+    let (inner, consumed) = strip_blockquote_markers_counted(line, depth);
+    consumed == depth
+        && crate::parser::blocks::fenced_divs::try_parse_div_fence_open(inner).is_some()
 }
 
 /// Get the current blockquote depth from the container stack.

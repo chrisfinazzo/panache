@@ -1470,6 +1470,34 @@ fn indented_lazy_fence_without_a_closer_keeps_continuing_the_paragraph() {
     assert_eq!(quote_block_kinds(input), vec![SyntaxKind::PARAGRAPH]);
 }
 
+/// The first child of a fenced div may be a blockquote even without a blank
+/// line before it, and that holds when the div is itself inside a quote:
+/// pandoc treats the line after a `:::` opener like the start of the
+/// document at any nesting depth (issue #310, one level deeper).
+#[test]
+fn nested_quote_opens_as_first_child_of_a_quoted_div() {
+    // pandoc: [ BlockQuote [ Div .. [ BlockQuote [ Para [ Str "inner" ] ] ] ] ]
+    let input = "> ::: note\n> > inner\n> :::\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(
+        count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE),
+        2,
+        "expected an inner blockquote inside the quoted div, got:\n{tree:#?}"
+    );
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}
+
+/// The same, with the div body separated by quoted blank lines.
+#[test]
+fn nested_quote_opens_after_a_quoted_blank_line_in_a_div() {
+    let input = "> ::: note\n>\n> > inner\n>\n> :::\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
+}
+
 /// A fenced div opened *outside* the quote still terminates it: pandoc's
 /// extraction runs inside the div body, where the closer is not quote
 /// content (issue #310).

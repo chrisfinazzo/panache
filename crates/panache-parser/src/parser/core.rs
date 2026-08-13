@@ -3409,13 +3409,15 @@ impl<'a> Parser<'a> {
         // inside an open div. At the top level a lone `:::` is just text,
         // which is what pandoc does (issue #310). Note this says nothing
         // about the *quote*: a div opened inside it closes inside it, which
-        // the lazy fold works out. This one stays on the raw `line`: the
-        // #310 shape was calibrated against zero-marker lines and the
-        // reduced-marker form is unverified against pandoc.
+        // the lazy fold works out. The zero-marker `line` form is the #310
+        // shape; the reduced-marker form is narrower (see
+        // [`Parser::quoted_div_closes_at`]).
         let div_close = ctx.probe_div_closer
             && self.config.extensions.fenced_divs
             && self.in_fenced_div()
-            && fenced_divs::is_div_closing_fence(line);
+            && (fenced_divs::is_div_closing_fence(line)
+                || (fenced_divs::is_div_closing_fence(inner_content)
+                    && self.quoted_div_closes_at(count_blockquote_markers(line).0)));
         // A paragraph-interrupting HTML block start on the lazy line ends
         // the paragraph rather than folding in as `RawInline`: pandoc keeps
         // the tag in the quote as its own `RawBlock`, CommonMark closes the
@@ -3447,6 +3449,32 @@ impl<'a> Parser<'a> {
     fn html_closer_ends_blockquote(&self, line: &str) -> bool {
         let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config);
         tables::html_closer_ends_lines(&prefix, line)
+    }
+
+    /// Whether a `:::` line carrying `markers` blockquote markers closes the
+    /// innermost open div, given that it is lazy at the current depth.
+    ///
+    /// Only when the div was opened inside a quote the line still carries:
+    /// pandoc extracts the quote's raw content, and there the closer sits
+    /// flush against the div it opened. `> ::: d` / `> > a` / `> :::` reads
+    /// as `Div [BlockQuote [Para "a"]]`, and so does the same shape one
+    /// quote deeper. A div opened *outside* the quote is the other shape --
+    /// pandoc leaves such a line as a `Para [Str ":::"]` and reports the div
+    /// unclosed -- so it stays out here; see
+    /// [`Parser::div_closer_ends_blockquote`] for that side.
+    fn quoted_div_closes_at(&self, markers: usize) -> bool {
+        let stack = &self.containers.stack;
+        let Some(div) = stack
+            .iter()
+            .rposition(|c| matches!(c, Container::FencedDiv { .. }))
+        else {
+            return false;
+        };
+        let quotes_before_div = stack[..div]
+            .iter()
+            .filter(|c| matches!(c, Container::BlockQuote { .. }))
+            .count();
+        quotes_before_div >= 1 && quotes_before_div <= markers
     }
 
     /// Whether a fenced-div closing fence ends the open blockquote rather
@@ -4024,7 +4052,16 @@ impl<'a> Parser<'a> {
                         || (self.pos > 0 && {
                             let prev_line = self.lines[self.pos - 1];
                             let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
-                            prev_bq_depth >= current_bq_depth && is_blank_line(prev_inner)
+                            (prev_bq_depth >= current_bq_depth && is_blank_line(prev_inner))
+                                // First child of a fenced div nested in the
+                                // quote: the opener line is not blank, but
+                                // pandoc treats it like the start of the
+                                // document at this depth too.
+                                || blockquotes::opens_fenced_div_at_depth(
+                                    prev_line,
+                                    current_bq_depth,
+                                    self.config.extensions.fenced_divs,
+                                )
                         })
                 } else {
                     true

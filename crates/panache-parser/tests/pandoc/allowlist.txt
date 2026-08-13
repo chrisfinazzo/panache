@@ -793,3 +793,12 @@
 535
 536
 537
+
+# A fenced div's first child may be a blockquote with no blank line before
+# it, at any quote depth: pandoc extracts the quote's raw content, where the
+# `:::` opener sits at the start like the start of the document, and the
+# closer carrying the same markers ends the div rather than folding into the
+# nested quote as lazy text. 0538 is the one-level shape, 0539 the same one
+# quote deeper.
+538
+539
