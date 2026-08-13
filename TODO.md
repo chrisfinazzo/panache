@@ -963,10 +963,21 @@ panache starts caching NodePtrs across edits.
       dispatches, so `try_buffer_marker_line_table_delimiter` never runs and
       `- | -` opens a nested list whose content is a line block.
 
-  - [ ] A spaced dash run after a list (`- x` items, then `- - - -`) is a
-    sibling `HorizontalRule` in pandoc but nests as the list's child here,
-    and the pandoc-ast projector then drops it from the projection entirely
-    (CST is lossless).
+  - [x] **A spaced dash run after a list is a sibling `HorizontalRule` now.**
+    `- x` items, then `- - - -`, nested as the list's child (the projector
+    then dropped it entirely; CST was lossless) because
+    `try_parse_list_marker_with` read the run as a bullet marker and the
+    blank-line lookahead kept the list open for it. Pandoc's
+    `bulletListStart` runs `notFollowedBy' hrule` and CommonMark 4.1 gives
+    the break precedence, so marker detection now refuses any hrule-shaped
+    line at any indent --- deeper runs are rules inside the enclosing item
+    (`    - - - -` under `- a` no longer fabricates a sublist), and the
+    blank-less form correctly stays lazy paragraph text under Pandoc while
+    interrupting under CommonMark. The multiline-table closer scan leaned on
+    the marker reading to bound its run at a dedented `- --- ---`; it now
+    bounds on the frame verdict directly (a post-blank line that fails the
+    container frame ends the run), which also moved that shape onto pandoc's
+    exact reading (`HorizontalRule` in the item, sibling rule after).
 
 - [ ] A **non-bare note marker line's own text should open a block**, not a
   paragraph the indented lines lazily continue. Pandoc's `noteBlock`
