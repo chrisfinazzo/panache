@@ -1295,9 +1295,15 @@ fn find_table_end(
         if lines.line(i).trim().is_empty() || lines.ends_container_lines(i) {
             return (!require_closer).then_some((i, false));
         }
-        // Check if this could be a closing separator (next line blank or EOF)
+        // Check if this could be a closing separator: the next line must
+        // be blank, EOF, or the end of the container's line run — a
+        // closer abutting the div's `:::`, a sibling list start, or a
+        // new note marker still closes the table (probed; the run ends
+        // right after it, exactly like a blank line).
         if try_parse_table_separator(lines.line(i)).is_some()
-            && (i + 1 >= lines.line_count() || lines.line(i + 1).trim().is_empty())
+            && (i + 1 >= lines.line_count()
+                || lines.line(i + 1).trim().is_empty()
+                || lines.ends_container_lines(i + 1))
         {
             // Headerless: two adjacent separator lines are two horizontal
             // rules, not an empty table.

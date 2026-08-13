@@ -1076,3 +1076,74 @@ fn nested_opener_stays_caption_content() {
         "the caption stops at the first bare closer: {text}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// A closing separator directly before a container terminator closes the
+// table
+//
+// `find_table_end` accepted a closing dash line only when followed by a
+// blank line or EOF, so a headerless table whose closer abuts the end of
+// the enclosing container's line run — the div's `:::`, a sibling list
+// start, a new note marker — failed to parse entirely. pandoc keeps the
+// table in all three shapes (probed): the run ends after the closer, which
+// bounds the table exactly like a blank line would.
+
+/// `pandoc -f markdown -t native`: Div \[Table\] — the closer directly
+/// before `:::` completes the table.
+#[test]
+fn table_closer_directly_before_div_closer_completes_the_table() {
+    let input = "::: note\n--- ---\nx   y\n--- ---\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the div");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer stays outside the table: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: two items, the first holding the
+/// table.
+#[test]
+fn table_closer_directly_before_sibling_marker_completes_the_table() {
+    let input = "- q\n\n  --- ---\n  x   y\n  --- ---\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in item 1");
+    assert!(
+        !table.text().to_string().contains("next"),
+        "the sibling marker stays outside the table: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: two notes, the first holding the
+/// table.
+#[test]
+fn table_closer_directly_before_note_marker_completes_the_table() {
+    let input = "[^1]: q\n\n    --- ---\n    x   y\n    --- ---\n[^2]: z\n\na[^1][^2]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in note 1");
+    assert!(
+        !table.text().to_string().contains("[^2]"),
+        "the new note marker stays outside the table: {}",
+        table.text()
+    );
+}
