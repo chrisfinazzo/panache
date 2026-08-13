@@ -5061,10 +5061,48 @@ impl<'a> Parser<'a> {
                     false
                 };
 
+                // A Pandoc marker in the innermost band of the item ladder
+                // (at or past the enclosing item's content column, left of
+                // the innermost one) is `band_fence_level`'s case: within
+                // the `listStart` tolerance it terminates the inner list,
+                // past it it is lazy continuation text. Both are decided at
+                // dispatch, and both need every open LIST still paired with
+                // its open LIST_ITEM — closing the inner item here would
+                // strand its LIST and mis-nest the new list directly inside
+                // it. The walk mirrors `band_fence_level`'s frame barriers.
+                let innermost_band_marker = is_new_item_at_outer_level
+                    && self.config.dialect == crate::options::Dialect::Pandoc
+                    && self
+                        .containers
+                        .stack
+                        .iter()
+                        .rev()
+                        .take_while(|c| {
+                            !matches!(
+                                c,
+                                Container::BlockQuote { .. }
+                                    | Container::FootnoteDefinition { .. }
+                                    | Container::Definition { .. }
+                                    | Container::Admonition { .. }
+                            )
+                        })
+                        .filter_map(|c| match c {
+                            Container::ListItem { content_col, .. } => Some(*content_col),
+                            _ => None,
+                        })
+                        .nth(1)
+                        .is_some_and(|outer_col| effective_indent >= outer_col);
+
                 // Close ListItem if:
                 // 1. It's a new list item at an outer (or same) level, OR
                 // 2. The line is not indented enough to continue the current item
-                if is_new_item_at_outer_level
+                if innermost_band_marker {
+                    log::trace!(
+                        "Keeping ladder for innermost-band marker: effective_indent={}, content_col={}",
+                        effective_indent,
+                        content_col
+                    );
+                } else if is_new_item_at_outer_level
                     || (effective_indent < content_col && !has_explicit_same_depth_marker)
                 {
                     log::trace!(

@@ -1520,3 +1520,67 @@ fn div_closer_outside_the_quote_still_ends_it() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 }
+
+/// A quoted band marker under a nested list terminates it and opens a
+/// sibling list inside the enclosing item, exactly like the unquoted
+/// band cases (pandoc: `[Plain a, OrderedList [b], BulletList [c]]`
+/// inside item `a`). The blockquote continuation must leave the item
+/// ladder open for dispatch's `band_fence_level`; pre-closing only the
+/// inner item strands its `LIST` and the new list mis-nests as a `LIST`
+/// directly inside a `LIST`, which the pandoc-ast projector drops.
+#[test]
+fn quoted_band_marker_opens_sibling_list_in_enclosing_item() {
+    for indent in ["    ", "     "] {
+        let input = format!("> - a\n>   10.  b\n> {indent}- c\n");
+        let tree = parse_blocks(&input);
+
+        for list in find_nodes_of_type(&tree, SyntaxKind::LIST) {
+            assert_ne!(
+                list.parent().map(|p| p.kind()),
+                Some(SyntaxKind::LIST),
+                "no LIST may sit directly inside a LIST, got:\n{tree:#?}"
+            );
+        }
+        let outer_item = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM)
+            .into_iter()
+            .next()
+            .expect("outer list item");
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::LIST),
+            3,
+            "expected outer, ordered, and sibling bullet lists, got:\n{tree:#?}"
+        );
+        assert_eq!(
+            outer_item
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::LIST)
+                .count(),
+            2,
+            "ordered and bullet lists should be siblings in item `a`, got:\n{tree:#?}"
+        );
+    }
+}
+
+/// Past the band tolerance (enclosing item's column + 3) the quoted
+/// marker is a lazy continuation of the inner item, not a fence:
+/// pandoc keeps `- c` in item `b`'s paragraph
+/// (`Plain [b, SoftBreak, -, Space, c]`).
+#[test]
+fn quoted_band_marker_past_tolerance_is_lazy_continuation() {
+    let input = "> - a\n>   10.  b\n>       - c\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(
+        count_nodes_of_type(&tree, SyntaxKind::LIST),
+        2,
+        "the lazy line must not open a third list, got:\n{tree:#?}"
+    );
+    let inner_item = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM)
+        .into_iter()
+        .nth(1)
+        .expect("inner list item");
+    assert!(
+        inner_item.text().to_string().contains("- c"),
+        "`- c` should be lazy text inside item `b`, got:\n{tree:#?}"
+    );
+}
