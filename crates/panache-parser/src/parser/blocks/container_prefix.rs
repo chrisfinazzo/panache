@@ -1644,61 +1644,85 @@ impl ContainerPrefixState {
     }
 }
 
-/// One per-line entry in [`ContainerPrefixState`].
+/// One ordered piece of a line's container prefix. The kind decides
+/// tokenization at emission time; the piece order is the order the bytes
+/// appear in the source line, so nesting depth is not capped by the
+/// representation (`- > - a`'s continuation lines carry indent, quote
+/// markers, indent — three ordered pieces).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrefixPieceKind {
+    /// Indent bytes (list-item indent, content indent, lazily gobbled
+    /// whitespace) — emitted as one coalesced `WHITESPACE` token.
+    Indent,
+    /// Blockquote prefix bytes (a mix of `>` and inter-marker
+    /// whitespace) — emitted byte-by-byte as `BLOCK_QUOTE_MARKER` /
+    /// `WHITESPACE` tokens.
+    BqRun,
+}
+
+/// One per-line entry in [`ContainerPrefixState`]: the line's container
+/// prefix as an ordered list of kind-tagged byte runs, captured in
+/// source order.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ContainerPrefixLine {
-    /// List-indent bytes — emitted as a single `WHITESPACE` token at
-    /// line start when non-empty.
-    pub list_indent: String,
-    /// Blockquote prefix bytes (mix of `>` and inter-marker whitespace),
-    /// plus any whitespace the Pandoc lazy gobble skipped on a line short
-    /// of its markers. Emitted byte-by-byte after the list-indent token,
-    /// except for the run trailing the last `>` — see
-    /// [`emit_container_prefix_tokens`].
-    pub bq_prefix: String,
-    /// Emit `bq_prefix` *before* `list_indent`, for a line whose quote
-    /// encloses the list rather than the other way round (`> - a`, whose
-    /// continuation lines read `>   ...`). The default order is the one
-    /// [`ContainerPrefix::split`] captures: list indent first, then the
-    /// quote markers it precedes (`- > a`).
-    pub bq_before_list: bool,
+    pieces: SmallVec<[(PrefixPieceKind, String); 2]>,
 }
 
 impl ContainerPrefixLine {
     pub fn is_empty(&self) -> bool {
-        self.list_indent.is_empty() && self.bq_prefix.is_empty()
+        // `push` drops empty byte runs, so no-pieces means no bytes.
+        self.pieces.is_empty()
+    }
+
+    /// Append indent bytes, coalescing into a trailing `Indent` piece so
+    /// adjacent indent runs keep emitting as one `WHITESPACE` token.
+    pub fn push_indent(&mut self, bytes: &str) {
+        self.push(PrefixPieceKind::Indent, bytes);
+    }
+
+    /// Append blockquote prefix bytes, coalescing into a trailing `BqRun`.
+    pub fn push_bq(&mut self, bytes: &str) {
+        self.push(PrefixPieceKind::BqRun, bytes);
+    }
+
+    fn push(&mut self, kind: PrefixPieceKind, bytes: &str) {
+        if bytes.is_empty() {
+            return;
+        }
+        if let Some((last_kind, run)) = self.pieces.last_mut()
+            && *last_kind == kind
+        {
+            run.push_str(bytes);
+        } else {
+            self.pieces.push((kind, bytes.to_string()));
+        }
     }
 
     pub fn bq_only(bq_prefix: String) -> Self {
-        Self {
-            list_indent: String::new(),
-            bq_prefix,
-            bq_before_list: false,
-        }
+        let mut line = Self::default();
+        line.push_bq(&bq_prefix);
+        line
     }
 
     pub fn list_only(list_indent: String) -> Self {
-        Self {
-            list_indent,
-            bq_prefix: String::new(),
-            bq_before_list: false,
-        }
+        let mut line = Self::default();
+        line.push_indent(&list_indent);
+        line
     }
 
     /// A line inside a quoted list item: the quote's markers, then the
     /// item's own indent.
     pub fn bq_then_list(bq_prefix: String, list_indent: String) -> Self {
-        Self {
-            list_indent,
-            bq_prefix,
-            bq_before_list: true,
-        }
+        let mut line = Self::default();
+        line.push_bq(&bq_prefix);
+        line.push_indent(&list_indent);
+        line
     }
 }
 
-/// Emit a captured per-line container prefix as kind-tagged tokens.
-/// List-indent (if any) goes out as one `WHITESPACE`; bq prefix bytes
-/// go out byte-by-byte as `BLOCK_QUOTE_MARKER` / `WHITESPACE`.
+/// Emit a captured per-line container prefix as kind-tagged tokens, in
+/// piece order. Indent pieces go out as one `WHITESPACE`; bq pieces go
+/// out byte-by-byte as `BLOCK_QUOTE_MARKER` / `WHITESPACE`.
 ///
 /// The byte-by-byte split is load-bearing, not cosmetic: the formatter
 /// reads these tokens back when rebuilding a quoted line, and coalescing
@@ -1709,27 +1733,22 @@ pub(crate) fn emit_container_prefix_tokens(
     builder: &mut GreenNodeBuilder<'static>,
     line: &ContainerPrefixLine,
 ) {
-    let emit_list_indent = |builder: &mut GreenNodeBuilder<'static>| {
-        if !line.list_indent.is_empty() {
-            builder.token(SyntaxKind::WHITESPACE.into(), &line.list_indent);
-        }
-    };
-    let emit_bq_prefix = |builder: &mut GreenNodeBuilder<'static>| {
-        for ch in line.bq_prefix.chars() {
-            if ch == '>' {
-                builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-            } else {
-                let mut buf = [0u8; 4];
-                builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
+    for (kind, bytes) in &line.pieces {
+        match kind {
+            PrefixPieceKind::Indent => {
+                builder.token(SyntaxKind::WHITESPACE.into(), bytes);
+            }
+            PrefixPieceKind::BqRun => {
+                for ch in bytes.chars() {
+                    if ch == '>' {
+                        builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
+                    } else {
+                        let mut buf = [0u8; 4];
+                        builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
+                    }
+                }
             }
         }
-    };
-    if line.bq_before_list {
-        emit_bq_prefix(builder);
-        emit_list_indent(builder);
-    } else {
-        emit_list_indent(builder);
-        emit_bq_prefix(builder);
     }
 }
 
@@ -2058,6 +2077,81 @@ mod tests {
         // `  > ` stripped (list-col 2, then one bq marker) → "hello".
         assert_eq!(tail, "hello");
         assert_eq!(tail, lines.peek_prefix_at(1));
+    }
+
+    fn emitted_tokens(line: &ContainerPrefixLine) -> Vec<(SyntaxKind, String)> {
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(SyntaxKind::DOCUMENT.into());
+        emit_container_prefix_tokens(&mut builder, line);
+        builder.finish_node();
+        let node = crate::syntax::SyntaxNode::new_root(builder.finish());
+        node.children_with_tokens()
+            .filter_map(|c| c.into_token())
+            .map(|t| (t.kind(), t.text().to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn container_prefix_line_emits_pieces_in_capture_order() {
+        // A `> - a` continuation line: quote markers, then item indent.
+        let line = ContainerPrefixLine::bq_then_list("> ".to_string(), "  ".to_string());
+        assert_eq!(
+            emitted_tokens(&line),
+            vec![
+                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
+                (SyntaxKind::WHITESPACE, " ".to_string()),
+                (SyntaxKind::WHITESPACE, "  ".to_string()),
+            ]
+        );
+
+        // A `- > a` continuation line: item indent, then quote markers.
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent("  ");
+        line.push_bq("> ");
+        assert_eq!(
+            emitted_tokens(&line),
+            vec![
+                (SyntaxKind::WHITESPACE, "  ".to_string()),
+                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
+                (SyntaxKind::WHITESPACE, " ".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn container_prefix_line_expresses_three_pieces() {
+        // A `- > - a` continuation line (`  >   x`): indent, quote run,
+        // indent — the shape the two-slot representation could not express.
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent("  ");
+        line.push_bq("> ");
+        line.push_indent("  ");
+        assert_eq!(
+            emitted_tokens(&line),
+            vec![
+                (SyntaxKind::WHITESPACE, "  ".to_string()),
+                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
+                (SyntaxKind::WHITESPACE, " ".to_string()),
+                (SyntaxKind::WHITESPACE, "  ".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn container_prefix_line_coalesces_adjacent_same_kind_pushes() {
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent("  ");
+        line.push_indent("  ");
+        assert_eq!(
+            emitted_tokens(&line),
+            vec![(SyntaxKind::WHITESPACE, "    ".to_string())]
+        );
+
+        // Empty pushes leave no pieces behind.
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent("");
+        line.push_bq("");
+        assert!(line.is_empty());
     }
 
     #[test]

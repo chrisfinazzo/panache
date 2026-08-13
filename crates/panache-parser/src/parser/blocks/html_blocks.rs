@@ -2557,11 +2557,10 @@ fn emit_html_block_body_lifted_bq(
     let mut stripped_lines: Vec<&str> = Vec::with_capacity(content_lines.len());
     for cl in content_lines {
         let (li, bq, inner) = prefix.split(cl);
-        prefix_lines.push(ContainerPrefixLine {
-            list_indent: li.to_string(),
-            bq_prefix: bq.to_string(),
-            bq_before_list: false,
-        });
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent(li);
+        line.push_bq(bq);
+        prefix_lines.push(line);
         stripped_lines.push(inner);
     }
     let mut state = ContainerPrefixState::new(prefix_lines);
@@ -2607,11 +2606,10 @@ fn emit_html_block_body_lifted_bq_messy(
     let mut stripped_lines: Vec<&str> = Vec::with_capacity(content_lines.len());
     for cl in content_lines {
         let (li, bq, inner) = prefix.split(cl);
-        prefix_lines.push(ContainerPrefixLine {
-            list_indent: li.to_string(),
-            bq_prefix: bq.to_string(),
-            bq_before_list: false,
-        });
+        let mut line = ContainerPrefixLine::default();
+        line.push_indent(li);
+        line.push_bq(bq);
+        prefix_lines.push(line);
         stripped_lines.push(inner);
     }
     if !leading.is_empty() {
