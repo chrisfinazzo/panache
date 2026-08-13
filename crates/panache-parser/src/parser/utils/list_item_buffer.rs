@@ -123,9 +123,36 @@ impl ListItemBuffer {
         self.segments.is_empty()
     }
 
-    /// Get the number of segments in the buffer (for debugging).
+    /// Number of source lines held in `Text` segments, counted over their
+    /// concatenation (a segment need not end at a line boundary). A trailing
+    /// line without a newline counts as one; structural marker segments
+    /// contribute nothing.
+    pub(crate) fn buffered_line_count(&self) -> usize {
+        let mut lines = 0usize;
+        let mut ends_mid_line = false;
+        for segment in &self.segments {
+            if let ListItemContent::Text(t) = segment {
+                lines += t.matches('\n').count();
+                if !t.is_empty() {
+                    ends_mid_line = !t.ends_with('\n');
+                }
+            }
+        }
+        lines + usize::from(ends_mid_line)
+    }
+
+    /// Number of segments in the buffer. Counts structural marker segments
+    /// too, so it must not be read as a line count — use
+    /// [`Self::buffered_line_count`] for that.
     pub(crate) fn segment_count(&self) -> usize {
         self.segments.len()
+    }
+
+    /// True when every segment is `Text` — no structural marker segments.
+    pub(crate) fn is_text_only(&self) -> bool {
+        self.segments
+            .iter()
+            .all(|s| matches!(s, ListItemContent::Text(_)))
     }
 
     /// Return the text of the first segment, if it is a `Text` segment.
@@ -415,10 +442,7 @@ impl ListItemBuffer {
             // continuation. Pandoc treats `- # Heading\n  Some text` as a
             // list item containing Header + Plain, not a single Plain spanning
             // both lines.
-            if self
-                .segments
-                .iter()
-                .all(|s| matches!(s, ListItemContent::Text(_)))
+            if self.is_text_only()
                 && let Some(first_nl) = text.find('\n')
             {
                 let first_line = &text[..first_nl];
@@ -461,11 +485,12 @@ impl ListItemBuffer {
             // block close forms as block starts and breaks the buffer) are
             // not handled here — the gate rejects HTML_BLOCK_DIV with only
             // one HTML_BLOCK_TAG child. That sub-target stays open.
+            // Text-only, not merely `sole_text_segment`: the lift emits via
+            // `emit_atx_heading`/`inline_emission` with no bq-prefix
+            // re-injection plumbing, so seeing past marker segments here
+            // would drop the `>` bytes. Same for the ATX split above.
             if config.dialect == Dialect::Pandoc
-                && self
-                    .segments
-                    .iter()
-                    .all(|s| matches!(s, ListItemContent::Text(_)))
+                && self.is_text_only()
                 && try_emit_html_block_lift(
                     builder,
                     &text,
@@ -990,6 +1015,48 @@ mod tests {
 
         buffer.push_text("  - | -\n", &config);
         assert_eq!(buffer.sole_text_segment(), None);
+    }
+
+    #[test]
+    fn test_buffered_line_count_counts_lines_not_segments() {
+        let config = ParserOptions::default();
+        let mut buffer = ListItemBuffer::new();
+        assert_eq!(buffer.buffered_line_count(), 0);
+
+        // Marker segments contribute nothing.
+        buffer.push_text("a | b\n", &config);
+        buffer.push_blockquote_marker(0, true);
+        buffer.push_blockquote_marker(0, true);
+        assert_eq!(buffer.buffered_line_count(), 1);
+        assert_eq!(buffer.segment_count(), 3);
+
+        buffer.push_text("  - | -\n", &config);
+        assert_eq!(buffer.buffered_line_count(), 2);
+
+        // One multi-line segment is more than one line.
+        let mut buffer = ListItemBuffer::new();
+        buffer.push_text("a\nb\n", &config);
+        assert_eq!(buffer.segment_count(), 1);
+        assert_eq!(buffer.buffered_line_count(), 2);
+
+        // A trailing line without a newline counts as one.
+        let mut buffer = ListItemBuffer::new();
+        buffer.push_text("a\n", &config);
+        buffer.push_text("b", &config);
+        assert_eq!(buffer.buffered_line_count(), 2);
+    }
+
+    #[test]
+    fn test_is_text_only_sees_markers() {
+        let config = ParserOptions::default();
+        let mut buffer = ListItemBuffer::new();
+        assert!(buffer.is_text_only());
+
+        buffer.push_text("a\n", &config);
+        assert!(buffer.is_text_only());
+
+        buffer.push_blockquote_marker(0, true);
+        assert!(!buffer.is_text_only());
     }
 
     #[test]

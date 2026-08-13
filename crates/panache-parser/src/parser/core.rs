@@ -286,9 +286,9 @@ impl<'a> Parser<'a> {
                     let gobble = self.containers.gobble_chain();
 
                     log::trace!(
-                        "Closing ListItem with buffer (is_empty={}, segment_count={})",
+                        "Closing ListItem with buffer (is_empty={}, buffered_line_count={})",
                         buffer_clone.is_empty(),
-                        buffer_clone.segment_count()
+                        buffer_clone.buffered_line_count()
                     );
 
                     // Determine if this should be Plain or PARAGRAPH:
@@ -619,10 +619,10 @@ impl<'a> Parser<'a> {
             return None;
         };
         let content_col = *content_col;
-        let text = buffer.first_text()?;
-        if buffer.segment_count() != 1 {
-            return None;
-        }
+        // Only the marker line is buffered so far. Any non-marker segment
+        // beyond the sole text one means content already accumulated and
+        // this is not a fresh marker line.
+        let text = buffer.sole_text_segment()?;
         let text_owned = text.to_string();
         let fence = code_blocks::try_parse_fence_open(&text_owned, self.config.dialect)?;
         let common_mark_dialect = self.config.dialect == crate::options::Dialect::CommonMark;
@@ -692,12 +692,9 @@ impl<'a> Parser<'a> {
         else {
             return None;
         };
-        // Only the marker line is buffered so far; a multi-segment buffer
-        // means this is not a fresh marker line.
-        if buffer.segment_count() != 1 {
-            return None;
-        }
-        try_parse_line_block_start(buffer.first_text()?)?;
+        // Only the marker line is buffered so far; further text segments
+        // mean this is not a fresh marker line.
+        try_parse_line_block_start(buffer.sole_text_segment()?)?;
         let content_col = *content_col;
         let bq_depth = self.current_blockquote_depth();
 
@@ -768,11 +765,9 @@ impl<'a> Parser<'a> {
         else {
             return None;
         };
-        // Only the marker line is buffered so far; a multi-segment buffer means
+        // Only the marker line is buffered so far; further text segments mean
         // more content already accumulated and this is not a fresh marker line.
-        if buffer.segment_count() != 1 || buffer.first_text().is_none() {
-            return None;
-        }
+        buffer.sole_text_segment()?;
         let content_col = *content_col;
 
         // Confirm a caption-led table actually follows, reading the marker line
@@ -861,13 +856,10 @@ impl<'a> Parser<'a> {
         else {
             return None;
         };
-        // Only the marker line is buffered so far; a multi-segment buffer means
+        // Only the marker line is buffered so far; further text segments mean
         // more content already accumulated and this is not a fresh marker line.
-        if buffer.segment_count() != 1 {
-            return None;
-        }
         // Cheap pre-filter: a table on the marker line begins with `|` or `+`.
-        let first = buffer.first_text()?;
+        let first = buffer.sole_text_segment()?;
         if !matches!(
             first.trim_start().as_bytes().first(),
             Some(b'|') | Some(b'+')
@@ -934,10 +926,9 @@ impl<'a> Parser<'a> {
         if *marker_only {
             return;
         }
-        if buffer.segment_count() != 1 {
-            return;
-        }
-        let Some(text) = buffer.first_text() else {
+        // Only the marker line is buffered so far; further text segments mean
+        // this is not a fresh marker line.
+        let Some(text) = buffer.sole_text_segment() else {
             return;
         };
         let content_col = *content_col;
@@ -3217,11 +3208,13 @@ impl<'a> Parser<'a> {
         else {
             return None;
         };
-        if *marker_only || buffer.segment_count() != 1 {
+        if *marker_only {
             return None;
         }
+        // Only the marker line is buffered so far; further text segments mean
+        // this is not a fresh marker line.
         let content_col = *content_col;
-        let text = buffer.first_text()?.to_string();
+        let text = buffer.sole_text_segment()?.to_string();
 
         // A term is a one-line block; more than one buffered line is a paragraph.
         let mut lines_it = text.split_inclusive('\n');
