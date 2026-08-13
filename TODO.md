@@ -1084,12 +1084,21 @@ panache starts caching NodePtrs across edits.
     identical byte ranges (plus the intended
     `TABLE_SEP_WHITESPACE`-was-really-prefix correction).
 
-  - [ ] **Consumers still reading raw prefixed text**, now trivially migratable
-    to `text_without_line_prefixes`: the pipe-table verbatim fallbacks
-    (`formatter/tables.rs` `format_pipe_table`-family
-    `return node.text().to_string()` early returns), and
-    `extract_code_block` in `crates/panache-formatter/src/utils.rs`, which
-    ships `> `/indent bytes to external formatters and linters.
+  - [x] **Consumers still reading raw prefixed text** migrated to
+    `text_without_line_prefixes`. The table verbatim fallbacks (pipe surplus
+    cells/no rows, simple and multiline non-ASCII/no rows) now return
+    dedented text re-indented to the container indent only, fixing the
+    double-prefix (`> >`) idempotency break for fallback tables in
+    containers
+    (`blockquote_{pipe_table_surplus_cells,simple_table_non_ascii,multiline_table_non_ascii}`
+    goldens). `extract_code_block` (host `src/utils.rs` and the
+    formatter-crate twin) dedents `CODE_CONTENT`, so external linters see
+    valid code instead of `> `/indent bytes; `CodeBlock.line_starts` +
+    `BlockMapping.line_offsets` map tool positions back through each line's
+    stripped prefix, and `map_concatenated_edit_to_original` drops autofixes
+    a dedented view cannot express (whole-line insert/delete inside a
+    prefixed block would orphan or swallow `> ` bytes — line-local fixes
+    still apply, unprefixed blocks keep multi-line fixes).
 
   - [ ] **`emit_as_block`'s ATX and HTML lifts stay `is_text_only`-gated**:
     unlike the table/div lift they have no bq-prefix re-injection plumbing,
