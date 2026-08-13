@@ -600,6 +600,7 @@ panache starts caching NodePtrs across edits.
   kind's closer — a caption whose table then fails to parse falls back to a
   paragraph). If the multiline check is ever narrowed, the single-column
   shape needs its own gate back.
+
 - [ ] Simple tables inside a blockquote are **not idempotent**:
   `> A    B\n> --- ---\n> x    y\n` reformats to `>   A B` / `>   x y` on
   pass 2, shifting cells out of their columns. Unrelated to the div bound
@@ -630,6 +631,7 @@ panache starts caching NodePtrs across edits.
     collects `[^2]: two` as a table row (pinned), and a marker at the note's
     content column stays note content. No config capture needed: a
     `FootnoteDefinition` on the stack implies the extension.
+
   - **List start**: `from_stack` captures the marker-detection config bits
     (`ListMarkerDetect`, split out of `try_parse_list_marker`) whenever a
     `ListAdvance` op exists. Three-way split, all pinned: a marker failing the
@@ -661,12 +663,14 @@ panache starts caching NodePtrs across edits.
     (`carried_unclosed_html_tag`), dropped again when a later chunk's closes
     catch up; `open_matched_pair_tag` reads through it. The dispatcher gate
     stays on the segments-only accessor.
+
   - `from_stack` reads the buffer straight off the `ListItem` stack entry (it
     already has `config`) --- no param threading. `html_closer_tag` on
     `ContainerPrefix` carries `(tag, content_col)`, ordering-gated exactly like
     the div flag with the tag-holding item in the `FencedDiv` role, so the
     item's own run is never fenced (pandoc slices the closer into the item's own
     table --- pinned).
+
   - The line test (`tables::html_closer_ends_lines`, OR-ed into
     `ends_container_lines` and consulted by `blockquote_gobble_ends_at` for the
     lazy fold) is a column bound, not a frame resolve: the lazy blockquote
@@ -746,15 +750,19 @@ panache starts caching NodePtrs across edits.
 - [ ] Probe findings from the seam migration, **untriaged candidates** (each
   needs confirming against existing fixtures/allowlists before being called
   a bug):
+
   - A pipe table starting on a list item's marker line (`- a | b` / `  ---|---`
     / `  c | d`) parses as a `Plain` here but as `BulletList [Table]` in pandoc;
     same for a footnote body whose marker line is bare (`[^1]:` + indented pipe
     table).
+
   - A pipe table claims a `[^1]: a | b` dispatch line as its header row where
     pandoc reads the note first (`Note [Table]`) --- registry precedence, not a
     scan bound.
+
   - Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache requires
     three.
+
   - A spaced dash run after a list (`- x` items, then `- - - -`) is a sibling
     `HorizontalRule` in pandoc but nests as the list's child here, and the
     pandoc-ast projector then drops it from the projection entirely (CST is
@@ -978,12 +986,14 @@ implemented.
 
 - [x] Extension: `citations` - `[@cite]` and `@cite` syntax with complex key
   support
+
 - [x] Pandoc `notAfterString` for bare `@key`: a citation glued to a preceding
   word character is literal text, not a citation (`word@key`,
   `user@example.com`, `違法編訂@jzkhl`). Handled at the shared detection
   site via a char-before-`@` check (alphanumeric or `.` suppresses); the
   `-@` suppress-author form is exempt. Backs the `unspaced-citation` lint
   rule. Closes #448.
+
 - [x] `notAfterString` delimiter-adjacent corner: a bare `@key` glued to a
   *resolved closing emphasis/strong delimiter* is now suppressed to match
   pandoc (`*em*@key` and `**strong**@key` are `Emph`/`Strong` +
@@ -992,6 +1002,7 @@ implemented.
   off resolved closers only, so `*@key*` (opener) and `*em*-@key`
   (suppress-author) keep the citation. No extra scan: the correction reads
   already-computed delimiter state rather than re-classifying.
+
 - [ ] `unspaced-citation` covers citations only. A crossref glued to a word
   (`x@fig-plot`) is likewise left as text by the parser but not flagged by
   the rule; extend it to crossref keys (gated on `quarto_crossrefs`) as a
@@ -1166,10 +1177,12 @@ elsewhere).
 
 - [x] MVP: `Flavor::Mdsvex` + `svelte-template` extension; `.svx`/`.svelte.md`
   detection; CLI/WASM/schema surfaces.
+
 - [x] Opaque, sigil-distinguished inline spans (`SVELTE_BLOCK_LOGIC` for
   `{#…}`/`{:…}`/`{/…}`, `SVELTE_TAG` for `{@…}`, `SVELTE_EXPRESSION` for
   `{expr}`), content preserved verbatim. Balanced-brace scan reused from the
   shortcode parser. Parser golden + formatter golden + unit tests landed.
+
 - [x] **Tier 2: block-level `{#if}`/`{#each}` pairing.** Standalone Svelte spans
   (block logic `{#if}`/`{:else}`/`{/each}`, tags `{@html}`, and expressions
   `{expr}`) that occupy a whole line are now emitted as an opaque
@@ -1179,11 +1192,14 @@ elsewhere).
   line and its inner whitespace collapsed. The equivalent quirk for Quarto
   shortcode lines (`{{< ... >}}`) is still a separate pre-existing issue and
   is not addressed here.
+
 - [ ] **Tier 3: format the JS/Svelte inside spans** (prettier-plugin-svelte
   territory). Likely out of scope.
+
 - [ ] String-literal-aware brace matching: a `}` inside a JS string (`{ "}" }`)
   can terminate a span early (depth-counting only). Lossless fallback
   (literal `{`), but a real Svelte tokenizer would fix it.
+
 - [ ] AST wrappers (`syntax/svelte.rs`), LSP semantic tokens, and lint rules for
   Svelte constructs.
 
@@ -1201,20 +1217,27 @@ dollar-math, deflists, ...) stay opt-in.
 - [x] **AST wrappers (`syntax/myst.rs`).** Typed wrappers over the existing
   `MYST_*` CST kinds, wired through `syntax.rs`, each with cast-from-`parse`
   unit tests (follow the `syntax/shortcodes.rs` pattern). Landed:
+
   - `MystTarget` (`label()`) --- the anchor side of MyST's cross-reference
     graph; keystone for goto-def/rename/undefined-target lint.
+
   - `MystRole` (`name()` brace-stripped, `content()`) --- the reference side
     (`` {ref}`label` ``); pairs with `MystTarget` for reference resolution.
+
   - `MystDirective` (`name()`, `argument()`, `options()` over
     `MystDirectiveOption` `name()`/`value()`, `body()`) --- richest construct;
     unlocks the most lint rules.
+
   - `MystSubstitution` (`name()`, trimmed) --- enables the "key not defined in
     frontmatter `substitutions:`" lint.
+
   - Skipped `MystComment`/`MystBlockBreak` wrappers (no name/label semantics to
     expose yet); add when a rule needs them.
+
 - [ ] **LSP semantic tokens for MyST.** Wrapper-driven classification of
   directive/role names, target labels, and substitution names. Depends on
   the AST wrappers.
+
 - [ ] **Lint rules for MyST constructs.** Gate on the `myst-*` extension flags
   (never `Flavor::Myst` directly), via the `add-lint-rule` skill. Start with
   `undefined-references` (role target resolves to a `MystTarget`) and an
@@ -1231,6 +1254,7 @@ design decisions, and per-session workflow. Parser invariants:
   math (`MATH_CONTENT` subtree; groups, environments, commands, alignment,
   scripts, comments, and `\left`/`\right` delimiter pairs). Landed in
   `crates/panache-parser/src/parser/math.rs`.
+
 - [x] Surface math diagnostics (unclosed/mismatched braces and environments,
   unbalanced `\left`/`\right`) through the linter and LSP. Landed as the
   always-on `math-syntax` lint rule (`src/linter/rules/math_content.rs`),
@@ -1239,6 +1263,7 @@ design decisions, and per-session workflow. Parser invariants:
   `syntax::math_diagnostics` (no re-parse, no side-channel; also consumed by
   the formatter to leave malformed math verbatim); spans are the offending
   tokens' host ranges.
+
 - [ ] Migrate the math formatter's `\left`/`\right` line-break tracking to the
   `MATH_DELIMITED` node. The break-candidate scan
   (`crates/panache-formatter/src/formatter/math/linebreak.rs`) and
@@ -1247,6 +1272,7 @@ design decisions, and per-session workflow. Parser invariants:
   the structural node. Harmless as a fallback today (formatter goldens are
   byte-identical), but node-awareness would let the scan treat a delimited
   run as one opaque operand instead of re-deriving depth.
+
 - [x] Math formatter that reformats content semantics-safely (align `&` columns,
   indent environment bodies, normalize `\\`) while preserving idempotency
   (`format(format(math)) == format(math)`), behind an experimental gate.
