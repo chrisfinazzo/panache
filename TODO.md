@@ -1034,10 +1034,11 @@ panache starts caching NodePtrs across edits.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
-- [ ] Give a line's **container prefix** one representation, so no consumer can
+- [x] Give a line's **container prefix** one representation, so no consumer can
   mistake prefix bytes for content. The structural fix landed (`LINE_PREFIX`
-  below); what remains is the stragglers still reading raw text and the two
-  structural gaps at the end.
+  below), the stragglers reading raw text migrated, and the two structural
+  gaps at the end (the marker-segment-gated lifts and the rowspan-grid
+  truncation) closed.
 
   - [x] **Buffers count segments where they mean lines.** `ListItemBuffer` grew
     the line-oriented API (`sole_text_segment`, `buffered_line_count`,
@@ -1111,12 +1112,23 @@ panache starts caching NodePtrs across edits.
     goldens, `blockquote_list_item_{atx_heading,html_block}` formatter
     goldens).
 
-  - [ ] **A rowspan grid inside a container truncates at the boundary line**:
-    `- +--+--+` items and `> `-quoted tables end the `GRID_TABLE` at an
-    interior `+   +--+` row separator (in a list item the `+` even opens a
-    nested list), so the table's tail parses as sibling blocks where pandoc
-    keeps one table. Parser-side (table continuation rules), upstream of the
-    formatter's span layout.
+  - [x] **A rowspan grid keeps its interior boundary lines.** The partial
+    (rowspan) row separator (`+   +---+`, `+---+   |`) became a grid-line
+    class: the scan and emission loops accept it as a `TABLE_SEPARATOR`
+    (checked after the container terminator, so a *dedented* separator still
+    ends the item the way pandoc's list-start tolerance demands), and a
+    list-item hold (`partial_separator_continues_item_table`, consulted by
+    the dispatcher path, the quoted lazy fold, and the
+    sibling-marker-across-bq branch) keeps the line buffered instead of
+    letting its `+` open a list. Downstream, the projector applies pandoc's
+    `plainify` per cell (a lone `Para` demotes to `Plain`; multi-block
+    rowspan cells keep `Para`s), and the formatter routes partial-separator
+    tables onto the span-aware canonical-grid path and no longer trims them
+    as marker lines in the quoted-list re-prefix walk. Top-level,
+    `> `-quoted, `- ` items, and `> - ` combos now parse, project, and
+    format to pandoc's exact native AST (unit pins in
+    `blocks/tests/tables.rs`, `*grid_table_rowspan*` goldens in both
+    suites).
 
 ## Parser - Coverage
 
