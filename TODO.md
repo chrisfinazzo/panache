@@ -1100,10 +1100,16 @@ panache starts caching NodePtrs across edits.
     prefixed block would orphan or swallow `> ` bytes — line-local fixes
     still apply, unprefixed blocks keep multi-line fixes).
 
-  - [ ] **`emit_as_block`'s ATX and HTML lifts stay `is_text_only`-gated**:
-    unlike the table/div lift they have no bq-prefix re-injection plumbing,
-    so a quoted item whose buffer holds marker segments skips them (`- # h`
-    lifts, `> - # h`'s continuation shapes do not).
+  - [x] **`emit_as_block`'s ATX and HTML lifts see past marker segments.** The
+    `is_text_only` gates became a line-0-carries-no-bq-prefix guard: the
+    multi-line ATX split routes its trailing block through the marker-aware
+    paragraph buffer, and the HTML lift threads `blockquote_prefixes()` into
+    graft-time `bq_then_list` prefix lines (the table/div lift's contract).
+    `> - # h` + `>   text` is now pandoc's `Header` + `Plain` (both
+    dialects) and `> - <div>foo</div>` + `>   after` lifts to `Div` +
+    `Plain` (`{atx_heading,html_block}_in_quoted_list_item_*` parser
+    goldens, `blockquote_list_item_{atx_heading,html_block}` formatter
+    goldens).
 
   - [ ] **A rowspan grid inside a container truncates at the boundary line**:
     `- +--+--+` items and `> `-quoted tables end the `GRID_TABLE` at an
