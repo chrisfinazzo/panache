@@ -2,8 +2,8 @@ use rowan::TextRange;
 use serde::Deserialize;
 
 use super::{
-    ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_offset_to_original_with_end_boundary,
+    ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
+    map_tool_line_col_to_original,
 };
 use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin, Location};
 
@@ -62,32 +62,26 @@ impl ExternalLinterParser for JarlParser {
             let line = jarl_diag.location.row;
             let column = jarl_diag.location.column + 1;
             let range_len = jarl_diag.range[1].saturating_sub(jarl_diag.range[0]);
-            let start_offset = line_col_to_offset(ctx.original_input, line, column)
+            let start_offset = map_tool_line_col_to_original(ctx, line, column)
                 .unwrap_or(ctx.original_input.len());
             let end_offset = start_offset
                 .saturating_add(range_len)
                 .min(ctx.original_input.len());
             let range = TextRange::new((start_offset as u32).into(), (end_offset as u32).into());
 
-            let location = Location {
-                line,
-                column,
-                range,
-            };
+            let location = Location::from_range(range, ctx.original_input);
 
             let fix = if let Some(mappings) = ctx.mappings {
                 if !jarl_diag.fix.to_skip {
-                    if let (Some(fix_start), Some(fix_end)) = (
-                        map_concatenated_offset_to_original_with_end_boundary(
-                            jarl_diag.fix.start,
-                            mappings,
-                        ),
-                        map_concatenated_offset_to_original_with_end_boundary(
-                            jarl_diag.fix.end,
-                            mappings,
-                        ),
-                    ) {
-                        Some(Fix::safe(
+                    map_concatenated_edit_to_original(
+                        ctx.linted_input,
+                        jarl_diag.fix.start,
+                        jarl_diag.fix.end,
+                        &jarl_diag.fix.content,
+                        mappings,
+                    )
+                    .map(|(fix_start, fix_end)| {
+                        Fix::safe(
                             format!("Apply suggested fix: {}", jarl_diag.fix.content),
                             vec![Edit {
                                 range: TextRange::new(
@@ -96,10 +90,8 @@ impl ExternalLinterParser for JarlParser {
                                 ),
                                 replacement: jarl_diag.fix.content.clone(),
                             }],
-                        ))
-                    } else {
-                        None
-                    }
+                        )
+                    })
                 } else {
                     None
                 }

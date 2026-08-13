@@ -27,12 +27,57 @@ pub fn is_block_element(kind: SyntaxKind) -> bool {
 pub struct CodeBlock {
     /// Programming language of the block
     pub language: String,
-    /// Content of the code block (without fences)
+    /// Content of the code block (without fences), dedented: container
+    /// prefix bytes (`> ` markers, list item indent) carried inside the
+    /// block as `LINE_PREFIX` tokens are skipped so external tools see
+    /// valid code.
     pub content: String,
     /// Starting line number in the document (1-indexed)
     pub start_line: usize,
     /// Byte offset range of the content in the original document
     pub original_range: std::ops::Range<usize>,
+    /// For each line of `content`, the byte offset in the original document
+    /// where that line's content starts — after the line's container prefix.
+    /// Dedenting makes plain start-plus-relative-offset arithmetic wrong on
+    /// prefixed lines, so offset mapping walks these instead.
+    pub line_starts: Vec<usize>,
+}
+
+/// A node's text with each line's container-prefix (`LINE_PREFIX`) tokens
+/// skipped, paired with the original byte offset at which each produced
+/// line starts.
+fn dedented_text_with_line_starts(node: &SyntaxNode) -> (String, Vec<usize>) {
+    let mut text = String::new();
+    let mut line_starts = Vec::new();
+    let mut at_line_start = true;
+
+    for token in node
+        .descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+    {
+        if token.kind() == SyntaxKind::LINE_PREFIX {
+            continue;
+        }
+        let token_text = token.text();
+        let base: usize = token.text_range().start().into();
+        let mut pos = 0;
+        while pos < token_text.len() {
+            if at_line_start {
+                line_starts.push(base + pos);
+                at_line_start = false;
+            }
+            match token_text[pos..].find('\n') {
+                Some(rel) => {
+                    pos += rel + 1;
+                    at_line_start = true;
+                }
+                None => break,
+            }
+        }
+        text.push_str(token_text);
+    }
+
+    (text, line_starts)
 }
 
 /// Collect all fenced code blocks from a syntax tree, grouped by language.
@@ -84,7 +129,7 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeBl
 
     let language = language?;
     let body_node = body_node?;
-    let content = body_node.text().to_string();
+    let (content, line_starts) = dedented_text_with_line_starts(&body_node);
 
     if language.is_empty() || content.is_empty() {
         return None;
@@ -99,12 +144,14 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeBl
         content,
         start_line: offset_to_line(input, start),
         original_range: start..end,
+        line_starts,
     })
 }
 
 fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
     let mut language = None;
     let mut content = String::new();
+    let mut line_starts = Vec::new();
     let mut content_start_offset = None;
     let mut content_end_offset = None;
 
@@ -135,7 +182,7 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
                     }
                 }
                 SyntaxKind::CODE_CONTENT => {
-                    content = n.text().to_string();
+                    (content, line_starts) = dedented_text_with_line_starts(&n);
                     // Track where the actual code content starts and ends (not the fence)
                     let range = n.text_range();
                     content_start_offset = Some(range.start().into());
@@ -170,6 +217,7 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
         content,
         start_line,
         original_range,
+        line_starts,
     })
 }
 

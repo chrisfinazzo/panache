@@ -14,6 +14,12 @@ pub struct BlockMapping {
     pub original_range: std::ops::Range<usize>,
     /// Starting line number in both files (preserved by blank line padding)
     pub start_line: usize,
+    /// Per content line: the line's start offset in the concatenated file
+    /// paired with the offset of its first content byte in the original
+    /// document. Block content is dedented (container prefixes stripped),
+    /// so offsets must map line by line rather than by a single block-start
+    /// delta; empty means the content is byte-identical to the original.
+    pub line_offsets: Vec<(usize, usize)>,
 }
 
 /// Result of concatenating code blocks with mapping information.
@@ -57,11 +63,23 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
         // Track the end of this block in the concatenated file
         let concat_end = content.len();
 
+        // Pair each content line's concatenated start with the original
+        // offset of its first content byte (past the container prefix).
+        let mut line_offsets = Vec::with_capacity(block.line_starts.len());
+        let mut line_start = concat_start;
+        for (idx, line) in block.content.split_inclusive('\n').enumerate() {
+            if let Some(&original) = block.line_starts.get(idx) {
+                line_offsets.push((line_start, original));
+            }
+            line_start += line.len();
+        }
+
         // Record the mapping
         mappings.push(BlockMapping {
             concatenated_range: concat_start..concat_end,
             original_range: block.original_range.clone(),
             start_line: block.start_line,
+            line_offsets,
         });
 
         // Update current line based on how many lines we just added
@@ -165,6 +183,7 @@ print("hello")
             content: "x <- 1\n".to_string(),
             start_line: 5,
             original_range: 100..107, // Dummy range for test
+            line_starts: vec![100],
         }];
 
         let result = concatenate_with_blanks(&blocks);
@@ -182,12 +201,14 @@ print("hello")
                 content: "x <- 1\n".to_string(),
                 start_line: 2,
                 original_range: 50..57,
+                line_starts: vec![50],
             },
             CodeBlock {
                 language: "r".to_string(),
                 content: "y <- 2\n".to_string(),
                 start_line: 6,
                 original_range: 150..157,
+                line_starts: vec![150],
             },
         ];
 
@@ -215,12 +236,14 @@ print("hello")
                 content: "a <- 1\n".to_string(),
                 start_line: 10,
                 original_range: 200..207,
+                line_starts: vec![200],
             },
             CodeBlock {
                 language: "r".to_string(),
                 content: "b <- 2\n".to_string(),
                 start_line: 20,
                 original_range: 400..407,
+                line_starts: vec![400],
             },
         ];
 
@@ -247,6 +270,69 @@ print("hello")
         assert_eq!(offset_to_line(input, 5), 1); // Before first \n
         assert_eq!(offset_to_line(input, 6), 2); // Start of line 2
         assert_eq!(offset_to_line(input, 12), 3); // Start of line 3
+    }
+
+    #[test]
+    fn test_collect_blockquoted_block_dedents_prefix() {
+        let input = "> ```python\n> x=1\n> y=2\n> ```\n";
+        let tree = parse(input, None);
+        let blocks = collect_code_blocks(&tree, input);
+
+        let py_blocks = &blocks["python"];
+        assert_eq!(py_blocks.len(), 1);
+        assert_eq!(
+            py_blocks[0].content, "x=1\ny=2\n",
+            "container prefix bytes must not reach external tools"
+        );
+        assert_eq!(py_blocks[0].start_line, 2);
+        assert_eq!(
+            py_blocks[0].line_starts,
+            vec![input.find("x=1").unwrap(), input.find("y=2").unwrap()]
+        );
+    }
+
+    #[test]
+    fn test_collect_list_item_block_dedents_indent() {
+        let input = "- item\n\n  ```python\n  x=1\n  ```\n";
+        let tree = parse(input, None);
+        let blocks = collect_code_blocks(&tree, input);
+
+        let py_blocks = &blocks["python"];
+        assert_eq!(py_blocks.len(), 1);
+        assert_eq!(py_blocks[0].content, "x=1\n");
+        assert_eq!(py_blocks[0].line_starts, vec![input.find("x=1").unwrap()]);
+    }
+
+    #[test]
+    fn test_mapping_maps_dedented_offsets_back_through_prefix() {
+        let input = "> ```python\n> x=1\n> y=2\n> ```\n";
+        let tree = parse(input, None);
+        let blocks = collect_code_blocks(&tree, input);
+        let result = concatenate_with_blanks_and_mapping(&blocks["python"]);
+
+        // Line numbers are preserved: content starts on document line 2.
+        let lines: Vec<&str> = result.content.lines().collect();
+        assert_eq!(lines[1], "x=1");
+        assert_eq!(lines[2], "y=2");
+
+        // A tool offset inside the dedented view maps back past the `> `
+        // prefix of its own line.
+        let concat_y = result.content.find("y=2").unwrap();
+        assert_eq!(
+            crate::linter::external_linters::map_concatenated_offset_to_original(
+                concat_y,
+                &result.mappings
+            ),
+            Some(input.find("y=2").unwrap())
+        );
+        let concat_1 = result.content.find('1').unwrap();
+        assert_eq!(
+            crate::linter::external_linters::map_concatenated_offset_to_original(
+                concat_1,
+                &result.mappings
+            ),
+            Some(input.find('1').unwrap())
+        );
     }
 
     #[test]
@@ -364,12 +450,14 @@ d <- 4
                 content: "x <- 1\n".to_string(),
                 start_line: 2,
                 original_range: 10..17, // Hypothetical original positions
+                line_starts: vec![10],
             },
             CodeBlock {
                 language: "r".to_string(),
                 content: "y <- 2\n".to_string(),
                 start_line: 6,
                 original_range: 50..57,
+                line_starts: vec![50],
             },
         ];
 

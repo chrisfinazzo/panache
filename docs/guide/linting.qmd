@@ -168,16 +168,26 @@ Available external linters:
 
 External linters analyze code blocks using a stateful concatenation approach:
 
-1. **Collection**: All code blocks of the target language are extracted
+1. **Collection**: All code blocks of the target language are extracted, with
+   any enclosing container syntax (block quote markers, list item indentation)
+   stripped so the linter sees valid code
 2. **Concatenation**: Blocks are joined with blank-line preservation to maintain
    line numbers
 3. **Analysis**: The external linter analyzes the concatenated code
-4. **Mapping**: Diagnostics are mapped back to original document positions
+4. **Mapping**: Diagnostics are mapped back to original document positions,
+   accounting for each line's stripped container prefix
 
 ::: {.callout-note}
 This approach correctly handles stateful code. If a variable is defined in one
 code block and used in another, the linter sees the complete context and won't
 report false positives.
+:::
+
+::: {.callout-note}
+For a code block nested in a block quote or list item, an autofix that would add
+or remove whole lines cannot be applied without disturbing the surrounding
+container syntax, so such fixes are dropped and only the diagnostic is reported.
+Fixes that stay within a single line apply normally.
 :::
 
 ### Example

@@ -1,5 +1,5 @@
 use crate::config::FormatterExtensions;
-use crate::syntax::{AstNode, Heading, SyntaxKind, SyntaxNode};
+use crate::syntax::{AstNode, Heading, SyntaxKind, SyntaxNode, text_without_line_prefixes};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
@@ -119,7 +119,10 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
                     }
                 }
                 SyntaxKind::CODE_CONTENT => {
-                    content = n.text().to_string();
+                    // Dedented: container prefix bytes (`> ` markers, list
+                    // item indent) are `LINE_PREFIX` tokens inside the node
+                    // and must not reach external tools as code bytes.
+                    content = text_without_line_prefixes(&n);
                     // Track where the actual code content starts and ends (not the fence)
                     let range = n.text_range();
                     content_start_offset = Some(range.start().into());

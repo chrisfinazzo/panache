@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use super::{
     ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_offset_to_original_with_end_boundary,
+    map_concatenated_edit_to_original, map_tool_line_col_to_original,
 };
 use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
 
@@ -55,20 +55,16 @@ impl ExternalLinterParser for RuffParser {
         for ruff_diag in output {
             let line = ruff_diag.location.row;
             let column = ruff_diag.location.column;
-            let start_offset = line_col_to_offset(ctx.original_input, line, column)
+            let start_offset = map_tool_line_col_to_original(ctx, line, column)
                 .unwrap_or(ctx.original_input.len());
 
             let end_line = ruff_diag.end_location.row;
             let end_column = ruff_diag.end_location.column;
-            let end_offset = line_col_to_offset(ctx.original_input, end_line, end_column)
+            let end_offset = map_tool_line_col_to_original(ctx, end_line, end_column)
                 .unwrap_or(ctx.original_input.len());
 
             let range = TextRange::new((start_offset as u32).into(), (end_offset as u32).into());
-            let location = Location {
-                line,
-                column,
-                range,
-            };
+            let location = Location::from_range(range, ctx.original_input);
 
             let fix = if let (Some(mappings), Some(fix)) = (ctx.mappings, ruff_diag.fix.as_ref()) {
                 let mut edits = Vec::new();
@@ -93,15 +89,13 @@ impl ExternalLinterParser for RuffParser {
                         break;
                     };
 
-                    let Some(mapped_start) =
-                        map_concatenated_offset_to_original_with_end_boundary(start, mappings)
-                    else {
-                        edits.clear();
-                        break;
-                    };
-                    let Some(mapped_end) =
-                        map_concatenated_offset_to_original_with_end_boundary(end, mappings)
-                    else {
+                    let Some((mapped_start, mapped_end)) = map_concatenated_edit_to_original(
+                        ctx.linted_input,
+                        start,
+                        end,
+                        &edit.content,
+                        mappings,
+                    ) else {
                         edits.clear();
                         break;
                     };

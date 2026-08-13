@@ -13,7 +13,7 @@ use rowan::TextRange;
 use serde::Deserialize;
 
 use super::{
-    ExternalLinterParser, LinterError, ParseContext,
+    ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
     map_concatenated_offset_to_original_with_end_boundary,
 };
 use crate::linter::diagnostics::{
@@ -138,12 +138,11 @@ fn parse_family(ctx: &ParseContext<'_>, tool: &str) -> Result<Vec<Diagnostic>, L
                 .as_ref()
                 .or_else(|| family_diag.fixes.first())
                 .and_then(|family_fix| {
-                    let fix_start = map_concatenated_offset_to_original_with_end_boundary(
+                    let (fix_start, fix_end) = map_concatenated_edit_to_original(
+                        ctx.linted_input,
                         family_fix.start,
-                        mappings,
-                    )?;
-                    let fix_end = map_concatenated_offset_to_original_with_end_boundary(
                         family_fix.end,
+                        &family_fix.content,
                         mappings,
                     )?;
                     let edits = vec![Edit {
@@ -198,11 +197,13 @@ fn parse_badness(ctx: &ParseContext<'_>) -> Result<Vec<Diagnostic>, LinterError>
                 }
                 let mut edits = Vec::new();
                 for edit in &badness_fix.edits {
-                    let start = map_concatenated_offset_to_original_with_end_boundary(
-                        edit.start, mappings,
+                    let (start, end) = map_concatenated_edit_to_original(
+                        ctx.linted_input,
+                        edit.start,
+                        edit.end,
+                        &edit.content,
+                        mappings,
                     )?;
-                    let end =
-                        map_concatenated_offset_to_original_with_end_boundary(edit.end, mappings)?;
                     edits.push(Edit {
                         range: TextRange::new((start as u32).into(), (end as u32).into()),
                         replacement: edit.content.clone(),
@@ -370,6 +371,7 @@ mod tests {
             concatenated_range: 3..17,
             original_range: 14..28,
             start_line: 4,
+            line_offsets: vec![],
         }];
         // Offsets are relative to the concatenated file (block starts at 3).
         let output = r#"[
@@ -421,6 +423,7 @@ mod tests {
             concatenated_range: 0..30,
             original_range: 0..30,
             start_line: 1,
+            line_offsets: vec![],
         }];
         let ctx = ParseContext {
             output: FATOU_OUTPUT,
@@ -464,6 +467,7 @@ mod tests {
             concatenated_range: 0..20,
             original_range: 0..20,
             start_line: 1,
+            line_offsets: vec![],
         }];
         let ctx = ParseContext {
             output,
@@ -526,6 +530,7 @@ mod tests {
             concatenated_range: 0..7,
             original_range: 0..7,
             start_line: 1,
+            line_offsets: vec![],
         }];
         let ctx = ParseContext {
             output,
@@ -546,6 +551,7 @@ mod tests {
             concatenated_range: 3..17,
             original_range: 14..28,
             start_line: 4,
+            line_offsets: vec![],
         }];
         // Fix offsets far outside every mapping.
         let output = r#"[
@@ -612,6 +618,7 @@ mod tests {
             concatenated_range: 3..17,
             original_range: 18..32,
             start_line: 4,
+            line_offsets: vec![],
         }];
         // Offsets shifted into the concatenated file (block starts at 3).
         let output = BADNESS_OUTPUT
@@ -669,6 +676,7 @@ mod tests {
             concatenated_range: 0..6,
             original_range: 0..6,
             start_line: 1,
+            line_offsets: vec![],
         }];
         let ctx = ParseContext {
             output,
@@ -710,6 +718,7 @@ mod tests {
             concatenated_range: 0..6,
             original_range: 0..6,
             start_line: 1,
+            line_offsets: vec![],
         }];
         let ctx = ParseContext {
             output,

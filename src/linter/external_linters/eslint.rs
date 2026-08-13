@@ -2,8 +2,8 @@ use rowan::TextRange;
 use serde::Deserialize;
 
 use super::{
-    ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_offset_to_original_with_end_boundary,
+    ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
+    map_tool_line_col_to_original,
 };
 use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
 
@@ -57,18 +57,17 @@ impl ExternalLinterParser for EslintParser {
             for msg in report.messages {
                 let line = msg.line;
                 let column = msg.column;
-                let start_offset = line_col_to_offset(ctx.original_input, line, column)
+                let start_offset = map_tool_line_col_to_original(ctx, line, column)
                     .unwrap_or(ctx.original_input.len());
                 let end_line = msg.end_line.unwrap_or(line);
                 let end_column = msg.end_column.unwrap_or(column.saturating_add(1));
-                let end_offset = line_col_to_offset(ctx.original_input, end_line, end_column)
+                let end_offset = map_tool_line_col_to_original(ctx, end_line, end_column)
                     .unwrap_or(ctx.original_input.len());
 
-                let location = Location {
-                    line,
-                    column,
-                    range: TextRange::new((start_offset as u32).into(), (end_offset as u32).into()),
-                };
+                let location = Location::from_range(
+                    TextRange::new((start_offset as u32).into(), (end_offset as u32).into()),
+                    ctx.original_input,
+                );
 
                 let code = msg.rule_id.unwrap_or_else(|| "eslint".to_string());
                 let diagnostic = match msg.severity {
@@ -82,16 +81,15 @@ impl ExternalLinterParser for EslintParser {
                     .or_else(|| msg.suggestions.into_iter().next().map(|s| s.fix));
                 let mapped_fix =
                     if let (Some(mappings), Some(eslint_fix)) = (ctx.mappings, selected_fix) {
-                        let fix_start = map_concatenated_offset_to_original_with_end_boundary(
+                        map_concatenated_edit_to_original(
+                            ctx.linted_input,
                             eslint_fix.range[0],
-                            mappings,
-                        );
-                        let fix_end = map_concatenated_offset_to_original_with_end_boundary(
                             eslint_fix.range[1],
+                            &eslint_fix.text,
                             mappings,
-                        );
-                        if let (Some(fix_start), Some(fix_end)) = (fix_start, fix_end) {
-                            Some(Fix::safe(
+                        )
+                        .map(|(fix_start, fix_end)| {
+                            Fix::safe(
                                 "Apply ESLint fix",
                                 vec![Edit {
                                     range: TextRange::new(
@@ -100,10 +98,8 @@ impl ExternalLinterParser for EslintParser {
                                     ),
                                     replacement: eslint_fix.text,
                                 }],
-                            ))
-                        } else {
-                            None
-                        }
+                            )
+                        })
                     } else {
                         None
                     };

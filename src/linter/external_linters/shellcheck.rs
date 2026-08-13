@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use super::{
     ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_offset_to_original_with_end_boundary,
+    map_concatenated_edit_to_original, map_concatenated_offset_to_original_with_end_boundary,
 };
 use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
 
@@ -113,15 +113,13 @@ impl ExternalLinterParser for ShellcheckParser {
                         end = start;
                     }
 
-                    let Some(mapped_start) =
-                        map_concatenated_offset_to_original_with_end_boundary(start, mappings)
-                    else {
-                        edits.clear();
-                        break;
-                    };
-                    let Some(mapped_end) =
-                        map_concatenated_offset_to_original_with_end_boundary(end, mappings)
-                    else {
+                    let Some((mapped_start, mapped_end)) = map_concatenated_edit_to_original(
+                        ctx.linted_input,
+                        start,
+                        end,
+                        &replacement.replacement,
+                        mappings,
+                    ) else {
                         edits.clear();
                         break;
                     };

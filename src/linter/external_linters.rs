@@ -350,14 +350,50 @@ pub(crate) fn line_col_to_offset(input: &str, line: usize, column: usize) -> Opt
     line_col_to_byte_offset_1based(input, line, column)
 }
 
+/// Byte offset in the original document for a tool-reported 1-based
+/// (line, column). Tool positions are relative to the concatenated,
+/// *dedented* lint input, so with mappings present the position must go
+/// through the per-line offset table — a column on a container-prefixed
+/// line is short of the document column by the stripped prefix. Reading
+/// the original input directly is only correct when the whole input was
+/// linted as-is (no mappings).
+pub(crate) fn map_tool_line_col_to_original(
+    ctx: &ParseContext<'_>,
+    line: usize,
+    column: usize,
+) -> Option<usize> {
+    match ctx.mappings {
+        Some(mappings) => line_col_to_offset(ctx.linted_input, line, column)
+            .and_then(|offset| {
+                map_concatenated_offset_to_original_with_end_boundary(offset, mappings)
+            })
+            .or_else(|| line_col_to_offset(ctx.original_input, line, column)),
+        None => line_col_to_offset(ctx.original_input, line, column),
+    }
+}
+
 pub(crate) fn map_concatenated_offset_to_original(
     offset: usize,
     mappings: &[BlockMapping],
 ) -> Option<usize> {
     for mapping in mappings {
         if mapping.concatenated_range.contains(&offset) {
-            let relative_offset = offset - mapping.concatenated_range.start;
-            let original_offset = mapping.original_range.start + relative_offset;
+            // Block content is dedented (container prefixes stripped), so
+            // map through the line table: the offset's distance into its
+            // line is the same in both views, but each line's start shifts
+            // by that line's stripped prefix.
+            let original_offset = if let Some(&(line_start, original_line_start)) = mapping
+                .line_offsets
+                .iter()
+                .rev()
+                .find(|(line_start, _)| *line_start <= offset)
+            {
+                original_line_start + (offset - line_start)
+            } else {
+                // No line table (hand-built mapping): the content is
+                // byte-identical to the original, offset arithmetic holds.
+                mapping.original_range.start + (offset - mapping.concatenated_range.start)
+            };
             if original_offset <= mapping.original_range.end {
                 return Some(original_offset);
             }
@@ -381,9 +417,194 @@ pub(crate) fn map_concatenated_offset_to_original_with_end_boundary(
     })
 }
 
+/// Map a fix edit's `[start, end)` (offsets in the concatenated lint input)
+/// plus its replacement text onto an original-document range.
+///
+/// Block content is dedented, so a document range covering more than one
+/// content line also covers the intervening container-prefix bytes — a
+/// tool edit spanning lines of a prefixed block is not expressible as one
+/// document edit (applying it verbatim deletes or displaces `> `/indent
+/// bytes and merges lines). Such fixes return `None`: the caller keeps
+/// the diagnostic and drops the fix.
+///
+/// Blocks whose content is byte-identical to the document (every line
+/// shifted by one constant delta — the common top-level case) stay fully
+/// mappable, multi-line edits included.
+pub(crate) fn map_concatenated_edit_to_original(
+    linted_input: &str,
+    start: usize,
+    end: usize,
+    replacement: &str,
+    mappings: &[BlockMapping],
+) -> Option<(usize, usize)> {
+    if end < start {
+        return None;
+    }
+    let mapping = mappings.iter().find(|mapping| {
+        mapping.concatenated_range.contains(&start) || mapping.concatenated_range.end == start
+    })?;
+    if end > mapping.concatenated_range.end {
+        return None;
+    }
+
+    let block_delta = mapping
+        .original_range
+        .start
+        .wrapping_sub(mapping.concatenated_range.start);
+    let constant_delta = mapping
+        .line_offsets
+        .iter()
+        .all(|&(line_start, original_line_start)| {
+            original_line_start.wrapping_sub(line_start) == block_delta
+        });
+    if constant_delta {
+        // Content is byte-identical to the document: plain offset
+        // arithmetic expresses any edit, including multi-line ones.
+        return Some((start + block_delta, end + block_delta));
+    }
+
+    // Prefixed block. A position past the final newline sits before the
+    // *next document line's* prefix, so an insertion there would land
+    // outside the container's line structure.
+    if start == mapping.concatenated_range.end {
+        return None;
+    }
+
+    // The replaced document range is contiguous, so an edit reaching into
+    // another content line would also cover that line's prefix bytes.
+    // Line structure must survive too: an edit absorbing the line's
+    // trailing newline has to put exactly one back at its end (else the
+    // next line's prefix is orphaned onto this line), and an edit inside
+    // the line must not introduce newlines (the inserted line would be
+    // prefix-less).
+    let covered = linted_input.get(start..end)?;
+    let covered_newlines = covered.matches('\n').count();
+    let replacement_newlines = replacement.matches('\n').count();
+    let structure_preserved = match covered_newlines {
+        0 => replacement_newlines == 0,
+        1 => covered.ends_with('\n') && replacement_newlines == 1 && replacement.ends_with('\n'),
+        _ => false,
+    };
+    if !structure_preserved {
+        return None;
+    }
+
+    let (line_start, original_line_start) = *mapping
+        .line_offsets
+        .iter()
+        .rev()
+        .find(|(line_start, _)| *line_start <= start)?;
+    let mapped_start = original_line_start + (start - line_start);
+    let mapped_end = original_line_start + (end - line_start);
+    if mapped_end > mapping.original_range.end {
+        return None;
+    }
+    Some((mapped_start, mapped_end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prefixed_block_mapping(input: &str) -> (String, Vec<BlockMapping>) {
+        let tree = crate::parse(input, None);
+        let blocks = crate::utils::collect_code_blocks(&tree, input);
+        let result = crate::linter::code_block_collector::concatenate_with_blanks_and_mapping(
+            &blocks["python"],
+        );
+        (result.content, result.mappings)
+    }
+
+    #[test]
+    fn edit_mapper_maps_line_local_edits_past_prefix() {
+        let input = "> ```python\n> import os\n> x = 1\n> ```\n";
+        let (linted, mappings) = prefixed_block_mapping(input);
+
+        // Mid-line edit maps past the line's `> ` prefix.
+        let start = linted.find("os").unwrap();
+        assert_eq!(
+            map_concatenated_edit_to_original(&linted, start, start + 2, "sys", &mappings),
+            Some((input.find("os").unwrap(), input.find("os").unwrap() + 2))
+        );
+
+        // A whole-line replacement that restores the newline stays
+        // line-local and is representable.
+        let line = linted.find("import os\n").unwrap();
+        let doc_line = input.find("import os\n").unwrap();
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &linted,
+                line,
+                line + "import os\n".len(),
+                "import sys\n",
+                &mappings
+            ),
+            Some((doc_line, doc_line + "import os\n".len()))
+        );
+    }
+
+    #[test]
+    fn edit_mapper_drops_structure_breaking_edits_in_prefixed_blocks() {
+        let input = "> ```python\n> import os\n> x = 1\n> ```\n";
+        let (linted, mappings) = prefixed_block_mapping(input);
+        let line = linted.find("import os\n").unwrap();
+
+        // Whole-line deletion absorbs the newline without restoring it:
+        // applying it would orphan the next line's `> ` prefix.
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &linted,
+                line,
+                line + "import os\n".len(),
+                "",
+                &mappings
+            ),
+            None
+        );
+
+        // An edit spanning two content lines would also cover the second
+        // line's prefix bytes in the document.
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &linted,
+                line,
+                linted.find("x = 1").unwrap() + 1,
+                "y",
+                &mappings
+            ),
+            None
+        );
+
+        // Inserted newlines would create prefix-less lines inside the
+        // container.
+        let start = linted.find("os").unwrap();
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &linted,
+                start,
+                start + 2,
+                "os\nimport sys",
+                &mappings
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn edit_mapper_keeps_multiline_edits_for_unprefixed_blocks() {
+        let input = "```python\nimport os\nx = 1\n```\n";
+        let (linted, mappings) = prefixed_block_mapping(input);
+
+        // Content is byte-identical to the document, so a multi-line
+        // deletion maps through unchanged.
+        let line = linted.find("import os\n").unwrap();
+        let doc_line = input.find("import os\n").unwrap();
+        let len = "import os\nx = 1\n".len();
+        assert_eq!(
+            map_concatenated_edit_to_original(&linted, line, line + len, "", &mappings),
+            Some((doc_line, doc_line + len))
+        );
+    }
 
     #[test]
     fn test_registry_contains_linters() {
