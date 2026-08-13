@@ -1046,19 +1046,34 @@ panache starts caching NodePtrs across edits.
   `nested_list_band_marker_terminates_item` /
   `simple_table_in_nested_item_stops_at_band_marker` goldens in both suites.
 
-- [ ] **Blockquoted band markers mis-nest and vanish from the AST**:
+- [x] **Blockquoted band markers mis-nest and vanish from the AST**:
   `> - a\n>   10.  b\n>     - c\n` parses `- c` through the nested-list path
   with the inner item already closed but its LIST node still open, emitting
   a `LIST` directly inside a `LIST` (no `LIST_ITEM` between), which the
   pandoc-ast projector silently drops --- the CST is lossless but
   linter/LSP/formatter consumers never see the list. Pandoc makes it a
   sibling `BulletList` inside item `a`, like the unquoted band cases. Root
-  cause is upstream of `band_fence_level`: inside the blockquote
-  continuation the inner `ListItem` is off the stack by dispatch time, so
-  `current_content_col` is the *outer* item's column and the
-  `indent >= current_content_col` branch fires; `band_fence_level` correctly
-  sees no open inner item and stays out of it. Pre-existing (identical CST
-  at `89bc3cdb`, before the band fence).
+  cause was upstream of `band_fence_level`: the blockquote continuation
+  pre-closed the inner `ListItem` before dispatch, so `current_content_col`
+  was the *outer* item's column, the `indent >= current_content_col` branch
+  fired, and `band_fence_level` (which pairs each LIST with its *open* item)
+  stayed out. Fixed by leaving the ladder open when the quoted marker falls
+  in the innermost band (Pandoc dialect): dispatch's existing fence/lazy
+  machinery then classifies it --- fence within the tolerance (sibling list
+  in the enclosing item, or sibling item on a marker match via the earlier
+  sibling path), lazy continuation text past it, both probed against
+  `pandoc -f markdown -t native`. Pinned by the `quoted_band_marker_*` tests
+  in `blocks/tests/blockquotes.rs` and parser goldens.
+
+- [ ] The formatter **flattens nested lists in blockquotes** (meaning change):
+  `> - a\n>   10.  b\n` formats to `> - a\n> 10. b\n`, dropping the nested
+  ordered list's indent so it reparses as a *sibling* of the bullet list
+  inside the quote. Pre-existing and independent of the band fence work
+  (reproduces with no band marker at all; surfaced while probing the
+  blockquoted-band fix, whose fence/lazy cases inherit the same flatten).
+  Losslessness and idempotency both pass, so `debug format --checks all`
+  does not catch it --- only a pandoc-AST comparison of input vs formatted
+  output does.
 
 - [ ] **A nested ordered list at the outer item's exact content column goes
   lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
