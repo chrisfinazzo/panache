@@ -1564,6 +1564,45 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   `blocks/tests/blockquotes.rs`, pandoc corpus 0525-0527, and golden
   `blockquote_lazy_html_block_interrupt`.
 
+  Design follow-ups from that fix, each bounded:
+
+  - [ ] Extract a **shared lazy-interrupt predicate**. The `interrupts_via_*`
+    probe list (hr, fence, heading, div closer, html, plus `ends_gobble`) is
+    copy-pasted across the paragraph gate and the list-item gate in
+    `parser/core.rs`, with partial copies in the footnote-body HTML dispatch
+    and the definition continuation policy. The two gates differ only in the
+    fence rule (backtick-anchored vs any-fence, both pandoc-probed), so one
+    predicate with a per-context fence parameter collapses them. Keep it a
+    probe list rather than delegating to `detect_prepared` --- the
+    dispatcher context can't express the `endline`-guard quirks (byte-0
+    anchoring, `blank_before_header`), and hypothetical dispatch has payload
+    side effects. The failure mode of a missing probe is *silent* (the line
+    becomes lazy inline text, caught only by pandoc-diffing), so each
+    construct family the predicate covers should carry a pandoc corpus pin.
+
+  - [ ] Stop `ContainerPrefix`'s **`ListAdvance` eating non-whitespace bytes**.
+    `advance_columns` advances blindly, so any consumer that strips a full
+    prefix off an under-indented line silently loses content bytes --- it
+    bit twice in one session (`pandoc_html_open_tag_closes` line 0, which
+    suppressed HTML-block detection on `- a`/`<hr>` continuation lines, and
+    the lazy-interrupt helper, which needed `without_innermost_list_advance`
+    to route around it). The three escape hatches (`strip_line_0` semantics,
+    `without_innermost_list_advance`, `lazy_blockquote_gobble`) all exist
+    because "columns the container claims" and "bytes the line carries" are
+    conflated. Cheap hardening: clamp the advance at the first non-blank
+    byte (probe whether any caller relies on the blind advance ---
+    tab-straddle handling is the suspect), or debug-assert it never eats
+    content.
+
+  - [ ] Make the formatter's **BLOCK_QUOTE arm fail closed**. The `_` fallback
+    emits a child without the `> ` prefix, so any block kind missing a
+    per-kind arm is a losslessness break rather than merely ugly output
+    (`PLAIN` was the latest; found via idempotency, not review). Invert the
+    default: an exhaustive match, or a fallback that renders to a temp
+    buffer and re-prefixes every line --- the save/format/re-prefix pattern
+    half the arms already copy-paste, which wants extracting into a helper
+    regardless.
+
 - [x] Migrate the remaining scans' **ad-hoc container bounds** onto
   `ends_container_lines`. Landed one scan per commit, all pandoc-probed:
   pipe rows, the grid loop (shape-disjoint, bound kept as invariant), the
