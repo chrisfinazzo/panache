@@ -613,7 +613,7 @@ panache starts caching NodePtrs across edits.
   multiline path had the same skew and was additionally splicing `>` into
   cell text.
 
-- [ ] `simple_table_aligns` in `pandoc_ast.rs` diverges from pandoc's
+- [x] `simple_table_aligns` in `pandoc_ast.rs` diverges from pandoc's
   `alignType` when a header cell **overruns its dash run**.
   `A    Bcd\n--- ---\nx    y\n` projects `AlignCenter` for column 2 where
   `pandoc -f markdown -t native` says `AlignRight`. The projector asks
@@ -628,7 +628,13 @@ panache starts caching NodePtrs across edits.
   is to match the predicate in the projector, not to reshape the CST -- no
   alignment is stored there, each consumer recomputes it. Rendered output
   currently agrees on this input, so the visible symptom is confined to
-  `parse --to pandoc-ast`.
+  `parse --to pandoc-ast`. Fixed by restating both predicates as ranges
+  (`left_space = cs > col_start`, `right_space = ce < col_end`). The
+  projector turned out to carry the block-quote prefix skew too --- its dash
+  runs were measured from the separator node start --- so a quoted simple
+  table projected every column as `AlignDefault`; both lines are now
+  measured from their own content start. Corpus cases 0540 and 0541 pin the
+  two shapes.
 
 ### Architecture
 

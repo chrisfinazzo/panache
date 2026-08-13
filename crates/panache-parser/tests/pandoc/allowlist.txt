@@ -802,3 +802,12 @@
 # quote deeper.
 538
 539
+
+# Simple-table column alignment follows pandoc's `alignType`: a column is
+# right-spaced only when its cell is *strictly shorter* than the dash run, so
+# 0540's `Bcd` overrunning `---` is AlignRight, not AlignCenter. 0541 pins the
+# same rule inside a blockquote, where the separator carries a
+# `BLOCK_QUOTE_MARKER` the header line does not -- both lines have to be
+# measured from their own content start or every column reads as AlignDefault.
+540
+541

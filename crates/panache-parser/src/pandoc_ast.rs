@@ -3047,15 +3047,46 @@ fn simple_table(node: &SyntaxNode) -> Option<TableData> {
     })
 }
 
+/// Byte length of the block-quote prefix at the start of `node`: the
+/// `BLOCK_QUOTE_MARKER` tokens and the single space each of them owns.
+///
+/// A table nested in a block quote carries a marker on every line it owns,
+/// but the *first* line's marker belongs to the enclosing `BLOCK_QUOTE` and
+/// sits outside the table. Column geometry is byte offsets into these lines,
+/// so a `TABLE_HEADER` would otherwise be measured from a different origin
+/// than the `TABLE_SEPARATOR` that defines its columns.
+fn container_prefix_len(node: &SyntaxNode) -> usize {
+    let mut len = 0;
+    let mut after_marker = false;
+    for element in node.children_with_tokens() {
+        let Some(token) = element.into_token() else {
+            break;
+        };
+        match token.kind() {
+            SyntaxKind::BLOCK_QUOTE_MARKER => {
+                len += token.text().len();
+                after_marker = true;
+            }
+            SyntaxKind::WHITESPACE if after_marker => {
+                len += token.text().len();
+                after_marker = false;
+            }
+            _ => break,
+        }
+    }
+    len
+}
+
 /// Return the `(start_col, end_col)` (inclusive) of each dash run in a
 /// `TABLE_SEPARATOR` node, where columns are 0-based offsets within the
 /// separator's line.
 fn simple_table_dash_runs(separator: &SyntaxNode) -> Vec<(usize, usize)> {
-    // One inclusive `(start, end)` per dash run, offsets relative to the node
-    // start (= line start, prefix included) so `simple_table_aligns` can match
-    // them against cell offsets. Markers are ASCII, so byte offsets equal the
-    // char indices the old char scan produced.
-    let node_start = u32::from(separator.text_range().start());
+    // One inclusive `(start, end)` per dash run, offsets relative to the start
+    // of the line's own content (past any block-quote prefix) so
+    // `simple_table_aligns` can match them against cell offsets. Markers are
+    // ASCII, so byte offsets equal the char indices the old char scan produced.
+    let node_start =
+        u32::from(separator.text_range().start()) + container_prefix_len(separator) as u32;
     separator_marker_tokens(separator)
         .filter(|t| t.kind() == SyntaxKind::TABLE_SEP_DASHES)
         .map(|t| {
@@ -3083,8 +3114,24 @@ fn simple_table_row_cells(row: &SyntaxNode) -> Vec<Vec<Inline>> {
 /// off leading/trailing whitespace before applying the flushness rule.
 /// (Single-line simple-table cells already exclude padding whitespace,
 /// but the trim is a no-op there.)
+///
+/// This restates pandoc's `alignType` (`Readers/Markdown.hs`) in terms of
+/// ranges. Pandoc slices the row from the column start, right-trims it to
+/// `x`, and asks two questions:
+///
+/// - `leftSpace`: does `x` begin with a space? The slice starts at
+///   `col_start`, so that holds exactly when the first visible character is
+///   further right, i.e. `visible_start > col_start`.
+/// - `rightSpace`: is `realLength x < len` (the dash run's length)? `x` runs
+///   from `col_start` through the last visible character, so that holds
+///   exactly when `visible_end < col_end`.
+///
+/// The second one is the trap: pandoc asks whether the cell is *strictly
+/// shorter* than its dash run, so a cell that overruns to the right lands in
+/// the same bucket as one that ends flush with it. Testing `visible_end ==
+/// col_end` instead reads `AlignCenter` where pandoc reads `AlignRight`.
 fn simple_table_aligns(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<&'static str> {
-    let row_start: u32 = row.text_range().start().into();
+    let row_start = u32::from(row.text_range().start()) + container_prefix_len(row) as u32;
     let mut cell_ranges: Vec<(usize, usize)> = Vec::new();
     for cell in row
         .children()
@@ -3117,13 +3164,13 @@ fn simple_table_aligns(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<&'stati
                 .find(|(cs, ce)| ce >= col_start && cs <= col_end);
             match cell {
                 Some((cs, ce)) => {
-                    let left_flush = cs == col_start;
-                    let right_flush = ce == col_end;
-                    match (left_flush, right_flush) {
-                        (true, true) => "AlignDefault",
-                        (true, false) => "AlignLeft",
-                        (false, true) => "AlignRight",
-                        (false, false) => "AlignCenter",
+                    let left_space = cs > col_start;
+                    let right_space = ce < col_end;
+                    match (left_space, right_space) {
+                        (true, false) => "AlignRight",
+                        (false, true) => "AlignLeft",
+                        (true, true) => "AlignCenter",
+                        (false, false) => "AlignDefault",
                     }
                 }
                 None => "AlignDefault",
