@@ -17,8 +17,8 @@
 use super::helpers::*;
 use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::parser::blocks::container_prefix::{
-    ContainerPrefix, FrameVerdict, StripOp, StrippedLines, advance_emitted_marker_columns,
-    strip_content_indent, strip_list_indent,
+    ContainerPrefix, FrameVerdict, PrefixPieceKind, StripOp, StrippedLines,
+    advance_emitted_marker_columns, strip_content_indent, strip_list_indent,
 };
 use crate::parser::blocks::definition_lists::{
     definition_marker_in_list_frame, next_line_is_definition_marker,
@@ -339,14 +339,26 @@ fn strip_consumes_only_container_prefix_bytes() {
     }
 }
 
-/// `split` captures the list-indent bytes for re-injection as a
+/// `split_pieces` captures the list-indent bytes for re-injection as a
 /// `WHITESPACE` token, so it must never claim content bytes either.
 #[test]
-fn split_captures_whitespace_only_list_indent() {
+fn split_pieces_captures_whitespace_only_list_indent() {
     let prefix =
         ContainerPrefix::from_ops(&[StripOp::ListAdvance(2), StripOp::BlockQuoteMarker], false);
-    assert_eq!(prefix.split("  > x"), ("  ", "> ", "x"));
-    assert_eq!(prefix.split("b > x"), ("", "", "b > x"));
+    let (line, inner) = prefix.split_pieces("  > x");
+    assert_eq!(
+        line.pieces(),
+        &[
+            (PrefixPieceKind::Indent, "  ".to_string()),
+            (PrefixPieceKind::BqRun, "> ".to_string()),
+        ]
+    );
+    assert_eq!(inner, "x");
+
+    // A non-whitespace line claims nothing.
+    let (line, inner) = prefix.split_pieces("b > x");
+    assert!(line.is_empty());
+    assert_eq!(inner, "b > x");
 }
 
 /// The step-2 invariant: nested content containers push one

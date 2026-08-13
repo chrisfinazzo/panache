@@ -24,6 +24,8 @@
 //!   `BLOCK_QUOTE_MARKER`, anything else as a 1-byte `WHITESPACE`
 //!   (matching the legacy `BqPrefixState` byte-walker).
 
+use std::ops::Range;
+
 use rowan::GreenNodeBuilder;
 use smallvec::SmallVec;
 
@@ -741,67 +743,34 @@ impl ContainerPrefix {
         (s, emit)
     }
 
-    /// Split a line into `(list_indent, bq_prefix, inner)` — the bytes
-    /// consumed by the FIRST `ListAdvance` op, the bytes consumed by
-    /// all `BlockQuoteMarker` ops between the list advance and the
-    /// next non-bq op, and the remaining inner content. Used by graft
+    /// Split a continuation line into its captured container prefix — as
+    /// ordered [`ContainerPrefixLine`] pieces — and the remaining inner
+    /// content, walking every strip op in stack order. Used by graft
     /// helpers that need to capture the consumed prefix bytes for
     /// re-injection.
     ///
-    /// Note: this split mirrors the legacy `(list_indent, bq_prefix,
-    /// inner)` shape and does NOT account for `ContentIndent` ops
-    /// (graft helpers operate on outer-container prefixes only).
+    /// Replaces the legacy two-slot `split`, whose phase machine stopped
+    /// at the first op past one list advance and one bq run, leaking a
+    /// deeper container's prefix bytes into the inner content the graft
+    /// hands to the reparse.
     ///
-    /// The Pandoc lazy gobble lands in `bq_prefix`: on a line short of
-    /// its `>` markers the skipped whitespace is prefix, not content, so
-    /// the graft re-injects it as prefix tokens instead of handing it to
-    /// the reparse. Keeping it in the reparse would turn a lazy `<div>`
-    /// body line indented four columns into an indented code block where
-    /// pandoc reads a paragraph.
-    #[allow(dead_code)]
-    pub fn split<'a>(&self, line: &'a str) -> (&'a str, &'a str, &'a str) {
-        let mut s = line;
-        let mut list_consumed = 0usize;
-        let mut bq_consumed = 0usize;
-        let mut bq_requested = 0usize;
-        let mut bq_matched = 0usize;
-        let mut phase = 0; // 0 = looking for list, 1 = consuming bqs, 2 = done
-        for op in self.ops() {
-            match op {
-                StripOp::ListAdvance(n) if phase == 0 => {
-                    // Continuation lines only, and the captured bytes go
-                    // back out as a `WHITESPACE` token — so the strip has
-                    // to be the whitespace-only one.
-                    let after = strip_list_indent(s, *n as usize);
-                    list_consumed = s.len() - after.len();
-                    s = after;
-                    phase = 1;
-                }
-                StripOp::BlockQuoteMarker if phase <= 1 => {
-                    let (after, consumed) = strip_blockquote_markers_counted(s, 1);
-                    bq_consumed += s.len() - after.len();
-                    bq_requested += 1;
-                    bq_matched += consumed;
-                    s = after;
-                    phase = 1;
-                }
-                _ => {
-                    phase = 2;
-                    break;
-                }
+    /// The Pandoc lazy gobble lands in the bq run (the legacy `split`
+    /// tokenization): on a line short of its `>` markers the skipped
+    /// whitespace is prefix, not content, so the graft re-injects it as
+    /// prefix tokens instead of handing it to the reparse. Keeping it in
+    /// the reparse would turn a lazy `<div>` body line indented four
+    /// columns into an indented code block where pandoc reads a
+    /// paragraph.
+    pub fn split_pieces<'a>(&self, line: &'a str) -> (ContainerPrefixLine, &'a str) {
+        let (pieces, tail) = prefix_pieces(self, line);
+        let mut out = ContainerPrefixLine::default();
+        for (kind, range) in pieces {
+            match kind {
+                RawPieceKind::Indent => out.push_indent(&line[range]),
+                RawPieceKind::BqRun | RawPieceKind::LazyGobble => out.push_bq(&line[range]),
             }
         }
-        let _ = phase;
-        if self.lazy_blockquote_gobble && bq_matched < bq_requested {
-            let gobbled = lazy_gobble_trim(s);
-            bq_consumed += s.len() - gobbled.len();
-            s = gobbled;
-        }
-        (
-            &line[..list_consumed],
-            &line[list_consumed..list_consumed + bq_consumed],
-            s,
-        )
+        (out, tail)
     }
 }
 
@@ -1448,92 +1417,70 @@ pub(crate) fn content_line_prefix_tail<'a>(
     s
 }
 
-/// Strip a continuation line's container prefix by walking
-/// [`ContainerPrefix::ops`] in stack order, optionally emitting the
-/// consumed bytes as kind-tagged tokens.
-///
-/// Tokenization (matching the legacy scalar emitters): list indent and
-/// content indent become `WHITESPACE`, with adjacent runs coalesced
-/// into one token for byte-range-equivalent CST stability; blockquote
-/// prefix bytes are emitted one by one (`>` as `BLOCK_QUOTE_MARKER`,
-/// anything else as 1-byte `WHITESPACE`). With no builder the walk is
-/// pure detection, and the tail equals the emitting walk's by
-/// construction.
+/// One raw piece of a continuation line's consumed container prefix,
+/// as captured by [`prefix_pieces`]. `LazyGobble` is whitespace a lazy
+/// line lost to the Pandoc gobble; it stays distinct because the two
+/// consumers tokenize it differently: [`walk_content_line_prefix`]
+/// coalesces it into the surrounding `WHITESPACE` run, while
+/// [`ContainerPrefix::split_pieces`] appends it to the preceding bq
+/// run for byte-by-byte re-injection (the legacy `split` behavior).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RawPieceKind {
+    /// List or content indent, emitted as `WHITESPACE`.
+    Indent,
+    /// A blockquote marker run's bytes. Pushed at every marker-run op,
+    /// even when it consumed nothing, because the op is a `WHITESPACE`
+    /// coalescing boundary: indent before a quote and gobbled bytes
+    /// after it must stay separate tokens.
+    BqRun,
+    /// Whitespace consumed by the Pandoc lazy gobble on a line short of
+    /// its `>` markers.
+    LazyGobble,
+}
+
+/// The ordered byte ranges [`prefix_pieces`] captured from one line.
+type RawPieces = SmallVec<[(RawPieceKind, Range<usize>); 4]>;
+
+/// Walk [`ContainerPrefix::ops`] over `content_line` in stack order and
+/// return the consumed prefix as ordered byte ranges plus the residual
+/// tail. The single source of truth for what a continuation line's
+/// prefix *is*; the emitting and capturing consumers below only decide
+/// how to tokenize the pieces.
 ///
 /// Every strip is the graceful emission-side one (`strip_list_indent`,
 /// `strip_content_indent`, the counted bq strip), so nothing here can
 /// eat content bytes as indent; a caller that needs to *know* whether
 /// the frame was reached asks [`ContainerPrefix::resolve`] instead.
-fn walk_content_line_prefix<'a>(
-    prefix: &ContainerPrefix,
-    content_line: &'a str,
-    mut builder: Option<&mut GreenNodeBuilder<'static>>,
-) -> &'a str {
-    fn flush_ws(
-        builder: &mut Option<&mut GreenNodeBuilder<'static>>,
-        content_line: &str,
-        pending: &mut Option<usize>,
-        current_offset: usize,
-    ) {
-        if let Some(start) = *pending
-            && current_offset > start
-        {
-            if let Some(b) = builder.as_deref_mut() {
-                b.token(
-                    SyntaxKind::WHITESPACE.into(),
-                    &content_line[start..current_offset],
-                );
-            }
-            *pending = None;
-        }
-    }
-
+fn prefix_pieces<'a>(prefix: &ContainerPrefix, content_line: &'a str) -> (RawPieces, &'a str) {
     let ops = prefix.ops();
+    let mut pieces = RawPieces::new();
+    let offset = |s: &str| content_line.len() - s.len();
     let mut s = content_line;
-    let mut pending_ws_start: Option<usize> = None;
     let mut i = 0;
     while i < ops.len() {
         match ops[i] {
             StripOp::ListAdvance(n) => {
                 let stripped = strip_list_indent(s, n as usize);
                 if stripped.len() < s.len() {
-                    let start = content_line.len() - s.len();
-                    if pending_ws_start.is_none() {
-                        pending_ws_start = Some(start);
-                    }
+                    pieces.push((RawPieceKind::Indent, offset(s)..offset(stripped)));
                     s = stripped;
                 }
                 i += 1;
             }
             StripOp::BlockQuoteMarker => {
                 let run = blockquote_run_len(&ops[i..]);
-                let current_offset = content_line.len() - s.len();
-                flush_ws(
-                    &mut builder,
-                    content_line,
-                    &mut pending_ws_start,
-                    current_offset,
-                );
                 let (stripped, consumed) = strip_blockquote_markers_counted(s, run);
-                let prefix_len = s.len() - stripped.len();
-                if prefix_len > 0
-                    && let Some(b) = builder.as_deref_mut()
-                {
-                    emit_blockquote_prefix_tokens(b, &s[..prefix_len]);
-                }
+                pieces.push((RawPieceKind::BqRun, offset(s)..offset(stripped)));
                 s = stripped;
                 // Pandoc's gobble: a lazy line loses its indent to the
-                // quote's raw content. Hand the bytes to the pending
-                // WHITESPACE run rather than leaving them in the
-                // construct's content — that is what keeps the tree
-                // lossless while the block sees a de-indented line.
+                // quote's raw content. Capture the bytes as prefix rather
+                // than leaving them in the construct's content — that is
+                // what keeps the tree lossless while the block sees a
+                // de-indented line.
                 if prefix.lazy_blockquote_gobble && consumed < run {
                     let gobbled = lazy_gobble_trim(s);
                     if gobbled.len() < s.len() {
-                        let start = content_line.len() - s.len();
-                        if pending_ws_start.is_none() {
-                            pending_ws_start = Some(start);
-                        }
+                        pieces.push((RawPieceKind::LazyGobble, offset(s)..offset(gobbled)));
                         s = gobbled;
                     }
                 }
@@ -1542,25 +1489,59 @@ fn walk_content_line_prefix<'a>(
             StripOp::ContentIndent(n) => {
                 let (stripped, consumed) = strip_content_indent(s, n as usize);
                 if consumed.is_some() {
-                    let start = content_line.len() - s.len();
-                    if pending_ws_start.is_none() {
-                        pending_ws_start = Some(start);
-                    }
+                    pieces.push((RawPieceKind::Indent, offset(s)..offset(stripped)));
                     s = stripped;
                 }
                 i += 1;
             }
         }
     }
+    (pieces, s)
+}
 
-    let final_offset = content_line.len() - s.len();
-    flush_ws(
-        &mut builder,
-        content_line,
-        &mut pending_ws_start,
-        final_offset,
-    );
-    s
+/// Strip a continuation line's container prefix via [`prefix_pieces`],
+/// optionally emitting the consumed bytes as kind-tagged tokens.
+///
+/// Tokenization (matching the legacy scalar emitters): list indent and
+/// content indent become `WHITESPACE`, with adjacent runs coalesced
+/// into one token for byte-range-equivalent CST stability; blockquote
+/// prefix bytes are emitted one by one (`>` as `BLOCK_QUOTE_MARKER`,
+/// anything else as 1-byte `WHITESPACE`). A marker run bounds the
+/// coalescing even when it consumed no bytes, so gobbled whitespace
+/// after a lazy quote stays a separate token from the indent before
+/// it. With no builder the walk is pure detection, and the tail equals
+/// the emitting walk's by construction.
+fn walk_content_line_prefix<'a>(
+    prefix: &ContainerPrefix,
+    content_line: &'a str,
+    builder: Option<&mut GreenNodeBuilder<'static>>,
+) -> &'a str {
+    let (pieces, tail) = prefix_pieces(prefix, content_line);
+    if let Some(b) = builder {
+        let mut pending_ws: Option<Range<usize>> = None;
+        for (kind, range) in pieces {
+            match kind {
+                RawPieceKind::Indent | RawPieceKind::LazyGobble => {
+                    pending_ws = Some(match pending_ws {
+                        Some(pending) => pending.start..range.end,
+                        None => range,
+                    });
+                }
+                RawPieceKind::BqRun => {
+                    if let Some(pending) = pending_ws.take() {
+                        b.token(SyntaxKind::WHITESPACE.into(), &content_line[pending]);
+                    }
+                    if !range.is_empty() {
+                        emit_blockquote_prefix_tokens(b, &content_line[range]);
+                    }
+                }
+            }
+        }
+        if let Some(pending) = pending_ws {
+            b.token(SyntaxKind::WHITESPACE.into(), &content_line[pending]);
+        }
+    }
+    tail
 }
 
 /// Advance past `target` columns of `line`, counting **any** character
@@ -1717,6 +1698,12 @@ impl ContainerPrefixLine {
         line.push_bq(&bq_prefix);
         line.push_indent(&list_indent);
         line
+    }
+
+    /// Test-only view of the ordered pieces.
+    #[cfg(test)]
+    pub(crate) fn pieces(&self) -> &[(PrefixPieceKind, String)] {
+        &self.pieces
     }
 }
 
@@ -2427,12 +2414,54 @@ mod tests {
     }
 
     #[test]
-    fn split_captures_consumed_bytes() {
+    fn split_pieces_captures_consumed_bytes() {
         let p =
             ContainerPrefix::from_ops(&[StripOp::ListAdvance(2), StripOp::BlockQuoteMarker], false);
-        let (li, bq, inner) = p.split("  > hello");
-        assert_eq!(li, "  ");
-        assert_eq!(bq, "> ");
+        let (line, inner) = p.split_pieces("  > hello");
+        assert_eq!(
+            line.pieces(),
+            &[
+                (PrefixPieceKind::Indent, "  ".to_string()),
+                (PrefixPieceKind::BqRun, "> ".to_string()),
+            ]
+        );
         assert_eq!(inner, "hello");
+    }
+
+    #[test]
+    fn split_pieces_captures_interleaved_ops() {
+        // `- > - a`'s continuation frame: indent, quote run, indent. The
+        // legacy two-slot `split` stopped at the second list advance and
+        // leaked its bytes into the inner content handed to the reparse.
+        let p = ContainerPrefix::from_ops(
+            &[
+                StripOp::ListAdvance(2),
+                StripOp::BlockQuoteMarker,
+                StripOp::ListAdvance(2),
+            ],
+            false,
+        );
+        let (line, inner) = p.split_pieces("  >   x");
+        assert_eq!(
+            line.pieces(),
+            &[
+                (PrefixPieceKind::Indent, "  ".to_string()),
+                (PrefixPieceKind::BqRun, "> ".to_string()),
+                (PrefixPieceKind::Indent, "  ".to_string()),
+            ]
+        );
+        assert_eq!(inner, "x");
+    }
+
+    #[test]
+    fn split_pieces_appends_lazy_gobble_to_bq_run() {
+        // A lazy line short of its `>` marker: the gobbled whitespace is
+        // prefix, joined onto the bq run so it re-injects byte-by-byte
+        // (the legacy `split` tokenization), not content.
+        let mut p = ContainerPrefix::from_ops(&[StripOp::BlockQuoteMarker], false);
+        p.lazy_blockquote_gobble = true;
+        let (line, inner) = p.split_pieces("  x");
+        assert_eq!(line.pieces(), &[(PrefixPieceKind::BqRun, "  ".to_string())]);
+        assert_eq!(inner, "x");
     }
 }
