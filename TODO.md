@@ -710,19 +710,29 @@ panache starts caching NodePtrs across edits.
 
   Design follow-ups from that fix, each bounded:
 
-  - [ ] Extract a **shared lazy-interrupt predicate**. The `interrupts_via_*`
-    probe list (hr, fence, heading, div closer, html, plus `ends_gobble`) is
-    copy-pasted across the paragraph gate and the list-item gate in
-    `parser/core.rs`, with partial copies in the footnote-body HTML dispatch
-    and the definition continuation policy. The two gates differ only in the
-    fence rule (backtick-anchored vs any-fence, both pandoc-probed), so one
-    predicate with a per-context fence parameter collapses them. Keep it a
-    probe list rather than delegating to `detect_prepared` --- the
-    dispatcher context can't express the `endline`-guard quirks (byte-0
-    anchoring, `blank_before_header`), and hypothetical dispatch has payload
-    side effects. The failure mode of a missing probe is *silent* (the line
-    becomes lazy inline text, caught only by pandoc-diffing), so each
-    construct family the predicate covers should carry a pandoc corpus pin.
+  - [x] Extract a **shared lazy-interrupt predicate**. Landed as
+    `Parser::lazy_interrupts` with a per-gate `LazyInterruptContext`
+    (`for_paragraph()`: backtick-anchored fence + div-closer probe;
+    `for_list_item()`: any-fence, no div closer), returning per-probe flags
+    because the paragraph gate's `[Plain, RawBlock]` follow-up keys on
+    `html`/`ends_gobble`. Kept a probe list rather than `detect_prepared`
+    dispatch, per the rationale above. The formerly unpinned probe families
+    got pandoc corpus pins first: 0528 (lazy div closer), 0529 (byte-0
+    backtick fence gobble end), 0530 (lazy heading stays text under default
+    pandoc; the positive interrupt needs `-blank_before_header`, which the
+    corpus harness can't express --- unit-pinned instead). The footnote-body
+    HTML dispatch and definition continuation policy stay separate, with
+    cross-reference comments saying why.
+
+  - [ ] The definition continuation policy's **HTML probe lacks
+    `html_block_cannot_interrupt`** (`definition_plain_can_continue`,
+    `parser/utils/continuation.rs`): any `try_parse_html_block_start` hit
+    ends the definition PLAIN, so `<!-- c -->` or `<button>` breaks a
+    definition body even though the same line stays lazy text in a quote.
+    Found while extracting the lazy-interrupt predicate. Verify against
+    pandoc whether comments/inline-block tags really end a definition PLAIN;
+    if not, route the probe through the same cannot-interrupt filter and pin
+    it in the pandoc corpus.
 
   - [ ] Stop `ContainerPrefix`'s **`ListAdvance` eating non-whitespace bytes**.
     `advance_columns` advances blindly, so any consumer that strips a full
