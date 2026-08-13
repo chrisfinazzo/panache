@@ -137,22 +137,6 @@ pub fn try_parse_setext_heading(lines: &[&str], pos: usize) -> Option<(usize, ch
     Some((level, first_char))
 }
 
-/// Emit a setext heading node to the builder.
-///
-/// Setext headings consist of a text line followed by an underline.
-/// This function emits the complete HEADING node with both lines.
-pub(crate) fn emit_setext_heading(
-    builder: &mut GreenNodeBuilder<'static>,
-    text_line: &str,
-    underline_line: &str,
-    level: usize,
-    config: &ParserOptions,
-) {
-    builder.start_node(SyntaxKind::HEADING.into());
-    emit_setext_heading_body(builder, text_line, underline_line, level, config);
-    builder.finish_node(); // HEADING
-}
-
 /// Emit the body of a setext heading (HEADING_CONTENT + underline + newlines).
 ///
 /// The caller is responsible for the surrounding `HEADING` start/finish node.

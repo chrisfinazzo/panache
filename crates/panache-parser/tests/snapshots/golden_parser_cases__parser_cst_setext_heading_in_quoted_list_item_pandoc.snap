@@ -1,0 +1,46 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..37
+  BLOCK_QUOTE@0..16
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    LIST@2..16
+      LIST_ITEM@2..16
+        LIST_MARKER@2..3 "-"
+        WHITESPACE@3..4 " "
+        HEADING@4..16
+          HEADING_CONTENT@4..7
+            TEXT@4..7 "Foo"
+          NEWLINE@7..8 "\n"
+          BLOCK_QUOTE_MARKER@8..9 ">"
+          WHITESPACE@9..10 " "
+          WHITESPACE@10..12 "  "
+          SETEXT_HEADING_UNDERLINE@12..15
+            SETEXT_HEADING_UNDERLINE@12..15 "---"
+          NEWLINE@15..16 "\n"
+  BLANK_LINE@16..17
+    BLANK_LINE@16..17 "\n"
+  BLOCK_QUOTE@17..37
+    BLOCK_QUOTE_MARKER@17..18 ">"
+    WHITESPACE@18..19 " "
+    BLOCK_QUOTE@19..37
+      BLOCK_QUOTE_MARKER@19..20 ">"
+      WHITESPACE@20..21 " "
+      LIST@21..37
+        LIST_ITEM@21..37
+          LIST_MARKER@21..22 "-"
+          WHITESPACE@22..23 " "
+          HEADING@23..37
+            HEADING_CONTENT@23..26
+              TEXT@23..26 "Bar"
+            NEWLINE@26..27 "\n"
+            BLOCK_QUOTE_MARKER@27..28 ">"
+            WHITESPACE@28..29 " "
+            BLOCK_QUOTE_MARKER@29..30 ">"
+            WHITESPACE@30..31 " "
+            WHITESPACE@31..33 "  "
+            SETEXT_HEADING_UNDERLINE@33..36
+              SETEXT_HEADING_UNDERLINE@33..36 "---"
+            NEWLINE@36..37 "\n"

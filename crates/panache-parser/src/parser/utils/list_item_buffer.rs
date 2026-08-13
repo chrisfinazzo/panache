@@ -144,6 +144,7 @@ impl ListItemBuffer {
     /// Number of segments in the buffer. Counts structural marker segments
     /// too, so it must not be read as a line count — use
     /// [`Self::buffered_line_count`] for that.
+    #[cfg(test)]
     pub(crate) fn segment_count(&self) -> usize {
         self.segments.len()
     }
@@ -176,6 +177,24 @@ impl ListItemBuffer {
             .iter()
             .all(|s| matches!(s, ListItemContent::BlockquoteMarker { .. }))
             .then_some(text)
+    }
+
+    /// The structural blockquote-marker segments buffered after the leading
+    /// text segment, in push order. A consumer that re-emits the buffered
+    /// line itself (rather than draining the buffer) reads these back out
+    /// before `clear()` and re-injects them, keeping the parse lossless.
+    pub(crate) fn trailing_blockquote_markers(&self) -> Vec<(usize, bool)> {
+        self.segments
+            .iter()
+            .skip(1)
+            .filter_map(|s| match s {
+                ListItemContent::BlockquoteMarker {
+                    leading_spaces,
+                    has_trailing_space,
+                } => Some((*leading_spaces, *has_trailing_space)),
+                ListItemContent::Text(_) => None,
+            })
+            .collect()
     }
 
     /// The blockquote prefix bytes each buffered line carries, indexed by

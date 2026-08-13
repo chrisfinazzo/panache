@@ -375,6 +375,8 @@ golden_test_cases!(
     setext_headings,
     setext_after_setext_multiline_paragraph_pandoc,
     setext_heading_in_list_item_commonmark,
+    setext_heading_in_quoted_list_item_commonmark,
+    setext_heading_in_quoted_list_item_pandoc,
     setext_mid_paragraph_no_blank_before_header,
     setext_multiline_commonmark,
     setext_multiline_pandoc,

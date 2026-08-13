@@ -581,6 +581,39 @@ fn test_losslessness_setext_underline_after_multiline_list_item_content() {
 }
 
 #[test]
+fn test_losslessness_setext_underline_in_quoted_list_item() {
+    // `BlockQuote [BulletList [[Header 2 "Foo"]]]` per pandoc (both
+    // dialects). The underline line's `>` sits in the item buffer as a
+    // structural marker segment; the fold has to see past it and re-emit
+    // it between the heading's text and its underline, byte-for-byte.
+    let input = "> - Foo\n>   ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::HEADING).len(),
+        1,
+        "expected a setext heading inside the quoted list item, got:\n{tree:#?}"
+    );
+}
+
+#[test]
+fn test_losslessness_setext_underline_in_nested_quoted_list_item() {
+    // `BlockQuote [BlockQuote [BulletList [[Header 2 "Foo"]]]]` per
+    // pandoc. One marker segment per depth level is buffered; all of them
+    // must be re-emitted in push order.
+    let input = "> > - Foo\n> >   ---\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+    assert_eq!(
+        find_all(&tree, SyntaxKind::HEADING).len(),
+        1,
+        "expected a setext heading inside the nested quoted list item, got:\n{tree:#?}"
+    );
+}
+
+#[test]
 fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
     // The live use of the `follows_setext_heading` escape: inside a list item
     // `has_blank_before` is false even once the item's buffer has been flushed,

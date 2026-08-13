@@ -15,8 +15,8 @@ use super::blocks::definition_lists;
 use super::blocks::fenced_divs;
 use super::blocks::figures::paragraph_is_standalone_image;
 use super::blocks::headings::{
-    emit_atx_heading, emit_setext_heading, emit_setext_heading_body, try_parse_atx_heading,
-    try_parse_setext_heading,
+    emit_atx_heading, emit_setext_heading_body, emit_setext_heading_text, emit_setext_underline,
+    try_parse_atx_heading, try_parse_setext_heading,
 };
 use super::blocks::horizontal_rules::try_parse_horizontal_rule;
 use super::blocks::html_blocks;
@@ -1388,10 +1388,16 @@ impl<'a> Parser<'a> {
         else {
             return None;
         };
-        if buffer.segment_count() != 1 {
+        // The underline line's own `>` markers are already buffered as
+        // structural segments (`emit_or_buffer_blockquote_marker` runs
+        // before the line's content dispatches), so a quoted item reads
+        // `[Text, BlockquoteMarker..]` here. See past them; the emission
+        // below re-injects them. More than one buffered *line* still
+        // declines — see the doc comment.
+        let text_line = buffer.sole_text_segment()?;
+        if buffer.buffered_line_count() != 1 {
             return None;
         }
-        let text_line = buffer.first_text()?;
 
         // CommonMark §5.2: the underline must be indented to at least the
         // list item's content column. A bare `---` at column 0 escapes the
@@ -1404,7 +1410,7 @@ impl<'a> Parser<'a> {
         }
 
         let lines = [text_line, content];
-        let (level, _) = try_parse_setext_heading(&lines, 0)?;
+        try_parse_setext_heading(&lines, 0)?;
 
         let (text_no_newline, _) = strip_newline(text_line);
         if text_no_newline.trim().is_empty() {
@@ -1415,10 +1421,26 @@ impl<'a> Parser<'a> {
         }
 
         let text_owned = text_line.to_string();
+        let markers = buffer.trailing_blockquote_markers();
         if let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last_mut() {
             buffer.clear();
         }
-        emit_setext_heading(&mut self.builder, &text_owned, content, level, self.config);
+        // The underline is a second source line, so its container prefix was
+        // never emitted upstream; the buffered markers go back out between
+        // the heading's text half and its underline half (mirroring the
+        // dispatcher's two-line setext path). `emit_setext_underline` covers
+        // the underline's own leading whitespace.
+        self.builder.start_node(SyntaxKind::HEADING.into());
+        emit_setext_heading_text(&mut self.builder, &text_owned, self.config);
+        for (leading_spaces, has_trailing_space) in markers {
+            blockquotes::emit_one_blockquote_marker(
+                &mut self.builder,
+                leading_spaces,
+                has_trailing_space,
+            );
+        }
+        emit_setext_underline(&mut self.builder, content);
+        self.builder.finish_node();
         Some(LineDispatch::consumed(1))
     }
 
