@@ -979,19 +979,30 @@ panache starts caching NodePtrs across edits.
     container frame ends the run), which also moved that shape onto pandoc's
     exact reading (`HorizontalRule` in the item, sibling rule after).
 
-- [ ] A **non-bare note marker line's own text should open a block**, not a
+- [x] **A non-bare note marker line's own text opens a block now**, not a
   paragraph the indented lines lazily continue. Pandoc's `noteBlock`
   reparses the collected body from scratch, so `[^1]: a | b` + `    ---|---`
-  is `Note [Table]`, `[^1]: ***` is `Note [HorizontalRule, …]`, and `- li`,
-  `> q`, and ```` ``` ```` open a list, a quote, and a code block the same
-  way; panache makes each a `Para`. Only a heading is meant to stay lazy
-  (`[^1]: # h` is `Para [#, h]` in pandoc too --- `blank_before_header`),
-  which is exactly the split `at_note_body_start` already models for the
-  bare marker: the non-bare path wants the non-strict `has_blank_before`
-  alone. `handle_footnote_open_effect` currently sends the marker-line
-  content straight to `append_paragraph_line`, next to the
-  definition-list-term and `try_dispatch_footnote_html_block` special cases
-  that already dispatch it.
+  is `Note [Table]`, `[^1]: ***` is `Note [HorizontalRule]`, and `- li`,
+  `> q`, ```` ``` ````, and setext text + underline open a list, a quote, a
+  code block, and a heading the same way; panache made each a `Para`.
+  `handle_footnote_open_effect` now runs the block registry over a synthetic
+  window (line 0 = the post-marker text, later lines stripped by the real
+  container-stack prefix) with the non-strict `has_blank_before` alone, next
+  to the definition-list-term and `try_dispatch_footnote_html_block` special
+  cases that already dispatched it: tables, hrules, fences, and setext emit
+  through their parsers; lists and blockquotes mirror the definition-list
+  marker-line arms. Probing pandoc showed the ATX-heading laziness is not
+  `blank_before_header` (`[^1]: # h` stays `Para` with the extension
+  disabled too) but the marker's trailing space indenting the collected raw
+  one column, which defeats every margin-anchored construct --- so ATX
+  headings, line blocks, and fenced divs deliberately stay lazy. The
+  companion bare-marker gap (`[^1]:` + `    > q` was `Para`, quote
+  suppressed by `blank_before_blockquote` reading the raw previous line) is
+  fixed by exempting `at_note_body_start`, which was also what kept the two
+  formatting styles from ping-ponging (`[^1]: > q` ⇄ bare marker + indented
+  quote) and breaking idempotency. Refdefs and nested note markers on the
+  marker line still fall to the paragraph path (pandoc consumes both;
+  deferred).
 
 - [ ] Terminator-adjacent **headered simple tables should degrade to a
   paragraph** the way pandoc's footer rule makes them: when a contiguous
