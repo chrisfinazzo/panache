@@ -12,16 +12,16 @@ DOCUMENT@0..156
         TEXT@9..21 "Fruit prices"
         NEWLINE@21..22 "\n"
       BLANK_LINE@22..24
-        BLOCK_QUOTE_MARKER@22..23 ">"
+        LINE_PREFIX@22..23 ">"
         BLANK_LINE@23..24 "\n"
       TABLE_SEPARATOR@24..48
-        BLOCK_QUOTE_MARKER@24..25 ">"
-        WHITESPACE@25..26 " "
+        LINE_PREFIX@24..25 ">"
+        LINE_PREFIX@25..26 " "
         TABLE_SEP_DASHES@26..47 "---------------------"
         NEWLINE@47..48 "\n"
       TABLE_HEADER@48..68
-        BLOCK_QUOTE_MARKER@48..49 ">"
-        WHITESPACE@49..50 " "
+        LINE_PREFIX@48..49 ">"
+        LINE_PREFIX@49..50 " "
         TABLE_CELL@50..59
           TEXT@50..59 "Fruit    "
         WHITESPACE@59..60 " "
@@ -29,15 +29,15 @@ DOCUMENT@0..156
           TEXT@60..67 "  Price"
         NEWLINE@67..68 "\n"
       TABLE_SEPARATOR@68..92
-        BLOCK_QUOTE_MARKER@68..69 ">"
-        WHITESPACE@69..70 " "
+        LINE_PREFIX@68..69 ">"
+        LINE_PREFIX@69..70 " "
         TABLE_SEP_DASHES@70..79 "---------"
         TABLE_SEP_WHITESPACE@79..80 " "
         TABLE_SEP_DASHES@80..91 "-----------"
         NEWLINE@91..92 "\n"
       TABLE_ROW@92..111
-        BLOCK_QUOTE_MARKER@92..93 ">"
-        WHITESPACE@93..94 " "
+        LINE_PREFIX@92..93 ">"
+        LINE_PREFIX@93..94 " "
         TABLE_CELL@94..103
           TEXT@94..103 "Apple    "
         WHITESPACE@103..104 " "
@@ -45,11 +45,11 @@ DOCUMENT@0..156
           TEXT@104..110 "  1.00"
         NEWLINE@110..111 "\n"
       BLANK_LINE@111..113
-        BLOCK_QUOTE_MARKER@111..112 ">"
+        LINE_PREFIX@111..112 ">"
         BLANK_LINE@112..113 "\n"
       TABLE_ROW@113..132
-        BLOCK_QUOTE_MARKER@113..114 ">"
-        WHITESPACE@114..115 " "
+        LINE_PREFIX@113..114 ">"
+        LINE_PREFIX@114..115 " "
         TABLE_CELL@115..124
           TEXT@115..124 "Pear     "
         WHITESPACE@124..125 " "
@@ -57,7 +57,7 @@ DOCUMENT@0..156
           TEXT@125..131 "  2.00"
         NEWLINE@131..132 "\n"
       TABLE_SEPARATOR@132..156
-        BLOCK_QUOTE_MARKER@132..133 ">"
-        WHITESPACE@133..134 " "
+        LINE_PREFIX@132..133 ">"
+        LINE_PREFIX@133..134 " "
         TABLE_SEP_DASHES@134..155 "---------------------"
         NEWLINE@155..156 "\n"

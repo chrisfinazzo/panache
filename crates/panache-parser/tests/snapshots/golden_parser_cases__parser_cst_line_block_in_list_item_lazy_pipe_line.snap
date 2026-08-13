@@ -14,11 +14,11 @@ DOCUMENT@0..16
         BLANK_LINE@4..5 "\n"
       LINE_BLOCK@5..16
         LINE_BLOCK_LINE@5..11
-          WHITESPACE@5..7 "  "
+          LINE_PREFIX@5..7 "  "
           LINE_BLOCK_MARKER@7..9 "| "
           TEXT@9..10 "a"
           NEWLINE@10..11 "\n"
         LINE_BLOCK_LINE@11..16
-          WHITESPACE@11..12 " "
+          LINE_PREFIX@11..12 " "
           TEXT@12..15 "b |"
           NEWLINE@15..16 "\n"

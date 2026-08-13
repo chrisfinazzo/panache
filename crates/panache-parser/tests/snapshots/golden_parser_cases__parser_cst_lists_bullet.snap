@@ -176,7 +176,7 @@ DOCUMENT@0..1147
       PLAIN@941..981
         TEXT@941..960 "this is a list item"
         NEWLINE@960..961 "\n"
-        WHITESPACE@961..962 "\t"
+        LINE_PREFIX@961..962 "\t"
         TEXT@962..980 "indented with tabs"
         NEWLINE@980..981 "\n"
     BLANK_LINE@981..982
@@ -187,7 +187,7 @@ DOCUMENT@0..1147
       PLAIN@986..1031
         TEXT@986..1005 "this is a list item"
         NEWLINE@1005..1006 "\n"
-        WHITESPACE@1006..1010 "    "
+        LINE_PREFIX@1006..1010 "    "
         TEXT@1010..1030 "indented with spaces"
         NEWLINE@1030..1031 "\n"
       BLANK_LINE@1031..1032
@@ -200,7 +200,7 @@ DOCUMENT@0..1147
           PLAIN@1035..1085
             TEXT@1035..1063 "this is an example li ..."
             NEWLINE@1063..1064 "\n"
-            WHITESPACE@1064..1066 "\t\t"
+            LINE_PREFIX@1064..1066 "\t\t"
             TEXT@1066..1084 "indented with tabs"
             NEWLINE@1084..1085 "\n"
         BLANK_LINE@1085..1087
@@ -212,6 +212,6 @@ DOCUMENT@0..1147
           PLAIN@1092..1147
             TEXT@1092..1120 "this is an example li ..."
             NEWLINE@1120..1121 "\n"
-            WHITESPACE@1121..1126 "\t    "
+            LINE_PREFIX@1121..1126 "\t    "
             TEXT@1126..1146 "indented with spaces"
             NEWLINE@1146..1147 "\n"

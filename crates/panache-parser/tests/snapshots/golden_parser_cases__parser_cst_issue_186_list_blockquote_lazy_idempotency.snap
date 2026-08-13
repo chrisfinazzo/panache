@@ -24,9 +24,9 @@ DOCUMENT@0..556
         PARAGRAPH@54..143
           TEXT@54..124 "Substitution takes pl ..."
           NEWLINE@124..125 "\n"
-          WHITESPACE@125..129 "    "
-          BLOCK_QUOTE_MARKER@129..130 ">"
-          WHITESPACE@130..131 " "
+          LINE_PREFIX@125..129 "    "
+          LINE_PREFIX@129..130 ">"
+          LINE_PREFIX@130..131 " "
           TEXT@131..142 "as follows:"
           NEWLINE@142..143 "\n"
         WHITESPACE@143..147 "    "
@@ -57,9 +57,9 @@ DOCUMENT@0..556
             PLAIN@220..350
               TEXT@220..285 "If it is a promise ob ..."
               NEWLINE@285..286 "\n"
-              WHITESPACE@286..290 "    "
-              BLOCK_QUOTE_MARKER@290..291 ">"
-              WHITESPACE@291..292 " "
+              LINE_PREFIX@286..290 "    "
+              LINE_PREFIX@290..291 ">"
+              LINE_PREFIX@291..292 " "
               TEXT@292..349 "  the expression slot ..."
               NEWLINE@349..350 "\n"
           WHITESPACE@350..354 "    "
@@ -71,9 +71,9 @@ DOCUMENT@0..556
             PLAIN@358..494
               TEXT@358..421 "If it is an ordinary  ..."
               NEWLINE@421..422 "\n"
-              WHITESPACE@422..426 "    "
-              BLOCK_QUOTE_MARKER@426..427 ">"
-              WHITESPACE@427..428 " "
+              LINE_PREFIX@422..426 "    "
+              LINE_PREFIX@426..427 ">"
+              LINE_PREFIX@427..428 " "
               TEXT@428..430 "  "
               INLINE_CODE@430..435
                 INLINE_CODE_MARKER@430..431 "`"

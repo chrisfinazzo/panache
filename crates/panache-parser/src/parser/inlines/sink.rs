@@ -4,7 +4,7 @@
 //! operations: emit a leaf token, open a node, close a node. Abstracting those
 //! behind [`InlineSink`] lets the common path write straight into a
 //! [`GreenNodeBuilder`] (zero-cost, monomorphized) while a blockquote paragraph
-//! can swap in [`MarkerInjectingSink`], which splices `BLOCK_QUOTE_MARKER`
+//! can swap in [`MarkerInjectingSink`], which splices `LINE_PREFIX`
 //! tokens into the stream at recorded byte offsets during the *same* pass —
 //! no temporary tree built and replayed.
 //!
@@ -101,17 +101,19 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
                     leading_spaces,
                     has_trailing_space,
                 } => {
+                    // Continuation-line container prefix inside the inline
+                    // container: kind-tagged, legacy token boundaries.
                     if leading_spaces > 0 {
                         self.inner
-                            .token(SyntaxKind::WHITESPACE.into(), &" ".repeat(leading_spaces));
+                            .token(SyntaxKind::LINE_PREFIX.into(), &" ".repeat(leading_spaces));
                     }
-                    self.inner.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
+                    self.inner.token(SyntaxKind::LINE_PREFIX.into(), ">");
                     if has_trailing_space {
-                        self.inner.token(SyntaxKind::WHITESPACE.into(), " ");
+                        self.inner.token(SyntaxKind::LINE_PREFIX.into(), " ");
                     }
                 }
                 InjectedMarker::Indent(indent) => {
-                    self.inner.token(SyntaxKind::WHITESPACE.into(), indent);
+                    self.inner.token(SyntaxKind::LINE_PREFIX.into(), indent);
                 }
             }
             self.idx += 1;
@@ -161,7 +163,7 @@ impl InlineSink for MarkerInjectingSink<'_, '_> {
 
     fn start_node(&mut self, kind: rowan::SyntaxKind) {
         // Emit any markers at the current offset *outside* this node — otherwise
-        // they nest inside (e.g. a BLOCK_QUOTE_MARKER inside an EMPHASIS_MARKER),
+        // they nest inside (e.g. a quote marker inside an emphasis span),
         // which breaks lossless reconstruction during reformatting.
         self.emit_markers_at_current();
         self.inner.start_node(kind);

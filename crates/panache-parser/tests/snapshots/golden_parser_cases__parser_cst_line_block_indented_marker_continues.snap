@@ -26,8 +26,8 @@ DOCUMENT@0..80
         TEXT@19..20 "d"
         NEWLINE@20..21 "\n"
       LINE_BLOCK_LINE@21..29
-        BLOCK_QUOTE_MARKER@21..22 ">"
-        WHITESPACE@22..23 " "
+        LINE_PREFIX@21..22 ">"
+        LINE_PREFIX@22..23 " "
         TEXT@23..28 "  | e"
         NEWLINE@28..29 "\n"
   BLANK_LINE@29..30
@@ -41,7 +41,7 @@ DOCUMENT@0..80
         TEXT@34..35 "f"
         NEWLINE@35..36 "\n"
       LINE_BLOCK_LINE@36..42
-        WHITESPACE@36..38 "  "
+        LINE_PREFIX@36..38 "  "
         LINE_BLOCK_MARKER@38..40 "| "
         TEXT@40..41 "g"
         NEWLINE@41..42 "\n"
@@ -58,12 +58,12 @@ DOCUMENT@0..80
         BLANK_LINE@47..48 "\n"
       LINE_BLOCK@48..62
         LINE_BLOCK_LINE@48..54
-          WHITESPACE@48..50 "  "
+          LINE_PREFIX@48..50 "  "
           LINE_BLOCK_MARKER@50..52 "| "
           TEXT@52..53 "h"
           NEWLINE@53..54 "\n"
         LINE_BLOCK_LINE@54..62
-          WHITESPACE@54..56 "  "
+          LINE_PREFIX@54..56 "  "
           TEXT@56..61 "  | i"
           NEWLINE@61..62 "\n"
     BLANK_LINE@62..63
@@ -78,12 +78,12 @@ DOCUMENT@0..80
         BLANK_LINE@67..68 "\n"
       LINE_BLOCK@68..80
         LINE_BLOCK_LINE@68..74
-          WHITESPACE@68..70 "  "
+          LINE_PREFIX@68..70 "  "
           LINE_BLOCK_MARKER@70..72 "| "
           TEXT@72..73 "j"
           NEWLINE@73..74 "\n"
         LINE_BLOCK_LINE@74..80
-          WHITESPACE@74..76 "  "
+          LINE_PREFIX@74..76 "  "
           LINE_BLOCK_MARKER@76..78 "| "
           TEXT@78..79 "k"
           NEWLINE@79..80 "\n"

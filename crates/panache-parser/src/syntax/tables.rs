@@ -3,49 +3,32 @@
 use super::ast::{AstChildren, support};
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 
-/// `node`'s text with each line's leading container-prefix tokens skipped.
+/// `node`'s text with each line's container-prefix tokens skipped.
 ///
 /// A continuation line inside a block node carries the enclosing
-/// containers' prefix bytes (list indent as `WHITESPACE`, blockquote
-/// markers as `BLOCK_QUOTE_MARKER` plus their whitespace) as ordinary
-/// tokens at line start; line 0's prefix sits *outside* the node. So
-/// `node.text()` is line 0 dedented and lines 1..n still prefixed —
-/// wrong by construction for any consumer doing column geometry across
-/// lines (grid layout, table measurement).
+/// containers' prefix bytes as `LINE_PREFIX` tokens at line start;
+/// line 0's prefix sits *outside* the node. So `node.text()` is line 0
+/// dedented and lines 1..n still prefixed — wrong by construction for
+/// any consumer doing column geometry across lines (grid layout, table
+/// measurement).
 ///
-/// This walk drops every line-leading run of {`WHITESPACE`,
-/// `BLOCK_QUOTE_MARKER`} tokens, treating the node start as a line
-/// start (a node whose first line is a continuation line opens with
-/// prefix tokens). That is sound for constructs whose content is
-/// flush-left on every line — grid and pipe table lines start with `+`
-/// or `|` — and a heuristic for anything else: a line-leading
-/// `WHITESPACE` token that is genuine content cannot be told apart
-/// from prefix until prefix runs carry their own kind in the CST (see
-/// the container-prefix entry in TODO.md).
+/// The skip is structural: prefix bytes carry their own kind, so a
+/// line-leading `WHITESPACE` token that is genuine content survives.
 pub fn text_without_line_prefixes(node: &SyntaxNode) -> String {
     let mut out = String::new();
-    let mut at_line_start = true;
     for token in node
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
     {
-        match token.kind() {
-            SyntaxKind::WHITESPACE | SyntaxKind::BLOCK_QUOTE_MARKER if at_line_start => {}
-            SyntaxKind::NEWLINE | SyntaxKind::BLANK_LINE => {
-                out.push_str(token.text());
-                at_line_start = true;
-            }
-            _ => {
-                out.push_str(token.text());
-                at_line_start = false;
-            }
+        if token.kind() != SyntaxKind::LINE_PREFIX {
+            out.push_str(token.text());
         }
     }
     out
 }
 
 /// The separator-marker tokens (`TABLE_SEP_*`) of a `TABLE_SEPARATOR` node,
-/// in order. Skips the container prefix (`WHITESPACE` / blockquote markers)
+/// in order. Skips the container prefix (`LINE_PREFIX`)
 /// and the trailing `NEWLINE` so callers see only the separator's own
 /// structure.
 pub fn separator_marker_tokens(separator: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
@@ -434,6 +417,50 @@ mod tests {
             text_without_line_prefixes(&table),
             "+---+---+\n| a | b |\n+===+===+\n| 1 | 2 |\n+---+---+\n"
         );
+    }
+
+    /// The structural contract behind `text_without_line_prefixes`:
+    /// container-prefix bytes inside a content node carry their own kind,
+    /// so consumers skip by kind instead of guessing at line-leading
+    /// whitespace.
+    #[test]
+    fn prefix_runs_inside_content_nodes_are_line_prefix_tokens() {
+        for input in [
+            "- +---+---+\n  | a | b |\n  +===+===+\n  | 1 | 2 |\n  +---+---+\n",
+            "> +---+---+\n> | a | b |\n> +===+===+\n> | 1 | 2 |\n> +---+---+\n",
+        ] {
+            let tree = crate::parse(input, None);
+            let table = tree
+                .descendants()
+                .find(|n| n.kind() == SyntaxKind::GRID_TABLE)
+                .expect("grid table node");
+            let mut at_line_start = true;
+            let mut prefix_tokens = 0usize;
+            for token in table
+                .descendants_with_tokens()
+                .filter_map(|el| el.into_token())
+            {
+                match token.kind() {
+                    SyntaxKind::LINE_PREFIX => {
+                        assert!(
+                            at_line_start,
+                            "LINE_PREFIX off line start: {token:?} in {input:?}"
+                        );
+                        prefix_tokens += 1;
+                    }
+                    SyntaxKind::NEWLINE | SyntaxKind::BLANK_LINE => at_line_start = true,
+                    SyntaxKind::WHITESPACE if at_line_start => {
+                        panic!("untagged line-leading WHITESPACE: {token:?} in {input:?}")
+                    }
+                    SyntaxKind::BLOCK_QUOTE_MARKER => {
+                        panic!("untagged prefix marker: {token:?} in {input:?}")
+                    }
+                    _ => at_line_start = false,
+                }
+            }
+            // Four continuation lines carry a prefix each.
+            assert!(prefix_tokens >= 4, "expected prefix tokens in {input:?}");
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ DOCUMENT@0..50
         BLANK_LINE@13..14
           BLANK_LINE@13..14 "\n"
         TABLE_HEADER@14..26
-          WHITESPACE@14..16 "  "
+          LINE_PREFIX@14..16 "  "
           TEXT@16..17 "|"
           WHITESPACE@17..18 " "
           TABLE_CELL@18..19
@@ -29,7 +29,7 @@ DOCUMENT@0..50
           TEXT@24..25 "|"
           NEWLINE@25..26 "\n"
         TABLE_SEPARATOR@26..38
-          WHITESPACE@26..28 "  "
+          LINE_PREFIX@26..28 "  "
           TABLE_SEP_DELIM@28..29 "|"
           TABLE_SEP_DASHES@29..32 "---"
           TABLE_SEP_DELIM@32..33 "|"
@@ -37,7 +37,7 @@ DOCUMENT@0..50
           TABLE_SEP_DELIM@36..37 "|"
           NEWLINE@37..38 "\n"
         TABLE_ROW@38..50
-          WHITESPACE@38..40 "  "
+          LINE_PREFIX@38..40 "  "
           TEXT@40..41 "|"
           WHITESPACE@41..42 " "
           TABLE_CELL@42..43

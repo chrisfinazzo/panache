@@ -246,12 +246,15 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
     for child in node.children_with_tokens() {
         match child {
             NodeOrToken::Token(t) => {
-                if t.kind() == SyntaxKind::WHITESPACE && !has_fence {
-                    // The pre-fence run is whatever host indent the parser left
-                    // in the block followed by the fence's own indent (a list
-                    // item at content column 2 whose fence is indented one
-                    // further emits `"  "` then `" "`). Both come off the
-                    // payload, so accumulate rather than overwrite.
+                if matches!(t.kind(), SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX)
+                    && !has_fence
+                {
+                    // The pre-fence run is the container prefix the parser
+                    // left in the block (`LINE_PREFIX`) followed by the
+                    // fence's own indent (a list item at content column 2
+                    // whose fence is indented one further emits `"  "` then
+                    // `" "`). Both come off the payload, so accumulate rather
+                    // than overwrite.
                     fence_indent.push_str(t.text());
                 }
             }
@@ -284,13 +287,17 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                     for token in n.children_with_tokens() {
                         match token {
                             NodeOrToken::Token(t) => match t.kind() {
-                                SyntaxKind::BLOCK_QUOTE_MARKER if at_line_start => {
-                                    // Parser may preserve blockquote continuation markers inside
-                                    // indented code content for losslessness. These are container
-                                    // syntax, not code bytes, so ignore them for formatter output.
+                                SyntaxKind::LINE_PREFIX
+                                    if at_line_start && !t.text().trim().is_empty() =>
+                                {
+                                    // Blockquote continuation marker preserved inside code
+                                    // content for losslessness. Container syntax, not code
+                                    // bytes, so ignore it for formatter output.
                                     saw_blockquote_marker = true;
                                 }
-                                SyntaxKind::WHITESPACE if at_line_start => {
+                                SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX
+                                    if at_line_start =>
+                                {
                                     if drop_container_indent {
                                         // Whole token is container syntax — see
                                         // `fenced_in_blockquote`. Covers a lazy

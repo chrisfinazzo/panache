@@ -15,7 +15,7 @@ DOCUMENT@0..23
           INLINE_CODE@4..10
             INLINE_CODE_MARKER@4..5 "`"
             INLINE_CODE_CONTENT@5..7 "x\n"
-            WHITESPACE@7..8 "\t"
+            LINE_PREFIX@7..8 "\t"
             INLINE_CODE_CONTENT@8..9 "y"
             INLINE_CODE_MARKER@9..10 "`"
           NEWLINE@10..11 "\n"

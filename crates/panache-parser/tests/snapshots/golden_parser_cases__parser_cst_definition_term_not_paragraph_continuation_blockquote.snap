@@ -9,8 +9,8 @@ DOCUMENT@0..18
     PARAGRAPH@2..8
       TEXT@2..3 "a"
       NEWLINE@3..4 "\n"
-      BLOCK_QUOTE_MARKER@4..5 ">"
-      WHITESPACE@5..6 " "
+      LINE_PREFIX@4..5 ">"
+      LINE_PREFIX@5..6 " "
       TEXT@6..7 "b"
       NEWLINE@7..8 "\n"
     BLOCK_QUOTE_MARKER@8..9 ">"

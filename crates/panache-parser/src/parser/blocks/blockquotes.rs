@@ -96,7 +96,9 @@ pub(in crate::parser) fn strip_blockquote_markers_counted(line: &str, n: usize) 
     (remaining, consumed)
 }
 
-/// Emit one blockquote marker with its whitespace.
+/// Emit one blockquote marker with its whitespace, as container
+/// structure (`BLOCK_QUOTE_MARKER`/`WHITESPACE`). For markers landing
+/// *inside* a content node use [`emit_one_line_prefix_marker`].
 pub(in crate::parser) fn emit_one_blockquote_marker(
     builder: &mut GreenNodeBuilder<'static>,
     leading_spaces: usize,
@@ -108,5 +110,22 @@ pub(in crate::parser) fn emit_one_blockquote_marker(
     builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
     if has_trailing_space {
         builder.token(SyntaxKind::WHITESPACE.into(), " ");
+    }
+}
+
+/// [`emit_one_blockquote_marker`]'s counterpart for a marker that lands
+/// inside a content node: same token boundaries, every token
+/// `LINE_PREFIX`.
+pub(in crate::parser) fn emit_one_line_prefix_marker(
+    builder: &mut GreenNodeBuilder<'static>,
+    leading_spaces: usize,
+    has_trailing_space: bool,
+) {
+    if leading_spaces > 0 {
+        builder.token(SyntaxKind::LINE_PREFIX.into(), &" ".repeat(leading_spaces));
+    }
+    builder.token(SyntaxKind::LINE_PREFIX.into(), ">");
+    if has_trailing_space {
+        builder.token(SyntaxKind::LINE_PREFIX.into(), " ");
     }
 }

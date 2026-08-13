@@ -11,11 +11,11 @@ DOCUMENT@0..66
         CODE_FENCE_MARKER@2..5 "```"
         NEWLINE@5..6 "\n"
       CODE_CONTENT@6..12
-        WHITESPACE@6..7 " "
+        LINE_PREFIX@6..7 " "
         TEXT@7..11 "code"
         NEWLINE@11..12 "\n"
-      BLOCK_QUOTE_MARKER@12..13 ">"
-      WHITESPACE@13..14 " "
+      LINE_PREFIX@12..13 ">"
+      LINE_PREFIX@13..14 " "
       CODE_FENCE_CLOSE@14..18
         CODE_FENCE_MARKER@14..17 "```"
         NEWLINE@17..18 "\n"
@@ -37,10 +37,10 @@ DOCUMENT@0..66
         CODE_FENCE_MARKER@26..29 "```"
         NEWLINE@29..30 "\n"
       CODE_CONTENT@30..37
-        WHITESPACE@30..32 "\t "
+        LINE_PREFIX@30..32 "\t "
         TEXT@32..36 "deep"
         NEWLINE@36..37 "\n"
-      WHITESPACE@37..38 " "
+      LINE_PREFIX@37..38 " "
       CODE_FENCE_CLOSE@38..42
         CODE_FENCE_MARKER@38..41 "```"
         NEWLINE@41..42 "\n"
@@ -56,13 +56,13 @@ DOCUMENT@0..66
           CODE_FENCE_MARKER@46..49 "```"
           NEWLINE@49..50 "\n"
         CODE_CONTENT@50..59
-          BLOCK_QUOTE_MARKER@50..51 ">"
-          WHITESPACE@51..52 " "
+          LINE_PREFIX@50..51 ">"
+          LINE_PREFIX@51..52 " "
           TEXT@52..58 "nested"
           NEWLINE@58..59 "\n"
-        BLOCK_QUOTE_MARKER@59..60 ">"
-        BLOCK_QUOTE_MARKER@60..61 ">"
-        WHITESPACE@61..62 " "
+        LINE_PREFIX@59..60 ">"
+        LINE_PREFIX@60..61 ">"
+        LINE_PREFIX@61..62 " "
         CODE_FENCE_CLOSE@62..66
           CODE_FENCE_MARKER@62..65 "```"
           NEWLINE@65..66 "\n"

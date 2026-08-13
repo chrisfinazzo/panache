@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..809
@@ -199,15 +198,15 @@ DOCUMENT@0..809
               TEXT@761..762 " "
             NEWLINE@762..763 "\n"
           CODE_CONTENT@763..800
-            WHITESPACE@763..767 "    "
+            LINE_PREFIX@763..767 "    "
             TEXT@767..778 "# Heading 1"
             NEWLINE@778..779 "\n"
-            WHITESPACE@779..783 "    "
+            LINE_PREFIX@779..783 "    "
             NEWLINE@783..784 "\n"
-            WHITESPACE@784..788 "    "
+            LINE_PREFIX@784..788 "    "
             TEXT@788..799 "# Heading 2"
             NEWLINE@799..800 "\n"
-          WHITESPACE@800..804 "    "
+          LINE_PREFIX@800..804 "    "
           CODE_FENCE_CLOSE@804..809
             CODE_FENCE_MARKER@804..807 "```"
             WHITESPACE@807..808 " "

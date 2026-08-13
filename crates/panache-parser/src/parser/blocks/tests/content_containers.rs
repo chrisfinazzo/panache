@@ -67,8 +67,8 @@ fn footnote_lazy_continuation_keeps_its_whitespace() {
 }
 
 #[test]
-fn footnote_continuation_indent_is_held_out_as_whitespace() {
-    // The gobbled bytes are re-injected as a `WHITESPACE` token rather than
+fn footnote_continuation_indent_is_held_out_as_line_prefix() {
+    // The gobbled bytes are re-injected as a `LINE_PREFIX` token rather than
     // dropped -- that is what keeps the CST byte-lossless.
     let input = "a[^1]\n\n[^1]: d\n    text\n";
     let tree = parse_blocks(input);
@@ -79,7 +79,7 @@ fn footnote_continuation_indent_is_held_out_as_whitespace() {
     let held: Vec<String> = paragraph
         .children_with_tokens()
         .filter_map(|el| el.into_token())
-        .filter(|t| t.kind() == SyntaxKind::WHITESPACE)
+        .filter(|t| t.kind() == SyntaxKind::LINE_PREFIX)
         .map(|t| t.text().to_string())
         .collect();
     assert_eq!(held, vec!["    ".to_string()]);

@@ -30,19 +30,10 @@ fn expand_tabs_code_span(node: &SyntaxNode, tab_width: usize) -> String {
 /// instead of pinning a hard newline into the paragraph.
 fn format_citation_like(node: &SyntaxNode, config: &Config) -> String {
     let mut result = String::new();
-    let mut skip_marker_whitespace = false;
     for child in node.children_with_tokens() {
         match child {
-            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::BLOCK_QUOTE_MARKER => {
-                skip_marker_whitespace = true;
-            }
-            NodeOrToken::Token(tok)
-                if tok.kind() == SyntaxKind::WHITESPACE && skip_marker_whitespace =>
-            {
-                skip_marker_whitespace = false;
-            }
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::LINE_PREFIX => {}
             NodeOrToken::Token(tok) => {
-                skip_marker_whitespace = false;
                 result.push_str(
                     normalize_smart_punctuation(
                         tok.text(),
@@ -53,7 +44,6 @@ fn format_citation_like(node: &SyntaxNode, config: &Config) -> String {
                 );
             }
             NodeOrToken::Node(n) => {
-                skip_marker_whitespace = false;
                 result.push_str(&n.text().to_string());
             }
         }
@@ -122,18 +112,10 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
     match node.kind() {
         SyntaxKind::AUTO_LINK => {
             let mut result = String::new();
-            let mut skip_marker_whitespace = false;
             for child in node.descendants_with_tokens() {
                 if let NodeOrToken::Token(tok) = child {
                     match tok.kind() {
-                        SyntaxKind::BLOCK_QUOTE_MARKER => {
-                            skip_marker_whitespace = true;
-                        }
-                        SyntaxKind::WHITESPACE if skip_marker_whitespace => {
-                            skip_marker_whitespace = false;
-                        }
                         SyntaxKind::AUTO_LINK_MARKER | SyntaxKind::TEXT => {
-                            skip_marker_whitespace = false;
                             // Autolinks are literal URLs/emails: emit verbatim,
                             // never smart-normalize (pandoc keeps `—`/`…` here).
                             result.push_str(tok.text());
@@ -148,7 +130,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             let mut content = String::new();
             let mut attributes = String::new();
             let mut marker_len = 1usize;
-            let mut skip_marker_whitespace = false;
 
             for child in node.children_with_tokens() {
                 match child {
@@ -159,15 +140,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         attributes = normalize_attribute_text(&n.text().to_string());
                     }
                     NodeOrToken::Token(t) => {
-                        if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                            skip_marker_whitespace = true;
-                        } else if t.kind() == SyntaxKind::WHITESPACE && skip_marker_whitespace {
-                            skip_marker_whitespace = false;
-                        } else if t.kind() == SyntaxKind::INLINE_CODE_MARKER {
-                            skip_marker_whitespace = false;
+                        if t.kind() == SyntaxKind::INLINE_CODE_MARKER {
                             marker_len = marker_len.max(t.text().len());
                         } else if t.kind() == SyntaxKind::INLINE_CODE_CONTENT {
-                            skip_marker_whitespace = false;
                             // Code spans are literal: never apply smart
                             // punctuation normalization to their contents
                             // (pandoc keeps `—`/`…`/curly quotes verbatim here).
@@ -312,11 +287,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
         }
         SyntaxKind::EMPHASIS => {
             let mut content = String::new();
-            let mut skip_marker_whitespace = false;
             for child in node.children_with_tokens() {
                 match child {
                     NodeOrToken::Node(n) => {
-                        skip_marker_whitespace = false;
                         if n.kind() == SyntaxKind::DISPLAY_MATH {
                             content.push_str(&n.text().to_string());
                         } else {
@@ -324,15 +297,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         }
                     }
                     NodeOrToken::Token(t) => {
-                        if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                            skip_marker_whitespace = true;
+                        if t.kind() == SyntaxKind::LINE_PREFIX {
                             continue;
                         }
-                        if t.kind() == SyntaxKind::WHITESPACE && skip_marker_whitespace {
-                            skip_marker_whitespace = false;
-                            continue;
-                        }
-                        skip_marker_whitespace = false;
                         if t.kind() != SyntaxKind::EMPHASIS_MARKER {
                             content.push_str(
                                 normalize_smart_punctuation(
@@ -352,11 +319,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
         }
         SyntaxKind::STRONG => {
             let mut content = String::new();
-            let mut skip_marker_whitespace = false;
             for child in node.children_with_tokens() {
                 match child {
                     NodeOrToken::Node(n) => {
-                        skip_marker_whitespace = false;
                         if n.kind() == SyntaxKind::DISPLAY_MATH {
                             content.push_str(&n.text().to_string());
                         } else {
@@ -364,15 +329,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         }
                     }
                     NodeOrToken::Token(t) => {
-                        if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                            skip_marker_whitespace = true;
+                        if t.kind() == SyntaxKind::LINE_PREFIX {
                             continue;
                         }
-                        if t.kind() == SyntaxKind::WHITESPACE && skip_marker_whitespace {
-                            skip_marker_whitespace = false;
-                            continue;
-                        }
-                        skip_marker_whitespace = false;
                         if t.kind() != SyntaxKind::STRONG_MARKER {
                             content.push_str(t.text());
                         }
@@ -418,19 +377,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             // Format bracketed span: [content]{.attributes}
             // Need to traverse children to avoid extra spaces
             let mut result = String::new();
-            let mut skip_marker_whitespace = false;
             for child in node.children_with_tokens() {
                 match child {
                     NodeOrToken::Token(t) => {
-                        if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                            skip_marker_whitespace = true;
+                        if t.kind() == SyntaxKind::LINE_PREFIX {
                             continue;
                         }
-                        if t.kind() == SyntaxKind::WHITESPACE && skip_marker_whitespace {
-                            skip_marker_whitespace = false;
-                            continue;
-                        }
-                        skip_marker_whitespace = false;
                         result.push_str(
                             normalize_smart_punctuation(
                                 t.text(),
@@ -443,21 +395,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     NodeOrToken::Node(n) => {
                         // Recursively format nested content
                         if n.kind() == SyntaxKind::SPAN_CONTENT {
-                            let mut skip_marker_whitespace = false;
                             for elem in n.children_with_tokens() {
                                 match elem {
                                     NodeOrToken::Token(t) => {
-                                        if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                                            skip_marker_whitespace = true;
+                                        if t.kind() == SyntaxKind::LINE_PREFIX {
                                             continue;
                                         }
-                                        if t.kind() == SyntaxKind::WHITESPACE
-                                            && skip_marker_whitespace
-                                        {
-                                            skip_marker_whitespace = false;
-                                            continue;
-                                        }
-                                        skip_marker_whitespace = false;
                                         result.push_str(
                                             normalize_smart_punctuation(
                                                 t.text(),
@@ -468,7 +411,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                                         );
                                     }
                                     NodeOrToken::Node(nested) => {
-                                        skip_marker_whitespace = false;
                                         result.push_str(&format_inline_node(&nested, config));
                                     }
                                 }

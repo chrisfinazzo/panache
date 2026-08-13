@@ -12,17 +12,17 @@ DOCUMENT@0..33
           TEXT@2..6 "<div"
           NEWLINE@6..7 "\n"
           HTML_ATTRS@7..15
-            WHITESPACE@7..9 "  "
+            LINE_PREFIX@7..9 "  "
             TEXT@9..13 "id=\""
             ATTR_ID@13..14 "x"
             TEXT@14..15 "\""
           TEXT@15..16 ">"
           NEWLINE@16..17 "\n"
         PARAGRAPH@17..24
-          WHITESPACE@17..19 "  "
+          LINE_PREFIX@17..19 "  "
           TEXT@19..23 "body"
           NEWLINE@23..24 "\n"
         HTML_BLOCK_TAG@24..33
-          WHITESPACE@24..26 "  "
+          LINE_PREFIX@24..26 "  "
           TEXT@26..32 "</div>"
           NEWLINE@32..33 "\n"

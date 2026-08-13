@@ -211,8 +211,9 @@ fn emit_open_line_prefixes<'a>(
         if let Some(start) = *pending
             && current_offset > start
         {
+            // Container-frame indent on the dispatch line: prefix.
             builder.token(
-                SyntaxKind::WHITESPACE.into(),
+                SyntaxKind::LINE_PREFIX.into(),
                 &source_line[start..current_offset],
             );
         }

@@ -18,8 +18,8 @@ DOCUMENT@0..18
       HEADING_CONTENT@8..11
         TEXT@8..11 "> b"
       NEWLINE@11..12 "\n"
-      BLOCK_QUOTE_MARKER@12..13 ">"
-      WHITESPACE@13..14 " "
+      LINE_PREFIX@12..13 ">"
+      LINE_PREFIX@13..14 " "
       SETEXT_HEADING_UNDERLINE@14..17
         SETEXT_HEADING_UNDERLINE@14..17 "---"
       NEWLINE@17..18 "\n"

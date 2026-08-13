@@ -30,7 +30,7 @@ DOCUMENT@0..254
     BLANK_LINE@65..66
       BLANK_LINE@65..66 "\n"
     PARAGRAPH@66..107
-      WHITESPACE@66..70 "    "
+      LINE_PREFIX@66..70 "    "
       TEXT@70..106 "Continuation line wit ..."
       NEWLINE@106..107 "\n"
     BLANK_LINE@107..108

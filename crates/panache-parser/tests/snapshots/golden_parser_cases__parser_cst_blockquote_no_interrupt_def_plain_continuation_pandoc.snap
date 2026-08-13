@@ -16,7 +16,7 @@ DOCUMENT@0..52
           INLINE_CODE@11..32
             INLINE_CODE_MARKER@11..12 "`"
             INLINE_CODE_CONTENT@12..24 "{{< include\n"
-            WHITESPACE@24..28 "    "
+            LINE_PREFIX@24..28 "    "
             INLINE_CODE_CONTENT@28..31 ">}}"
             INLINE_CODE_MARKER@31..32 "`"
           TEXT@32..38 " then "

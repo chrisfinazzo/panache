@@ -11,8 +11,8 @@ DOCUMENT@0..38
         TEXT@2..7 "<div>"
         NEWLINE@7..8 "\n"
       HTML_BLOCK_CONTENT@8..20
-        BLOCK_QUOTE_MARKER@8..9 ">"
-        WHITESPACE@9..10 " "
+        LINE_PREFIX@8..9 ">"
+        LINE_PREFIX@9..10 " "
         TEXT@10..19 "# heading"
         NEWLINE@19..20 "\n"
     BLOCK_QUOTE_MARKER@20..21 ">"
@@ -23,8 +23,8 @@ DOCUMENT@0..38
     PARAGRAPH@24..31
       TEXT@24..28 "para"
       NEWLINE@28..29 "\n"
-      BLOCK_QUOTE_MARKER@29..30 ">"
-      WHITESPACE@30..31 " "
+      LINE_PREFIX@29..30 ">"
+      LINE_PREFIX@30..31 " "
     HTML_BLOCK@31..38
       HTML_BLOCK_TAG@31..38
         TEXT@31..37 "</div>"

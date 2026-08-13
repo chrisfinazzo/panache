@@ -28,10 +28,10 @@ DOCUMENT@0..51
           BLANK_LINE@25..26
             BLANK_LINE@25..26 "\n"
           PARAGRAPH@26..39
-            WHITESPACE@26..30 "    "
+            LINE_PREFIX@26..30 "    "
             TEXT@30..32 "--"
             NEWLINE@32..33 "\n"
-            WHITESPACE@33..37 "    "
+            LINE_PREFIX@33..37 "    "
             TEXT@37..38 "x"
             NEWLINE@38..39 "\n"
     DIV_FENCE_CLOSE@39..43

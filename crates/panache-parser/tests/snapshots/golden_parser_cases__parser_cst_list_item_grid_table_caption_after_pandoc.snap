@@ -16,7 +16,7 @@ DOCUMENT@0..69
           TABLE_SEP_DELIM@10..11 "+"
           NEWLINE@11..12 "\n"
         TABLE_HEADER@12..24
-          WHITESPACE@12..14 "  "
+          LINE_PREFIX@12..14 "  "
           TEXT@14..15 "|"
           WHITESPACE@15..16 " "
           TABLE_CELL@16..17
@@ -30,7 +30,7 @@ DOCUMENT@0..69
           TEXT@22..23 "|"
           NEWLINE@23..24 "\n"
         TABLE_SEPARATOR@24..36
-          WHITESPACE@24..26 "  "
+          LINE_PREFIX@24..26 "  "
           TABLE_SEP_DELIM@26..27 "+"
           TABLE_SEP_EQUALS@27..30 "==="
           TABLE_SEP_DELIM@30..31 "+"
@@ -38,7 +38,7 @@ DOCUMENT@0..69
           TABLE_SEP_DELIM@34..35 "+"
           NEWLINE@35..36 "\n"
         TABLE_ROW@36..48
-          WHITESPACE@36..38 "  "
+          LINE_PREFIX@36..38 "  "
           TEXT@38..39 "|"
           WHITESPACE@39..40 " "
           TABLE_CELL@40..41
@@ -52,7 +52,7 @@ DOCUMENT@0..69
           TEXT@46..47 "|"
           NEWLINE@47..48 "\n"
         TABLE_SEPARATOR@48..60
-          WHITESPACE@48..50 "  "
+          LINE_PREFIX@48..50 "  "
           TABLE_SEP_DELIM@50..51 "+"
           TABLE_SEP_DASHES@51..54 "---"
           TABLE_SEP_DELIM@54..55 "+"
@@ -62,7 +62,7 @@ DOCUMENT@0..69
         BLANK_LINE@60..61
           BLANK_LINE@60..61 "\n"
         TABLE_CAPTION@61..69
-          WHITESPACE@61..63 "  "
+          LINE_PREFIX@61..63 "  "
           TABLE_CAPTION_PREFIX@63..65 ": "
           TEXT@65..68 "cap"
           NEWLINE@68..69 "\n"

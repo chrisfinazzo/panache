@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..4373
@@ -371,7 +370,7 @@ DOCUMENT@0..4373
         BLANK_LINE@2484..2485
           BLANK_LINE@2484..2485 "\n"
         CODE_BLOCK@2485..2585
-          WHITESPACE@2485..2489 "    "
+          LINE_PREFIX@2485..2489 "    "
           CODE_FENCE_OPEN@2489..2521
             CODE_FENCE_MARKER@2489..2492 "```"
             WHITESPACE@2492..2493 " "
@@ -387,10 +386,10 @@ DOCUMENT@0..4373
               TEXT@2519..2520 "}"
             NEWLINE@2520..2521 "\n"
           CODE_CONTENT@2521..2577
-            WHITESPACE@2521..2525 "    "
+            LINE_PREFIX@2521..2525 "    "
             TEXT@2525..2576 "git clone git@github. ..."
             NEWLINE@2576..2577 "\n"
-          WHITESPACE@2577..2581 "    "
+          LINE_PREFIX@2577..2581 "    "
           CODE_FENCE_CLOSE@2581..2585
             CODE_FENCE_MARKER@2581..2584 "```"
             NEWLINE@2584..2585 "\n"
@@ -516,7 +515,7 @@ DOCUMENT@0..4373
         BLANK_LINE@3539..3540
           BLANK_LINE@3539..3540 "\n"
         CODE_BLOCK@3540..3638
-          WHITESPACE@3540..3544 "    "
+          LINE_PREFIX@3540..3544 "    "
           CODE_FENCE_OPEN@3544..3576
             CODE_FENCE_MARKER@3544..3547 "```"
             WHITESPACE@3547..3548 " "
@@ -532,13 +531,13 @@ DOCUMENT@0..4373
               TEXT@3574..3575 "}"
             NEWLINE@3575..3576 "\n"
           CODE_CONTENT@3576..3630
-            WHITESPACE@3576..3580 "    "
+            LINE_PREFIX@3576..3580 "    "
             TEXT@3580..3602 "cd manuscript-tutorial"
             NEWLINE@3602..3603 "\n"
-            WHITESPACE@3603..3607 "    "
+            LINE_PREFIX@3603..3607 "    "
             TEXT@3607..3629 "python3 -m jupyter lab"
             NEWLINE@3629..3630 "\n"
-          WHITESPACE@3630..3634 "    "
+          LINE_PREFIX@3630..3634 "    "
           CODE_FENCE_CLOSE@3634..3638
             CODE_FENCE_MARKER@3634..3637 "```"
             NEWLINE@3637..3638 "\n"

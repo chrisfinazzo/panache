@@ -19,7 +19,7 @@ DOCUMENT@0..499
         BLANK_LINE@23..24
           BLANK_LINE@23..24 "\n"
         PLAIN@24..42
-          WHITESPACE@24..28 "    "
+          LINE_PREFIX@24..28 "    "
           TEXT@28..41 "Another list:"
           NEWLINE@41..42 "\n"
         BLANK_LINE@42..43
@@ -35,15 +35,15 @@ DOCUMENT@0..499
             BLANK_LINE@57..58
               BLANK_LINE@57..58 "\n"
             CODE_BLOCK@58..92
-              WHITESPACE@58..65 "       "
+              LINE_PREFIX@58..65 "       "
               CODE_FENCE_OPEN@65..69
                 CODE_FENCE_MARKER@65..68 "```"
                 NEWLINE@68..69 "\n"
               CODE_CONTENT@69..81
-                WHITESPACE@69..76 "       "
+                LINE_PREFIX@69..76 "       "
                 TEXT@76..80 "code"
                 NEWLINE@80..81 "\n"
-              WHITESPACE@81..88 "       "
+              LINE_PREFIX@81..88 "       "
               CODE_FENCE_CLOSE@88..92
                 CODE_FENCE_MARKER@88..91 "```"
                 NEWLINE@91..92 "\n"
@@ -74,13 +74,13 @@ DOCUMENT@0..499
               CODE_LANGUAGE@186..194 "markdown"
             NEWLINE@194..195 "\n"
           CODE_CONTENT@195..219
-            WHITESPACE@195..197 "  "
+            LINE_PREFIX@195..197 "  "
             TEXT@197..205 "    code"
             NEWLINE@205..206 "\n"
-            WHITESPACE@206..208 "  "
+            LINE_PREFIX@206..208 "  "
             TEXT@208..218 "    a <- 1"
             NEWLINE@218..219 "\n"
-          WHITESPACE@219..221 "  "
+          LINE_PREFIX@219..221 "  "
           CODE_FENCE_CLOSE@221..225
             CODE_FENCE_MARKER@221..224 "```"
             NEWLINE@224..225 "\n"
@@ -102,13 +102,13 @@ DOCUMENT@0..499
               CODE_LANGUAGE@298..306 "markdown"
             NEWLINE@306..307 "\n"
           CODE_CONTENT@307..335
-            WHITESPACE@307..311 "    "
+            LINE_PREFIX@307..311 "    "
             TEXT@311..319 "    code"
             NEWLINE@319..320 "\n"
-            WHITESPACE@320..324 "    "
+            LINE_PREFIX@320..324 "    "
             TEXT@324..334 "    a <- 1"
             NEWLINE@334..335 "\n"
-          WHITESPACE@335..339 "    "
+          LINE_PREFIX@335..339 "    "
           CODE_FENCE_CLOSE@339..343
             CODE_FENCE_MARKER@339..342 "```"
             NEWLINE@342..343 "\n"
@@ -130,13 +130,13 @@ DOCUMENT@0..499
               CODE_LANGUAGE@418..426 "markdown"
             NEWLINE@426..427 "\n"
           CODE_CONTENT@427..445
-            WHITESPACE@427..428 "\t"
+            LINE_PREFIX@427..428 "\t"
             TEXT@428..434 "\t\tcode"
             NEWLINE@434..435 "\n"
-            WHITESPACE@435..436 "\t"
+            LINE_PREFIX@435..436 "\t"
             TEXT@436..444 "\t\ta <- 1"
             NEWLINE@444..445 "\n"
-          WHITESPACE@445..446 "\t"
+          LINE_PREFIX@445..446 "\t"
           CODE_FENCE_CLOSE@446..450
             CODE_FENCE_MARKER@446..449 "```"
             NEWLINE@449..450 "\n"
@@ -154,15 +154,15 @@ DOCUMENT@0..499
             CODE_FENCE_MARKER@461..464 "```"
             NEWLINE@464..465 "\n"
           CODE_CONTENT@465..491
-            WHITESPACE@465..469 "    "
+            LINE_PREFIX@465..469 "    "
             TEXT@469..473 "Term"
             NEWLINE@473..474 "\n"
-            WHITESPACE@474..478 "    "
+            LINE_PREFIX@474..478 "    "
             NEWLINE@478..479 "\n"
-            WHITESPACE@479..483 "    "
+            LINE_PREFIX@479..483 "    "
             TEXT@483..490 "  : Def"
             NEWLINE@490..491 "\n"
-          WHITESPACE@491..495 "    "
+          LINE_PREFIX@491..495 "    "
           CODE_FENCE_CLOSE@495..499
             CODE_FENCE_MARKER@495..498 "```"
             NEWLINE@498..499 "\n"

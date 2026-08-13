@@ -15,8 +15,8 @@ DOCUMENT@0..24
     PARAGRAPH@7..24
       TEXT@7..10 "b |"
       NEWLINE@10..11 "\n"
-      BLOCK_QUOTE_MARKER@11..12 ">"
-      WHITESPACE@12..13 " "
+      LINE_PREFIX@11..12 ">"
+      LINE_PREFIX@12..13 " "
       TEXT@13..16 "# h"
       NEWLINE@16..17 "\n"
       TEXT@17..23 "     c"

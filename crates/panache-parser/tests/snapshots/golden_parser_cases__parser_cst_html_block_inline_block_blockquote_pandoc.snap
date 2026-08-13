@@ -12,12 +12,12 @@ DOCUMENT@0..32
         TEXT@8..9 ">"
         NEWLINE@9..10 "\n"
       PLAIN@10..21
-        BLOCK_QUOTE_MARKER@10..11 ">"
-        WHITESPACE@11..12 " "
+        LINE_PREFIX@10..11 ">"
+        LINE_PREFIX@11..12 " "
         TEXT@12..20 "fallback"
         NEWLINE@20..21 "\n"
       HTML_BLOCK_TAG@21..32
-        BLOCK_QUOTE_MARKER@21..22 ">"
-        WHITESPACE@22..23 " "
+        LINE_PREFIX@21..22 ">"
+        LINE_PREFIX@22..23 " "
         TEXT@23..31 "</video>"
         NEWLINE@31..32 "\n"

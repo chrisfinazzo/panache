@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..33
@@ -14,8 +13,8 @@ DOCUMENT@0..33
       PLAIN@9..24
         TEXT@9..17 "fallback"
         NEWLINE@17..18 "\n"
-        BLOCK_QUOTE_MARKER@18..19 ">"
-        WHITESPACE@19..20 " "
+        LINE_PREFIX@18..19 ">"
+        LINE_PREFIX@19..20 " "
         TEXT@20..24 "more"
       HTML_BLOCK_TAG@24..33
         TEXT@24..32 "</video>"

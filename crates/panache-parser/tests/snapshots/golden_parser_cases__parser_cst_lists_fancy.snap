@@ -479,7 +479,7 @@ DOCUMENT@0..1432
           PLAIN@1308..1361
             TEXT@1308..1336 "sublist with roman nu ..."
             NEWLINE@1336..1337 "\n"
-            WHITESPACE@1337..1345 "        "
+            LINE_PREFIX@1337..1345 "        "
             TEXT@1345..1360 "starting with 4"
             NEWLINE@1360..1361 "\n"
         LIST_ITEM@1361..1432

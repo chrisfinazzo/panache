@@ -204,7 +204,7 @@ fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
                 line_idx += 1;
                 at_line_start = true;
             }
-            SyntaxKind::BLOCK_QUOTE_MARKER | SyntaxKind::WHITESPACE => {}
+            SyntaxKind::LINE_PREFIX | SyntaxKind::WHITESPACE => {}
             SyntaxKind::TEXT => {
                 let text = token.text();
                 if at_line_start

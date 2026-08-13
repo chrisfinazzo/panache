@@ -24,15 +24,15 @@ DOCUMENT@0..49
             TEXT@17..18 "B"
           NEWLINE@18..19 "\n"
         TABLE_SEPARATOR@19..29
-          BLOCK_QUOTE_MARKER@19..20 ">"
-          WHITESPACE@20..21 " "
+          LINE_PREFIX@19..20 ">"
+          LINE_PREFIX@20..21 " "
           TABLE_SEP_DASHES@21..24 "---"
           TABLE_SEP_WHITESPACE@24..25 " "
           TABLE_SEP_DASHES@25..28 "---"
           NEWLINE@28..29 "\n"
         TABLE_ROW@29..38
-          BLOCK_QUOTE_MARKER@29..30 ">"
-          WHITESPACE@30..31 " "
+          LINE_PREFIX@29..30 ">"
+          LINE_PREFIX@30..31 " "
           TABLE_CELL@31..32
             TEXT@31..32 "x"
           WHITESPACE@32..36 "    "

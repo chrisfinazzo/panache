@@ -53,7 +53,7 @@ DOCUMENT@0..81
         BLANK_LINE@50..51
           BLANK_LINE@50..51 "\n"
         PLAIN@51..66
-          WHITESPACE@51..53 "  "
+          LINE_PREFIX@51..53 "  "
           TEXT@53..65 "Continuation"
           NEWLINE@65..66 "\n"
     BLANK_LINE@66..67

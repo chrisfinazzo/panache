@@ -31,11 +31,11 @@ DOCUMENT@0..78
     PARAGRAPH@23..33
       TEXT@23..24 "d"
       NEWLINE@24..25 "\n"
-      WHITESPACE@25..26 "\t"
+      LINE_PREFIX@25..26 "\t"
       INLINE_CODE@26..32
         INLINE_CODE_MARKER@26..27 "`"
         INLINE_CODE_CONTENT@27..29 "x\n"
-        WHITESPACE@29..30 "\t"
+        LINE_PREFIX@29..30 "\t"
         INLINE_CODE_CONTENT@30..31 "y"
         INLINE_CODE_MARKER@31..32 "`"
       NEWLINE@32..33 "\n"
@@ -50,11 +50,11 @@ DOCUMENT@0..78
     PARAGRAPH@40..57
       TEXT@40..41 "d"
       NEWLINE@41..42 "\n"
-      WHITESPACE@42..46 "    "
+      LINE_PREFIX@42..46 "    "
       INLINE_CODE@46..56
         INLINE_CODE_MARKER@46..47 "`"
         INLINE_CODE_CONTENT@47..49 "x\n"
-        WHITESPACE@49..53 "    "
+        LINE_PREFIX@49..53 "    "
         INLINE_CODE_CONTENT@53..55 "\ty"
         INLINE_CODE_MARKER@55..56 "`"
       NEWLINE@56..57 "\n"
@@ -69,11 +69,11 @@ DOCUMENT@0..78
     PARAGRAPH@64..78
       TEXT@64..65 "d"
       NEWLINE@65..66 "\n"
-      WHITESPACE@66..69 "  \t"
+      LINE_PREFIX@66..69 "  \t"
       INLINE_CODE@69..77
         INLINE_CODE_MARKER@69..70 "`"
         INLINE_CODE_CONTENT@70..72 "x\n"
-        WHITESPACE@72..75 "  \t"
+        LINE_PREFIX@72..75 "  \t"
         INLINE_CODE_CONTENT@75..76 "y"
         INLINE_CODE_MARKER@76..77 "`"
       NEWLINE@77..78 "\n"

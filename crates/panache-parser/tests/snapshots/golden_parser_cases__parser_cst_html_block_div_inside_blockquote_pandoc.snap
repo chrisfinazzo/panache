@@ -21,8 +21,8 @@ DOCUMENT@0..58
         TEXT@30..31 ">"
         NEWLINE@31..32 "\n"
       PARAGRAPH@32..49
-        BLOCK_QUOTE_MARKER@32..33 ">"
-        WHITESPACE@33..34 " "
+        LINE_PREFIX@32..33 ">"
+        LINE_PREFIX@33..34 " "
         TEXT@34..40 "Hello "
         EMPHASIS@40..47
           EMPHASIS_MARKER@40..41 "*"
@@ -31,7 +31,7 @@ DOCUMENT@0..58
         TEXT@47..48 "."
         NEWLINE@48..49 "\n"
       HTML_BLOCK_TAG@49..58
-        BLOCK_QUOTE_MARKER@49..50 ">"
-        WHITESPACE@50..51 " "
+        LINE_PREFIX@49..50 ">"
+        LINE_PREFIX@50..51 " "
         TEXT@51..57 "</div>"
         NEWLINE@57..58 "\n"

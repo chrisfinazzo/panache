@@ -43,9 +43,10 @@ pub fn code_span_payload(node: &SyntaxNode, tab_width: usize) -> String {
                 if t.kind() == SyntaxKind::INLINE_CODE_CONTENT {
                     out.push_str(&expanded);
                 }
-                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                    // A `>` re-injected on a continuation line is container
-                    // syntax; the line's indent run continues past it.
+                if t.kind() == SyntaxKind::LINE_PREFIX {
+                    // Container prefix re-injected on a continuation line
+                    // (indent or `>` bytes); the line's indent run continues
+                    // past it.
                     in_indent = true;
                 }
             }
@@ -129,7 +130,11 @@ fn token_line_context(token: &SyntaxToken, tab_width: usize) -> (usize, bool) {
             pieces.push(tail.to_string());
             break;
         }
-        if t.kind() != SyntaxKind::BLOCK_QUOTE_MARKER && !is_indent_run(text) {
+        if !matches!(
+            t.kind(),
+            SyntaxKind::BLOCK_QUOTE_MARKER | SyntaxKind::LINE_PREFIX
+        ) && !is_indent_run(text)
+        {
             in_indent = false;
         }
         pieces.push(text.to_string());

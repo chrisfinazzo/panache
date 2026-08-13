@@ -136,7 +136,7 @@ DOCUMENT@0..162
         BLANK_LINE@120..121
           BLANK_LINE@120..121 "\n"
         PLAIN@121..130
-          WHITESPACE@121..125 "    "
+          LINE_PREFIX@121..125 "    "
           TEXT@125..129 "more"
           NEWLINE@129..130 "\n"
   BLANK_LINE@130..131

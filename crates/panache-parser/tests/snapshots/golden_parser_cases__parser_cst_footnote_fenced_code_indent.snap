@@ -24,15 +24,15 @@ DOCUMENT@0..51
     BLANK_LINE@21..22
       BLANK_LINE@21..22 "\n"
     CODE_BLOCK@22..51
-      WHITESPACE@22..26 "    "
+      LINE_PREFIX@22..26 "    "
       CODE_FENCE_OPEN@26..30
         CODE_FENCE_MARKER@26..29 "```"
         NEWLINE@29..30 "\n"
       CODE_CONTENT@30..43
-        WHITESPACE@30..34 "    "
+        LINE_PREFIX@30..34 "    "
         TEXT@34..42 "    deep"
         NEWLINE@42..43 "\n"
-      WHITESPACE@43..47 "    "
+      LINE_PREFIX@43..47 "    "
       CODE_FENCE_CLOSE@47..51
         CODE_FENCE_MARKER@47..50 "```"
         NEWLINE@50..51 "\n"

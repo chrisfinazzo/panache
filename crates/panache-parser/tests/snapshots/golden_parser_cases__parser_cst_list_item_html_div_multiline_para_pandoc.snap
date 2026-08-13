@@ -13,10 +13,10 @@ DOCUMENT@0..24
           TEXT@6..7 ">"
           NEWLINE@7..8 "\n"
         PARAGRAPH@8..15
-          WHITESPACE@8..10 "  "
+          LINE_PREFIX@8..10 "  "
           TEXT@10..14 "body"
           NEWLINE@14..15 "\n"
         HTML_BLOCK_TAG@15..24
-          WHITESPACE@15..17 "  "
+          LINE_PREFIX@15..17 "  "
           TEXT@17..23 "</div>"
           NEWLINE@23..24 "\n"

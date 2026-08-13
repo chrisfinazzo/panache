@@ -2752,16 +2752,12 @@ fn graft_subtree_as(
     builder.finish_node();
 }
 
-/// Emit a captured per-line bq prefix as a stream of `BLOCK_QUOTE_MARKER`
-/// (`>`) and `WHITESPACE` (everything else, byte-by-byte) tokens.
+/// Emit a captured per-line bq prefix as a byte-by-byte stream of
+/// `LINE_PREFIX` tokens (the bytes land inside a content node).
 fn emit_bq_prefix_tokens(builder: &mut GreenNodeBuilder<'static>, prefix: &str) {
     for ch in prefix.chars() {
-        if ch == '>' {
-            builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-        } else {
-            let mut buf = [0u8; 4];
-            builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
-        }
+        let mut buf = [0u8; 4];
+        builder.token(SyntaxKind::LINE_PREFIX.into(), ch.encode_utf8(&mut buf));
     }
 }
 
@@ -3786,20 +3782,16 @@ fn emit_attr_region(builder: &mut GreenNodeBuilder<'static>, region: &str) {
 }
 
 /// Emit one continuation line of an HTML block, preserving any blockquote
-/// markers as structural tokens (so the CST stays byte-equal to the source
-/// and downstream consumers can strip them per-context).
+/// prefix as `LINE_PREFIX` tokens (so the CST stays byte-equal to the
+/// source while consumers can skip the prefix structurally).
 fn emit_html_block_line(builder: &mut GreenNodeBuilder<'static>, line: &str, bq_depth: usize) {
     let inner = if bq_depth > 0 {
         let stripped = strip_n_blockquote_markers(line, bq_depth);
         let prefix_len = line.len() - stripped.len();
         if prefix_len > 0 {
             for ch in line[..prefix_len].chars() {
-                if ch == '>' {
-                    builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-                } else {
-                    let mut buf = [0u8; 4];
-                    builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
-                }
+                let mut buf = [0u8; 4];
+                builder.token(SyntaxKind::LINE_PREFIX.into(), ch.encode_utf8(&mut buf));
             }
         }
         stripped

@@ -1035,8 +1035,9 @@ panache starts caching NodePtrs across edits.
   or improve).
 
 - [ ] Give a line's **container prefix** one representation, so no consumer can
-  mistake prefix bytes for content. The bounded steps landed; what remains
-  is the structural fix and the consumers still reading raw text.
+  mistake prefix bytes for content. The structural fix landed (`LINE_PREFIX`
+  below); what remains is the stragglers still reading raw text and the two
+  structural gaps at the end.
 
   - [x] **Buffers count segments where they mean lines.** `ListItemBuffer` grew
     the line-oriented API (`sole_text_segment`, `buffered_line_count`,
@@ -1065,24 +1066,30 @@ panache starts caching NodePtrs across edits.
     output, and a listed colspan grid collapsing to one escaped line on the
     second pass (`{blockquote,list_item}_grid_table_colspan` goldens).
 
-  - [ ] **Real fix: tag prefix runs with their own kind** so skipping is
-    structural rather than per-consumer --- a CST shape change touching
-    every snapshot, and the same principle as the `pandoc_ast.rs` entry
-    above (a structural fact the parser already knows belongs in the CST,
-    not recomputed downstream). Until then `text_without_line_prefixes`
-    stays a heuristic: a line-leading `WHITESPACE` token that is genuine
-    content cannot be told apart from prefix.
+  - [x] **Real fix: tag prefix runs with their own kind.** Container-prefix
+    bytes landing inside a content node (continuation-line indent, `>`
+    markers, their padding, the dispatch line's unconsumed list indent) now
+    carry `SyntaxKind::LINE_PREFIX`, with token boundaries preserved from
+    the legacy tokenization (indent coalesced, bq runs byte-by-byte, so
+    marker-vs-padding is still readable off the token texts). Line 0
+    prefixes that are `BLOCK_QUOTE`/`LIST_ITEM` structure keep their kinds.
+    `text_without_line_prefixes` is now an exact structural skip, and the
+    migrated skippers went with it: `pandoc_ast.rs` (`code_content_text`,
+    `collect_html_block_text_skip_bq_markers`, `container_prefix_len`), the
+    formatter's `container_prefix_len`/`text_without_prefixes` family (no
+    longer blind to list indent --- which also fixed the dispatch-line vs
+    continuation-line geometry-origin mismatch for tables in list items),
+    `code_span_payload`, and the linter's `swallowed_list_marker` walk. The
+    \~200 CST snapshot diffs were verified to be pure kind renames at
+    identical byte ranges (plus the intended
+    `TABLE_SEP_WHITESPACE`-was-really-prefix correction).
 
-  - [ ] **Consumers still reading raw prefixed text**, migratable to the shared
-    accessor (or its structural successor): the pipe-table verbatim fallback
-    (`formatter/tables.rs` `format_pipe_table` early returns), the bq-only
-    `container_prefix_len`/`text_without_prefixes` family in the
-    simple/multiline paths (blind to a bare line-leading `WHITESPACE`, so a
-    list indent contributes zero), the ad-hoc skippers in `pandoc_ast.rs`
-    (`code_content_text`, `collect_html_block_text_skip_bq_markers`, its own
-    `container_prefix_len`, ...), and `extract_code_block` in
-    `crates/panache-formatter/src/utils.rs`, which ships `> `/indent bytes
-    to external formatters and linters.
+  - [ ] **Consumers still reading raw prefixed text**, now trivially migratable
+    to `text_without_line_prefixes`: the pipe-table verbatim fallbacks
+    (`formatter/tables.rs` `format_pipe_table`-family
+    `return node.text().to_string()` early returns), and
+    `extract_code_block` in `crates/panache-formatter/src/utils.rs`, which
+    ships `> `/indent bytes to external formatters and linters.
 
   - [ ] **`emit_as_block`'s ATX and HTML lifts stay `is_text_only`-gated**:
     unlike the table/div lift they have no bq-prefix re-injection plumbing,

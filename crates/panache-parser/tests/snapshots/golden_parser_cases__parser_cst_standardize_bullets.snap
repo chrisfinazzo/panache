@@ -211,7 +211,7 @@ DOCUMENT@0..1226
       PLAIN@731..821
         TEXT@731..805 "List item with more t ..."
         NEWLINE@805..806 "\n"
-        WHITESPACE@806..808 "  "
+        LINE_PREFIX@806..808 "  "
         TEXT@808..820 "processes it"
         NEWLINE@820..821 "\n"
       BLANK_LINE@821..824
@@ -222,20 +222,20 @@ DOCUMENT@0..1226
       BLANK_LINE@862..865
         BLANK_LINE@862..865 "  \n"
       CODE_BLOCK@865..911
-        WHITESPACE@865..867 "  "
+        LINE_PREFIX@865..867 "  "
         CODE_FENCE_OPEN@867..877
           CODE_FENCE_MARKER@867..870 "```"
           CODE_INFO@870..876
             CODE_LANGUAGE@870..876 "python"
           NEWLINE@876..877 "\n"
         CODE_CONTENT@877..905
-          WHITESPACE@877..879 "  "
+          LINE_PREFIX@877..879 "  "
           TEXT@879..893 "def example():"
           NEWLINE@893..894 "\n"
-          WHITESPACE@894..896 "  "
+          LINE_PREFIX@894..896 "  "
           TEXT@896..904 "    pass"
           NEWLINE@904..905 "\n"
-        WHITESPACE@905..907 "  "
+        LINE_PREFIX@905..907 "  "
         CODE_FENCE_CLOSE@907..911
           CODE_FENCE_MARKER@907..910 "```"
           NEWLINE@910..911 "\n"

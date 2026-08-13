@@ -24,12 +24,12 @@ DOCUMENT@0..29
       PLAIN@15..29
         TEXT@15..16 "b"
         NEWLINE@16..17 "\n"
-        WHITESPACE@17..19 "  "
+        LINE_PREFIX@17..19 "  "
         TEXT@19..20 "\t"
         INLINE_CODE@20..28
           INLINE_CODE_MARKER@20..21 "`"
           INLINE_CODE_CONTENT@21..23 "x\n"
-          WHITESPACE@23..25 "  "
+          LINE_PREFIX@23..25 "  "
           INLINE_CODE_CONTENT@25..27 "\ty"
           INLINE_CODE_MARKER@27..28 "`"
         NEWLINE@28..29 "\n"

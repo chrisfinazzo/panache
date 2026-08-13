@@ -13,7 +13,7 @@ DOCUMENT@0..167
       BLANK_LINE@46..47
         BLANK_LINE@46..47 "\n"
       CODE_BLOCK@47..167
-        WHITESPACE@47..51 "    "
+        LINE_PREFIX@47..51 "    "
         CODE_FENCE_OPEN@51..58
           CODE_FENCE_MARKER@51..54 "```"
           CODE_INFO@54..57
@@ -52,10 +52,10 @@ DOCUMENT@0..167
                         YAML_LINE_PREFIX@121..128 "    #| "
                         YAML_SCALAR_TEXT@128..147 "  across two lines\""
                       NEWLINE@147..148 "\n"
-          WHITESPACE@148..152 "    "
+          LINE_PREFIX@148..152 "    "
           TEXT@152..158 "x <- 1"
           NEWLINE@158..159 "\n"
-        WHITESPACE@159..163 "    "
+        LINE_PREFIX@159..163 "    "
         CODE_FENCE_CLOSE@163..167
           CODE_FENCE_MARKER@163..166 "```"
           NEWLINE@166..167 "\n"

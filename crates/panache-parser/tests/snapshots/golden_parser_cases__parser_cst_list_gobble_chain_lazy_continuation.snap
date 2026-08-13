@@ -18,11 +18,11 @@ DOCUMENT@0..92
           PLAIN@8..23
             TEXT@8..9 "d"
             NEWLINE@9..10 "\n"
-            WHITESPACE@10..14 "    "
+            LINE_PREFIX@10..14 "    "
             INLINE_CODE@14..22
               INLINE_CODE_MARKER@14..15 "`"
               INLINE_CODE_CONTENT@15..17 "q\n"
-              WHITESPACE@17..19 "  "
+              LINE_PREFIX@17..19 "  "
               INLINE_CODE_CONTENT@19..21 " y"
               INLINE_CODE_MARKER@21..22 "`"
             NEWLINE@22..23 "\n"
@@ -56,7 +56,7 @@ DOCUMENT@0..92
         PLAIN@49..64
           TEXT@49..50 "a"
           NEWLINE@50..51 "\n"
-          WHITESPACE@51..57 "      "
+          LINE_PREFIX@51..57 "      "
           INLINE_CODE@57..63
             INLINE_CODE_MARKER@57..58 "`"
             INLINE_CODE_CONTENT@58..62 "q\n y"
@@ -69,11 +69,11 @@ DOCUMENT@0..92
         PLAIN@70..92
           TEXT@70..71 "b"
           NEWLINE@71..72 "\n"
-          WHITESPACE@72..78 "      "
+          LINE_PREFIX@72..78 "      "
           INLINE_CODE@78..91
             INLINE_CODE_MARKER@78..79 "`"
             INLINE_CODE_CONTENT@79..81 "q\n"
-            WHITESPACE@81..87 "      "
+            LINE_PREFIX@81..87 "      "
             INLINE_CODE_CONTENT@87..90 "  y"
             INLINE_CODE_MARKER@90..91 "`"
           NEWLINE@91..92 "\n"

@@ -21,10 +21,10 @@ DOCUMENT@0..22
         HEADING_CONTENT@10..13
           TEXT@10..13 "> b"
         NEWLINE@13..14 "\n"
-        BLOCK_QUOTE_MARKER@14..15 ">"
-        WHITESPACE@15..16 " "
-        BLOCK_QUOTE_MARKER@16..17 ">"
-        WHITESPACE@17..18 " "
+        LINE_PREFIX@14..15 ">"
+        LINE_PREFIX@15..16 " "
+        LINE_PREFIX@16..17 ">"
+        LINE_PREFIX@17..18 " "
         SETEXT_HEADING_UNDERLINE@18..21
           SETEXT_HEADING_UNDERLINE@18..21 "---"
         NEWLINE@21..22 "\n"

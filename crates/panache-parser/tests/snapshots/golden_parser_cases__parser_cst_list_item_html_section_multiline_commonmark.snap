@@ -11,7 +11,7 @@ DOCUMENT@0..33
         INLINE_HTML@2..11
           INLINE_HTML_CONTENT@2..11 "<section>"
         NEWLINE@11..12 "\n"
-        WHITESPACE@12..14 "  "
+        LINE_PREFIX@12..14 "  "
         TEXT@14..19 "hello"
         NEWLINE@19..20 "\n"
       HTML_BLOCK@20..33

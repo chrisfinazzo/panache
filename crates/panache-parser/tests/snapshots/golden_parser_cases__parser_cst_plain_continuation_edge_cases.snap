@@ -32,10 +32,10 @@ DOCUMENT@0..1248
         PLAIN@70..160
           TEXT@70..94 "First line of definition"
           NEWLINE@94..95 "\n"
-          WHITESPACE@95..99 "    "
+          LINE_PREFIX@95..99 "    "
           TEXT@99..132 "continues here with p ..."
           NEWLINE@132..133 "\n"
-          WHITESPACE@133..137 "    "
+          LINE_PREFIX@133..137 "    "
           TEXT@137..159 "and even a third line."
           NEWLINE@159..160 "\n"
     BLANK_LINE@160..161
@@ -75,10 +75,10 @@ DOCUMENT@0..1248
         BLANK_LINE@272..273
           BLANK_LINE@272..273 "\n"
         PLAIN@273..327
-          WHITESPACE@273..277 "    "
+          LINE_PREFIX@273..277 "    "
           TEXT@277..303 "Continues after blank ..."
           NEWLINE@303..304 "\n"
-          WHITESPACE@304..308 "    "
+          LINE_PREFIX@304..308 "    "
           TEXT@308..326 "with more content."
           NEWLINE@326..327 "\n"
   BLANK_LINE@327..328
@@ -103,7 +103,7 @@ DOCUMENT@0..1248
         PLAIN@388..439
           TEXT@388..411 "Definition content here"
           NEWLINE@411..412 "\n"
-          WHITESPACE@412..416 "    "
+          LINE_PREFIX@412..416 "    "
           TEXT@416..438 "continues on next line"
           NEWLINE@438..439 "\n"
         BLANK_LINE@439..444
@@ -157,7 +157,7 @@ DOCUMENT@0..1248
             TEXT@584..588 "bold"
             STRONG_MARKER@588..590 "**"
           NEWLINE@590..591 "\n"
-          WHITESPACE@591..595 "    "
+          LINE_PREFIX@591..595 "    "
           TEXT@595..610 "continues with "
           INLINE_CODE@610..616
             INLINE_CODE_MARKER@610..611 "`"
@@ -165,7 +165,7 @@ DOCUMENT@0..1248
             INLINE_CODE_MARKER@615..616 "`"
           TEXT@616..629 " on next line"
           NEWLINE@629..630 "\n"
-          WHITESPACE@630..634 "    "
+          LINE_PREFIX@630..634 "    "
           TEXT@634..638 "and "
           LINK@638..664
             LINK_START@638..639
@@ -201,7 +201,7 @@ DOCUMENT@0..1248
         PLAIN@727..762
           TEXT@727..742 "Definition text"
           NEWLINE@742..743 "\n"
-          WHITESPACE@743..747 "    "
+          LINE_PREFIX@743..747 "    "
           TEXT@747..761 "continues here"
           NEWLINE@761..762 "\n"
   BLANK_LINE@762..763
@@ -260,7 +260,7 @@ DOCUMENT@0..1248
         PLAIN@981..1017
           TEXT@981..997 "First definition"
           NEWLINE@997..998 "\n"
-          WHITESPACE@998..1002 "    "
+          LINE_PREFIX@998..1002 "    "
           TEXT@1002..1016 "continues here"
           NEWLINE@1016..1017 "\n"
       BLANK_LINE@1017..1018
@@ -271,7 +271,7 @@ DOCUMENT@0..1248
         PLAIN@1022..1059
           TEXT@1022..1039 "Second definition"
           NEWLINE@1039..1040 "\n"
-          WHITESPACE@1040..1044 "    "
+          LINE_PREFIX@1040..1044 "    "
           TEXT@1044..1058 "also continues"
           NEWLINE@1058..1059 "\n"
     BLANK_LINE@1059..1060
@@ -288,7 +288,7 @@ DOCUMENT@0..1248
         PLAIN@1083..1119
           TEXT@1083..1099 "First definition"
           NEWLINE@1099..1100 "\n"
-          WHITESPACE@1100..1104 "    "
+          LINE_PREFIX@1100..1104 "    "
           TEXT@1104..1118 "continues here"
           NEWLINE@1118..1119 "\n"
       BLANK_LINE@1119..1120
@@ -299,7 +299,7 @@ DOCUMENT@0..1248
         PLAIN@1124..1161
           TEXT@1124..1141 "Second definition"
           NEWLINE@1141..1142 "\n"
-          WHITESPACE@1142..1146 "    "
+          LINE_PREFIX@1142..1146 "    "
           TEXT@1146..1160 "also continues"
           NEWLINE@1160..1161 "\n"
   BLANK_LINE@1161..1162
@@ -324,6 +324,6 @@ DOCUMENT@0..1248
         PLAIN@1201..1248
           TEXT@1201..1226 "Last definition conti ..."
           NEWLINE@1226..1227 "\n"
-          WHITESPACE@1227..1231 "    "
+          LINE_PREFIX@1227..1231 "    "
           TEXT@1231..1247 "to the very end."
           NEWLINE@1247..1248 "\n"

@@ -14,8 +14,8 @@ DOCUMENT@0..37
           HEADING_CONTENT@4..7
             TEXT@4..7 "Foo"
           NEWLINE@7..8 "\n"
-          BLOCK_QUOTE_MARKER@8..9 ">"
-          WHITESPACE@9..10 " "
+          LINE_PREFIX@8..9 ">"
+          LINE_PREFIX@9..10 " "
           WHITESPACE@10..12 "  "
           SETEXT_HEADING_UNDERLINE@12..15
             SETEXT_HEADING_UNDERLINE@12..15 "---"
@@ -36,10 +36,10 @@ DOCUMENT@0..37
             HEADING_CONTENT@23..26
               TEXT@23..26 "Bar"
             NEWLINE@26..27 "\n"
-            BLOCK_QUOTE_MARKER@27..28 ">"
-            WHITESPACE@28..29 " "
-            BLOCK_QUOTE_MARKER@29..30 ">"
-            WHITESPACE@30..31 " "
+            LINE_PREFIX@27..28 ">"
+            LINE_PREFIX@28..29 " "
+            LINE_PREFIX@29..30 ">"
+            LINE_PREFIX@30..31 " "
             WHITESPACE@31..33 "  "
             SETEXT_HEADING_UNDERLINE@33..36
               SETEXT_HEADING_UNDERLINE@33..36 "---"

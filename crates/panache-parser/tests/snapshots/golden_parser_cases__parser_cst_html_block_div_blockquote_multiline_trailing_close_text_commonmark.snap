@@ -11,7 +11,7 @@ DOCUMENT@0..31
         TEXT@2..6 "<div"
         NEWLINE@6..7 "\n"
       HTML_BLOCK_CONTENT@7..31
-        BLOCK_QUOTE_MARKER@7..8 ">"
-        WHITESPACE@8..9 " "
+        LINE_PREFIX@7..8 ">"
+        LINE_PREFIX@8..9 " "
         TEXT@9..30 "  id=\"x\">foo</div>bar"
         NEWLINE@30..31 "\n"

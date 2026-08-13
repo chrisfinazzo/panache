@@ -42,7 +42,7 @@ DOCUMENT@0..393
         BLANK_LINE@143..144
           BLANK_LINE@143..144 "\n"
         PLAIN@144..189
-          WHITESPACE@144..148 "    "
+          LINE_PREFIX@144..148 "    "
           TEXT@148..188 "contains seeds, crisp ..."
           NEWLINE@188..189 "\n"
     BLANK_LINE@189..190

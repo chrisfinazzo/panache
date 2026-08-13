@@ -18,6 +18,6 @@ DOCUMENT@0..19
           TEXT@13..14 ">"
           NEWLINE@14..15 "\n"
         PARAGRAPH@15..19
-          WHITESPACE@15..17 "  "
+          LINE_PREFIX@15..17 "  "
           TEXT@17..18 "x"
           NEWLINE@18..19 "\n"

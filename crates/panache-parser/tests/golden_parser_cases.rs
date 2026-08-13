@@ -126,7 +126,7 @@ fn issue_195_canonical_shape_delta() {
     let canonical_cst = format!("{:#?}\n", canonical_tree);
 
     assert!(
-        once_cst.contains("BLOCK_QUOTE_MARKER@417..418 \">\""),
+        once_cst.contains("LINE_PREFIX@417..418 \">\""),
         "expected issue_195 CST to keep shifted continuation marker as a structural token"
     );
     assert!(

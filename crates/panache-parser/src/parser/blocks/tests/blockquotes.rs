@@ -142,11 +142,12 @@ fn blockquote_marker_lands_inside_multiline_strong() {
     assert_eq!(strongs.len(), 1);
     let strong = &strongs[0];
 
-    // The second line's BLOCK_QUOTE_MARKER must live inside the STRONG.
+    // The second line's `> ` prefix must live inside the STRONG, tagged
+    // as LINE_PREFIX (a marker byte and its padding space).
     assert_eq!(
-        count_tokens_in(strong, SyntaxKind::BLOCK_QUOTE_MARKER),
-        1,
-        "the continuation marker must be nested inside STRONG"
+        count_tokens_in(strong, SyntaxKind::LINE_PREFIX),
+        2,
+        "the continuation prefix must be nested inside STRONG"
     );
 
     // The marker must come before the `text` continuation TEXT token. Collect the
@@ -157,7 +158,7 @@ fn blockquote_marker_lands_inside_multiline_strong() {
         .collect();
     let marker_idx = tokens
         .iter()
-        .position(|t| t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER)
+        .position(|t| t.kind() == SyntaxKind::LINE_PREFIX && t.text() == ">")
         .expect("marker present");
     let text_idx = tokens
         .iter()
@@ -183,7 +184,7 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
     let emphs = find_nodes_of_type(&tree, SyntaxKind::EMPHASIS);
     assert_eq!(emphs.len(), 1);
     assert_eq!(
-        count_tokens_in(&emphs[0], SyntaxKind::BLOCK_QUOTE_MARKER),
+        count_tokens_in(&emphs[0], SyntaxKind::LINE_PREFIX),
         0,
         "a boundary-coincident marker must not be nested inside EMPHASIS"
     );
@@ -198,7 +199,7 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
         .enumerate()
         .filter_map(|(i, el)| match el {
             crate::syntax::SyntaxElement::Token(t)
-                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER =>
+                if t.kind() == SyntaxKind::LINE_PREFIX && t.text() == ">" =>
             {
                 Some(i)
             }
@@ -206,7 +207,7 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
             _ => None,
         })
         .collect();
-    // Exactly two: the BLOCK_QUOTE_MARKER child then the EMPHASIS node, in order.
+    // Exactly two: the LINE_PREFIX marker child then the EMPHASIS node, in order.
     assert_eq!(
         positions.len(),
         2,
@@ -884,12 +885,20 @@ fn definition_list_list_blockquote_continuation_stays_structural() {
         .into_iter()
         .next()
         .expect("expected blockquote node");
-    let marker_count = blockquote
+    // Line 0's marker is blockquote structure; the two continuation
+    // markers land inside the quote's paragraph as LINE_PREFIX.
+    let structural_marker_count = blockquote
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
         .filter(|token| token.kind() == SyntaxKind::BLOCK_QUOTE_MARKER)
         .count();
-    assert_eq!(marker_count, 3);
+    assert_eq!(structural_marker_count, 1);
+    let prefix_marker_count = blockquote
+        .descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|token| token.kind() == SyntaxKind::LINE_PREFIX && token.text() == ">")
+        .count();
+    assert_eq!(prefix_marker_count, 2);
 
     let has_text_with_raw_marker = blockquote
         .descendants_with_tokens()

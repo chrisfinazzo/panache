@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..33
@@ -12,8 +11,8 @@ DOCUMENT@0..33
         TEXT@2..12 "<!-- multi"
         NEWLINE@12..13 "\n"
       HTML_BLOCK_TAG@13..23
-        BLOCK_QUOTE_MARKER@13..14 ">"
-        WHITESPACE@14..15 " "
+        LINE_PREFIX@13..14 ">"
+        LINE_PREFIX@14..15 " "
         TEXT@15..23 "line -->"
     PARAGRAPH@23..33
       TEXT@23..32 " trailing"

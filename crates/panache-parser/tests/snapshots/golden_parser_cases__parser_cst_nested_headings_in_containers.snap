@@ -57,6 +57,6 @@ DOCUMENT@0..80
             TEXT@60..67 "Heading"
           NEWLINE@67..68 "\n"
         PLAIN@68..80
-          WHITESPACE@68..70 "  "
+          LINE_PREFIX@68..70 "  "
           TEXT@70..79 "Some text"
           NEWLINE@79..80 "\n"

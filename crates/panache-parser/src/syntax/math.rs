@@ -8,10 +8,10 @@ use super::{AstNode, PanacheLanguage, SyntaxElement, SyntaxKind, SyntaxNode, Syn
 /// subtree, keeping only the math tokens.
 ///
 /// Container machinery (blockquotes, list continuations, …) interleaves host
-/// prefix tokens (`BLOCK_QUOTE_MARKER`, `WHITESPACE`, `NEWLINE`) into the
-/// subtree on continuation lines for lossless capture. Those prefixes are not
-/// part of the math, so they are excluded here — otherwise e.g. a blockquote
-/// `>` would leak into the content and re-accumulate on every format pass.
+/// prefix tokens (`LINE_PREFIX`, `NEWLINE`) into the subtree on continuation
+/// lines for lossless capture. Those prefixes are not part of the math, so
+/// they are excluded here — otherwise e.g. a blockquote `>` would leak into
+/// the content and re-accumulate on every format pass.
 pub fn math_content_text(math: &SyntaxNode) -> String {
     let Some(content) = math
         .children()

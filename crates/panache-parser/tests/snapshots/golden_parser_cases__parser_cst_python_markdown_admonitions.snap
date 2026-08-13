@@ -13,13 +13,13 @@ DOCUMENT@0..154
     BLANK_LINE@20..21
       BLANK_LINE@20..21 "\n"
     PARAGRAPH@21..82
-      WHITESPACE@21..25 "    "
+      LINE_PREFIX@21..25 "    "
       TEXT@25..81 "Lorem ipsum dolor sit ..."
       NEWLINE@81..82 "\n"
     BLANK_LINE@82..83
       BLANK_LINE@82..83 "\n"
     PARAGRAPH@83..119
-      WHITESPACE@83..87 "    "
+      LINE_PREFIX@83..87 "    "
       TEXT@87..118 "A second paragraph in ..."
       NEWLINE@118..119 "\n"
   BLANK_LINE@119..120

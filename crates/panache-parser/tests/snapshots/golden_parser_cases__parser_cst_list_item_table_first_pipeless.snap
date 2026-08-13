@@ -18,14 +18,14 @@ DOCUMENT@0..26
             TEXT@6..7 "b"
           NEWLINE@7..8 "\n"
         TABLE_SEPARATOR@8..18
-          WHITESPACE@8..10 "  "
+          LINE_PREFIX@8..10 "  "
           TABLE_SEP_DASHES@10..13 "---"
           TABLE_SEP_DELIM@13..14 "|"
           TABLE_SEP_DASHES@14..17 "---"
           NEWLINE@17..18 "\n"
         TABLE_ROW@18..26
           TABLE_CELL@18..21
-            WHITESPACE@18..20 "  "
+            LINE_PREFIX@18..20 "  "
             TEXT@20..21 "c"
           WHITESPACE@21..22 " "
           TEXT@22..23 "|"

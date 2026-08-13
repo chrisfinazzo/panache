@@ -26,17 +26,17 @@ DOCUMENT@0..61
               TEXT@19..23 "col2"
             NEWLINE@23..24 "\n"
           TABLE_SEPARATOR@24..40
-            WHITESPACE@24..26 "  "
-            BLOCK_QUOTE_MARKER@26..27 ">"
-            WHITESPACE@27..28 " "
+            LINE_PREFIX@24..26 "  "
+            LINE_PREFIX@26..27 ">"
+            LINE_PREFIX@27..28 " "
             TABLE_SEP_DASHES@28..33 "-----"
             TABLE_SEP_WHITESPACE@33..34 " "
             TABLE_SEP_DASHES@34..39 "-----"
             NEWLINE@39..40 "\n"
           TABLE_ROW@40..52
-            WHITESPACE@40..42 "  "
-            BLOCK_QUOTE_MARKER@42..43 ">"
-            WHITESPACE@43..44 " "
+            LINE_PREFIX@40..42 "  "
+            LINE_PREFIX@42..43 ">"
+            LINE_PREFIX@43..44 " "
             TABLE_CELL@44..45
               TEXT@44..45 "a"
             WHITESPACE@45..50 "     "

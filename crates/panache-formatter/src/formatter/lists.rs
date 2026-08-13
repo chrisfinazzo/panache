@@ -20,7 +20,13 @@ impl Formatter {
         for element in node.children_with_tokens() {
             match element {
                 NodeOrToken::Token(token) => match token.kind() {
-                    SyntaxKind::BLOCK_QUOTE_MARKER => has_blockquote_marker = true,
+                    SyntaxKind::LINE_PREFIX => {
+                        // A prefix run's `>` byte marks the continuation;
+                        // its indent/space bytes are ignorable either way.
+                        if token.text().contains('>') {
+                            has_blockquote_marker = true;
+                        }
+                    }
                     SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                     _ => {
                         if !token.text().trim().is_empty() {

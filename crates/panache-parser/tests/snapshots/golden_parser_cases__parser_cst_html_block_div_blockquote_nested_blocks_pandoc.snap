@@ -13,23 +13,23 @@ DOCUMENT@0..38
         NEWLINE@7..8 "\n"
       HEADING@8..20
         ATX_HEADING_MARKER@8..11
-          BLOCK_QUOTE_MARKER@8..9 ">"
-          WHITESPACE@9..10 " "
+          LINE_PREFIX@8..9 ">"
+          LINE_PREFIX@9..10 " "
           ATX_HEADING_MARKER@10..11 "#"
         WHITESPACE@11..12 " "
         HEADING_CONTENT@12..19
           TEXT@12..19 "heading"
         NEWLINE@19..20 "\n"
       BLANK_LINE@20..22
-        BLOCK_QUOTE_MARKER@20..21 ">"
+        LINE_PREFIX@20..21 ">"
         BLANK_LINE@21..22 "\n"
       PARAGRAPH@22..29
-        BLOCK_QUOTE_MARKER@22..23 ">"
-        WHITESPACE@23..24 " "
+        LINE_PREFIX@22..23 ">"
+        LINE_PREFIX@23..24 " "
         TEXT@24..28 "para"
         NEWLINE@28..29 "\n"
       HTML_BLOCK_TAG@29..38
-        BLOCK_QUOTE_MARKER@29..30 ">"
-        WHITESPACE@30..31 " "
+        LINE_PREFIX@29..30 ">"
+        LINE_PREFIX@30..31 " "
         TEXT@31..37 "</div>"
         NEWLINE@37..38 "\n"

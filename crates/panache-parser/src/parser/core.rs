@@ -1433,7 +1433,9 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::HEADING.into());
         emit_setext_heading_text(&mut self.builder, &text_owned, self.config);
         for (leading_spaces, has_trailing_space) in markers {
-            blockquotes::emit_one_blockquote_marker(
+            // Landing inside the HEADING node: container prefix, not
+            // blockquote structure.
+            blockquotes::emit_one_line_prefix_marker(
                 &mut self.builder,
                 leading_spaces,
                 has_trailing_space,

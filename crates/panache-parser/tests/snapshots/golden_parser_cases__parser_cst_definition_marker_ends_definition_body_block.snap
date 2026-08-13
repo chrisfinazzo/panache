@@ -14,11 +14,11 @@ DOCUMENT@0..48
         PLAIN@6..14
           TEXT@6..7 "a"
           NEWLINE@7..8 "\n"
-          WHITESPACE@8..12 "    "
+          LINE_PREFIX@8..12 "    "
           TEXT@12..13 "b"
           NEWLINE@13..14 "\n"
         PLAIN@14..24
-          WHITESPACE@14..18 "    "
+          LINE_PREFIX@14..18 "    "
           TEXT@18..23 ": def"
           NEWLINE@23..24 "\n"
     BLANK_LINE@24..25
@@ -33,7 +33,7 @@ DOCUMENT@0..48
         PLAIN@32..40
           TEXT@32..33 "a"
           NEWLINE@33..34 "\n"
-          WHITESPACE@34..38 "    "
+          LINE_PREFIX@34..38 "    "
           TEXT@38..39 "b"
           NEWLINE@39..40 "\n"
       DEFINITION@40..48

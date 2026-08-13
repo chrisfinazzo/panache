@@ -398,33 +398,21 @@ fn format_table_caption(caption_text: &str, config: &Config, node: &SyntaxNode) 
 
 fn extract_table_caption_content(caption_node: &SyntaxNode) -> String {
     let mut caption_body = String::new();
-    // Captions inside a blockquote carry BLOCK_QUOTE_MARKER tokens for
-    // losslessness; the blockquote formatter re-adds the prefix dynamically, so
-    // drop the marker (and the whitespace that follows it) here.
-    let mut skip_next_whitespace = false;
-
+    // Captions inside a container carry LINE_PREFIX tokens for
+    // losslessness; the container formatter re-adds the prefix
+    // dynamically, so drop them here (along with the caption's own
+    // `Table:`/`:` prefix).
     for caption_child in caption_node.children_with_tokens() {
         match caption_child {
-            rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::BLOCK_QUOTE_MARKER => {
-                skip_next_whitespace = true;
-            }
             rowan::NodeOrToken::Token(token)
-                if token.kind() == SyntaxKind::WHITESPACE && skip_next_whitespace =>
-            {
-                skip_next_whitespace = false;
-            }
-            rowan::NodeOrToken::Token(token)
-                if token.kind() == SyntaxKind::TABLE_CAPTION_PREFIX =>
-            {
-                // Skip the original prefix
-                skip_next_whitespace = false;
-            }
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::LINE_PREFIX | SyntaxKind::TABLE_CAPTION_PREFIX
+                ) => {}
             rowan::NodeOrToken::Token(token) => {
-                skip_next_whitespace = false;
                 caption_body.push_str(token.text());
             }
             rowan::NodeOrToken::Node(node) => {
-                skip_next_whitespace = false;
                 caption_body.push_str(&node.text().to_string());
             }
         }
@@ -493,58 +481,40 @@ fn extract_row_cells(row_node: &SyntaxNode, config: &Config) -> Vec<String> {
     cells
 }
 
-/// Byte length of the block-quote prefix at the start of `node`: the
-/// `BLOCK_QUOTE_MARKER` tokens and the single space each of them consumes.
+/// Byte length of the container prefix at the start of `node` — its
+/// leading run of `LINE_PREFIX` tokens.
 ///
-/// A table nested in a block quote carries its own marker on every line it
-/// owns, but the *first* line's marker belongs to the enclosing `BLOCK_QUOTE`
+/// A table nested in a container carries its own prefix on every line it
+/// owns, but the *first* line's prefix belongs to the enclosing container
 /// and so sits outside the table node. Column geometry is byte offsets into
 /// these lines, so the header would otherwise be measured from a different
 /// origin than the separator and rows.
 fn container_prefix_len(node: &SyntaxNode) -> usize {
-    let mut len = 0;
-    let mut after_marker = false;
-    for element in node.children_with_tokens() {
-        let Some(token) = element.into_token() else {
-            break;
-        };
-        match token.kind() {
-            SyntaxKind::BLOCK_QUOTE_MARKER => {
-                len += token.text().len();
-                after_marker = true;
-            }
-            SyntaxKind::WHITESPACE if after_marker => {
-                len += token.text().len();
-                after_marker = false;
-            }
-            _ => break,
-        }
-    }
-    len
+    node.children_with_tokens()
+        .map_while(|el| {
+            el.into_token()
+                .filter(|t| t.kind() == SyntaxKind::LINE_PREFIX)
+                .map(|t| t.text().len())
+        })
+        .sum()
 }
 
 /// Rebuild a table line (or multi-line row) from its tokens with every
-/// block-quote prefix stripped, rendering child nodes through `render_node`.
+/// container prefix stripped, rendering child nodes through `render_node`.
 ///
-/// See `container_prefix_len`: markers only ever appear at a line start, so
-/// dropping every `BLOCK_QUOTE_MARKER` and the `WHITESPACE` immediately after
-/// it leaves text whose byte offsets match the separator's dash geometry.
+/// See `container_prefix_len`: dropping every `LINE_PREFIX` token leaves
+/// text whose byte offsets match the separator's dash geometry.
 fn text_without_prefixes(node: &SyntaxNode, render_node: impl Fn(&SyntaxNode) -> String) -> String {
     let mut out = String::new();
-    let mut after_marker = false;
     for element in node.children_with_tokens() {
         match element {
-            NodeOrToken::Token(token) => match token.kind() {
-                SyntaxKind::BLOCK_QUOTE_MARKER => after_marker = true,
-                SyntaxKind::WHITESPACE if after_marker => after_marker = false,
-                _ => {
+            NodeOrToken::Token(token) => {
+                if token.kind() != SyntaxKind::LINE_PREFIX {
                     out.push_str(token.text());
-                    after_marker = false;
                 }
-            },
+            }
             NodeOrToken::Node(child) => {
                 out.push_str(&render_node(&child));
-                after_marker = false;
             }
         }
     }

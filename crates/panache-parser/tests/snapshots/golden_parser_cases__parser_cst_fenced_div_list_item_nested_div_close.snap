@@ -28,11 +28,11 @@ DOCUMENT@0..72
                   TEXT@26..39 "light-content"
                 NEWLINE@39..40 "\n"
               PARAGRAPH@40..50
-                WHITESPACE@40..44 "    "
+                LINE_PREFIX@40..44 "    "
                 TEXT@44..49 "inner"
                 NEWLINE@49..50 "\n"
               DIV_FENCE_CLOSE@50..58
-                WHITESPACE@50..54 "    "
+                LINE_PREFIX@50..54 "    "
                 TEXT@54..57 ":::"
                 NEWLINE@57..58 "\n"
           LIST_ITEM@58..68

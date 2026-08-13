@@ -35,7 +35,7 @@ DOCUMENT@0..170
         PLAIN@26..34
           TEXT@26..27 "a"
           NEWLINE@27..28 "\n"
-          WHITESPACE@28..32 "    "
+          LINE_PREFIX@28..32 "    "
           TEXT@32..33 "b"
           NEWLINE@33..34 "\n"
         DEFINITION_LIST@34..55

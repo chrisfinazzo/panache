@@ -21,8 +21,8 @@ DOCUMENT@0..95
       PARAGRAPH@19..71
         TEXT@19..43 "first paragraph line one"
         NEWLINE@43..44 "\n"
-        BLOCK_QUOTE_MARKER@44..45 ">"
-        WHITESPACE@45..46 " "
+        LINE_PREFIX@44..45 ">"
+        LINE_PREFIX@45..46 " "
         TEXT@46..70 "first paragraph line two"
         NEWLINE@70..71 "\n"
     BLANK_LINE@71..72

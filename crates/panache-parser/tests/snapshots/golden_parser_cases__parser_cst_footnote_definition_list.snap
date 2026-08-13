@@ -80,6 +80,6 @@ DOCUMENT@0..340
     BLANK_LINE@283..288
       BLANK_LINE@283..288 "    \n"
     PARAGRAPH@288..340
-      WHITESPACE@288..292 "    "
+      LINE_PREFIX@288..292 "    "
       TEXT@292..339 "Continuing paragraph  ..."
       NEWLINE@339..340 "\n"

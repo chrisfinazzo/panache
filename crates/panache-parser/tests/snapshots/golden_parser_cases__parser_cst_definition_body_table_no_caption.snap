@@ -20,15 +20,15 @@ DOCUMENT@0..34
           BLANK_LINE@9..10 "\n"
         SIMPLE_TABLE@10..34
           TABLE_SEPARATOR@10..19
-            WHITESPACE@10..14 "    "
+            LINE_PREFIX@10..14 "    "
             TABLE_SEP_DASHES@14..18 "----"
             NEWLINE@18..19 "\n"
           TABLE_ROW@19..25
-            WHITESPACE@19..23 "    "
+            LINE_PREFIX@19..23 "    "
             TABLE_CELL@23..24
               TEXT@23..24 "x"
             NEWLINE@24..25 "\n"
           TABLE_SEPARATOR@25..34
-            WHITESPACE@25..29 "    "
+            LINE_PREFIX@25..29 "    "
             TABLE_SEP_DASHES@29..33 "----"
             NEWLINE@33..34 "\n"

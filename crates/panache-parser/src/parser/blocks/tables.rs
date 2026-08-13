@@ -1227,7 +1227,7 @@ pub(crate) fn try_parse_simple_table(
     }
 
     // Emit separator, re-emitting any continuation-line container prefix
-    // (`  > `) as WHITESPACE/BLOCK_QUOTE_MARKER tokens before the row text.
+    // (`  > `) as `LINE_PREFIX` tokens before the row text.
     builder.start_node(SyntaxKind::TABLE_SEPARATOR.into());
     let separator_tail = window.emit_or_dispatch_tail(builder, separator_pos);
     emit_separator_tokens(builder, separator_tail);
@@ -1358,7 +1358,7 @@ fn emit_table_row(
     builder.start_node(row_kind.into());
 
     // On continuation lines the leading `  > ` prefix is re-emitted as
-    // WHITESPACE/BLOCK_QUOTE_MARKER tokens inside the row node and the
+    // `LINE_PREFIX` tokens inside the row node and the
     // stripped tail returned; the dispatch line just strips its (already
     // core-emitted) prefix. Empty prefix ⇒ the raw line.
     let line = window.emit_or_dispatch_tail(builder, abs_idx);
@@ -1941,7 +1941,7 @@ pub(crate) fn try_parse_pipe_table(
     );
 
     // Emit separator, re-emitting any continuation-line container prefix
-    // (`  > `) as WHITESPACE/BLOCK_QUOTE_MARKER tokens before the row text.
+    // (`  > `) as `LINE_PREFIX` tokens before the row text.
     builder.start_node(SyntaxKind::TABLE_SEPARATOR.into());
     let separator_tail = window.emit_or_dispatch_tail(builder, actual_start + 1);
     emit_separator_tokens(builder, separator_tail);
@@ -2816,7 +2816,7 @@ fn emit_grid_table_row(
     builder.start_node(row_kind.into());
 
     // Emit first line with TABLE_CELL nodes. The continuation-line container
-    // prefix (`  > `) is re-emitted as WHITESPACE/BLOCK_QUOTE_MARKER tokens
+    // prefix (`  > `) is re-emitted as `LINE_PREFIX` tokens
     // inside the row node before the cell text; the returned tail is the
     // prefix-stripped line we slice cells from (empty prefix ⇒ raw line).
     // Grid table rows look like: "| Cell 1 | Cell 2 | Cell 3 |"
@@ -3084,7 +3084,7 @@ pub(crate) fn try_parse_grid_table(
             let is_header_sep = sep_cols.iter().any(|c| c.is_header_separator);
 
             // Re-emit any continuation-line container prefix (`  > `) as
-            // WHITESPACE/BLOCK_QUOTE_MARKER tokens before the separator text.
+            // `LINE_PREFIX` tokens before the separator text.
             if is_header_sep {
                 if !past_header_sep {
                     // This is the header/body separator

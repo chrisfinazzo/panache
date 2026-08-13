@@ -583,8 +583,8 @@ fn prepare_fence_open_line<'a>(
     // dispatch and silently consumed here. The list_content_col indent
     // is upstream-emitted only on a marker-line dispatch
     // (`list_marker_consumed_on_line_0=true`); on continuation-line
-    // dispatch it must be emitted here as WHITESPACE. Adjacent
-    // WHITESPACE emissions are coalesced into one token for
+    // dispatch it must be emitted here as LINE_PREFIX. Adjacent
+    // prefix-indent emissions are coalesced into one token for
     // byte-range-equivalent CST stability.
     if let Some(first_line) = first_line_override {
         if bq_depth > 0 && source_line != first_line {
@@ -612,8 +612,10 @@ fn prepare_fence_open_line<'a>(
         if let Some(start) = *pending
             && current_offset > start
         {
+            // List/content indent consumed by the container frame:
+            // prefix, not the fence's own leading whitespace.
             builder.token(
-                SyntaxKind::WHITESPACE.into(),
+                SyntaxKind::LINE_PREFIX.into(),
                 &source_line[start..current_offset],
             );
         }
@@ -664,7 +666,7 @@ fn prepare_fence_open_line<'a>(
         do_strip_bq(builder, &mut s, &mut pending_ws_start);
     }
 
-    // content_indent (footnote/definition) — always emit as WHITESPACE.
+    // content_indent (footnote/definition) — always emit (as LINE_PREFIX).
     if content_indent > 0 {
         let indent_bytes = byte_index_at_column(s, content_indent);
         if s.len() >= indent_bytes && indent_bytes > 0 {

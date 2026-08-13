@@ -18,8 +18,8 @@ DOCUMENT@0..47
       PLAIN@22..36
         TEXT@22..27 "first"
         NEWLINE@27..28 "\n"
-        BLOCK_QUOTE_MARKER@28..29 ">"
-        WHITESPACE@29..30 " "
+        LINE_PREFIX@28..29 ">"
+        LINE_PREFIX@29..30 " "
         TEXT@30..36 "second"
       HTML_BLOCK_TAG@36..47
         TEXT@36..46 "</section>"

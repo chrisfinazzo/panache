@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 99
 expression: cst_output
 ---
 DOCUMENT@0..91
@@ -64,6 +63,6 @@ DOCUMENT@0..91
       PLAIN@74..91
         TEXT@74..78 "Term"
         NEWLINE@78..79 "\n"
-        WHITESPACE@79..81 "  "
+        LINE_PREFIX@79..81 "  "
         TEXT@81..90 "    : def"
         NEWLINE@90..91 "\n"

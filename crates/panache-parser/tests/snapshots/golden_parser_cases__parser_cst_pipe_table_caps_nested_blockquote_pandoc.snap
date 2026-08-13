@@ -17,8 +17,8 @@ DOCUMENT@0..20
           TEXT@8..9 "b"
         NEWLINE@9..10 "\n"
       TABLE_SEPARATOR@10..20
-        BLOCK_QUOTE_MARKER@10..11 ">"
-        WHITESPACE@11..12 " "
+        LINE_PREFIX@10..11 ">"
+        LINE_PREFIX@11..12 " "
         TABLE_SEP_DASHES@12..15 "---"
         TABLE_SEP_DELIM@15..16 "|"
         TABLE_SEP_DASHES@16..19 "---"

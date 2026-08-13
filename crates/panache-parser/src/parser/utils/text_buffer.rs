@@ -49,7 +49,7 @@ impl ParagraphSegment {
 /// Buffer for accumulating paragraph content with interleaved structural markers.
 ///
 /// This enables proper inline parsing across line boundaries while preserving
-/// the position of BLOCK_QUOTE_MARKER tokens for lossless reconstruction.
+/// the position of container-prefix (`LINE_PREFIX`) tokens for lossless reconstruction.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ParagraphBuffer {
     /// Interleaved segments of text and markers
@@ -246,7 +246,7 @@ impl ParagraphBuffer {
     ///
     /// The inline parser runs *once* over the full text (so multiline inlines
     /// like STRONG can span blockquote marker boundaries), emitting straight
-    /// into a [`MarkerInjectingSink`] that splices the `BLOCK_QUOTE_MARKER`
+    /// into a [`MarkerInjectingSink`] that splices the `LINE_PREFIX`
     /// tokens in at the recorded offsets during the same pass — no temporary
     /// tree is built and replayed.
     fn emit_with_markers(

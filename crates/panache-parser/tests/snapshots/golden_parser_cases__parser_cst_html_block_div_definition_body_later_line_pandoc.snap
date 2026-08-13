@@ -20,7 +20,7 @@ DOCUMENT@0..50
           BLANK_LINE@15..16 "\n"
         HTML_BLOCK_DIV@16..50
           HTML_BLOCK_TAG@16..33
-            WHITESPACE@16..20 "    "
+            LINE_PREFIX@16..20 "    "
             TEXT@20..24 "<div"
             WHITESPACE@24..25 " "
             HTML_ATTRS@25..31
@@ -30,10 +30,10 @@ DOCUMENT@0..50
             TEXT@31..32 ">"
             NEWLINE@32..33 "\n"
           PARAGRAPH@33..39
-            WHITESPACE@33..37 "    "
+            LINE_PREFIX@33..37 "    "
             TEXT@37..38 "x"
             NEWLINE@38..39 "\n"
           HTML_BLOCK_TAG@39..50
-            WHITESPACE@39..43 "    "
+            LINE_PREFIX@39..43 "    "
             TEXT@43..49 "</div>"
             NEWLINE@49..50 "\n"

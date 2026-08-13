@@ -10,7 +10,7 @@ DOCUMENT@0..24
       PLAIN@2..10
         TEXT@2..5 "```"
         NEWLINE@5..6 "\n"
-        WHITESPACE@6..8 "  "
+        LINE_PREFIX@6..8 "  "
         TEXT@8..9 "c"
         NEWLINE@9..10 "\n"
   BLANK_LINE@10..11

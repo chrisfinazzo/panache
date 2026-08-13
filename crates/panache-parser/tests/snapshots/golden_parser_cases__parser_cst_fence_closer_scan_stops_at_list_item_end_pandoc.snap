@@ -12,9 +12,9 @@ DOCUMENT@0..32
         INLINE_CODE@4..17
           INLINE_CODE_MARKER@4..7 "```"
           INLINE_CODE_CONTENT@7..8 "\n"
-          WHITESPACE@8..10 "  "
+          LINE_PREFIX@8..10 "  "
           INLINE_CODE_CONTENT@10..12 "c\n"
-          WHITESPACE@12..14 "  "
+          LINE_PREFIX@12..14 "  "
           INLINE_CODE_MARKER@14..17 "```"
         NEWLINE@17..18 "\n"
   BLANK_LINE@18..19

@@ -19,6 +19,6 @@ DOCUMENT@0..40
         PARAGRAPH@21..40
           TEXT@21..30 " trailing"
           NEWLINE@30..31 "\n"
-          WHITESPACE@31..35 "    "
+          LINE_PREFIX@31..35 "    "
           TEXT@35..39 "more"
           NEWLINE@39..40 "\n"

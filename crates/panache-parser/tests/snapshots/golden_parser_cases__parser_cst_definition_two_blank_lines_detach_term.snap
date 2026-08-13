@@ -47,7 +47,7 @@ DOCUMENT@0..63
         BLANK_LINE@31..32
           BLANK_LINE@31..32 "\n"
         PLAIN@32..42
-          WHITESPACE@32..36 "    "
+          LINE_PREFIX@32..36 "    "
           TEXT@36..41 ":   b"
           NEWLINE@41..42 "\n"
     BLANK_LINE@42..43

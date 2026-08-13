@@ -46,7 +46,7 @@ pub(crate) fn parse_indented_code_block(
     base_indent: usize,
 ) -> usize {
     use super::blockquotes::{
-        count_blockquote_markers, emit_one_blockquote_marker, strip_n_blockquote_markers,
+        count_blockquote_markers, emit_one_line_prefix_marker, strip_n_blockquote_markers,
     };
     use crate::parser::utils::marker_utils::parse_blockquote_marker_info;
 
@@ -100,7 +100,7 @@ pub(crate) fn parse_indented_code_block(
                 let marker_info = parse_blockquote_marker_info(line);
                 for i in 0..bq_depth {
                     if let Some(info) = marker_info.get(i) {
-                        emit_one_blockquote_marker(
+                        emit_one_line_prefix_marker(
                             builder,
                             info.leading_spaces,
                             info.has_trailing_space,
@@ -135,7 +135,7 @@ pub(crate) fn parse_indented_code_block(
             let marker_info = parse_blockquote_marker_info(line);
             for i in 0..bq_depth {
                 if let Some(info) = marker_info.get(i) {
-                    emit_one_blockquote_marker(
+                    emit_one_line_prefix_marker(
                         builder,
                         info.leading_spaces,
                         info.has_trailing_space,

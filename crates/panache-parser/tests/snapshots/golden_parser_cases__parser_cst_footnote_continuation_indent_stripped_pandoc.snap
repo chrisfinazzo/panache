@@ -36,11 +36,11 @@ DOCUMENT@0..113
     PARAGRAPH@28..44
       TEXT@28..29 "d"
       NEWLINE@29..30 "\n"
-      WHITESPACE@30..34 "    "
+      LINE_PREFIX@30..34 "    "
       INLINE_CODE@34..43
         INLINE_CODE_MARKER@34..35 "`"
         INLINE_CODE_CONTENT@35..37 "x\n"
-        WHITESPACE@37..41 "    "
+        LINE_PREFIX@37..41 "    "
         INLINE_CODE_CONTENT@41..42 "y"
         INLINE_CODE_MARKER@42..43 "`"
       NEWLINE@43..44 "\n"
@@ -55,12 +55,12 @@ DOCUMENT@0..113
     PARAGRAPH@51..71
       TEXT@51..52 "d"
       NEWLINE@52..53 "\n"
-      WHITESPACE@53..57 "    "
+      LINE_PREFIX@53..57 "    "
       TEXT@57..59 "  "
       INLINE_CODE@59..70
         INLINE_CODE_MARKER@59..60 "`"
         INLINE_CODE_CONTENT@60..62 "x\n"
-        WHITESPACE@62..66 "    "
+        LINE_PREFIX@62..66 "    "
         INLINE_CODE_CONTENT@66..69 "  y"
         INLINE_CODE_MARKER@69..70 "`"
       NEWLINE@70..71 "\n"
@@ -78,13 +78,13 @@ DOCUMENT@0..113
     BLANK_LINE@80..81
       BLANK_LINE@80..81 "\n"
     PARAGRAPH@81..95
-      WHITESPACE@81..85 "    "
+      LINE_PREFIX@81..85 "    "
       INLINE_MATH@85..94
         INLINE_MATH_MARKER@85..86 "$"
         MATH_CONTENT@86..93
           MATH_TEXT@86..87 "m"
           MATH_NEWLINE@87..88 "\n"
-          WHITESPACE@88..92 "    "
+          LINE_PREFIX@88..92 "    "
           MATH_TEXT@92..93 "n"
         INLINE_MATH_MARKER@93..94 "$"
       NEWLINE@94..95 "\n"

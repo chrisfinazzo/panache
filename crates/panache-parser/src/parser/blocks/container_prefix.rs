@@ -16,13 +16,16 @@
 //! (`utils/list_item_buffer.rs`) — bq + list-indent on the same line
 //! both round-trip cleanly under one structure.
 //!
-//! Tokenization preserved across the migration:
+//! Every re-emitted prefix byte carries the `LINE_PREFIX` kind — inside a
+//! content node, prefix is structurally distinguishable from content — with
+//! token boundaries preserved from the legacy tokenization:
 //!
-//! - List-indent is emitted as a *single* `WHITESPACE` token (matching
+//! - List-indent is emitted as a *single* `LINE_PREFIX` token (matching
 //!   the legacy `LinePrefixState` behavior).
-//! - Blockquote prefix is emitted byte-by-byte — `>` as
-//!   `BLOCK_QUOTE_MARKER`, anything else as a 1-byte `WHITESPACE`
-//!   (matching the legacy `BqPrefixState` byte-walker).
+//! - Blockquote prefix is emitted byte-by-byte as 1-byte `LINE_PREFIX`
+//!   tokens (matching the legacy `BqPrefixState` byte-walker), so a
+//!   consumer that needs the marker-vs-padding split can still read it
+//!   off the token texts.
 
 use std::ops::Range;
 
@@ -1306,13 +1309,31 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
         i: usize,
     ) -> &'a str {
         if i == self.dispatch {
-            let (tail, indent) = self
+            let (mut tail, indent) = self
                 .prefix
                 .strip_line_0_with_indent_emit(self.raw[self.dispatch]);
             if let Some(ws) = indent
                 && !ws.is_empty()
             {
-                builder.token(SyntaxKind::WHITESPACE.into(), ws);
+                builder.token(SyntaxKind::LINE_PREFIX.into(), ws);
+            }
+            // A continuation-line dispatch keeps the innermost list item's
+            // indent in the tail (`strip_line_0_for_emission` skips that
+            // op). Those bytes are container prefix all the same, so tag
+            // them — otherwise the dispatch line's geometry origin differs
+            // from every continuation line's. Only safe when the advance is
+            // the recipe's last op: with ops after it (an inner blockquote),
+            // the marker strip already ran over the indent and the tail's
+            // leading whitespace is genuine content.
+            if !self.prefix.list_marker_consumed_on_line_0
+                && let Some(StripOp::ListAdvance(n)) = self.prefix.ops().last()
+            {
+                let peeled = strip_list_indent(tail, *n as usize);
+                let consumed = tail.len() - peeled.len();
+                if consumed > 0 {
+                    builder.token(SyntaxKind::LINE_PREFIX.into(), &tail[..consumed]);
+                    tail = peeled;
+                }
             }
             tail
         } else {
@@ -1357,13 +1378,12 @@ pub(crate) fn bq_outer_of_list(prefix: &ContainerPrefix) -> bool {
 }
 
 pub(crate) fn emit_blockquote_prefix_tokens(builder: &mut GreenNodeBuilder<'static>, prefix: &str) {
+    // Every byte here is container prefix landing inside a content node,
+    // so the whole run is `LINE_PREFIX` — kept byte-by-byte to preserve
+    // the legacy token boundaries.
     for ch in prefix.chars() {
-        if ch == '>' {
-            builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-        } else {
-            let mut buf = [0u8; 4];
-            builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
-        }
+        let mut buf = [0u8; 4];
+        builder.token(SyntaxKind::LINE_PREFIX.into(), ch.encode_utf8(&mut buf));
     }
 }
 
@@ -1529,7 +1549,7 @@ fn walk_content_line_prefix<'a>(
                 }
                 RawPieceKind::BqRun => {
                     if let Some(pending) = pending_ws.take() {
-                        b.token(SyntaxKind::WHITESPACE.into(), &content_line[pending]);
+                        b.token(SyntaxKind::LINE_PREFIX.into(), &content_line[pending]);
                     }
                     if !range.is_empty() {
                         emit_blockquote_prefix_tokens(b, &content_line[range]);
@@ -1538,7 +1558,7 @@ fn walk_content_line_prefix<'a>(
             }
         }
         if let Some(pending) = pending_ws {
-            b.token(SyntaxKind::WHITESPACE.into(), &content_line[pending]);
+            b.token(SyntaxKind::LINE_PREFIX.into(), &content_line[pending]);
         }
     }
     tail
@@ -1707,15 +1727,15 @@ impl ContainerPrefixLine {
     }
 }
 
-/// Emit a captured per-line container prefix as kind-tagged tokens, in
-/// piece order. Indent pieces go out as one `WHITESPACE`; bq pieces go
-/// out byte-by-byte as `BLOCK_QUOTE_MARKER` / `WHITESPACE`.
+/// Emit a captured per-line container prefix as `LINE_PREFIX` tokens, in
+/// piece order. Indent pieces go out as one token; bq pieces go out
+/// byte-by-byte.
 ///
 /// The byte-by-byte split is load-bearing, not cosmetic: the formatter
-/// reads these tokens back when rebuilding a quoted line, and coalescing
-/// the run into one `WHITESPACE` makes it drop the whole run rather than
-/// the marker's own space (see the
-/// `html_block_div_definition_body_later_line_blockquote` golden case).
+/// reads these tokens back when rebuilding a quoted line and drops only
+/// the marker byte and its own padding space, keeping indent pieces (see
+/// the `html_block_div_definition_body_later_line_blockquote` golden
+/// case). Coalescing the run would erase that distinction.
 pub(crate) fn emit_container_prefix_tokens(
     builder: &mut GreenNodeBuilder<'static>,
     line: &ContainerPrefixLine,
@@ -1723,16 +1743,12 @@ pub(crate) fn emit_container_prefix_tokens(
     for (kind, bytes) in &line.pieces {
         match kind {
             PrefixPieceKind::Indent => {
-                builder.token(SyntaxKind::WHITESPACE.into(), bytes);
+                builder.token(SyntaxKind::LINE_PREFIX.into(), bytes);
             }
             PrefixPieceKind::BqRun => {
                 for ch in bytes.chars() {
-                    if ch == '>' {
-                        builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-                    } else {
-                        let mut buf = [0u8; 4];
-                        builder.token(SyntaxKind::WHITESPACE.into(), ch.encode_utf8(&mut buf));
-                    }
+                    let mut buf = [0u8; 4];
+                    builder.token(SyntaxKind::LINE_PREFIX.into(), ch.encode_utf8(&mut buf));
                 }
             }
         }
@@ -2085,9 +2101,9 @@ mod tests {
         assert_eq!(
             emitted_tokens(&line),
             vec![
-                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
-                (SyntaxKind::WHITESPACE, " ".to_string()),
-                (SyntaxKind::WHITESPACE, "  ".to_string()),
+                (SyntaxKind::LINE_PREFIX, ">".to_string()),
+                (SyntaxKind::LINE_PREFIX, " ".to_string()),
+                (SyntaxKind::LINE_PREFIX, "  ".to_string()),
             ]
         );
 
@@ -2098,9 +2114,9 @@ mod tests {
         assert_eq!(
             emitted_tokens(&line),
             vec![
-                (SyntaxKind::WHITESPACE, "  ".to_string()),
-                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
-                (SyntaxKind::WHITESPACE, " ".to_string()),
+                (SyntaxKind::LINE_PREFIX, "  ".to_string()),
+                (SyntaxKind::LINE_PREFIX, ">".to_string()),
+                (SyntaxKind::LINE_PREFIX, " ".to_string()),
             ]
         );
     }
@@ -2116,10 +2132,10 @@ mod tests {
         assert_eq!(
             emitted_tokens(&line),
             vec![
-                (SyntaxKind::WHITESPACE, "  ".to_string()),
-                (SyntaxKind::BLOCK_QUOTE_MARKER, ">".to_string()),
-                (SyntaxKind::WHITESPACE, " ".to_string()),
-                (SyntaxKind::WHITESPACE, "  ".to_string()),
+                (SyntaxKind::LINE_PREFIX, "  ".to_string()),
+                (SyntaxKind::LINE_PREFIX, ">".to_string()),
+                (SyntaxKind::LINE_PREFIX, " ".to_string()),
+                (SyntaxKind::LINE_PREFIX, "  ".to_string()),
             ]
         );
     }
@@ -2131,7 +2147,7 @@ mod tests {
         line.push_indent("  ");
         assert_eq!(
             emitted_tokens(&line),
-            vec![(SyntaxKind::WHITESPACE, "    ".to_string())]
+            vec![(SyntaxKind::LINE_PREFIX, "    ".to_string())]
         );
 
         // Empty pushes leave no pieces behind.

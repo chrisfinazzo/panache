@@ -41,7 +41,7 @@ DOCUMENT@0..240
     PARAGRAPH@88..220
       TEXT@88..150 "First sentence of the ..."
       NEWLINE@150..151 "\n"
-      WHITESPACE@151..155 "    "
+      LINE_PREFIX@151..155 "    "
       TEXT@155..219 "will wrap it onto a c ..."
       NEWLINE@219..220 "\n"
   BLANK_LINE@220..221

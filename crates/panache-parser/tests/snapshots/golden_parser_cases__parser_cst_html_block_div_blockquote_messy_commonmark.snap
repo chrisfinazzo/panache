@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..30
@@ -12,7 +11,7 @@ DOCUMENT@0..30
         TEXT@2..17 "<div id=\"x\">foo"
         NEWLINE@17..18 "\n"
       HTML_BLOCK_CONTENT@18..30
-        BLOCK_QUOTE_MARKER@18..19 ">"
-        WHITESPACE@19..20 " "
+        LINE_PREFIX@18..19 ">"
+        LINE_PREFIX@19..20 " "
         TEXT@20..29 "bar</div>"
         NEWLINE@29..30 "\n"

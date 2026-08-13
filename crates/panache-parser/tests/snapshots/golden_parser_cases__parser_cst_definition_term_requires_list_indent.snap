@@ -26,7 +26,7 @@ DOCUMENT@0..53
       PLAIN@14..20
         TEXT@14..15 "a"
         NEWLINE@15..16 "\n"
-        WHITESPACE@16..18 "  "
+        LINE_PREFIX@16..18 "  "
         TEXT@18..19 "b"
         NEWLINE@19..20 "\n"
   BLANK_LINE@20..21

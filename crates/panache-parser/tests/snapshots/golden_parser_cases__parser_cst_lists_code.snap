@@ -13,17 +13,17 @@ DOCUMENT@0..184
       BLANK_LINE@12..13
         BLANK_LINE@12..13 "\n"
       CODE_BLOCK@13..45
-        WHITESPACE@13..17 "    "
+        LINE_PREFIX@13..17 "    "
         CODE_FENCE_OPEN@17..24
           CODE_FENCE_MARKER@17..20 "```"
           CODE_INFO@20..23
             CODE_LANGUAGE@20..23 "c++"
           NEWLINE@23..24 "\n"
         CODE_CONTENT@24..37
-          WHITESPACE@24..28 "    "
+          LINE_PREFIX@24..28 "    "
           TEXT@28..36 "int foo;"
           NEWLINE@36..37 "\n"
-        WHITESPACE@37..41 "    "
+        LINE_PREFIX@37..41 "    "
         CODE_FENCE_CLOSE@41..45
           CODE_FENCE_MARKER@41..44 "```"
           NEWLINE@44..45 "\n"
@@ -56,17 +56,17 @@ DOCUMENT@0..184
           BLANK_LINE@110..111
             BLANK_LINE@110..111 "\n"
           CODE_BLOCK@111..155
-            WHITESPACE@111..119 "        "
+            LINE_PREFIX@111..119 "        "
             CODE_FENCE_OPEN@119..126
               CODE_FENCE_MARKER@119..122 "```"
               CODE_INFO@122..125
                 CODE_LANGUAGE@122..125 "c++"
               NEWLINE@125..126 "\n"
             CODE_CONTENT@126..143
-              WHITESPACE@126..134 "        "
+              LINE_PREFIX@126..134 "        "
               TEXT@134..142 "int bar;"
               NEWLINE@142..143 "\n"
-            WHITESPACE@143..151 "        "
+            LINE_PREFIX@143..151 "        "
             CODE_FENCE_CLOSE@151..155
               CODE_FENCE_MARKER@151..154 "```"
               NEWLINE@154..155 "\n"

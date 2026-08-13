@@ -16,7 +16,7 @@ DOCUMENT@0..36
           PARAGRAPH@7..36
             TEXT@7..17 "Blockquote"
             NEWLINE@17..18 "\n"
-            BLOCK_QUOTE_MARKER@18..19 ">"
-            WHITESPACE@19..20 " "
+            LINE_PREFIX@18..19 ">"
+            LINE_PREFIX@19..20 " "
             TEXT@20..35 "continued here."
             NEWLINE@35..36 "\n"

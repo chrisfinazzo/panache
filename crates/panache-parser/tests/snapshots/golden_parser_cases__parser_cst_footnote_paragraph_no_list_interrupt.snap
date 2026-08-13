@@ -12,13 +12,13 @@ DOCUMENT@0..188
     PARAGRAPH@6..168
       TEXT@6..40 "opener and some text  ..."
       NEWLINE@40..41 "\n"
-      WHITESPACE@41..45 "    "
+      LINE_PREFIX@41..45 "    "
       TEXT@45..81 "multiple indented con ..."
       NEWLINE@81..82 "\n"
-      WHITESPACE@82..86 "    "
+      LINE_PREFIX@82..86 "    "
       TEXT@86..125 "0. this leading order ..."
       NEWLINE@125..126 "\n"
-      WHITESPACE@126..130 "    "
+      LINE_PREFIX@126..130 "    "
       TEXT@130..167 "start a new list insi ..."
       NEWLINE@167..168 "\n"
   BLANK_LINE@168..169

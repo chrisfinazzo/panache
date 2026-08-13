@@ -32,8 +32,8 @@ DOCUMENT@0..1133
     PARAGRAPH@192..236
       TEXT@192..215 "Blockquote content here"
       NEWLINE@215..216 "\n"
-      BLOCK_QUOTE_MARKER@216..217 ">"
-      WHITESPACE@217..218 " "
+      LINE_PREFIX@216..217 ">"
+      LINE_PREFIX@217..218 " "
       TEXT@218..235 "with continuation"
       NEWLINE@235..236 "\n"
   BLANK_LINE@236..237
@@ -151,12 +151,12 @@ DOCUMENT@0..1133
     PARAGRAPH@655..750
       TEXT@655..694 "This is a paragraph i ..."
       NEWLINE@694..695 "\n"
-      BLOCK_QUOTE_MARKER@695..696 ">"
-      WHITESPACE@696..697 " "
+      LINE_PREFIX@695..696 ">"
+      LINE_PREFIX@696..697 " "
       TEXT@697..728 "that continues on the ..."
       NEWLINE@728..729 "\n"
-      BLOCK_QUOTE_MARKER@729..730 ">"
-      WHITESPACE@730..731 " "
+      LINE_PREFIX@729..730 ">"
+      LINE_PREFIX@730..731 " "
       TEXT@731..749 "with more content."
       NEWLINE@749..750 "\n"
     BLOCK_QUOTE_MARKER@750..751 ">"
@@ -167,8 +167,8 @@ DOCUMENT@0..1133
     PARAGRAPH@754..803
       TEXT@754..784 "Second paragraph in b ..."
       NEWLINE@784..785 "\n"
-      BLOCK_QUOTE_MARKER@785..786 ">"
-      WHITESPACE@786..787 " "
+      LINE_PREFIX@785..786 ">"
+      LINE_PREFIX@786..787 " "
       TEXT@787..802 "also continues."
       NEWLINE@802..803 "\n"
   BLANK_LINE@803..804
@@ -185,7 +185,7 @@ DOCUMENT@0..1133
       PLAIN@834..886
         TEXT@834..867 "  Indented paragraph  ..."
         NEWLINE@867..868 "\n"
-        WHITESPACE@868..870 "  "
+        LINE_PREFIX@868..870 "  "
         TEXT@870..885 "continues here."
         NEWLINE@885..886 "\n"
     BLANK_LINE@886..889

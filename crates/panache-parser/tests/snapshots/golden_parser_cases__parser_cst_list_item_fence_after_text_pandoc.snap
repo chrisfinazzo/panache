@@ -11,15 +11,15 @@ DOCUMENT@0..24
         TEXT@2..3 "a"
         NEWLINE@3..4 "\n"
       CODE_BLOCK@4..20
-        WHITESPACE@4..6 "  "
+        LINE_PREFIX@4..6 "  "
         CODE_FENCE_OPEN@6..10
           CODE_FENCE_MARKER@6..9 "```"
           NEWLINE@9..10 "\n"
         CODE_CONTENT@10..14
-          WHITESPACE@10..12 "  "
+          LINE_PREFIX@10..12 "  "
           TEXT@12..13 "c"
           NEWLINE@13..14 "\n"
-        WHITESPACE@14..16 "  "
+        LINE_PREFIX@14..16 "  "
         CODE_FENCE_CLOSE@16..20
           CODE_FENCE_MARKER@16..19 "```"
           NEWLINE@19..20 "\n"

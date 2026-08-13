@@ -19,9 +19,9 @@ DOCUMENT@0..70
             TABLE_SEP_DELIM@12..13 "+"
             NEWLINE@13..14 "\n"
           TABLE_HEADER@14..28
-            WHITESPACE@14..16 "  "
-            BLOCK_QUOTE_MARKER@16..17 ">"
-            WHITESPACE@17..18 " "
+            LINE_PREFIX@14..16 "  "
+            LINE_PREFIX@16..17 ">"
+            LINE_PREFIX@17..18 " "
             TEXT@18..19 "|"
             WHITESPACE@19..20 " "
             TABLE_CELL@20..21
@@ -35,9 +35,9 @@ DOCUMENT@0..70
             TEXT@26..27 "|"
             NEWLINE@27..28 "\n"
           TABLE_SEPARATOR@28..42
-            WHITESPACE@28..30 "  "
-            BLOCK_QUOTE_MARKER@30..31 ">"
-            WHITESPACE@31..32 " "
+            LINE_PREFIX@28..30 "  "
+            LINE_PREFIX@30..31 ">"
+            LINE_PREFIX@31..32 " "
             TABLE_SEP_DELIM@32..33 "+"
             TABLE_SEP_EQUALS@33..36 "==="
             TABLE_SEP_DELIM@36..37 "+"
@@ -45,9 +45,9 @@ DOCUMENT@0..70
             TABLE_SEP_DELIM@40..41 "+"
             NEWLINE@41..42 "\n"
           TABLE_ROW@42..56
-            WHITESPACE@42..44 "  "
-            BLOCK_QUOTE_MARKER@44..45 ">"
-            WHITESPACE@45..46 " "
+            LINE_PREFIX@42..44 "  "
+            LINE_PREFIX@44..45 ">"
+            LINE_PREFIX@45..46 " "
             TEXT@46..47 "|"
             WHITESPACE@47..48 " "
             TABLE_CELL@48..49
@@ -61,9 +61,9 @@ DOCUMENT@0..70
             TEXT@54..55 "|"
             NEWLINE@55..56 "\n"
           TABLE_SEPARATOR@56..70
-            WHITESPACE@56..58 "  "
-            BLOCK_QUOTE_MARKER@58..59 ">"
-            WHITESPACE@59..60 " "
+            LINE_PREFIX@56..58 "  "
+            LINE_PREFIX@58..59 ">"
+            LINE_PREFIX@59..60 " "
             TABLE_SEP_DELIM@60..61 "+"
             TABLE_SEP_DASHES@61..64 "---"
             TABLE_SEP_DELIM@64..65 "+"

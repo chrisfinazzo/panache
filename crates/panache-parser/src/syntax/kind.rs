@@ -32,13 +32,24 @@ pub enum SyntaxKind {
     YAML_DOCUMENT_END,   // YAML document end marker (...)
 
     BLOCK_QUOTE_MARKER, // >
-    ALERT_MARKER,       // [!NOTE], [!TIP], etc.
-    IMAGE_LINK_START,   // ![
-    LIST_MARKER,        // - + *
-    TASK_CHECKBOX,      // [ ] or [x] or [X]
-    COMMENT_START,      // <!--
-    COMMENT_END,        // -->
-    ATTRIBUTE,          // {#label} for headings, math, etc.
+    // Container-prefix bytes carried INSIDE a content node at a
+    // continuation-line start: list/content indent, `>` markers, and the
+    // whitespace between/after them. A block nested in a container owns
+    // every line after its first, so those lines' prefix bytes land inside
+    // the node for losslessness; this kind tags them so no consumer can
+    // mistake them for content (see `text_without_line_prefixes`). Line 0's
+    // prefix sits *outside* the node as `BLOCK_QUOTE`/`LIST_ITEM` structure
+    // and keeps `BLOCK_QUOTE_MARKER`/`WHITESPACE`. Token boundaries mirror
+    // the legacy tokenization (indent coalesced, bq prefix byte-by-byte);
+    // adjacent LINE_PREFIX tokens form one prefix run.
+    LINE_PREFIX,
+    ALERT_MARKER,     // [!NOTE], [!TIP], etc.
+    IMAGE_LINK_START, // ![
+    LIST_MARKER,      // - + *
+    TASK_CHECKBOX,    // [ ] or [x] or [X]
+    COMMENT_START,    // <!--
+    COMMENT_END,      // -->
+    ATTRIBUTE,        // {#label} for headings, math, etc.
     // Structured children of a Pandoc `{...}` ATTRIBUTE. Each wraps the
     // existing source bytes (markers/quotes included); the projector strips
     // them. Absent on opaque ATTRIBUTE forms (MMD `[#id]`, raw-inline

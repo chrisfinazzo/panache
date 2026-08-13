@@ -471,7 +471,9 @@ fn pre_fence_indent_columns(node: &SyntaxNode) -> usize {
     let mut cols = 0usize;
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Token(t) if t.kind() == SyntaxKind::WHITESPACE => {
+            NodeOrToken::Token(t)
+                if matches!(t.kind(), SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX) =>
+            {
                 // `nonindentSpaces` and the container peels are space-only
                 // here, so the byte count is the column count.
                 cols += t.text().chars().take_while(|&c| c == ' ').count();
@@ -1131,22 +1133,33 @@ fn fenced_in_blockquote(node: &SyntaxNode, is_fenced: bool) -> bool {
 /// the container prefix the emitters interleave there.
 ///
 /// For losslessness a block parser re-emits each *continuation* line's
-/// container prefix inside `CODE_CONTENT` — `BLOCK_QUOTE_MARKER` for `>`,
-/// `WHITESPACE` for the space after it and for list/content indent — so the
+/// container prefix inside `CODE_CONTENT` as `LINE_PREFIX` tokens, so the
 /// node's raw text is the source line, not the code. Pandoc sees only what
 /// survives container stripping.
 ///
-/// `BLOCK_QUOTE_MARKER`s (and the single space each one owns) are always
-/// dropped: a `>` is never code, and no caller compensates for one.
+/// Marker bytes (`>` and the one padding space each owns) are always
+/// dropped: a `>` is never code, and no caller compensates for one. Prefix
+/// *indent* is different: the emitter's peel is not column-exact when tabs
+/// are in play (a straddling tab cannot be split byte-losslessly), so its
+/// expanded text stays in the string for the caller's column-based
+/// [`strip_leading_spaces_per_line`] to measure — exactly like line-start
+/// `WHITESPACE`, which is host indent the emitter never peeled. The
+/// `LINE_PREFIX` kind bounds this walk structurally (genuine content can no
+/// longer be mistaken for prefix); the marker-vs-indent split within a
+/// tagged run is byte-driven.
 ///
-/// The remaining line-start `WHITESPACE` is host indent, and `drop_indent`
-/// says whether to drop it here or leave it for the caller's column-based
-/// [`strip_leading_spaces_per_line`]. Only [`fenced_in_blockquote`] sets it —
-/// see that function for why the token boundary is trustworthy there and
-/// nowhere else. With it clear, an indented block keeps its significant
-/// indent and a fenced one keeps a host indent the caller will strip by
-/// column.
+/// `drop_indent` drops that line-start indent here instead. Only
+/// [`fenced_in_blockquote`] sets it — see that function for why the token
+/// boundary is trustworthy there and nowhere else. With it clear, an
+/// indented block keeps its significant indent and a fenced one keeps a
+/// host indent the caller will strip by column.
 fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
+    let is_marker_piece = |el: &crate::syntax::SyntaxElement| {
+        el.kind() == SyntaxKind::LINE_PREFIX && {
+            el.as_token()
+                .is_some_and(|t| t.text().contains(|c: char| !c.is_whitespace()))
+        }
+    };
     let mut out = String::new();
     for content in node
         .children()
@@ -1188,11 +1201,13 @@ fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
                 out.push_str(&expanded);
                 continue;
             }
+            if is_marker_piece(el) {
+                saw_bq = true;
+                continue;
+            }
             match token.kind() {
-                SyntaxKind::BLOCK_QUOTE_MARKER => saw_bq = true,
-                SyntaxKind::WHITESPACE => {
-                    let next_is_marker = elements.get(i + 1).map(|e| e.kind())
-                        == Some(SyntaxKind::BLOCK_QUOTE_MARKER);
+                SyntaxKind::LINE_PREFIX | SyntaxKind::WHITESPACE => {
+                    let next_is_marker = elements.get(i + 1).is_some_and(&is_marker_piece);
                     // Exactly one space after a `>` belongs to the marker;
                     // anything past it is host indent.
                     let rest = if saw_bq {
@@ -1315,61 +1330,23 @@ fn html_div_block(node: &SyntaxNode) -> Block {
     Block::Div(attr, Vec::new())
 }
 
-/// Concatenate the node's token text, dropping prefix tokens injected
-/// by the parser for container nesting:
-/// - Every `BLOCK_QUOTE_MARKER` and the immediately-following
-///   `WHITESPACE` token (bq-wrapped HTML lift —
-///   `> <div>\n> foo\n> </div>` becomes `<div>\nfoo\n</div>`).
-/// - A leading `WHITESPACE` token at the start of each source line
-///   when it is NOT preceded by a `BLOCK_QUOTE_MARKER` on the same
-///   line (list-item content_col stripped by
-///   `parser/utils/list_item_buffer.rs::strip_list_item_indent` and
-///   re-injected as a structural `WHITESPACE` token during graft —
-///   `- <pre>\n  foo\n  </pre>` becomes `<pre>\nfoo\n</pre>` in the
-///   RawBlock text). The parser never emits a leading line-start
-///   `WHITESPACE` inside `HTML_BLOCK_CONTENT` or `HTML_BLOCK_TAG`
-///   outside this lift path — top-level indented HTML keeps the
-///   leading indent inside a single `TEXT` token — so the rule is
-///   unambiguous.
+/// Concatenate the node's token text, dropping the container prefix the
+/// parser injects for container nesting (`> <div>\n> foo\n> </div>`
+/// becomes `<div>\nfoo\n</div>`, `- <pre>\n  foo\n  </pre>` becomes
+/// `<pre>\nfoo\n</pre>`). Prefix bytes carry the `LINE_PREFIX` kind, so
+/// the skip is structural — top-level indented HTML keeps its leading
+/// indent (a `TEXT`/`WHITESPACE` token) untouched.
 fn collect_html_block_text_skip_bq_markers(node: &SyntaxNode) -> String {
     let mut out = String::new();
-    let mut skip_next_ws = false;
-    let mut at_line_start = true;
-    walk_skip_bq_markers(node, &mut out, &mut skip_next_ws, &mut at_line_start);
-    out
-}
-
-fn walk_skip_bq_markers(
-    node: &SyntaxNode,
-    out: &mut String,
-    skip_next_ws: &mut bool,
-    at_line_start: &mut bool,
-) {
-    for child in node.children_with_tokens() {
-        match child {
-            NodeOrToken::Node(n) => walk_skip_bq_markers(&n, out, skip_next_ws, at_line_start),
-            NodeOrToken::Token(t) => {
-                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                    *skip_next_ws = true;
-                    *at_line_start = false;
-                    continue;
-                }
-                if *skip_next_ws && t.kind() == SyntaxKind::WHITESPACE {
-                    *skip_next_ws = false;
-                    *at_line_start = false;
-                    continue;
-                }
-                if *at_line_start && t.kind() == SyntaxKind::WHITESPACE {
-                    *at_line_start = false;
-                    continue;
-                }
-                *skip_next_ws = false;
-                let kind = t.kind();
-                out.push_str(t.text());
-                *at_line_start = kind == SyntaxKind::NEWLINE || kind == SyntaxKind::BLANK_LINE;
-            }
+    for token in node
+        .descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+    {
+        if token.kind() != SyntaxKind::LINE_PREFIX {
+            out.push_str(token.text());
         }
     }
+    out
 }
 
 /// True when the parser has lifted the `<div>` body into structural
@@ -1741,29 +1718,22 @@ fn open_tag_raw_block_text(tag: &SyntaxNode) -> String {
         return result;
     }
     // Blockquote-wrapped close tags (`> </form>`, `> </video>`) carry
-    // their leading `BLOCK_QUOTE_MARKER + WHITESPACE` tokens inside the
-    // close `HTML_BLOCK_TAG` for losslessness. Pandoc-native's RawBlock
-    // text is the tag bytes only — strip those prefix tokens. Leading
-    // 1-3 space indent (captured as a WHITESPACE token before the tag
-    // name TEXT) is likewise stripped: pandoc's HTML block scanner
-    // accepts ≤ 3 leading spaces on the open/close line but doesn't
-    // round-trip them into the RawBlock text.
+    // their leading container prefix inside the close `HTML_BLOCK_TAG`
+    // for losslessness, tagged `LINE_PREFIX`. Pandoc-native's RawBlock
+    // text is the tag bytes only — skip those tokens. Leading 1-3 space
+    // indent (captured as a WHITESPACE token before the tag name TEXT)
+    // is likewise stripped: pandoc's HTML block scanner accepts ≤ 3
+    // leading spaces on the open/close line but doesn't round-trip them
+    // into the RawBlock text.
     let mut text = String::new();
-    let mut skip_next_ws = false;
     for child in tag.children_with_tokens() {
         if let NodeOrToken::Token(t) = child {
-            if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER {
-                skip_next_ws = true;
-                continue;
-            }
-            if skip_next_ws && t.kind() == SyntaxKind::WHITESPACE {
-                skip_next_ws = false;
+            if t.kind() == SyntaxKind::LINE_PREFIX {
                 continue;
             }
             if text.is_empty() && t.kind() == SyntaxKind::WHITESPACE {
                 continue;
             }
-            skip_next_ws = false;
             text.push_str(t.text());
         }
     }
@@ -3011,34 +2981,22 @@ fn simple_table(node: &SyntaxNode) -> Option<TableData> {
     })
 }
 
-/// Byte length of the block-quote prefix at the start of `node`: the
-/// `BLOCK_QUOTE_MARKER` tokens and the single space each of them owns.
+/// Byte length of the container prefix at the start of `node` — its
+/// leading run of `LINE_PREFIX` tokens.
 ///
-/// A table nested in a block quote carries a marker on every line it owns,
-/// but the *first* line's marker belongs to the enclosing `BLOCK_QUOTE` and
+/// A table nested in a container carries its prefix on every line it owns,
+/// but the *first* line's prefix belongs to the enclosing container and
 /// sits outside the table. Column geometry is byte offsets into these lines,
 /// so a `TABLE_HEADER` would otherwise be measured from a different origin
 /// than the `TABLE_SEPARATOR` that defines its columns.
 fn container_prefix_len(node: &SyntaxNode) -> usize {
-    let mut len = 0;
-    let mut after_marker = false;
-    for element in node.children_with_tokens() {
-        let Some(token) = element.into_token() else {
-            break;
-        };
-        match token.kind() {
-            SyntaxKind::BLOCK_QUOTE_MARKER => {
-                len += token.text().len();
-                after_marker = true;
-            }
-            SyntaxKind::WHITESPACE if after_marker => {
-                len += token.text().len();
-                after_marker = false;
-            }
-            _ => break,
-        }
-    }
-    len
+    node.children_with_tokens()
+        .map_while(|el| {
+            el.into_token()
+                .filter(|t| t.kind() == SyntaxKind::LINE_PREFIX)
+                .map(|t| t.text().len())
+        })
+        .sum()
 }
 
 /// Return the `(start_col, end_col)` (inclusive) of each dash run in a

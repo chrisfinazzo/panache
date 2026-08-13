@@ -11,10 +11,10 @@ DOCUMENT@0..22
         INLINE_HTML@2..7
           INLINE_HTML_CONTENT@2..7 "<pre>"
         NEWLINE@7..8 "\n"
-        WHITESPACE@8..9 "\t"
+        LINE_PREFIX@8..9 "\t"
         TEXT@9..13 "body"
         NEWLINE@13..14 "\n"
-        WHITESPACE@14..15 "\t"
+        LINE_PREFIX@14..15 "\t"
         INLINE_HTML@15..21
           INLINE_HTML_CONTENT@15..21 "</pre>"
         NEWLINE@21..22 "\n"

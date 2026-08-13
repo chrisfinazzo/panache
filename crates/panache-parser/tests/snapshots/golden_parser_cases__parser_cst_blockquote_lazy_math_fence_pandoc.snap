@@ -9,10 +9,10 @@ DOCUMENT@0..56
     DISPLAY_MATH@2..24
       DISPLAY_MATH_MARKER@2..9 "```math"
       NEWLINE@9..10 "\n"
-      WHITESPACE@10..12 "  "
+      LINE_PREFIX@10..12 "  "
       TEXT@12..18 "c + d\n"
-      BLOCK_QUOTE_MARKER@18..19 ">"
-      WHITESPACE@19..20 " "
+      LINE_PREFIX@18..19 ">"
+      LINE_PREFIX@19..20 " "
       DISPLAY_MATH_MARKER@20..23 "```"
       NEWLINE@23..24 "\n"
   BLANK_LINE@24..25
@@ -31,8 +31,8 @@ DOCUMENT@0..56
     DISPLAY_MATH@32..56
       DISPLAY_MATH_MARKER@32..39 "```math"
       NEWLINE@39..40 "\n"
-      WHITESPACE@40..45 "     "
+      LINE_PREFIX@40..45 "     "
       TEXT@45..51 "e + f\n"
-      WHITESPACE@51..52 " "
+      LINE_PREFIX@51..52 " "
       DISPLAY_MATH_MARKER@52..55 "```"
       NEWLINE@55..56 "\n"

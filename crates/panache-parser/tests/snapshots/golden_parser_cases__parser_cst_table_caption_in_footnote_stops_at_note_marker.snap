@@ -16,13 +16,13 @@ DOCUMENT@0..73
       BLANK_LINE@8..9 "\n"
     SIMPLE_TABLE@9..54
       TABLE_SEPARATOR@9..21
-        WHITESPACE@9..13 "    "
+        LINE_PREFIX@9..13 "    "
         TABLE_SEP_DASHES@13..16 "---"
         TABLE_SEP_WHITESPACE@16..17 " "
         TABLE_SEP_DASHES@17..20 "---"
         NEWLINE@20..21 "\n"
       TABLE_ROW@21..31
-        WHITESPACE@21..25 "    "
+        LINE_PREFIX@21..25 "    "
         TABLE_CELL@25..26
           TEXT@25..26 "a"
         WHITESPACE@26..29 "   "
@@ -30,16 +30,16 @@ DOCUMENT@0..73
           TEXT@29..30 "b"
         NEWLINE@30..31 "\n"
       TABLE_SEPARATOR@31..43
-        WHITESPACE@31..35 "    "
+        LINE_PREFIX@31..35 "    "
         TABLE_SEP_DASHES@35..38 "---"
         TABLE_SEP_WHITESPACE@38..39 " "
         TABLE_SEP_DASHES@39..42 "---"
         NEWLINE@42..43 "\n"
       BLANK_LINE@43..44
-        WHITESPACE@43..44 "\n"
+        LINE_PREFIX@43..44 "\n"
         BLANK_LINE@44..44 ""
       TABLE_CAPTION@44..54
-        WHITESPACE@44..48 "    "
+        LINE_PREFIX@44..48 "    "
         TABLE_CAPTION_PREFIX@48..50 ": "
         TEXT@50..53 "cap"
         NEWLINE@53..54 "\n"

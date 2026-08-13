@@ -21,14 +21,14 @@ DOCUMENT@0..100
       PARAGRAPH@25..79
         TEXT@25..53 "A quote inside the fo ..."
         NEWLINE@53..54 "\n"
-        WHITESPACE@54..58 "    "
-        BLOCK_QUOTE_MARKER@58..59 ">"
-        WHITESPACE@59..60 " "
+        LINE_PREFIX@54..58 "    "
+        LINE_PREFIX@58..59 ">"
+        LINE_PREFIX@59..60 " "
         TEXT@60..78 "Second quote line."
         NEWLINE@78..79 "\n"
     BLANK_LINE@79..80
       BLANK_LINE@79..80 "\n"
     PARAGRAPH@80..100
-      WHITESPACE@80..84 "    "
+      LINE_PREFIX@80..84 "    "
       TEXT@84..99 "Tail paragraph."
       NEWLINE@99..100 "\n"

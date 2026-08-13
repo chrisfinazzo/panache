@@ -13,7 +13,7 @@ DOCUMENT@0..119
           TEXT@4..5 "a"
           NEWLINE@5..6 "\n"
         LINE_BLOCK_LINE@6..12
-          WHITESPACE@6..8 "  "
+          LINE_PREFIX@6..8 "  "
           LINE_BLOCK_MARKER@8..10 "| "
           TEXT@10..11 "b"
           NEWLINE@11..12 "\n"
@@ -39,7 +39,7 @@ DOCUMENT@0..119
           TEXT@25..26 "d"
           NEWLINE@26..27 "\n"
         LINE_BLOCK_LINE@27..34
-          WHITESPACE@27..30 "   "
+          LINE_PREFIX@27..30 "   "
           LINE_BLOCK_MARKER@30..32 "| "
           TEXT@32..33 "e"
           NEWLINE@33..34 "\n"
@@ -58,9 +58,9 @@ DOCUMENT@0..119
             TEXT@41..42 "f"
             NEWLINE@42..43 "\n"
           LINE_BLOCK_LINE@43..51
-            BLOCK_QUOTE_MARKER@43..44 ">"
-            WHITESPACE@44..45 " "
-            WHITESPACE@45..47 "  "
+            LINE_PREFIX@43..44 ">"
+            LINE_PREFIX@44..45 " "
+            LINE_PREFIX@45..47 "  "
             LINE_BLOCK_MARKER@47..49 "| "
             TEXT@49..50 "g"
             NEWLINE@50..51 "\n"
@@ -76,7 +76,7 @@ DOCUMENT@0..119
           TEXT@56..57 "h"
           NEWLINE@57..58 "\n"
         LINE_BLOCK_LINE@58..66
-          WHITESPACE@58..60 "  "
+          LINE_PREFIX@58..60 "  "
           TEXT@60..65 "  | i"
           NEWLINE@65..66 "\n"
     BLANK_LINE@66..67
@@ -132,7 +132,7 @@ DOCUMENT@0..119
           TEXT@105..106 "|"
           NEWLINE@106..107 "\n"
         TABLE_SEPARATOR@107..119
-          WHITESPACE@107..109 "  "
+          LINE_PREFIX@107..109 "  "
           TABLE_SEP_DELIM@109..110 "|"
           TABLE_SEP_WHITESPACE@110..111 " "
           TABLE_SEP_DASHES@111..112 "-"

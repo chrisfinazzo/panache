@@ -1309,38 +1309,32 @@ impl Formatter {
                     }
                 }
 
-                // Walk descendants and skip BLOCK_QUOTE_MARKER + the immediately
-                // following WHITESPACE when the marker is a "leaked" prefix from
-                // an enclosing BLOCK_QUOTE (parser keeps prefix tokens inside
-                // HTML_BLOCK_CONTENT for losslessness; the enclosing BLOCK_QUOTE
-                // handler re-emits markers dynamically). When the marker's parent
-                // is itself a BLOCK_QUOTE, the BLOCK_QUOTE is a structural child
-                // of this HTML_BLOCK and the marker is part of the child — keep
-                // it so the quote isn't flattened to a paragraph (issue #350).
+                // Walk descendants and skip the blockquote prefix an enclosing
+                // BLOCK_QUOTE leaked into the block (parser keeps prefix
+                // tokens inside HTML_BLOCK_CONTENT for losslessness, tagged
+                // `LINE_PREFIX`; the enclosing BLOCK_QUOTE handler re-emits
+                // markers dynamically). Indent-type prefix (a definition
+                // body's content indent) is kept: no enclosing handler
+                // re-adds it here. A structural BLOCK_QUOTE child of this
+                // HTML_BLOCK keeps its own `BLOCK_QUOTE_MARKER` tokens, so
+                // the quote isn't flattened to a paragraph (issue #350).
                 let mut text = String::new();
-                let mut skip_next_ws = false;
+                let mut after_marker = false;
                 for el in node.descendants_with_tokens() {
                     if let NodeOrToken::Token(t) = el {
-                        match t.kind() {
-                            SyntaxKind::BLOCK_QUOTE_MARKER => {
-                                let parent_is_block_quote = t
-                                    .parent()
-                                    .is_some_and(|p| p.kind() == SyntaxKind::BLOCK_QUOTE);
-                                if parent_is_block_quote {
-                                    skip_next_ws = false;
-                                    text.push_str(t.text());
-                                } else {
-                                    skip_next_ws = true;
-                                }
-                            }
-                            SyntaxKind::WHITESPACE if skip_next_ws => {
-                                skip_next_ws = false;
-                            }
-                            _ => {
-                                skip_next_ws = false;
+                        if t.kind() == SyntaxKind::LINE_PREFIX {
+                            if t.text().contains('>') {
+                                after_marker = true;
+                            } else if after_marker {
+                                // The marker's own padding space.
+                                after_marker = false;
+                            } else {
                                 text.push_str(t.text());
                             }
+                            continue;
                         }
+                        after_marker = false;
+                        text.push_str(t.text());
                     }
                 }
                 self.output.push_str(&text);
@@ -1442,29 +1436,17 @@ impl Formatter {
                                     // Build paragraph text while skipping BlockQuoteMarker tokens
                                     // (they're in the tree for losslessness but we add prefixes dynamically)
                                     let mut lines_text = String::new();
-                                    let mut skip_next_whitespace = false;
                                     for item in child.children_with_tokens() {
                                         match item {
                                             NodeOrToken::Token(t)
-                                                if t.kind() == SyntaxKind::BLOCK_QUOTE_MARKER =>
+                                                if t.kind() == SyntaxKind::LINE_PREFIX =>
                                             {
-                                                // Skip marker - we add these dynamically
-                                                // Also skip the following whitespace (part of marker syntax)
-                                                skip_next_whitespace = true;
-                                            }
-                                            NodeOrToken::Token(t)
-                                                if t.kind() == SyntaxKind::WHITESPACE
-                                                    && skip_next_whitespace =>
-                                            {
-                                                // Skip whitespace after marker
-                                                skip_next_whitespace = false;
+                                                // Container prefix — re-added dynamically.
                                             }
                                             NodeOrToken::Token(t) => {
-                                                skip_next_whitespace = false;
                                                 lines_text.push_str(t.text());
                                             }
                                             NodeOrToken::Node(n) => {
-                                                skip_next_whitespace = false;
                                                 lines_text.push_str(&n.text().to_string());
                                             }
                                         }
@@ -1633,7 +1615,7 @@ impl Formatter {
                         SyntaxKind::HTML_BLOCK
                         | SyntaxKind::HTML_BLOCK_RAW
                         | SyntaxKind::HTML_BLOCK_DIV => {
-                            // Format HTML block contents (BLOCK_QUOTE_MARKER tokens
+                            // Format HTML block contents (LINE_PREFIX tokens
                             // are stripped by the HTML_BLOCK handler) and re-emit
                             // the blockquote prefix per line so the output stays
                             // lossless.
@@ -2156,7 +2138,7 @@ impl Formatter {
                 // Format each line preserving line breaks and leading spaces.
                 // Walk LINE_BLOCK_LINE children-with-tokens so we can skip
                 // leading container-prefix tokens (WHITESPACE,
-                // BLOCK_QUOTE_MARKER) that the parser now emits inside
+                // LINE_PREFIX) that the parser now emits inside
                 // LINE_BLOCK_LINE for nested cases like `- > | foo`. The
                 // outer LIST_ITEM / BLOCK_QUOTE walkers re-emit those
                 // prefixes; if we left them in `content` they'd appear
@@ -2178,10 +2160,7 @@ impl Formatter {
                     for elem in child.children_with_tokens() {
                         let kind = elem.kind();
                         if !past_prefix
-                            && matches!(
-                                kind,
-                                SyntaxKind::WHITESPACE | SyntaxKind::BLOCK_QUOTE_MARKER
-                            )
+                            && matches!(kind, SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX)
                         {
                             continue;
                         }

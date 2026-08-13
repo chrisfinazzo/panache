@@ -11,7 +11,7 @@ DOCUMENT@0..30
         TEXT@2..7 "<form"
         NEWLINE@7..8 "\n"
       HTML_BLOCK_CONTENT@8..30
-        BLOCK_QUOTE_MARKER@8..9 ">"
-        WHITESPACE@9..10 " "
+        LINE_PREFIX@8..9 ">"
+        LINE_PREFIX@9..10 " "
         TEXT@10..29 "  id=\"x\">foo</form>"
         NEWLINE@29..30 "\n"

@@ -21,8 +21,8 @@ DOCUMENT@0..53
         TEXT@10..11 "|"
         NEWLINE@11..12 "\n"
       TABLE_SEPARATOR@12..24
-        BLOCK_QUOTE_MARKER@12..13 ">"
-        WHITESPACE@13..14 " "
+        LINE_PREFIX@12..13 ">"
+        LINE_PREFIX@13..14 " "
         TABLE_SEP_DELIM@14..15 "|"
         TABLE_SEP_DASHES@15..18 "---"
         TABLE_SEP_DELIM@18..19 "|"
@@ -30,8 +30,8 @@ DOCUMENT@0..53
         TABLE_SEP_DELIM@22..23 "|"
         NEWLINE@23..24 "\n"
       TABLE_ROW@24..36
-        BLOCK_QUOTE_MARKER@24..25 ">"
-        WHITESPACE@25..26 " "
+        LINE_PREFIX@24..25 ">"
+        LINE_PREFIX@25..26 " "
         TEXT@26..27 "|"
         WHITESPACE@27..28 " "
         TABLE_CELL@28..29
@@ -45,11 +45,11 @@ DOCUMENT@0..53
         TEXT@34..35 "|"
         NEWLINE@35..36 "\n"
       BLANK_LINE@36..38
-        BLOCK_QUOTE_MARKER@36..37 ">"
+        LINE_PREFIX@36..37 ">"
         BLANK_LINE@37..38 "\n"
       TABLE_CAPTION@38..53
-        BLOCK_QUOTE_MARKER@38..39 ">"
-        WHITESPACE@39..40 " "
+        LINE_PREFIX@38..39 ">"
+        LINE_PREFIX@39..40 " "
         TABLE_CAPTION_PREFIX@40..42 ": "
         TEXT@42..52 "My caption"
         NEWLINE@52..53 "\n"
