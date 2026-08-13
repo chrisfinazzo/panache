@@ -1004,14 +1004,27 @@ panache starts caching NodePtrs across edits.
   the downstream cascade first, then widen the bound to
   `List::base_indent_cols + 3`.
 
-- [ ] A **simple table in a blockquote in a footnote body is not lossless**:
+- [x] A **simple table in a blockquote in a footnote body is not lossless**:
   `[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n` parses with
   four duplicated indent columns on the table's dispatch line
   (`    > A    B` re-emits as `    >     A    B`), so
   `debug format --checks losslessness` fails before any formatting question
   arises. Pre-existing (reproduces on the commit before the note-marker
   fence); the note-marker golden pins had to route around it via a
-  list-in-footnote shape instead.
+  list-in-footnote shape instead. Fixed: `strip_line_0_with_indent_emit`
+  reported the footnote content indent for re-emission even when a
+  blockquote marker followed it, but the core's blockquote opener had
+  already emitted those bytes as `WHITESPACE`; the indent report is now
+  cleared when a blockquote-marker run is applied. Affected all four table
+  types (simple, pipe, grid, multiline); pinned in
+  `blocks/tests/losslessness.rs`.
+
+- [ ] A **multiline table in a blockquote is not idempotent**:
+  `> ----- -----\n> A     B\n> ----- -----\n> x     y\n>\n> ----- -----\n`
+  formats pass 1 to full-width top/bottom dash lines, and pass 2 shrinks
+  them to the column width and drops the blank `>` row separator line before
+  the closer. Reproduces without a footnote wrapper and predates the
+  blockquote-in-footnote losslessness fix above (surfaced while pinning it).
 
 - [ ] Simple-table rows holding a **sliced multi-space cell** are not idempotent
   even where the slicing matches pandoc: `- <div>` + indented table +
