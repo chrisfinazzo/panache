@@ -613,6 +613,23 @@ panache starts caching NodePtrs across edits.
   multiline path had the same skew and was additionally splicing `>` into
   cell text.
 
+- [ ] `simple_table_aligns` in `pandoc_ast.rs` diverges from pandoc's
+  `alignType` when a header cell **overruns its dash run**.
+  `A    Bcd\n--- ---\nx    y\n` projects `AlignCenter` for column 2 where
+  `pandoc -f markdown -t native` says `AlignRight`. The projector asks
+  `visible_end == col_end` (cell's last visible column lands exactly on the
+  dash-run end); pandoc (`Readers/Markdown.hs:1276`) asks
+  `realLength x < len` — strictly *shorter* than the dash run — so a cell
+  that is equal-or-longer falls in the same bucket, and only a genuinely
+  short cell counts as right-spaced. Overrun flips the two predicates apart.
+  The formatter's `determine_simple_alignments` is already faithful: it
+  truncates the slice at the dash-run end, which makes
+  `trimmed_len == col_width` hold exactly when pandoc's `>= len` does. Fix
+  is to match the predicate in the projector, not to reshape the CST -- no
+  alignment is stored there, each consumer recomputes it. Rendered output
+  currently agrees on this input, so the visible symptom is confined to
+  `parse --to pandoc-ast`.
+
 ### Architecture
 
 - [x] Give a container's **line extent** a single owner, the way the typed frame
