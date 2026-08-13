@@ -1,0 +1,73 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..70
+  GRID_TABLE@0..70
+    TABLE_SEPARATOR@0..10
+      TABLE_SEP_DELIM@0..1 "+"
+      TABLE_SEP_DASHES@1..4 "---"
+      TABLE_SEP_DELIM@4..5 "+"
+      TABLE_SEP_DASHES@5..8 "---"
+      TABLE_SEP_DELIM@8..9 "+"
+      NEWLINE@9..10 "\n"
+    TABLE_HEADER@10..20
+      TEXT@10..11 "|"
+      WHITESPACE@11..12 " "
+      TABLE_CELL@12..13
+        TEXT@12..13 "a"
+      WHITESPACE@13..14 " "
+      TEXT@14..15 "|"
+      WHITESPACE@15..16 " "
+      TABLE_CELL@16..17
+        TEXT@16..17 "b"
+      WHITESPACE@17..18 " "
+      TEXT@18..19 "|"
+      NEWLINE@19..20 "\n"
+    TABLE_SEPARATOR@20..30
+      TABLE_SEP_DELIM@20..21 "+"
+      TABLE_SEP_EQUALS@21..24 "==="
+      TABLE_SEP_DELIM@24..25 "+"
+      TABLE_SEP_EQUALS@25..28 "==="
+      TABLE_SEP_DELIM@28..29 "+"
+      NEWLINE@29..30 "\n"
+    TABLE_ROW@30..40
+      TEXT@30..31 "|"
+      WHITESPACE@31..32 " "
+      TABLE_CELL@32..33
+        TEXT@32..33 "c"
+      WHITESPACE@33..34 " "
+      TEXT@34..35 "|"
+      WHITESPACE@35..36 " "
+      TABLE_CELL@36..37
+        TEXT@36..37 "d"
+      WHITESPACE@37..38 " "
+      TEXT@38..39 "|"
+      NEWLINE@39..40 "\n"
+    TABLE_SEPARATOR@40..50
+      TABLE_SEP_DELIM@40..41 "+"
+      TABLE_SEP_WHITESPACE@41..44 "   "
+      TABLE_SEP_DELIM@44..45 "+"
+      TABLE_SEP_DASHES@45..48 "---"
+      TABLE_SEP_DELIM@48..49 "+"
+      NEWLINE@49..50 "\n"
+    TABLE_ROW@50..60
+      TEXT@50..51 "|"
+      WHITESPACE@51..52 " "
+      TABLE_CELL@52..53
+        TEXT@52..53 "e"
+      WHITESPACE@53..54 " "
+      TEXT@54..55 "|"
+      WHITESPACE@55..56 " "
+      TABLE_CELL@56..57
+        TEXT@56..57 "f"
+      WHITESPACE@57..58 " "
+      TEXT@58..59 "|"
+      NEWLINE@59..60 "\n"
+    TABLE_SEPARATOR@60..70
+      TABLE_SEP_DELIM@60..61 "+"
+      TABLE_SEP_DASHES@61..64 "---"
+      TABLE_SEP_DELIM@64..65 "+"
+      TABLE_SEP_DASHES@65..68 "---"
+      TABLE_SEP_DELIM@68..69 "+"
+      NEWLINE@69..70 "\n"

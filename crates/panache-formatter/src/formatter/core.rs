@@ -530,7 +530,12 @@ impl Formatter {
         let mut in_list_item_continuation = false;
         for line in list_output.lines() {
             let trimmed_line = line.trim_start();
-            let starts_with_list_marker = Self::starts_with_list_marker(trimmed_line);
+            // A partial (rowspan) grid separator (`+   +---+`) shape-matches
+            // a `+` list marker but is table structure; re-emitting it
+            // trimmed would drop the item indent it needs to stay a table
+            // continuation line on reparse.
+            let starts_with_list_marker = Self::starts_with_list_marker(trimmed_line)
+                && !tables::is_partial_grid_separator(trimmed_line);
             if line.is_empty() {
                 self.output.push_str(blank_prefix);
                 in_list_item_continuation = false;
@@ -543,7 +548,8 @@ impl Formatter {
                     self.output.push('\n');
                     continue;
                 }
-                let starts_with_marker_after_quote = Self::starts_with_list_marker(trimmed_rest);
+                let starts_with_marker_after_quote = Self::starts_with_list_marker(trimmed_rest)
+                    && !tables::is_partial_grid_separator(trimmed_rest);
                 if starts_with_marker_after_quote {
                     self.output.push_str(base_indent);
                     self.output.push_str("> ");

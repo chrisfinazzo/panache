@@ -580,6 +580,41 @@ impl ListItemBuffer {
         builder.finish_node(); // Close FIGURE, PLAIN, or PARAGRAPH
     }
 
+    /// Whether the buffered lines are the head of a grid table that is
+    /// still open: the first non-blank line is a full grid separator (the
+    /// table opened at the buffer's start, where the emit-time lift can
+    /// see it) and the last line is a row or row boundary that expects
+    /// more table under it. Backs the parser core's partial-separator
+    /// hold, which decides whether a `+   +---+` continuation line is
+    /// table structure or a nested `+` list marker.
+    ///
+    /// `content_col` is the item's content column; continuation lines
+    /// carry it while the marker-line seed does not, so each line is
+    /// dedented by at most that much before classification.
+    pub(crate) fn is_open_grid_table(&self, content_col: usize) -> bool {
+        use crate::parser::blocks::container_prefix::strip_list_indent;
+        use crate::parser::blocks::tables::{
+            is_grid_content_row, try_parse_grid_partial_separator, try_parse_grid_separator,
+        };
+
+        let text = self.get_text_for_parsing();
+        let mut lines = text
+            .lines()
+            .map(|line| strip_list_indent(line, content_col))
+            .filter(|line| !line.trim().is_empty());
+        let Some(first) = lines.next() else {
+            return false;
+        };
+        if try_parse_grid_separator(first).is_none() {
+            return false;
+        }
+        // A trailing *full* separator is excluded: it may be the table's
+        // closing border, after which a partial separator is no longer a
+        // continuation.
+        let last = lines.next_back().unwrap_or(first);
+        is_grid_content_row(last) || try_parse_grid_partial_separator(last).is_some()
+    }
+
     /// The buffered content after the first line of the concatenated text,
     /// as a new buffer: the trailing `Text` bytes plus the structural
     /// blockquote markers between them, in segment order. Backs the

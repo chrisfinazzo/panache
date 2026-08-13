@@ -751,6 +751,126 @@ fn grid_table_in_a_fenced_div_ends_at_the_closer() {
 }
 
 // ---------------------------------------------------------------------------
+// Partial (rowspan) grid separators are table structure
+//
+// A row boundary under a rowspan cell shows spaces instead of dashes for
+// the continuing columns (`+   +---+`). Such a line is neither a full
+// separator nor a `|`-leading content row, so the grid scan used to stop
+// there — and in a container the `+` + spaces opening then read as a list
+// marker, so the table's tail parsed as sibling blocks (a nested list, a
+// second table) where pandoc keeps one table.
+
+/// `pandoc -f markdown -t native`: one Table, first-column cell RowSpan 2.
+#[test]
+fn rowspan_partial_separator_stays_in_the_grid_table() {
+    let input = "+---+---+\n| c | d |\n+   +---+\n| e | f |\n+---+---+\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        child_kinds(&node),
+        vec![SyntaxKind::GRID_TABLE],
+        "the partial separator must not end the table"
+    );
+}
+
+/// `pandoc -f markdown -t native`: one Table, last-column cell RowSpan 2.
+/// The continuing column's right edge may show `|` instead of `+`.
+#[test]
+fn rowspan_partial_separator_may_end_with_a_pipe() {
+    let input = "+---+---+\n| a | b |\n+---+   |\n| c |   |\n+---+---+\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        child_kinds(&node),
+        vec![SyntaxKind::GRID_TABLE],
+        "the pipe-edged partial separator must not end the table"
+    );
+}
+
+/// `pandoc -f markdown -t native`: BlockQuote [Table ...] — one table.
+#[test]
+fn rowspan_partial_separator_in_a_blockquote_stays_in_the_table() {
+    let input = "> +---+---+\n> | c | d |\n> +   +---+\n> | e | f |\n> +---+---+\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = node.children().next().expect("blockquote");
+    assert_eq!(quote.kind(), SyntaxKind::BLOCK_QUOTE);
+    let table = first_of(&quote, SyntaxKind::GRID_TABLE).expect("table in the quote");
+    assert!(
+        table.text().to_string().contains("| e | f |"),
+        "the table keeps its tail rows: {}",
+        table.text()
+    );
+    assert!(
+        first_of(&quote, SyntaxKind::LIST).is_none(),
+        "the partial separator must not open a list"
+    );
+}
+
+/// `pandoc -f markdown -t native`: BulletList [[Table ...]] — one table.
+#[test]
+fn rowspan_partial_separator_in_a_list_item_stays_in_the_table() {
+    let input = "- +---+---+\n  | c | d |\n  +   +---+\n  | e | f |\n  +---+---+\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let item = first_of(&node, SyntaxKind::LIST_ITEM).expect("list item");
+    let table = first_of(&item, SyntaxKind::GRID_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("| e | f |"),
+        "the table keeps its tail rows: {}",
+        table.text()
+    );
+    assert!(
+        first_of(&item, SyntaxKind::LIST).is_none(),
+        "the partial separator must not open a nested list"
+    );
+}
+
+/// `pandoc -f markdown -t native`: a *dedented* partial separator is a
+/// sibling `+` list item, not a table row — the item's line run ends
+/// within the list-start tolerance, and the table stays truncated. Pins
+/// that the container terminator keeps priority over the partial-
+/// separator classification.
+#[test]
+fn dedented_partial_separator_still_ends_the_list_item() {
+    let input = "- +---+---+\n  | a | b |\n+   +---+\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let list = node.children().next().expect("list");
+    assert_eq!(list.kind(), SyntaxKind::LIST);
+    let items: Vec<_> = list
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
+        .collect();
+    assert_eq!(items.len(), 2, "the dedented line opens a sibling item");
+}
+
+// ---------------------------------------------------------------------------
 // The multiline-table scan ends at container line-run terminators
 //
 // The scan used to cross container ends hunting for a closing separator:

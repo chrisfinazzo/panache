@@ -1,0 +1,98 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..98
+  BLOCK_QUOTE@0..98
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    LIST@2..98
+      LIST_ITEM@2..98
+        LIST_MARKER@2..3 "-"
+        WHITESPACE@3..4 " "
+        GRID_TABLE@4..98
+          TABLE_SEPARATOR@4..14
+            TABLE_SEP_DELIM@4..5 "+"
+            TABLE_SEP_DASHES@5..8 "---"
+            TABLE_SEP_DELIM@8..9 "+"
+            TABLE_SEP_DASHES@9..12 "---"
+            TABLE_SEP_DELIM@12..13 "+"
+            NEWLINE@13..14 "\n"
+          TABLE_HEADER@14..28
+            LINE_PREFIX@14..15 ">"
+            LINE_PREFIX@15..16 " "
+            LINE_PREFIX@16..18 "  "
+            TEXT@18..19 "|"
+            WHITESPACE@19..20 " "
+            TABLE_CELL@20..21
+              TEXT@20..21 "a"
+            WHITESPACE@21..22 " "
+            TEXT@22..23 "|"
+            WHITESPACE@23..24 " "
+            TABLE_CELL@24..25
+              TEXT@24..25 "b"
+            WHITESPACE@25..26 " "
+            TEXT@26..27 "|"
+            NEWLINE@27..28 "\n"
+          TABLE_SEPARATOR@28..42
+            LINE_PREFIX@28..29 ">"
+            LINE_PREFIX@29..30 " "
+            LINE_PREFIX@30..32 "  "
+            TABLE_SEP_DELIM@32..33 "+"
+            TABLE_SEP_EQUALS@33..36 "==="
+            TABLE_SEP_DELIM@36..37 "+"
+            TABLE_SEP_EQUALS@37..40 "==="
+            TABLE_SEP_DELIM@40..41 "+"
+            NEWLINE@41..42 "\n"
+          TABLE_ROW@42..56
+            LINE_PREFIX@42..43 ">"
+            LINE_PREFIX@43..44 " "
+            LINE_PREFIX@44..46 "  "
+            TEXT@46..47 "|"
+            WHITESPACE@47..48 " "
+            TABLE_CELL@48..49
+              TEXT@48..49 "c"
+            WHITESPACE@49..50 " "
+            TEXT@50..51 "|"
+            WHITESPACE@51..52 " "
+            TABLE_CELL@52..53
+              TEXT@52..53 "d"
+            WHITESPACE@53..54 " "
+            TEXT@54..55 "|"
+            NEWLINE@55..56 "\n"
+          TABLE_SEPARATOR@56..70
+            LINE_PREFIX@56..57 ">"
+            LINE_PREFIX@57..58 " "
+            LINE_PREFIX@58..60 "  "
+            TABLE_SEP_DELIM@60..61 "+"
+            TABLE_SEP_WHITESPACE@61..64 "   "
+            TABLE_SEP_DELIM@64..65 "+"
+            TABLE_SEP_DASHES@65..68 "---"
+            TABLE_SEP_DELIM@68..69 "+"
+            NEWLINE@69..70 "\n"
+          TABLE_ROW@70..84
+            LINE_PREFIX@70..71 ">"
+            LINE_PREFIX@71..72 " "
+            LINE_PREFIX@72..74 "  "
+            TEXT@74..75 "|"
+            WHITESPACE@75..76 " "
+            TABLE_CELL@76..77
+              TEXT@76..77 "e"
+            WHITESPACE@77..78 " "
+            TEXT@78..79 "|"
+            WHITESPACE@79..80 " "
+            TABLE_CELL@80..81
+              TEXT@80..81 "f"
+            WHITESPACE@81..82 " "
+            TEXT@82..83 "|"
+            NEWLINE@83..84 "\n"
+          TABLE_SEPARATOR@84..98
+            LINE_PREFIX@84..85 ">"
+            LINE_PREFIX@85..86 " "
+            LINE_PREFIX@86..88 "  "
+            TABLE_SEP_DELIM@88..89 "+"
+            TABLE_SEP_DASHES@89..92 "---"
+            TABLE_SEP_DELIM@92..93 "+"
+            TABLE_SEP_DASHES@93..96 "---"
+            TABLE_SEP_DELIM@96..97 "+"
+            NEWLINE@97..98 "\n"

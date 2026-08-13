@@ -534,6 +534,32 @@ impl<'a> Parser<'a> {
             .find(|marker| *marker == trimmed)
     }
 
+    /// Whether `content` (container-stripped, still carrying the item's
+    /// content-column indent) is a partial (rowspan) grid separator that
+    /// continues the innermost open list item's buffered grid table
+    /// (`+   +---+` under `| c | d |`). Such a line parses as a `+` list
+    /// marker, but it is table structure — pandoc's grid parser consumes
+    /// it before `bulletList` can see it — so every list-decision site on
+    /// the item's continuation path must yield to it. A *dedented*
+    /// separator fails the content-column check and still ends the item
+    /// (pandoc's list-start tolerance wins there; pinned by
+    /// `dedented_partial_separator_still_ends_the_list_item`).
+    fn partial_separator_continues_item_table(&self, content: &str) -> bool {
+        use super::blocks::container_prefix::strip_list_indent;
+        use super::blocks::tables::try_parse_grid_partial_separator;
+        let Some(Container::ListItem {
+            buffer,
+            content_col,
+            ..
+        }) = self.containers.last()
+        else {
+            return false;
+        };
+        leading_indent(content).0 >= *content_col
+            && try_parse_grid_partial_separator(strip_list_indent(content, *content_col)).is_some()
+            && buffer.is_open_grid_table(*content_col)
+    }
+
     /// Emit buffered list item content if we're in a ListItem and it has content.
     /// This is used before starting block-level elements inside list items.
     fn emit_list_item_buffer_if_needed(&mut self) {
@@ -4369,6 +4395,53 @@ impl<'a> Parser<'a> {
                     self.close_paragraph_as_plain_if_open();
                 }
             }
+            // Partial (rowspan) grid separator continuing the quoted item's
+            // open grid table: `>   +   +---+`'s content parses as a `+`
+            // list marker, but it is table structure — pandoc's grid parser
+            // consumes the line before `bulletList` can see it (the quoted
+            // analogue of the dispatcher-path hold in
+            // `parse_inner_content`). Fold it into the buffer with its `>`
+            // markers so the emit-time table lift sees the whole table.
+            let quoted_grid_hold = lists::in_blockquote_list(&self.containers)
+                && self.partial_separator_continues_item_table(inner_content);
+            if quoted_grid_hold {
+                if bq_depth > 0 {
+                    let marker_info = self.marker_info_for_line(
+                        blockquote_payload.as_ref(),
+                        line,
+                        bq_marker_line,
+                        shifted_bq_prefix,
+                        used_shifted_bq,
+                    );
+                    if let Some(Container::ListItem {
+                        buffer,
+                        marker_only,
+                        ..
+                    }) = self.containers.stack.last_mut()
+                    {
+                        for i in 0..bq_depth {
+                            if let Some(info) = marker_info.get(i) {
+                                buffer.push_blockquote_marker(
+                                    info.leading_spaces,
+                                    info.has_trailing_space,
+                                );
+                            }
+                        }
+                        buffer.push_text(inner_content, self.config);
+                        *marker_only = false;
+                    }
+                } else if let Some(Container::ListItem {
+                    buffer,
+                    marker_only,
+                    ..
+                }) = self.containers.stack.last_mut()
+                {
+                    buffer.push_text(line, self.config);
+                    *marker_only = false;
+                }
+                return LineDispatch::consumed(1);
+            }
+
             // Lazy continuation of a list item's open content (its
             // Plain/Para). Pandoc and CommonMark both fold a no-`>`
             // (or short-`>`) plain-text line into the deepest open
@@ -4636,10 +4709,13 @@ impl<'a> Parser<'a> {
             ) {
                 // Don't steal lines whose leading whitespace inside the BQ
                 // would push the marker into the previous inner LIST_ITEM's
-                // content area — those are nested lists, not siblings.
+                // content area — those are nested lists, not siblings. Nor
+                // a partial (rowspan) grid separator continuing the open
+                // item's table — that one keeps buffering.
                 let inner_content_threshold =
                     marker_match.marker_len + marker_match.spaces_after_cols;
-                let is_sibling_candidate = inner_indent_cols_raw < inner_content_threshold;
+                let is_sibling_candidate = inner_indent_cols_raw < inner_content_threshold
+                    && !self.partial_separator_continues_item_table(inner_content);
                 let sibling_list_level = if is_sibling_candidate {
                     self.containers
                         .stack
@@ -5484,6 +5560,25 @@ impl<'a> Parser<'a> {
                 }
                 return LineDispatch::consumed(1);
             }
+        }
+
+        // Grid-table analogue of the display-math hold: a partial (rowspan)
+        // row separator under an open grid table reads as a `+` list marker
+        // to the dispatcher (`+   +---+` is marker `+`, content `+---+`),
+        // but it is table structure. Hold it in the buffer so the emit-time
+        // table lift sees the whole table.
+        if self.partial_separator_continues_item_table(content) {
+            let line = line_to_append.unwrap_or(self.lines[self.pos]);
+            if let Some(Container::ListItem {
+                buffer,
+                marker_only,
+                ..
+            }) = self.containers.stack.last_mut()
+            {
+                buffer.push_text(line, self.config);
+                *marker_only = false;
+            }
+            return LineDispatch::consumed(1);
         }
 
         // Precompute dispatcher match once per line (reused by multiple branches below).

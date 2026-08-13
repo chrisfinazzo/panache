@@ -1488,6 +1488,33 @@ fn dedent_line(line: &str, common_indent: usize) -> &str {
         .trim_end()
 }
 
+/// A partial (rowspan) row separator: a `+`-leading boundary line where at
+/// least one column's segment is blank because its cell continues into the
+/// next row (`+   +---+`, `+---+   |`). The structured path would rebuild
+/// it as a full separator, destroying the span, so such a table must take
+/// the span-aware canonical-grid path.
+pub(crate) fn is_partial_grid_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('+') || !trimmed.ends_with(['+', '|']) {
+        return false;
+    }
+    let mut has_dashes = false;
+    let mut has_blank = false;
+    for segment in trimmed.split(['+', '|']) {
+        if segment.is_empty() {
+            continue;
+        }
+        if segment.chars().all(|c| c == ' ') {
+            has_blank = true;
+        } else if segment.chars().all(|c| matches!(c, '-' | '=' | ':')) {
+            has_dashes = true;
+        } else {
+            return false;
+        }
+    }
+    has_dashes && has_blank
+}
+
 /// Alignment of each segment (between `+`) of a separator line, read from the
 /// leading/trailing `:` of its dash run.
 fn colspan_separator_segments(separator: &str) -> Vec<Alignment> {
@@ -1526,10 +1553,10 @@ pub fn format_grid_table(node: &SyntaxNode, config: &Config, indent: usize) -> S
     // uniform column count and would truncate/pad spanning rows. Lay them out
     // span-aware on the canonical grid instead. See #323 (rowspan) and #359
     // (colspan).
-    let is_spanning = raw_table
-        .lines()
-        .any(|line| line.trim_start().starts_with('|') && line.contains('+'))
-        || grid_table_has_column_spans(&raw_table);
+    let is_spanning = raw_table.lines().any(|line| {
+        (line.trim_start().starts_with('|') && line.contains('+'))
+            || is_partial_grid_separator(line)
+    }) || grid_table_has_column_spans(&raw_table);
     if is_spanning {
         return format_unified_spanning_grid_table(&raw_table, config, profile, indent);
     }

@@ -3251,12 +3251,16 @@ fn parse_grid_cell_text(text: &str) -> Vec<Block> {
     let mut out = Vec::new();
     for child in doc.children() {
         if let Some(block) = block_from(&child) {
-            let block = match block {
-                Block::Para(inlines) => Block::Plain(inlines),
-                other => other,
-            };
             out.push(block);
         }
+    }
+    // Pandoc's `plainify` (`Parsing/GridTable.hs`): a cell holding exactly
+    // one `Para` becomes `Plain`; a multi-block cell (e.g. a rowspan cell
+    // whose sub-rows each carry a paragraph) keeps its `Para`s.
+    if let [Block::Para(_)] = out.as_slice()
+        && let Some(Block::Para(inlines)) = out.pop()
+    {
+        out.push(Block::Plain(inlines));
     }
     out
 }

@@ -2632,7 +2632,7 @@ mod tests {
 
 /// Check if a line is a grid table row separator (starts with +, contains -, ends with +).
 /// Returns Some(vec of column info) if valid, None otherwise.
-fn try_parse_grid_separator(line: &str) -> Option<Vec<GridColumn>> {
+pub(crate) fn try_parse_grid_separator(line: &str) -> Option<Vec<GridColumn>> {
     let trimmed = line.trim_start();
     let leading_spaces = line.len() - trimmed.len();
 
@@ -2701,9 +2701,63 @@ fn try_parse_grid_separator(line: &str) -> Option<Vec<GridColumn>> {
     }
 }
 
+/// A *partial* grid separator — a row boundary under a rowspan, where at
+/// least one column's cell continues into the next row and shows spaces
+/// between its boundary markers instead of dashes (`+   +---+`,
+/// `+---+   |`). Boundary markers may be `+` or `|` (pandoc's grid
+/// reader treats both as cell-edge characters), but the line must open
+/// with `+`: a `|`-leading hybrid is a content row
+/// (`is_grid_content_row`). Requires at least one dashed segment (an
+/// all-blank frame is not table structure) and at least one blank
+/// segment (a fully dashed line is a full separator,
+/// `try_parse_grid_separator`).
+pub(crate) fn try_parse_grid_partial_separator(line: &str) -> Option<Vec<GridColumn>> {
+    let trimmed = line.trim_start();
+
+    // Same column-0 rule as the full separator: detection runs on the
+    // container-prefix-stripped line, so any leading whitespace means the
+    // border is indented relative to its container.
+    if line.len() != trimmed.len() {
+        return None;
+    }
+
+    let trimmed = trimmed.trim_end();
+    if !trimmed.starts_with('+') || !trimmed.ends_with(['+', '|']) {
+        return None;
+    }
+
+    let mut columns = Vec::new();
+    let mut has_dashes = false;
+    let mut has_blank = false;
+    for segment in trimmed.split(['+', '|']) {
+        if segment.is_empty() {
+            continue;
+        }
+        if segment.chars().all(|c| c == ' ') {
+            has_blank = true;
+            columns.push(GridColumn {
+                is_header_separator: false,
+                width: segment.chars().count(),
+            });
+            continue;
+        }
+        let inner = segment.trim_start_matches(':').trim_end_matches(':');
+        let first_char = inner.chars().next()?;
+        if (first_char != '-' && first_char != '=') || !inner.chars().all(|c| c == first_char) {
+            return None;
+        }
+        has_dashes = true;
+        columns.push(GridColumn {
+            is_header_separator: first_char == '=',
+            width: segment.chars().count(),
+        });
+    }
+    (has_dashes && has_blank).then_some(columns)
+}
+
 /// Column information for grid tables.
 #[derive(Debug, Clone)]
-struct GridColumn {
+pub(crate) struct GridColumn {
     is_header_separator: bool,
     width: usize,
 }
@@ -2748,7 +2802,7 @@ fn slice_cell_by_display_width(line: &str, start_byte: usize, width: usize) -> (
 
 /// Check if a line is a grid table content row.
 /// Accepts normal rows ending with `|` and spanning-style continuation lines ending with `+`.
-fn is_grid_content_row(line: &str) -> bool {
+pub(crate) fn is_grid_content_row(line: &str) -> bool {
     let trimmed = line.trim_start();
     let leading_spaces = line.len() - trimmed.len();
 
@@ -2992,13 +3046,23 @@ pub(crate) fn try_parse_grid_table(
         }
 
         // A line ending the enclosing container's line run bounds the
-        // table like a blank line does. Today this is shape-disjoint
-        // belt-and-braces: every terminator (list start, note marker,
-        // div closer, HTML closer) already fails the grid-line checks
-        // below, so the scan stopped anyway — but the bound keeps that
-        // an invariant rather than a coincidence of the current shapes.
+        // table like a blank line does. This bound is load-bearing for
+        // the partial-separator class below: a *dedented* `+   +---+`
+        // inside a list is a sibling `+` item in pandoc (the item's
+        // line run ends within the list-start tolerance), so the
+        // terminator must win over the partial-separator match. The
+        // other grid-line classes stay shape-disjoint from every
+        // terminator (list start, note marker, div closer, HTML
+        // closer).
         if view.ends_container_lines(end_pos) {
             break;
+        }
+
+        // A partial (rowspan) row separator is table structure: the
+        // columns whose cells continue show spaces instead of dashes.
+        if try_parse_grid_partial_separator(line).is_some() {
+            end_pos += 1;
+            continue;
         }
 
         // Check for separator line
@@ -3110,6 +3174,26 @@ pub(crate) fn try_parse_grid_table(
                 emit_separator_tokens(builder, tail);
                 builder.finish_node();
             }
+        } else if let Some(sep_cols) = try_parse_grid_partial_separator(line) {
+            // Partial (rowspan) row separator: a row boundary like the
+            // full separator above, never a header/footer boundary (the
+            // continuing cell keeps its row block open — the projector's
+            // 2D layout pass derives the spans from the blank segments).
+            if !current_row_indices.is_empty() {
+                emit_grid_table_row(
+                    builder,
+                    window,
+                    &current_row_indices,
+                    &sep_cols,
+                    current_row_kind,
+                    config,
+                );
+                current_row_indices.clear();
+            }
+            builder.start_node(SyntaxKind::TABLE_SEPARATOR.into());
+            let tail = window.emit_or_dispatch_tail(builder, idx);
+            emit_separator_tokens(builder, tail);
+            builder.finish_node();
         } else if is_grid_content_row(line) {
             // Content row - accumulate for multi-line cells
             current_row_kind = if !past_header_sep && found_header_sep {
