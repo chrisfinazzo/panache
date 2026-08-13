@@ -777,3 +777,19 @@
 528
 529
 530
+
+# Definition-body HTML continuation. The definition PLAIN's HTML probe now
+# routes through `html_block_cannot_interrupt`, so tags that cannot
+# interrupt a running paragraph fold into the open PLAIN as `RawInline`s:
+# 0531 comment, 0532 inline-block tag (`<button>`), 0533 void inline-block
+# tag (`<embed>`), 0534 processing instruction, 0535 `<style>`. 0536 and
+# 0537 are the controls that must keep lifting to `RawBlock` --- a
+# strict-block void tag (`<hr>`) interrupts, and a comment with no PLAIN
+# open is the body's first block.
+531
+532
+533
+534
+535
+536
+537

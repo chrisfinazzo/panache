@@ -379,12 +379,11 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
     /// (and buffered into the definition PLAIN), rather than parsed as a new block.
     ///
     /// Not unified with `Parser::lazy_interrupts` (the blockquote gates'
-    /// probe list): the polarity is inverted, the probe set differs (marker
-    /// and indent policy, raw TeX, a catch-all `detect_prepared`), and the
-    /// HTML probe below deliberately lacks `html_block_cannot_interrupt` ---
-    /// so `<!-- c -->` ends a definition PLAIN even though it stays lazy
-    /// text in a quote. Whether that divergence matches pandoc is an open
-    /// question tracked in TODO.md.
+    /// probe list): the polarity is inverted and the probe set differs
+    /// (marker and indent policy, raw TeX, a catch-all `detect_prepared`).
+    /// The HTML probe does share `html_block_cannot_interrupt`, so a tag
+    /// that stays lazy text in a quote also stays lazy text in an open
+    /// definition PLAIN.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn definition_plain_can_continue(
         &self,
@@ -472,14 +471,28 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             }
             return false;
         }
-        if self.config.extensions.raw_html
-            && html_blocks::try_parse_html_block_start(
-                stripped_content,
-                self.config.dialect == crate::options::Dialect::CommonMark,
-            )
-            .is_some()
-        {
-            return false;
+        if self.config.extensions.raw_html {
+            let is_commonmark = self.config.dialect == crate::options::Dialect::CommonMark;
+            let (probe, _) = crate::parser::utils::helpers::strip_newline(stripped_content);
+            if let Some(block_type) = html_blocks::try_parse_html_block_start(probe, is_commonmark)
+            {
+                // Tags that cannot interrupt a running paragraph (pandoc's
+                // `isInlineTag` set plus comments and PIs) stay lazy text in
+                // the open PLAIN, matching pandoc-native: `<!-- c -->` or
+                // `<button>x</button>` under `: definition text` folds into
+                // the PLAIN as `RawInline`s. Without an open PLAIN the same
+                // line is the body's next block and lifts to a `RawBlock`.
+                if plain_open
+                    && crate::parser::block_dispatcher::html_block_cannot_interrupt(
+                        &block_type,
+                        probe,
+                        !is_commonmark,
+                    )
+                {
+                    return true;
+                }
+                return false;
+            }
         }
         if self.config.extensions.raw_tex
             && raw_blocks::extract_environment_name(stripped_content).is_some()

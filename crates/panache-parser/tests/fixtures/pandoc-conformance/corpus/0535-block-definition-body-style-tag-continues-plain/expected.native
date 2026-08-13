@@ -1,0 +1,20 @@
+[ DefinitionList
+    [ ( [ Str "Term" ]
+      , [ [ Plain
+              [ Str "definition"
+              , Space
+              , Str "text"
+              , SoftBreak
+              , RawInline (Format "html") "<style>"
+              , Str "a{}"
+              , RawInline (Format "html") "</style>"
+              , SoftBreak
+              , Str "more"
+              , Space
+              , Str "text"
+              ]
+          ]
+        ]
+      )
+    ]
+]

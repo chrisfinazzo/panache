@@ -1,0 +1,10 @@
+[ DefinitionList
+    [ ( [ Str "Term" ]
+      , [ [ Plain [ Str "definition" , Space , Str "text" ]
+          , RawBlock (Format "html") "<hr>"
+          , Plain [ Str "more" , Space , Str "text" ]
+          ]
+        ]
+      )
+    ]
+]

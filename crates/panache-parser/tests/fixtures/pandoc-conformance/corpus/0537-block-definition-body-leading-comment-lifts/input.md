@@ -1,0 +1,3 @@
+Term
+:   <!-- c -->
+    more text

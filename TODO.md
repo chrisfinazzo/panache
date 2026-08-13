@@ -724,15 +724,19 @@ panache starts caching NodePtrs across edits.
     HTML dispatch and definition continuation policy stay separate, with
     cross-reference comments saying why.
 
-  - [ ] The definition continuation policy's **HTML probe lacks
+  - [x] The definition continuation policy's **HTML probe lacked
     `html_block_cannot_interrupt`** (`definition_plain_can_continue`,
     `parser/utils/continuation.rs`): any `try_parse_html_block_start` hit
-    ends the definition PLAIN, so `<!-- c -->` or `<button>` breaks a
+    ended the definition PLAIN, so `<!-- c -->` or `<button>` broke a
     definition body even though the same line stays lazy text in a quote.
-    Found while extracting the lazy-interrupt predicate. Verify against
-    pandoc whether comments/inline-block tags really end a definition PLAIN;
-    if not, route the probe through the same cannot-interrupt filter and pin
-    it in the pandoc corpus.
+    Pandoc confirmed the divergence was a bug --- comments, PIs,
+    inline-block tags (`<button>`, `<style>`), and void inline-block tags
+    (`<embed>`) all stay `RawInline`s in the open PLAIN. The probe now
+    routes through the shared `html_block_cannot_interrupt`, gated on
+    `plain_open` so a tag with no PLAIN open is still the body's next block
+    and lifts to a `RawBlock`. Pandoc corpus 0531-0535 pin the fixed shapes,
+    0536 (`<hr>`, strict-block void) and 0537 (leading comment) are the
+    controls that must keep lifting.
 
   - [ ] Stop `ContainerPrefix`'s **`ListAdvance` eating non-whitespace bytes**.
     `advance_columns` advances blindly, so any consumer that strips a full

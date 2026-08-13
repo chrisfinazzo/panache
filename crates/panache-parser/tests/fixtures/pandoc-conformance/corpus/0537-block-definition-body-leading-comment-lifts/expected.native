@@ -1,0 +1,9 @@
+[ DefinitionList
+    [ ( [ Str "Term" ]
+      , [ [ RawBlock (Format "html") "<!-- c -->"
+          , Plain [ Str "more" , Space , Str "text" ]
+          ]
+        ]
+      )
+    ]
+]
