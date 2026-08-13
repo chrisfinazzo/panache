@@ -1,0 +1,50 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..40
+  BLOCK_QUOTE@0..17
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    LIST@2..17
+      LIST_ITEM@2..17
+        LIST_MARKER@2..3 "-"
+        WHITESPACE@3..4 " "
+        HEADING@4..8
+          ATX_HEADING_MARKER@4..5
+            ATX_HEADING_MARKER@4..5 "#"
+          WHITESPACE@5..6 " "
+          HEADING_CONTENT@6..7
+            TEXT@6..7 "h"
+          NEWLINE@7..8 "\n"
+        PLAIN@8..17
+          LINE_PREFIX@8..9 ">"
+          LINE_PREFIX@9..10 " "
+          TEXT@10..16 "  text"
+          NEWLINE@16..17 "\n"
+  BLANK_LINE@17..18
+    BLANK_LINE@17..18 "\n"
+  BLOCK_QUOTE@18..40
+    BLOCK_QUOTE_MARKER@18..19 ">"
+    WHITESPACE@19..20 " "
+    BLOCK_QUOTE@20..40
+      BLOCK_QUOTE_MARKER@20..21 ">"
+      WHITESPACE@21..22 " "
+      LIST@22..40
+        LIST_ITEM@22..40
+          LIST_MARKER@22..23 "-"
+          WHITESPACE@23..24 " "
+          HEADING@24..29
+            ATX_HEADING_MARKER@24..25
+              ATX_HEADING_MARKER@24..25 "#"
+            WHITESPACE@25..26 " "
+            HEADING_CONTENT@26..28
+              TEXT@26..28 "h2"
+            NEWLINE@28..29 "\n"
+          PLAIN@29..40
+            LINE_PREFIX@29..30 ">"
+            LINE_PREFIX@30..31 " "
+            LINE_PREFIX@31..32 ">"
+            LINE_PREFIX@32..33 " "
+            TEXT@33..39 "  more"
+            NEWLINE@39..40 "\n"

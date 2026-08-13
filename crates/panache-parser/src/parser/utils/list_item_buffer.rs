@@ -457,13 +457,22 @@ impl ListItemBuffer {
                 }
             }
 
+            // Buffered blockquote markers don't block the ATX / HTML lifts
+            // below as long as line 0 carries none (the enclosing quote
+            // emitted that `>` itself, which is the normal shape): the
+            // lifted head is line 0's bytes verbatim, and the trailing
+            // lines' held-out `>` bytes are re-injected — via the
+            // marker-aware paragraph buffer for the ATX split, via
+            // graft-time prefix lines for the HTML lift (mirroring the
+            // table/div lift).
+            let bq_prefixes = self.blockquote_prefixes();
+            let line0_has_bq = bq_prefixes.first().is_some_and(|p| !p.is_empty());
+
             // Multi-line case: first line is an ATX heading, rest is plain
             // continuation. Pandoc treats `- # Heading\n  Some text` as a
             // list item containing Header + Plain, not a single Plain spanning
             // both lines.
-            if self.is_text_only()
-                && let Some(first_nl) = text.find('\n')
-            {
+            if !line0_has_bq && let Some(first_nl) = text.find('\n') {
                 let first_line = &text[..first_nl];
                 let after_first = &text[first_nl + 1..];
                 let detect_first = &first_line[item_indent_prefix_len(first_line, gobble)..];
@@ -479,12 +488,22 @@ impl ListItemBuffer {
                         SyntaxKind::PLAIN
                     };
                     builder.start_node(block_kind.into());
-                    inline_emission::emit_inlines(
-                        builder,
-                        after_first,
-                        config,
-                        suppress_footnote_refs,
-                    );
+                    if self.is_text_only() {
+                        inline_emission::emit_inlines(
+                            builder,
+                            after_first,
+                            config,
+                            suppress_footnote_refs,
+                        );
+                    } else {
+                        // Marker-holding buffer (`> - # h` / `>   text`):
+                        // route the trailing lines through the paragraph
+                        // buffer so the held-out `>` bytes re-inject at
+                        // their line starts.
+                        self.trailing_after_first_line(config)
+                            .to_paragraph_buffer(gobble)
+                            .emit_with_inlines(builder, config, suppress_footnote_refs);
+                    }
                     builder.finish_node();
                     return;
                 }
@@ -504,17 +523,14 @@ impl ListItemBuffer {
             // block close forms as block starts and breaks the buffer) are
             // not handled here — the gate rejects HTML_BLOCK_DIV with only
             // one HTML_BLOCK_TAG child. That sub-target stays open.
-            // Text-only, not merely `sole_text_segment`: the lift emits via
-            // `emit_atx_heading`/`inline_emission` with no bq-prefix
-            // re-injection plumbing, so seeing past marker segments here
-            // would drop the `>` bytes. Same for the ATX split above.
             if config.dialect == Dialect::Pandoc
-                && self.is_text_only()
+                && !line0_has_bq
                 && try_emit_html_block_lift(
                     builder,
                     &text,
                     config,
                     gobble,
+                    &bq_prefixes,
                     use_paragraph,
                     "",
                     allow_unclosed_div,
@@ -536,13 +552,7 @@ impl ListItemBuffer {
             // blockquote markers too (`> - a | b` / `>   - | -`): the markers
             // are already held out of `text`, so they only have to be put
             // back at graft time alongside the item indent.
-            if try_emit_table_or_div_lift(
-                builder,
-                &text,
-                config,
-                gobble,
-                &self.blockquote_prefixes(),
-            ) {
+            if try_emit_table_or_div_lift(builder, &text, config, gobble, &bq_prefixes) {
                 return;
             }
         }
@@ -568,6 +578,35 @@ impl ListItemBuffer {
         }
 
         builder.finish_node(); // Close FIGURE, PLAIN, or PARAGRAPH
+    }
+
+    /// The buffered content after the first line of the concatenated text,
+    /// as a new buffer: the trailing `Text` bytes plus the structural
+    /// blockquote markers between them, in segment order. Backs the
+    /// multi-line ATX split for marker-holding buffers, whose trailing
+    /// block must re-inject the held-out `>` bytes.
+    fn trailing_after_first_line(&self, config: &ParserOptions) -> ListItemBuffer {
+        let mut trailing = ListItemBuffer::new();
+        let mut past_first_line = false;
+        for segment in &self.segments {
+            match segment {
+                ListItemContent::Text(text) => {
+                    if past_first_line {
+                        trailing.push_text(text.clone(), config);
+                    } else if let Some(nl) = text.find('\n') {
+                        past_first_line = true;
+                        trailing.push_text(&text[nl + 1..], config);
+                    }
+                }
+                ListItemContent::BlockquoteMarker {
+                    leading_spaces,
+                    has_trailing_space,
+                } => {
+                    trailing.push_blockquote_marker(*leading_spaces, *has_trailing_space);
+                }
+            }
+        }
+        trailing
     }
 
     /// Clear the buffer for reuse. Also drops any open display-math state:
@@ -613,11 +652,18 @@ impl ListItemBuffer {
 /// later-line content-container caller passes the stripped content indent
 /// so the block's first line carries it too (the formatter dumps HTML
 /// blocks verbatim, so the indent must live inside the block).
+///
+/// `bq_prefixes` are the per-line blockquote marker bytes the buffer held
+/// out of `text` (empty outside a quote); they are re-injected ahead of
+/// the item indent at graft time, which is the order they sit in on a
+/// quoted item's line (`>   after`). Same contract as the table/div lift.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn try_emit_html_block_lift(
     builder: &mut GreenNodeBuilder<'static>,
     text: &str,
     config: &ParserOptions,
     gobble: &[usize],
+    bq_prefixes: &[String],
     use_paragraph: bool,
     line0_prefix: &str,
     allow_unclosed_div: bool,
@@ -644,9 +690,13 @@ pub(crate) fn try_emit_html_block_lift(
         }
     }
 
-    let prefix_lines: Vec<ContainerPrefixLine> = prefixes
-        .into_iter()
-        .map(ContainerPrefixLine::list_only)
+    let prefix_lines: Vec<ContainerPrefixLine> = (0..prefixes.len().max(bq_prefixes.len()))
+        .map(|i| {
+            ContainerPrefixLine::bq_then_list(
+                bq_prefixes.get(i).cloned().unwrap_or_default(),
+                prefixes.get(i).cloned().unwrap_or_default(),
+            )
+        })
         .collect();
     emit_html_block_lift_from_stripped(
         builder,

@@ -708,6 +708,48 @@ fn atx_heading_in_depth_two_list_item() {
 }
 
 #[test]
+fn atx_heading_then_text_in_quoted_list_item() {
+    // pandoc (both dialects): BlockQuote [BulletList [[Header 1, Plain]]].
+    // The item's buffer holds the continuation line's `>` marker as a
+    // structural segment; the multi-line ATX split must see past it and
+    // re-inject the `>` bytes into the trailing block.
+    let input = "> - # h\n>   text\n";
+    let tree = parse_blocks(input);
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("should find list item");
+    let heading = find_first(&item, SyntaxKind::HEADING)
+        .expect("quoted item's ATX heading should parse as HEADING");
+    let trailing = heading
+        .next_sibling()
+        .expect("heading should have trailing sibling block");
+    assert!(
+        matches!(trailing.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH),
+        "trailing text should be a separate block, got {:?}",
+        trailing.kind()
+    );
+    assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+}
+
+#[test]
+fn html_block_then_text_in_quoted_list_item() {
+    // pandoc: BlockQuote [BulletList [[Div [Plain "foo"], Plain "after"]]].
+    // Same marker-segment shape as the ATX case, through the HTML lift.
+    let input = "> - <div>foo</div>\n>   after\n";
+    let tree = parse_blocks(input);
+    let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("should find list item");
+    let div = find_first(&item, SyntaxKind::HTML_BLOCK_DIV)
+        .expect("quoted item's matched-pair div should lift to HTML_BLOCK_DIV");
+    let trailing = div
+        .next_sibling()
+        .expect("div should have trailing sibling block");
+    assert!(
+        matches!(trailing.kind(), SyntaxKind::PLAIN | SyntaxKind::PARAGRAPH),
+        "trailing text should be a separate block, got {:?}",
+        trailing.kind()
+    );
+    assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+}
+
+#[test]
 fn atx_heading_then_text_in_depth_two_list_item() {
     // pandoc (both dialects): Header followed by a separate Para/Plain,
     // both inside the inner item (multi-line buffer chunk).
