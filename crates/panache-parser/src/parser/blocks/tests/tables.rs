@@ -1331,3 +1331,174 @@ fn footnote_body_after_marker_line_text_keeps_lazy_continuation() {
         "the heading cannot interrupt the marker line's paragraph"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Pipe tables need `nonindentSpaces`
+//
+// pandoc's `pipeTable` opens with `nonindentSpaces` and its `pipeBreak`
+// repeats it, so both the header and the delimiter row must sit within 3
+// columns of the frame they are parsed in. Panache measured neither, so an
+// indented delimiter row still claimed its dispatch line as a header --
+// including a `[^1]: a | b` note marker, which pandoc reads as a note whose
+// (dedented) body is the table.
+// ---------------------------------------------------------------------------
+
+/// `pandoc -f markdown -t native` on `[^1]: a | b` + a 4-column-indented
+/// delimiter and row: `Note [Table …]`. The pipe table cannot start on the
+/// marker line because its delimiter row is indented past
+/// `nonindentSpaces`, so the note claims the line.
+///
+/// Known, remaining divergence (TODO.md): panache leaves the marker line's
+/// own text a paragraph the indented lines lazily continue, so the body is
+/// a `Para` where pandoc — which reparses the whole note body dedented —
+/// gets the `Table`. That is not table-specific: an hrule, a list, a
+/// blockquote, and a code fence on a non-bare marker line diverge the same
+/// way, and only a heading is meant to stay lazy (`blank_before_header`).
+/// What this pins is the block-level verdict: the note owns the line, and
+/// no table swallows the marker.
+#[test]
+fn indented_delimiter_leaves_the_note_marker_to_the_note() {
+    let input = "x[^1]\n\n[^1]: a | b\n    --- | ---\n    c | d\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let note = first_of(&node, SyntaxKind::FOOTNOTE_DEFINITION).expect("footnote definition");
+    assert!(
+        note.text().to_string().contains("--- | ---"),
+        "the whole body stays inside the note: {}",
+        note.text()
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "no table claims the marker line as its header row"
+    );
+}
+
+/// `pandoc -f markdown -t native` on `a | b` + `    --- | ---`: a single
+/// `Para`, because `pipeBreak`'s `nonindentSpaces` fails on the 4-column
+/// delimiter row.
+#[test]
+fn pipe_delimiter_past_nonindent_spaces_is_not_a_table() {
+    let input = "a | b\n    --- | ---\n    c | d\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "the indented delimiter row cannot open a table"
+    );
+}
+
+/// A tab is 4 columns, so it fails the same bound
+/// (`pandoc -f markdown -t native`: a `Para`).
+#[test]
+fn tab_indented_pipe_delimiter_is_not_a_table() {
+    let node = parse_blocks("a | b\n\t--- | ---\n");
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "a tab is 4 columns: past `nonindentSpaces`"
+    );
+}
+
+/// Three columns is still inside the tolerance
+/// (`pandoc -f markdown -t native`: a `Table`).
+#[test]
+fn pipe_delimiter_within_nonindent_spaces_stays_a_table() {
+    let input = "a | b\n   --- | ---\n   c | d\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+        "3 columns is within `nonindentSpaces`"
+    );
+}
+
+/// The delimiter bound is Pandoc's alone. GFM grows its table out of an
+/// open paragraph, and a paragraph's continuation lines carry no indent
+/// bound: `pandoc -f gfm -t native` on the same input reads the `Table`.
+#[test]
+fn gfm_keeps_a_table_with_an_indented_pipe_delimiter() {
+    let input = "a | b\n    --- | ---\n    c | d\n";
+    let node = parse_blocks_gfm(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+        "GFM has no `pipeBreak` indent bound"
+    );
+}
+
+/// The header row's bound is not dialect-specific: 4 columns is an
+/// indented code block under GFM too (`pandoc -f gfm -t native`:
+/// `CodeBlock`).
+#[test]
+fn gfm_pipe_header_past_nonindent_spaces_is_indented_code() {
+    let node = parse_blocks_gfm("x\n\n    a | b\n    --- | ---\n");
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "an indented header opens indented code, not a table"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::CODE_BLOCK).is_some(),
+        "the indented block is code"
+    );
+}
+
+/// The header row carries the same bound: with both lines indented 4
+/// columns `pandoc -f markdown -t native` gives a `CodeBlock`, and with
+/// only the header indented it gives `CodeBlock` + `Para`.
+#[test]
+fn pipe_header_past_nonindent_spaces_is_indented_code() {
+    let both = parse_blocks("x\n\n    a | b\n    --- | ---\n");
+    assert!(
+        first_of(&both, SyntaxKind::PIPE_TABLE).is_none(),
+        "an indented header opens indented code, not a table"
+    );
+    assert!(
+        first_of(&both, SyntaxKind::CODE_BLOCK).is_some(),
+        "the indented block is code"
+    );
+
+    let header_only = parse_blocks("x\n\n    a | b\n--- | ---\n");
+    assert!(
+        first_of(&header_only, SyntaxKind::PIPE_TABLE).is_none(),
+        "the delimiter row cannot reach back into indented code"
+    );
+}
+
+/// The bound is measured in the container's frame, which is pandoc's: a
+/// blockquote body is reparsed with its `> ` peeled, so `>     ---|---`
+/// is 4 columns there (`pandoc -f markdown -t native`:
+/// `BlockQuote [Para …]`).
+#[test]
+fn indented_pipe_delimiter_in_a_blockquote_is_not_a_table() {
+    let input = "> a | b\n>     --- | ---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "the delimiter row is 4 columns inside the quote"
+    );
+}

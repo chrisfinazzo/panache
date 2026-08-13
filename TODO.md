@@ -849,9 +849,27 @@ panache starts caching NodePtrs across edits.
     inside a `Note` projected as `Unsupported "Table"`; both it and
     `clone_inline` were redundant with the derived `Clone` and are gone.
 
-  - A pipe table claims a `[^1]: a | b` dispatch line as its header row where
-    pandoc reads the note first (`Note [Table]`) --- registry precedence, not a
-    scan bound.
+  - [x] A pipe table claims a `[^1]: a | b` dispatch line as its header row
+    where pandoc reads the note first (`Note [Table]`). It was a scan bound
+    after all, not registry precedence: pandoc's `pipeTable` opens with
+    `nonindentSpaces` and repeats it in `pipeBreak`, so neither the header
+    nor the delimiter row may start past 3 columns --- and it is the
+    *delimiter* row that is indented here (the note body's 4 columns), which
+    left the marker line to the note. `try_parse_pipe_table` measured
+    neither row, so it also read `a | b` + `    ---|---` as a table where
+    pandoc has a `Para` and `    a | b` + `    ---|---` where pandoc has a
+    `CodeBlock`.
+
+    Both bounds are counted in the frame the block is parsed in, through
+    `UniformStripView` --- the dispatch line's own indent belongs to the
+    container, so a table at the content column of a `10.  item` is at column 0
+    of the item's frame while `>     ---|---` is 4 columns inside the quote. The
+    delimiter bound is Pandoc-dialect only: GFM grows its table out of an open
+    paragraph, whose continuation lines have no indent bound, so `pandoc -f gfm`
+    still reads that table. The header bound holds in both.
+
+    The note body itself is still a `Para` where pandoc has the `Table` --- a
+    wider divergence, filed as its own item below.
 
   - Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache requires
     three.
@@ -860,6 +878,20 @@ panache starts caching NodePtrs across edits.
     `HorizontalRule` in pandoc but nests as the list's child here, and the
     pandoc-ast projector then drops it from the projection entirely (CST is
     lossless).
+
+- [ ] A **non-bare note marker line's own text should open a block**, not a
+  paragraph the indented lines lazily continue. Pandoc's `noteBlock`
+  reparses the collected body from scratch, so `[^1]: a | b` + `    ---|---`
+  is `Note [Table]`, `[^1]: ***` is `Note [HorizontalRule, …]`, and `- li`,
+  `> q`, and ```` ``` ```` open a list, a quote, and a code block the same
+  way; panache makes each a `Para`. Only a heading is meant to stay lazy
+  (`[^1]: # h` is `Para [#, h]` in pandoc too --- `blank_before_header`),
+  which is exactly the split `at_note_body_start` already models for the
+  bare marker: the non-bare path wants the non-strict `has_blank_before`
+  alone. `handle_footnote_open_effect` currently sends the marker-line
+  content straight to `append_paragraph_line`, next to the
+  definition-list-term and `try_dispatch_footnote_html_block` special cases
+  that already dispatch it.
 
 - [ ] Terminator-adjacent **headered simple tables should degrade to a
   paragraph** the way pandoc's footer rule makes them: when a contiguous

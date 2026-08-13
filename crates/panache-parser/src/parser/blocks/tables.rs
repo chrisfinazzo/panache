@@ -1,6 +1,6 @@
 //! Simple table parsing for Pandoc's simple_tables extension.
 
-use crate::options::ParserOptions;
+use crate::options::{Dialect, ParserOptions};
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 use unicode_width::UnicodeWidthChar;
@@ -1471,6 +1471,16 @@ fn emit_table_row(
 // Pipe Table Parsing
 // ============================================================================
 
+/// Does `line` start within pandoc's `nonindentSpaces` (at most 3 columns,
+/// tabs expanded to a 4-column stop)? The line must already be stripped of
+/// its container prefix: pandoc measures the indent in the frame the block
+/// is parsed in, not in the source.
+fn within_nonindent_spaces(line: &str) -> bool {
+    use super::super::utils::container_stack::leading_indent;
+
+    leading_indent(line).0 <= 3
+}
+
 /// Check if a line is a pipe table separator line.
 /// Returns the column alignments if it's a valid separator.
 pub(crate) fn try_parse_pipe_separator(line: &str) -> Option<Vec<Alignment>> {
@@ -1777,6 +1787,33 @@ pub(crate) fn try_parse_pipe_table(
 
     // First line should have pipes (potential header)
     if !window.line(actual_start).contains('|') {
+        return None;
+    }
+
+    // A table cannot open past `nonindentSpaces` — 4 columns is an indented
+    // code block in both dialects (`    a | b` / `    ---|---` is a
+    // `CodeBlock`). The columns are counted in the frame the block is parsed
+    // in, since pandoc reparses a container's body dedented, so the rows are
+    // read through the uniform strip: a table at the content column of a
+    // `10.  item` sits at column 0 of the item's frame. That is what the
+    // dispatch line needs `UniformStripView` for — its own leading indent
+    // belongs to the container, and `line()` (emission-safe) keeps those
+    // bytes for the block's content.
+    let frame = UniformStripView(window);
+    if !within_nonindent_spaces(frame.line(actual_start)) {
+        return None;
+    }
+
+    // The delimiter row's indent is where the dialects part. Pandoc's
+    // `pipeTable` repeats `nonindentSpaces` in `pipeBreak`, so `a | b` over
+    // `    ---|---` is a plain `Para` — and a `[^1]: a | b` dispatch line is
+    // left to the note, which is what pandoc reads there. GFM instead grows
+    // its table out of an open paragraph, whose continuation lines carry no
+    // indent bound at all: `cmark-gfm` (via `pandoc -f gfm`) still reads the
+    // table, however deep the delimiter row sits.
+    if config.dialect != Dialect::CommonMark
+        && !within_nonindent_spaces(frame.line(actual_start + 1))
+    {
         return None;
     }
 
