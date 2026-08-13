@@ -1,6 +1,5 @@
 - item
 
-    A    B
-    --- ---
-    x    y
+  A B --- --- x y
+
 - next

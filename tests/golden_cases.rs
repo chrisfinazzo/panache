@@ -253,6 +253,7 @@ golden_test_cases!(
     footnote_marker_line_blocks,
     simple_table_in_footnote_stops_at_note_marker,
     simple_table_in_list_item_stops_at_sibling_marker,
+    simple_table_closer_kept_before_sibling_marker,
     pipe_table_in_footnote_stops_at_note_marker,
     pipe_table_in_list_item_stops_at_sibling_marker,
     pipe_table_marker_line_in_blockquote,

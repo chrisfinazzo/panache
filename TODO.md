@@ -1004,16 +1004,25 @@ panache starts caching NodePtrs across edits.
   marker line still fall to the paragraph path (pandoc consumes both;
   deferred).
 
-- [ ] Terminator-adjacent **headered simple tables should degrade to a
-  paragraph** the way pandoc's footer rule makes them: when a contiguous
-  terminator (div closer, note marker, list start) ends the run, the
-  collected raw has no trailing blank line, pandoc's `simpleTable` footer
-  (`blanklines`) fails, and the block reparses as a paragraph.
-  `find_table_end` treats the terminator like a blank line instead, so
-  panache keeps the Table (lossless and idempotent; pinned with divergence
-  comments in `blocks/tests/tables.rs`). Applies to the shipped div closer
-  too when it ends a *list item's* run --- the existing div pins only cover
-  blockquote/definition containers, whose reparse appends the blank.
+- [x] Terminator-adjacent **headered simple tables degrade to a paragraph** the
+  way pandoc's footer rule makes them: a contiguous terminator (div closer,
+  list start, HTML closer) cuts the terminated container's raw off without
+  the blank line the `simpleTable` footer (`blanklines`) needs, so the block
+  reparses as a paragraph. `find_table_end` now consults
+  `run_end_supplies_blank`: the table survives only when the terminated
+  chain restores the blank on reparse --- a blockquote (raw + `"\n\n"`) or
+  footnote body (raw + `"\n"`) at or inside the terminated container, or
+  nothing line-collected between the div closer and the table at all (a
+  table directly in a div keeps its footer). New-note-marker terminators
+  therefore never degrade (the note's own raw gets the newline), and a
+  closing dash line abutting the terminator keeps the table too (all
+  probed). Tracked per terminator in `ContainerPrefix::from_stack`
+  (`*_supplies_blank`). Companion formatter fix: a headered table's closer
+  is now kept when no blank line follows the table, since dropping it
+  against a contiguous terminator would degrade the reparse (meaning change +
+  idempotency break). Pinned in `blocks/tests/tables.rs` and the
+  `simple_table_{in_list_item_stops_at,closer_kept_before}_sibling_marker`
+  goldens.
 
 - [ ] The list-start fence stops at pandoc's plain `nonindentSpaces` (<= 3
   columns in the outer frame). For a **nested list with a positive base
@@ -1047,6 +1056,21 @@ panache starts caching NodePtrs across edits.
   them to the column width and drops the blank `>` row separator line before
   the closer. Reproduces without a footnote wrapper and predates the
   blockquote-in-footnote losslessness fix above (surfaced while pinning it).
+
+- [ ] Simple tables in **definition bodies nested one container deep** fail the
+  debug checks (pre-existing; surfaced while probing the footer-rule fix,
+  which does not touch these shapes). Four probed reproducers: a quoted
+  definition list in a div
+  (`::: warn\n> term\n> :   body\n>\n>     A    B\n>     --- ---\n>     x    y\n:::`)
+  breaks losslessness with duplicated `> > >` prefixes; a definition body in
+  a footnote loses the `term` line's indent (losslessness) and pass 2 slices
+  the following `[^2]:` marker into table cells (idempotency); a definition
+  body in a list item and a list in a footnote wobble their reindent between
+  passes and slice the trailing marker likewise. The slicing family is
+  adjacent to the tracked "list-start fence stops at plain
+  `nonindentSpaces`" gap: after the formatter deepens the content indent,
+  the marker no longer fails the frame within tolerance, so the fences stop
+  firing on the reparse.
 
 - [ ] Simple-table rows holding a **sliced multi-space cell** are not idempotent
   even where the slicing matches pandoc: `- <div>` + indented table +

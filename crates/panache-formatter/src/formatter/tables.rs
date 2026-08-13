@@ -2041,6 +2041,26 @@ pub fn format_simple_table(node: &SyntaxNode, config: &Config, indent: usize) ->
         for row in table_data.rows.iter().skip(1) {
             push_row(&mut output, row);
         }
+        // A headered table's closing dash line is normalized away (pandoc's
+        // writer emits none) only when a blank line follows the table.
+        // Against a contiguous container terminator (a sibling list marker,
+        // a div closer) the closer is what satisfies pandoc's footer rule;
+        // dropping it would degrade the reparsed table to a paragraph — a
+        // meaning change and an idempotency break.
+        let has_closer = node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::TABLE_SEPARATOR)
+            .count()
+            >= 2;
+        let blank_follows = match node.next_sibling() {
+            Some(next) => next.kind() == SyntaxKind::BLANK_LINE,
+            None => node
+                .parent()
+                .is_none_or(|p| p.kind() == SyntaxKind::DOCUMENT),
+        };
+        if has_closer && !blank_follows {
+            push_separator(&mut output);
+        }
     } else {
         // Headerless simple tables are delimited by a separator above and below.
         push_separator(&mut output);

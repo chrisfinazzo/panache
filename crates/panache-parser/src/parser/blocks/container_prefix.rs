@@ -203,6 +203,35 @@ pub(crate) struct ContainerPrefix {
     /// ops because the lazy blockquote gobble skips a marker-less line's
     /// indent wholesale, erasing exactly the distinction pandoc draws.
     html_closer_tag: Option<(String, u32)>,
+    /// Whether the run a bare `:::` closer terminates supplies, on
+    /// reparse, the trailing blank line pandoc's headered simple-table
+    /// footer (`blanklines`) needs.
+    ///
+    /// A terminator contiguous with a table's last row cuts the
+    /// terminated container's raw off without a blank line, so the
+    /// footer fails and the lines reparse as a paragraph — unless some
+    /// container in the terminated chain restores the blank when its
+    /// content is reparsed: pandoc appends `"\n\n"` to a blockquote's
+    /// collected raw and `"\n"` to a note's, and list items and
+    /// definition bodies keep a trailing blank present in the outer raw.
+    /// So the blank survives iff a blockquote or footnote body sits
+    /// inside the innermost open div (or nothing line-collected does at
+    /// all — a table directly in the div keeps its footer; probed).
+    /// Meaningful only when [`Self::div_closer_ends_lines`] is set.
+    div_closer_supplies_blank: bool,
+    /// Same question for a run ended by pandoc's `listStart` fence: a
+    /// blockquote or footnote body pushed after the innermost list item
+    /// supplies the blank; the item's own raw ends contiguous at the
+    /// marker otherwise. Meaningful only when [`Self::list_start_detect`]
+    /// is set. (A new note marker needs no such flag: it terminates the
+    /// note's own raw, which `noteBlock` reparses with `"\n"` appended,
+    /// so the blank always materializes.)
+    list_start_supplies_blank: bool,
+    /// Same question for a run ended by the markdown-in-html closer
+    /// fence: a blockquote or footnote body pushed after the tag-holding
+    /// item supplies the blank. Meaningful only when
+    /// [`Self::html_closer_tag`] is set.
+    html_closer_supplies_blank: bool,
 }
 
 impl ContainerPrefix {
@@ -244,6 +273,19 @@ impl ContainerPrefix {
         let mut html_open: Option<(String, u32)> = None;
         let mut html_closer_tag: Option<(String, u32)> = None;
         let mut note_marker_op_bound = None;
+        // Blank-supply tracking for the terminator fences (see the
+        // `*_supplies_blank` fields): whether any line-collected
+        // container sits inside the innermost open div, whether one of
+        // them restores the footer's blank on reparse (blockquote /
+        // footnote body), and the same restore question for containers
+        // pushed after the innermost list item and after the tag-holding
+        // item. Reset points mirror each fence's anchor; a blockquote
+        // always rescues its own content, so order within the chain
+        // never matters — any appender inside the chain suffices.
+        let mut div_chain_collects = false;
+        let mut div_chain_appends = false;
+        let mut list_start_supplies_blank = false;
+        let mut html_closer_supplies_blank = false;
         for c in stack {
             match c {
                 Container::BlockQuote { .. } => {
@@ -255,6 +297,10 @@ impl ContainerPrefix {
                     ops.push(StripOp::BlockQuoteMarker);
                     div_closer_ends_lines |= div_open;
                     html_closer_tag = html_open.clone().or(html_closer_tag);
+                    div_chain_collects = true;
+                    div_chain_appends = true;
+                    list_start_supplies_blank = true;
+                    html_closer_supplies_blank = true;
                 }
                 Container::FootnoteDefinition { content_col } => {
                     if let Some(p) = pending_list_advance.take() {
@@ -267,6 +313,10 @@ impl ContainerPrefix {
                     ops.push(StripOp::ContentIndent(*content_col as u32));
                     div_closer_ends_lines |= div_open;
                     html_closer_tag = html_open.clone().or(html_closer_tag);
+                    div_chain_collects = true;
+                    div_chain_appends = true;
+                    list_start_supplies_blank = true;
+                    html_closer_supplies_blank = true;
                 }
                 Container::Definition { content_col, .. }
                 | Container::Admonition { content_col } => {
@@ -278,6 +328,10 @@ impl ContainerPrefix {
                     ops.push(StripOp::ContentIndent(*content_col as u32));
                     div_closer_ends_lines |= div_open;
                     html_closer_tag = html_open.clone().or(html_closer_tag);
+                    // Collects lines but restores no blank on reparse
+                    // (probed: a definition body cut off by a closer
+                    // degrades its table).
+                    div_chain_collects = true;
                 }
                 Container::ListItem {
                     content_col,
@@ -293,11 +347,25 @@ impl ContainerPrefix {
                         div_open,
                         html_open: html_open.clone(),
                     });
+                    div_chain_collects = true;
+                    // This item is now the innermost `listStart` fence
+                    // anchor; only appenders pushed after it rescue its
+                    // run's table.
+                    list_start_supplies_blank = false;
                     if let Some(tag) = buffer.open_matched_pair_tag(config) {
                         html_open = Some((tag, *content_col as u32));
+                        // Same reset for the html fence, anchored at the
+                        // tag-holding item.
+                        html_closer_supplies_blank = false;
                     }
                 }
-                Container::FencedDiv { .. } => div_open = true,
+                Container::FencedDiv { .. } => {
+                    div_open = true;
+                    // A bare closer closes the innermost div; only
+                    // containers pushed after it are in its chain.
+                    div_chain_collects = false;
+                    div_chain_appends = false;
+                }
                 _ => {}
             }
         }
@@ -338,6 +406,9 @@ impl ContainerPrefix {
             note_marker_op_bound,
             list_start_detect,
             html_closer_tag,
+            div_closer_supplies_blank: !div_chain_collects || div_chain_appends,
+            list_start_supplies_blank,
+            html_closer_supplies_blank,
         }
     }
 
@@ -386,6 +457,9 @@ impl ContainerPrefix {
             note_marker_op_bound: None,
             list_start_detect: None,
             html_closer_tag: None,
+            div_closer_supplies_blank: true,
+            list_start_supplies_blank: true,
+            html_closer_supplies_blank: true,
         }
     }
 
@@ -406,6 +480,9 @@ impl ContainerPrefix {
             note_marker_op_bound: None,
             list_start_detect: None,
             html_closer_tag: None,
+            div_closer_supplies_blank: true,
+            list_start_supplies_blank: true,
+            html_closer_supplies_blank: true,
         }
     }
 
@@ -477,6 +554,9 @@ impl ContainerPrefix {
             note_marker_op_bound: None,
             list_start_detect: None,
             html_closer_tag: None,
+            div_closer_supplies_blank: true,
+            list_start_supplies_blank: true,
+            html_closer_supplies_blank: true,
         }
     }
 
@@ -506,6 +586,25 @@ impl ContainerPrefix {
         self.html_closer_tag
             .as_ref()
             .map(|(tag, col)| (tag.as_str(), *col))
+    }
+
+    /// See the field of the same name: whether the run a bare `:::`
+    /// terminates supplies the headered simple-table footer's blank
+    /// line on reparse.
+    pub fn div_closer_supplies_blank(&self) -> bool {
+        self.div_closer_supplies_blank
+    }
+
+    /// See the field of the same name: the blank-supply question for a
+    /// run ended by pandoc's `listStart` fence.
+    pub fn list_start_supplies_blank(&self) -> bool {
+        self.list_start_supplies_blank
+    }
+
+    /// See the field of the same name: the blank-supply question for a
+    /// run ended by the markdown-in-html closer fence.
+    pub fn html_closer_supplies_blank(&self) -> bool {
+        self.html_closer_supplies_blank
     }
 
     /// See the field of the same name: the marker-detection bits a
@@ -565,6 +664,9 @@ impl ContainerPrefix {
             note_marker_op_bound: None,
             list_start_detect: None,
             html_closer_tag: None,
+            div_closer_supplies_blank: true,
+            list_start_supplies_blank: true,
+            html_closer_supplies_blank: true,
         }
     }
 
@@ -638,6 +740,9 @@ impl ContainerPrefix {
             list_start_detect: self.list_start_detect,
             // A tag, not an op index: no remap needed.
             html_closer_tag: self.html_closer_tag.clone(),
+            div_closer_supplies_blank: self.div_closer_supplies_blank,
+            list_start_supplies_blank: self.list_start_supplies_blank,
+            html_closer_supplies_blank: self.html_closer_supplies_blank,
         }
     }
 

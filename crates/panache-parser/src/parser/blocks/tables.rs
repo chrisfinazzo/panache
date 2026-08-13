@@ -63,6 +63,23 @@ pub(crate) trait LineView {
     fn ends_container_lines(&self, _i: usize) -> bool {
         false
     }
+
+    /// For a line that ends the container's line run (see
+    /// [`Self::ends_container_lines`]): whether the terminated run
+    /// supplies, on reparse, the trailing blank line pandoc's headered
+    /// simple-table footer (`blanklines`) needs. A terminator
+    /// contiguous with the table's last row cuts the collected raw off
+    /// without a blank; the footer then fails and the lines reparse as
+    /// a paragraph — unless a blockquote or footnote body in the
+    /// terminated chain restores the blank (pandoc reparses a quote's
+    /// raw with `"\n\n"` appended and a note's with `"\n"`). See the
+    /// `*_supplies_blank` fields on `ContainerPrefix`.
+    ///
+    /// Defaults to `true` (blank-like): meaningful only where
+    /// [`Self::ends_container_lines`] can fire.
+    fn run_end_supplies_blank(&self, _i: usize) -> bool {
+        true
+    }
 }
 
 impl LineView for [&str] {
@@ -100,6 +117,26 @@ impl<'a, 'p> LineView for StrippedLines<'a, 'p> {
             || note_marker_ends_lines(prefix, self.raw()[i])
             || list_start_ends_lines(prefix, self.raw()[i])
             || html_closer_ends_lines(prefix, self.raw()[i])
+    }
+    fn run_end_supplies_blank(&self, i: usize) -> bool {
+        let prefix = self.prefix();
+        let raw = self.raw()[i];
+        if prefix.div_closer_ends_lines() && line_is_fenced_div_closer(raw) {
+            return prefix.div_closer_supplies_blank();
+        }
+        // A new note marker terminates the note's own raw, which
+        // `noteBlock` reparses with `"\n"` appended — the blank always
+        // materializes (probed, including through a definition body).
+        if note_marker_ends_lines(prefix, raw) {
+            return true;
+        }
+        if list_start_ends_lines(prefix, raw) {
+            return prefix.list_start_supplies_blank();
+        }
+        if html_closer_ends_lines(prefix, raw) {
+            return prefix.html_closer_supplies_blank();
+        }
+        true
     }
 }
 
@@ -234,6 +271,9 @@ impl<'s, 'a, 'p> LineView for UniformStripView<'s, 'a, 'p> {
     fn ends_container_lines(&self, i: usize) -> bool {
         self.0.ends_container_lines(i)
     }
+    fn run_end_supplies_blank(&self, i: usize) -> bool {
+        self.0.run_end_supplies_blank(i)
+    }
 }
 
 /// A [`LineView`] that strips `content_col` columns of leading whitespace
@@ -268,6 +308,9 @@ impl<V: LineView + ?Sized> LineView for ContentColStripView<'_, V> {
     }
     fn ends_container_lines(&self, i: usize) -> bool {
         self.inner.ends_container_lines(i)
+    }
+    fn run_end_supplies_blank(&self, i: usize) -> bool {
+        self.inner.run_end_supplies_blank(i)
     }
 }
 
@@ -1317,11 +1360,18 @@ fn find_table_end(
 ) -> Option<(usize, bool)> {
     let mut saw_row = false;
     for i in start_pos..lines.line_count() {
-        // A `:::` closing the enclosing div ends the container's line
-        // run, so it bounds the table exactly like a blank line does:
-        // the fence is the div's, never a row.
-        if lines.line(i).trim().is_empty() || lines.ends_container_lines(i) {
+        if lines.line(i).trim().is_empty() {
             return (!require_closer).then_some((i, false));
+        }
+        // A terminator ending the container's line run (a `:::` div
+        // closer, a sibling list start, a new note marker, an HTML
+        // closer) bounds the table where a blank line would — but
+        // pandoc's headered footer is `blanklines`, so unless the
+        // terminated run's reparse supplies the blank (see
+        // `run_end_supplies_blank`) the footer fails and the collected
+        // lines reparse as a paragraph: no table at all.
+        if lines.ends_container_lines(i) {
+            return (!require_closer && lines.run_end_supplies_blank(i)).then_some((i, false));
         }
         // Check if this could be a closing separator: the next line must
         // be blank, EOF, or the end of the container's line run — a

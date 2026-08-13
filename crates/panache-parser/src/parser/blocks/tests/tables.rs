@@ -148,6 +148,16 @@ fn bodyless_pipe_table_does_not_cap_under_commonmark() {
 // the fence belongs to the div, and no table scan started inside the
 // container may reach past it. The container-frame bound cannot see this --
 // a closer at column 0 carries no indent to compare.
+//
+// Whether a headered simple table cut off by the closer survives depends
+// on the terminated chain (all probed): pandoc's footer rule
+// (`blanklines`) needs a blank line after the last row, and only a
+// blockquote or footnote body inside the chain supplies one on reparse (a
+// quote's raw gets `"\n\n"` appended, a note's gets `"\n"`). A table
+// sitting directly in the div survives too — nothing between the closer
+// and the div's own content parse loses the blank. A list item or
+// definition body without such a rescue degrades the table to a
+// paragraph.
 
 /// `pandoc -f markdown -t native`: BlockQuote [Table ...], the div closes,
 /// and `after` is a sibling of the div. The closer is never a table row.
@@ -222,6 +232,117 @@ fn stray_div_closer_in_a_definition_body_stays_a_table_row() {
     assert!(
         table.text().to_string().contains(":::"),
         "with no div open the fence is a row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: Div \[Table\] — a table sitting
+/// directly in the div keeps its footer even with the closer contiguous.
+#[test]
+fn simple_table_directly_in_a_div_survives_the_contiguous_closer() {
+    let input = "::: note\nA    B\n--- ---\nx    y\n:::\n\nafter\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the div");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer is not a table row: {}",
+        table.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: the closer ends the list item's run,
+/// whose raw ends without the blank the footer rule needs — the item
+/// holds a paragraph, not a table.
+#[test]
+fn simple_table_in_a_div_list_item_degrades_at_the_div_closer() {
+    let input = "::: warn\n- item\n\n  A    B\n  --- ---\n  x    y\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let div = node.children().next().expect("div");
+    assert_eq!(div.kind(), SyntaxKind::FENCED_DIV);
+    assert!(
+        first_of(&div, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the contiguous run end fails the footer rule: {}",
+        div.text()
+    );
+    let item = first_of(&div, SyntaxKind::LIST_ITEM).expect("item in the div");
+    assert!(
+        !item.text().to_string().contains(":::"),
+        "the closer stays outside the item: {}",
+        item.text()
+    );
+}
+
+/// `pandoc -f markdown -t native`: same for a definition body — its raw
+/// ends contiguous at the closer, so the table degrades to a paragraph.
+#[test]
+fn simple_table_in_a_div_definition_body_degrades_at_the_div_closer() {
+    let input = "::: warn\nterm\n:   body\n\n    A    B\n    --- ---\n    x    y\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let div = node.children().next().expect("div");
+    assert_eq!(div.kind(), SyntaxKind::FENCED_DIV);
+    assert!(
+        first_of(&div, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the contiguous run end fails the footer rule: {}",
+        div.text()
+    );
+}
+
+/// A blockquote inside the item rescues the table: pandoc reparses the
+/// quote's raw with `"\n\n"` appended, so `pandoc -f markdown -t native`
+/// keeps Div \[BulletList \[\[BlockQuote \[Table\]\]\]\].
+#[test]
+fn quoted_table_in_a_div_list_item_survives_the_div_closer() {
+    let input = "::: warn\n- item\n\n  > A    B\n  > --- ---\n  > x    y\n:::\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("quoted table in the item");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A footnote body inside the div rescues the table the same way:
+/// pandoc's `noteBlock` appends a newline to its collected raw, so
+/// `pandoc -f markdown -t native` keeps the Table in the note.
+#[test]
+fn note_body_table_in_a_div_survives_the_div_closer() {
+    let input = "::: warn\n[^1]: body\n\n    A    B\n    --- ---\n    x    y\n:::\n\nx[^1]\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the note body");
+    assert!(
+        !table.text().to_string().contains(":::"),
+        "the div closer is not a table row: {}",
         table.text()
     );
 }
@@ -345,18 +466,19 @@ fn note_marker_ends_a_list_item_table_inside_a_footnote_body() {
 // listStart >> ...`, where `listStart` tolerates `nonindentSpaces` (at most
 // 3 columns) in the frame the list was parsed in. So a marker line within
 // that tolerance ends the item's run; one at the item's content column is
-// nested-list content; and one in between is a lazy continuation. Known,
-// deliberate divergence: when the terminator is contiguous with a headered
-// simple table, pandoc's collected raw ends without the blank line the
-// table's footer rule demands, so pandoc degrades the table to a
-// paragraph; panache treats the terminator like a blank line and keeps the
-// table (lossless and idempotent; see TODO.md).
+// nested-list content; and one in between is a lazy continuation. A
+// headered simple table cut off by the terminator degrades further:
+// pandoc's footer rule (`blanklines`) needs a blank line after the last
+// row, the item's collected raw ends contiguously without one, and the
+// lines reparse as a paragraph. A blockquote between the item and the
+// table rescues it — pandoc reparses a quote's raw with `"\n\n"` appended,
+// so the blank materializes (all shapes probed).
 
-/// `pandoc -f markdown -t native`: `- next` is a sibling item, never a
-/// table row (before this fence it was sliced across the table's column
-/// boundaries, reformatting to `- ne   xt`).
+/// `pandoc -f markdown -t native`: `- next` is a sibling item, and the
+/// contiguous run end fails the table's footer rule, so item 1 holds a
+/// paragraph, not a table.
 #[test]
-fn simple_table_in_a_list_item_ends_at_a_sibling_marker() {
+fn simple_table_in_a_list_item_degrades_at_a_contiguous_sibling_marker() {
     let input = "- item\n\n  A    B\n  --- ---\n  x    y\n- next\n";
     let node = parse_blocks(input);
 
@@ -372,7 +494,57 @@ fn simple_table_in_a_list_item_ends_at_a_sibling_marker() {
         .filter(|n| n.kind() == SyntaxKind::LIST_ITEM)
         .collect();
     assert_eq!(items.len(), 2, "the sibling item survives the table scan");
-    let table = first_of(&items[0], SyntaxKind::SIMPLE_TABLE).expect("table in item 1");
+    assert!(
+        first_of(&items[0], SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the contiguous run end fails the footer rule: {}",
+        items[0].text()
+    );
+    let para = items[0]
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::PLAIN)
+        .find(|p| p.text().to_string().contains("x    y"))
+        .expect("degraded paragraph in item 1");
+    assert!(
+        para.text().to_string().contains("--- ---"),
+        "the separator line is paragraph text: {}",
+        para.text()
+    );
+}
+
+/// A blank line before the sibling marker satisfies the footer rule:
+/// `pandoc -f markdown -t native` keeps the Table.
+#[test]
+fn simple_table_in_a_list_item_survives_with_a_blank_before_the_sibling() {
+    let input = "- item\n\n  A    B\n  --- ---\n  x    y\n\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in item 1");
+    assert!(
+        !table.text().to_string().contains("next"),
+        "the sibling marker is not a table row: {}",
+        table.text()
+    );
+}
+
+/// A blockquote between the item and the table supplies the blank:
+/// pandoc reparses the quote's raw with `"\n\n"` appended, so
+/// `pandoc -f markdown -t native` keeps BlockQuote \[Table\] in item 1.
+#[test]
+fn quoted_table_in_a_list_item_survives_a_contiguous_sibling_marker() {
+    let input = "- item\n\n  > A    B\n  > --- ---\n  > x    y\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("quoted table in item 1");
     assert!(
         !table.text().to_string().contains("next"),
         "the sibling marker is not a table row: {}",
@@ -425,7 +597,8 @@ fn list_marker_in_the_lazy_band_stays_a_table_row() {
 
 /// The same shape with the marker inside the tolerance: `pandoc -f
 /// markdown -t native` ends the ordered item's run and opens a sibling
-/// BulletList after the list.
+/// BulletList after the list — and the contiguous run end fails the
+/// table's footer rule, so the item holds a paragraph, not a table.
 #[test]
 fn list_marker_within_nonindent_tolerance_ends_the_run() {
     let input = "10.  item\n\n     A    B\n     --- ---\n     x    y\n   - sib\n";
@@ -436,11 +609,9 @@ fn list_marker_within_nonindent_tolerance_ends_the_run() {
         input,
         "parser must remain lossless"
     );
-    let table = first_of(&node, SyntaxKind::SIMPLE_TABLE).expect("table in the item");
     assert!(
-        !table.text().to_string().contains("sib"),
-        "the marker is not a table row: {}",
-        table.text()
+        first_of(&node, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the contiguous run end fails the footer rule"
     );
     let lists: Vec<_> = node
         .children()
@@ -450,6 +621,11 @@ fn list_marker_within_nonindent_tolerance_ends_the_run() {
         lists.len(),
         2,
         "the bullet opens its own list after the ordered one"
+    );
+    assert!(
+        !lists[0].text().to_string().contains("sib"),
+        "the marker is not item content: {}",
+        lists[0].text()
     );
 }
 
@@ -584,6 +760,37 @@ fn lazy_quote_fold_stops_at_the_html_closer() {
         quote.text().to_string().contains("</div>"),
         "one space past the content column stays lazy quote content: {}",
         quote.text()
+    );
+}
+
+/// The closer ends a *nested* item's run with no blockquote to supply
+/// the footer's blank, so the table degrades: `pandoc -f markdown -t
+/// native` puts a Para, not a Table, in the nested item. (Contrast the
+/// quoted shape above, where the quote's reparse appends the blank and
+/// the Table survives.)
+#[test]
+fn nested_item_table_degrades_at_the_html_closer() {
+    let input = "- <div>\n\n  - sub\n\n    A    B\n    --- ---\n    x    y\n  </div>\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::SIMPLE_TABLE).is_none(),
+        "the contiguous run end fails the footer rule"
+    );
+    let para = node
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::PLAIN)
+        .find(|p| p.text().to_string().contains("x    y"))
+        .expect("degraded paragraph in the nested item");
+    assert!(
+        !para.text().to_string().contains("</div>"),
+        "the closer is not paragraph content: {}",
+        para.text()
     );
 }
 
@@ -1070,8 +1277,7 @@ fn sibling_marker_is_no_multiline_closer() {
 // the terminator is a list start contiguous with the caption line, pandoc
 // drops the caption entirely (empty caption, `: cap` reparses as a
 // paragraph); panache treats the terminator like a blank line and keeps
-// the caption — same convention as the simple-table footer-rule
-// divergence in TODO.md, lossless and idempotent.
+// the caption (see TODO.md; lossless and idempotent).
 
 /// `pandoc -f markdown -t native`: `[^2]: z` opens the second note; the
 /// caption is `cap` alone.
