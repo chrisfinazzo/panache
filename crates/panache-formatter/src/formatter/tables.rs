@@ -2,7 +2,7 @@ use crate::config::{Config, WrapMode};
 use crate::formatter::inline::format_inline_node;
 use crate::formatter::inline_layout::wrap_text_first_fit;
 use crate::formatter::sentence_wrap::{ResolvedProfile, resolve_profile, split_sentence_text};
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken, text_without_line_prefixes};
 use panache_parser::analyze_grid;
 use rowan::NodeOrToken;
 use std::collections::BTreeSet;
@@ -1289,7 +1289,7 @@ fn extract_grid_table_data(node: &SyntaxNode, config: &Config) -> GridTableData 
                 let has_parsed_cells = !cells.is_empty();
                 let mut seeded_from_plain_line = false;
                 if !has_parsed_cells {
-                    let row_text = child.text().to_string();
+                    let row_text = text_without_line_prefixes(&child);
                     for line in row_text.lines() {
                         let trimmed_start = line.trim_start();
                         let trimmed_end = line.trim_end();
@@ -1315,9 +1315,10 @@ fn extract_grid_table_data(node: &SyntaxNode, config: &Config) -> GridTableData 
                 }
 
                 // Continuation lines are emitted as raw text in CST rows; include
-                // them for width calculation and output structure.
+                // them for width calculation and output structure. Read them
+                // dedented so a container prefix cannot hide a `|` line.
                 let mut seen_first_content_line = false;
-                let row_text = child.text().to_string();
+                let row_text = text_without_line_prefixes(&child);
                 for line in row_text.lines() {
                     let trimmed_start = line.trim_start();
                     let trimmed_end = line.trim_end();
@@ -1534,7 +1535,12 @@ fn colspan_separator_segments(separator: &str) -> Vec<Alignment> {
 
 /// Format a grid table with consistent alignment and padding
 pub fn format_grid_table(node: &SyntaxNode, config: &Config, indent: usize) -> String {
-    let raw_table = node.text().to_string();
+    // Continuation lines inside the node carry the enclosing containers'
+    // prefix bytes (item indent, `>` markers) as leading tokens; every
+    // geometry read below needs lines dedented to the table's own left
+    // edge, and the enclosing block walkers re-apply the container
+    // prefix to whatever this returns.
+    let raw_table = text_without_line_prefixes(node);
     let mut extra_abbreviations = Vec::new();
     let profile = resolve_profile(node, config, &mut extra_abbreviations);
 
@@ -1555,9 +1561,11 @@ pub fn format_grid_table(node: &SyntaxNode, config: &Config, indent: usize) -> S
     let mut table_data = extract_grid_table_data(node, config);
     let mut output = String::new();
 
-    // Early return if no rows
+    // Early return if no rows. The dedented text, not `node.text()`: the
+    // enclosing walker re-prefixes every line, so returning raw prefixed
+    // text would double the container prefix.
     if table_data.rows.is_empty() {
-        return node.text().to_string();
+        return raw_table;
     }
 
     // Reflow plain-prose body cells to their fixed column width and drop blank
