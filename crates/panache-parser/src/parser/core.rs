@@ -1664,6 +1664,78 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A list marker line that is really the delimiter row of a table the
+    /// item's *marker line* opened. Returns true when the line was buffered
+    /// as item content (caller should advance pos without opening a list).
+    ///
+    /// Pandoc collects a list item's lines and reparses them as a document,
+    /// so `- a | b` / `  - | -` reparses `a | b\n- | -`: the first line is
+    /// not a marker, `pipeTable` claims both lines, and `bulletList` never
+    /// sees the second. Panache parses item content as it goes, so without
+    /// this the `- ` would open a nested bullet whose content is a line
+    /// block (`| -`). Buffering the line instead leaves the table to the
+    /// buffer's structural lift at item close, which is where every other
+    /// marker-line table is built.
+    ///
+    /// Only the marker line may be buffered so far: pandoc's reparse gives
+    /// the table no way to interrupt an open paragraph, so `- x` / `  a | b`
+    /// / `  - | -` really is a nested list in both. Pandoc-dialect only —
+    /// `cmark-gfm` (via `pandoc -f gfm`) opens the nested list here, since
+    /// its table extension grows out of a paragraph rather than a reparse.
+    fn try_buffer_marker_line_table_delimiter(&mut self, content: &str) -> bool {
+        if self.config.dialect != crate::options::Dialect::Pandoc
+            || !self.config.extensions.pipe_tables
+            || self.pos == 0
+        {
+            return false;
+        }
+
+        let Some(Container::ListItem { buffer, .. }) = self.containers.stack.last() else {
+            return false;
+        };
+        // Exactly one `Text` segment — the same all-`Text` precondition the
+        // lift itself gates on, so this never buffers a line the lift cannot
+        // use. A quoted item (`> - a | b`) carries a `BlockquoteMarker`
+        // segment and falls out here; that shape stays a nested list (see
+        // TODO.md).
+        if buffer.segment_count() != 1 {
+            return false;
+        }
+        let Some(first) = buffer.first_text() else {
+            return false;
+        };
+        // One line, and one that could be a header row at all.
+        if first.trim_end_matches(['\n', '\r']).contains('\n') || !first.contains('|') {
+            return false;
+        }
+
+        // Probe the real parser at the marker line, in the item's own frame
+        // (the stack top is this item, so `from_stack` sees any enclosing
+        // blockquote / footnote / definition indent too). A table consuming
+        // two lines or more is one whose delimiter row is this line, and the
+        // column-exact form keeps the choice round-trippable — a header with
+        // surplus cells re-parses differently once the formatter has written
+        // the delimiter row back out.
+        let prefix = ContainerPrefix::from_stack(&self.containers.stack, true, self.config);
+        let window = StrippedLines::new(&self.lines, self.pos - 1, &prefix);
+        if tables::opens_column_exact_pipe_table(&window, self.config).is_none() {
+            return false;
+        }
+
+        if let Some(Container::ListItem {
+            buffer,
+            marker_only,
+            ..
+        }) = self.containers.stack.last_mut()
+        {
+            buffer.push_text(content, self.config);
+            if !content.trim().is_empty() {
+                *marker_only = false;
+            }
+        }
+        true
+    }
+
     /// Returns the number of extra lines consumed beyond the block parser's
     /// reported `lines_consumed` (= 1 for list-open). Non-zero when the
     /// list-marker line opens a fenced code block (multi-line fence) or
@@ -5742,6 +5814,15 @@ impl<'a> Parser<'a> {
                     // flushing the buffer and opening a new sibling list.
                     if matches!(block_match.effect, BlockEffect::OpenList)
                         && self.try_lazy_list_continuation(block_match, content)
+                    {
+                        return LineDispatch::consumed(1);
+                    }
+
+                    // A `- | -` under a `- a | b` marker line is that table's
+                    // delimiter row, not a nested bullet — pandoc's reparse of
+                    // the item's lines finds the table first.
+                    if matches!(block_match.effect, BlockEffect::OpenList)
+                        && self.try_buffer_marker_line_table_delimiter(content)
                     {
                         return LineDispatch::consumed(1);
                     }

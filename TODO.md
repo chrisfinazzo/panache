@@ -871,8 +871,41 @@ panache starts caching NodePtrs across edits.
     The note body itself is still a `Para` where pandoc has the `Table` --- a
     wider divergence, filed as its own item below.
 
-  - Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache requires
-    three.
+  - [x] "Pandoc accepts a two-dash pipe delimiter row (`--|--`); panache
+    requires three" --- **not a bug**, and nothing to fix. Panache reads
+    one, two, and three dashes per cell alike (`try_parse_pipe_separator`
+    needs one dash, which is pandoc's own bound), in every flavor and every
+    container a differential sweep could reach. Pinned by
+    `short_pipe_delimiter_rows_are_tables` so the claim cannot come back.
+
+    Triaging it did turn up two real ones. **Landed**: a marker-shaped delimiter
+    row under a marker-line table (`- a | b` / `  - | -`) was claimed as a
+    nested bullet whose content is a line block, where pandoc reparses the
+    item's lines and lets `pipeTable` take both --- the `- ` is never read as a
+    marker. `Parser::try_buffer_marker_line_table_delimiter` now buffers that
+    line so the existing structural lift builds the table. It is bounded to the
+    marker line (with a prose line first, pandoc's table cannot interrupt the
+    item's paragraph either) and to the Pandoc dialect (`cmark-gfm` opens the
+    nested list). Also landed: the header-row gate counted an escaped `\|` as a
+    cell boundary, so `a \| b` over `---|---` was a table where pandoc has a
+    `Para`.
+
+  - [ ] **Pipe table column counts should come from the delimiter row.**
+    `try_parse_pipe_table` is lenient --- a header may carry up to twice the
+    delimiter's cells --- while pandoc takes the count from the delimiter
+    and drops the surplus: `a | b | c` over `---|---` is 2 columns in pandoc
+    and 3 here, and `| a | b |` over `- |` is 1 versus 2. Top-level shapes
+    stay idempotent only because the formatter re-emits panache's own count.
+    The marker-line gate above therefore requires the column-exact form
+    (`opens_column_exact_pipe_table`); shapes like `- | a | b |` / `  - |`
+    keep the old nested-list reading until this is fixed. Touches the
+    projector and the formatter, not just the parser.
+
+  - [ ] A **quoted** item's marker-line table is out of the lift's reach:
+    `> - a | b` / `>   - | -` is `BlockQuote [BulletList [[Table …]]]` in
+    pandoc but stays a nested list here. The item's buffer carries a
+    `BlockquoteMarker` segment, and both structural lifts gate on all-`Text`
+    segments.
 
   - [ ] A spaced dash run after a list (`- x` items, then `- - - -`) is a
     sibling `HorizontalRule` in pandoc but nests as the list's child here,

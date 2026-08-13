@@ -1540,6 +1540,27 @@ pub(crate) fn try_parse_pipe_separator(line: &str) -> Option<Vec<Alignment>> {
     }
 }
 
+/// Does `line` carry a `|` that would split it into cells? Mirrors
+/// [`parse_pipe_table_row`]'s escape handling, so the gate and the splitter
+/// cannot disagree about what a cell boundary is.
+fn has_unescaped_pipe(line: &str) -> bool {
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                // `\|` is literal text; any other escape consumes its own
+                // pair, so a following `|` still counts.
+                if chars.clone().next() == Some('|') {
+                    chars.next();
+                }
+            }
+            '|' => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Split a pipe table row into cells.
 /// Handles escaped pipes (\|) properly by not splitting on them.
 fn parse_pipe_table_row(line: &str) -> Vec<String> {
@@ -1734,6 +1755,33 @@ fn emit_pipe_table_row(
     builder.finish_node();
 }
 
+/// Probe for a pipe table opening at the window's first line whose header
+/// row and delimiter row agree on their column count, returning the lines
+/// it would consume.
+///
+/// [`try_parse_pipe_table`] is deliberately lenient about that count: a
+/// header may carry up to twice the delimiter's cells and still parse.
+/// Pandoc instead takes the column count from the delimiter row and drops
+/// the surplus, so a mismatched table is a known divergence (TODO.md) whose
+/// formatted delimiter row does not re-parse to the same shape. Callers that
+/// *choose* to build a table out of a line another parser would claim need
+/// the exact form, so their choice survives a format round-trip.
+pub(crate) fn opens_column_exact_pipe_table(
+    window: &StrippedLines<'_, '_>,
+    config: &ParserOptions,
+) -> Option<usize> {
+    let start = window.pos();
+    let mut probe = GreenNodeBuilder::new();
+    let consumed = try_parse_pipe_table(window, &mut probe, config)?;
+    if consumed < 2 {
+        return None;
+    }
+    // The same frame-anchored rows `try_parse_pipe_table` measured.
+    let frame = UniformStripView(window);
+    let alignments = try_parse_pipe_separator(frame.line(start + 1))?;
+    (parse_pipe_table_row(frame.line(start)).len() == alignments.len()).then_some(consumed)
+}
+
 /// Try to parse a pipe table starting at the given position.
 /// Returns the number of lines consumed if successful.
 pub(crate) fn try_parse_pipe_table(
@@ -1785,8 +1833,12 @@ pub(crate) fn try_parse_pipe_table(
         return None;
     }
 
-    // First line should have pipes (potential header)
-    if !window.line(actual_start).contains('|') {
+    // The header row needs a cell boundary, and an escaped `\|` is not one:
+    // `a \| b` over `---|---` is a `Para` in pandoc, while `a \| b | c` over
+    // the same row is a `Table` whose first cell holds the literal pipe. The
+    // cheap `|` gate above stays a superset filter; this is the exact test,
+    // and it reads escapes the way `parse_pipe_table_row` splits them.
+    if !has_unescaped_pipe(window.line(actual_start)) {
         return None;
     }
 

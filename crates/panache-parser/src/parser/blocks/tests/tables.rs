@@ -1502,3 +1502,194 @@ fn indented_pipe_delimiter_in_a_blockquote_is_not_a_table() {
         "the delimiter row is 4 columns inside the quote"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Short pipe delimiter rows
+//
+// `try_parse_pipe_separator` needs one dash per cell, which is pandoc's own
+// bound. A two-dash row was recorded as a divergence in TODO.md; it is not
+// one, and these pin that so the claim cannot resurface.
+// ---------------------------------------------------------------------------
+
+/// `pandoc -f markdown -t native` reads one, two, and three dashes per cell
+/// as the same `Table`.
+#[test]
+fn short_pipe_delimiter_rows_are_tables() {
+    for delim in [
+        "-|-", "--|--", "---|---", "- | -", "-- | --", ":-|-:", "--|--:",
+    ] {
+        let input = format!("a | b\n{delim}\nc | d\n");
+        let node = parse_blocks(&input);
+
+        assert_eq!(
+            node.text().to_string(),
+            input,
+            "parser must remain lossless on {delim:?}"
+        );
+        assert!(
+            first_of(&node, SyntaxKind::PIPE_TABLE).is_some(),
+            "{delim:?} is a delimiter row"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A marker-shaped delimiter row under a marker-line table
+//
+// Pandoc collects a list item's lines and reparses them as a document, so a
+// table opened on the marker line claims the delimiter row before anything
+// on it can be read as a list marker: in `a | b\n- | -` the first line is no
+// marker, `pipeTable` takes both lines, and `bulletList` never sees the
+// second. See `Parser::try_buffer_marker_line_table_delimiter`.
+// ---------------------------------------------------------------------------
+
+/// `pandoc -f markdown -t native` on `- a | b` + `  - | -`:
+/// `BulletList [[Table …]]`. Before the gate the `- ` opened a nested bullet
+/// whose content was a line block (`| -`).
+#[test]
+fn marker_shaped_delimiter_row_completes_the_item_table() {
+    let input = "- a | b\n  - | -\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let item = first_of(&node, SyntaxKind::LIST_ITEM).expect("list item");
+    let table = first_of(&item, SyntaxKind::PIPE_TABLE).expect("table in the item");
+    assert!(
+        table.text().to_string().contains("- | -"),
+        "the marker-shaped line is the delimiter row: {}",
+        table.text()
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        1,
+        "no nested list opens on the delimiter row"
+    );
+}
+
+/// The table keeps growing past its delimiter row, and a following sibling
+/// marker still ends the item (`pandoc -f markdown -t native`: a two-item
+/// `BulletList` whose first item is the `Table`).
+#[test]
+fn marker_shaped_delimiter_row_keeps_its_body_rows() {
+    let input = "- a | b\n  - | -\n  c | d\n- next\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("table in item 1");
+    assert!(
+        table.text().to_string().contains("c | d"),
+        "the body row joins the table: {}",
+        table.text()
+    );
+    assert!(
+        !table.text().to_string().contains("next"),
+        "the sibling marker is not a row: {}",
+        table.text()
+    );
+}
+
+/// The gate is bounded to the marker line, which is where pandoc's reparse
+/// puts the table: with a line of prose first, the table cannot interrupt
+/// the open paragraph and `  - | -` really is a nested bullet
+/// (`pandoc -f markdown -t native`: `Plain [x, SoftBreak, a | b]` then a
+/// nested `BulletList`).
+#[test]
+fn delimiter_row_under_a_paragraph_line_stays_a_nested_marker() {
+    let input = "- x\n  a | b\n  - | -\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "no table interrupts the item's paragraph"
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        2,
+        "the nested list opens"
+    );
+}
+
+/// A marker-shaped line that is no delimiter row (`+ | +` has no dash) keeps
+/// opening its nested list under both readings.
+#[test]
+fn non_delimiter_marker_line_still_opens_a_nested_list() {
+    let node = parse_blocks("- a | b\n  + | +\n");
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "`+ | +` is no delimiter row"
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        2,
+        "the nested list opens"
+    );
+}
+
+/// GFM has no reparse: `cmark-gfm` (via `pandoc -f gfm -t native`) opens the
+/// nested list, since its table extension grows out of a paragraph rather
+/// than out of the item's collected lines.
+#[test]
+fn gfm_keeps_the_nested_list_on_a_marker_shaped_delimiter_row() {
+    let node = parse_blocks_gfm("- a | b\n  - | -\n");
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "GFM opens the nested list here"
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        2,
+        "the nested list opens"
+    );
+}
+
+/// An escaped `\|` is literal text, not a cell boundary:
+/// `pandoc -f markdown -t native` on `a \| b` + `---|---` is a `Para`,
+/// while the same delimiter under `a \| b | c` is a `Table` whose first
+/// cell holds the literal pipe.
+#[test]
+fn escaped_pipe_alone_does_not_open_a_header_row() {
+    let input = "a \\| b\n---|---\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::PIPE_TABLE).is_none(),
+        "the only pipe in the header is escaped"
+    );
+
+    let with_real_pipe = parse_blocks("a \\| b | c\n---|---\n");
+    assert!(
+        first_of(&with_real_pipe, SyntaxKind::PIPE_TABLE).is_some(),
+        "an unescaped pipe still opens the table"
+    );
+    assert_eq!(
+        header_cells(&with_real_pipe),
+        vec!["a \\| b".to_string(), "c".to_string()],
+        "the escaped pipe stays inside the first cell"
+    );
+}
