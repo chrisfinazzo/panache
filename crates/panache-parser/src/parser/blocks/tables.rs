@@ -198,13 +198,15 @@ pub(crate) fn html_closer_ends_lines(prefix: &ContainerPrefix, raw: &str) -> boo
 
 /// Pandoc collects a list item's continuation lines with
 /// `listContinuationLine`, which stops at a `listStart` reached by at
-/// most 3 spaces in the frame the list was parsed in. A three-way
-/// split, all verified against `pandoc -f markdown -t native`: a
-/// marker at or past the item's content column is nested-list content
-/// (the full resolve stays inside the frame); one past the base+3
-/// tolerance but short of the content column is a lazy continuation;
-/// one within the tolerance ends the run (see
-/// `ContainerPrefix::list_start_bound`).
+/// most 3 spaces in the frame the list was parsed in — for a nested
+/// list, the enclosing item's content reparse, so the tolerance is 3
+/// columns past the start of the marker's ladder band (see
+/// `ContainerPrefix::list_start_band_start`). A three-way split, all
+/// verified against `pandoc -f markdown -t native`: a marker at or
+/// past the item's content column is nested-list content (the full
+/// resolve stays inside the frame); one past its band's tolerance but
+/// short of the content column is a lazy continuation; one within the
+/// tolerance ends the run.
 fn list_start_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
     use super::super::utils::container_stack::leading_indent;
     use super::container_prefix::StripOp;
@@ -236,7 +238,8 @@ fn list_start_ends_lines(prefix: &ContainerPrefix, raw: &str) -> bool {
     // whether it matches.
     match prefix.without_innermost_list_advance().resolve(raw) {
         FrameVerdict::Inside { rest } => {
-            leading_indent(rest).0 <= 3
+            let indent = leading_indent(rest).0;
+            indent <= prefix.list_start_band_start(indent) + 3
                 && try_parse_list_marker_with(rest, detect, OpenListHint::None).is_some()
         }
         _ => false,

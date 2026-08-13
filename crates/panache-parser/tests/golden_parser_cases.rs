@@ -339,6 +339,8 @@ golden_test_cases!(
     list_item_table_under_bare_marker,
     simple_table_in_footnote_stops_at_note_marker,
     simple_table_in_list_item_stops_at_sibling_marker,
+    simple_table_in_nested_item_stops_at_band_marker,
+    nested_list_band_marker_terminates_item,
     pipe_table_in_footnote_stops_at_note_marker,
     pipe_table_in_list_item_stops_at_sibling_marker,
     simple_table_in_div_stops_at_closer,

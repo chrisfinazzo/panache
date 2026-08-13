@@ -157,26 +157,32 @@ pub(crate) struct ContainerPrefix {
     /// `listContinuationLine = notFollowedBy blankline >>
     /// notFollowedBy' listStart >> ...`, where `listStart` runs in the
     /// frame the list was parsed in and tolerates `nonindentSpaces`
-    /// (at most 3). So a marker line within 3 columns of the outer
-    /// frame ends the run, one that reaches the item's content column
-    /// is nested-list content, and one in between is a lazy
-    /// continuation (all verified against `pandoc -f markdown -t
-    /// native`; see the `list_start` pins). Like
-    /// [`Self::note_marker_op_bound`] this tracks presence: with no
-    /// list item on the stack there is no item run to fence.
-    ///
-    /// Known gap: for a nested list whose base indent is > 0, pandoc's
-    /// tolerance is base+3 in the *outer list's* frame, not 3. The
-    /// predicate deliberately stops at 3 — the base+1..base+3 band
-    /// currently trips a formatter reindent cascade that destroys the
-    /// marker on the second pass, so those lines keep today's
-    /// collected-as-content behavior until that is fixed (see
-    /// TODO.md).
+    /// (at most 3). So a marker line within 3 columns of that frame
+    /// ends the run, one that reaches the item's content column is
+    /// nested-list content, and one in between is a lazy continuation
+    /// (all verified against `pandoc -f markdown -t native`; see the
+    /// `list_start` pins). Like [`Self::note_marker_op_bound`] this
+    /// tracks presence: with no list item on the stack there is no
+    /// item run to fence.
     ///
     /// The bits are captured here because the predicate has no config
     /// access at scan time (the same pattern as
     /// `lazy_blockquote_gobble`).
     list_start_detect: Option<ListMarkerDetect>,
+    /// Content columns of the open list items in the innermost list
+    /// section (the run of `ListItem`s whose collapsed advance is the
+    /// recipe's last `ListAdvance`), outermost first, cumulative in the
+    /// section frame. Pandoc parses each nested list inside the
+    /// enclosing item's content reparse, so `listStart`'s 3-column
+    /// tolerance is measured from that frame — in the section frame,
+    /// from the start of whichever band `[c_{j-1}, c_j)` of this
+    /// ladder a marker's indent falls in (see
+    /// [`Self::list_start_band_start`]; verified against `pandoc -f
+    /// markdown -t native`, the `list_start` band pins). Empty
+    /// whenever the last advance was flushed by a section-breaking
+    /// container, which keeps those exotic stacks on the flat
+    /// 3-column rule.
+    list_item_ladder: SmallVec<[u32; 4]>,
     /// The matched-pair HTML tag left open by a list item *below* some
     /// container this prefix strips. `Some` arms pandoc's
     /// `notFollowedByHtmlCloser` fence: inside markdown-in-html, a line
@@ -286,6 +292,11 @@ impl ContainerPrefix {
         let mut div_chain_appends = false;
         let mut list_start_supplies_blank = false;
         let mut html_closer_supplies_blank = false;
+        // Item columns of the current section (see `list_item_ladder`);
+        // cleared wherever the pending advance is flushed, so a
+        // non-empty ladder always belongs to the recipe's final
+        // `ListAdvance`.
+        let mut list_item_ladder: SmallVec<[u32; 4]> = SmallVec::new();
         for c in stack {
             match c {
                 Container::BlockQuote { .. } => {
@@ -294,6 +305,7 @@ impl ContainerPrefix {
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
+                    list_item_ladder.clear();
                     ops.push(StripOp::BlockQuoteMarker);
                     div_closer_ends_lines |= div_open;
                     html_closer_tag = html_open.clone().or(html_closer_tag);
@@ -308,6 +320,7 @@ impl ContainerPrefix {
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
+                    list_item_ladder.clear();
                     // Outermost footnote wins: see `note_marker_op_bound`.
                     note_marker_op_bound.get_or_insert(ops.len());
                     ops.push(StripOp::ContentIndent(*content_col as u32));
@@ -325,6 +338,7 @@ impl ContainerPrefix {
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
+                    list_item_ladder.clear();
                     ops.push(StripOp::ContentIndent(*content_col as u32));
                     div_closer_ends_lines |= div_open;
                     html_closer_tag = html_open.clone().or(html_closer_tag);
@@ -347,6 +361,7 @@ impl ContainerPrefix {
                         div_open,
                         html_open: html_open.clone(),
                     });
+                    list_item_ladder.push(*content_col as u32);
                     div_chain_collects = true;
                     // This item is now the innermost `listStart` fence
                     // anchor; only appenders pushed after it rescue its
@@ -405,6 +420,7 @@ impl ContainerPrefix {
             div_closer_ends_lines,
             note_marker_op_bound,
             list_start_detect,
+            list_item_ladder,
             html_closer_tag,
             div_closer_supplies_blank: !div_chain_collects || div_chain_appends,
             list_start_supplies_blank,
@@ -456,6 +472,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            list_item_ladder: SmallVec::new(),
             html_closer_tag: None,
             div_closer_supplies_blank: true,
             list_start_supplies_blank: true,
@@ -479,6 +496,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            list_item_ladder: SmallVec::new(),
             html_closer_tag: None,
             div_closer_supplies_blank: true,
             list_start_supplies_blank: true,
@@ -501,6 +519,11 @@ impl ContainerPrefix {
         let mut next = self.clone();
         for _ in 0..n {
             next.ops.push(StripOp::BlockQuoteMarker);
+        }
+        if n > 0 {
+            // `from_stack` clears the ladder at the blockquote it
+            // flushes the pending advance for.
+            next.list_item_ladder.clear();
         }
         next
     }
@@ -553,6 +576,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            list_item_ladder: SmallVec::new(),
             html_closer_tag: None,
             div_closer_supplies_blank: true,
             list_start_supplies_blank: true,
@@ -614,6 +638,23 @@ impl ContainerPrefix {
         self.list_start_detect
     }
 
+    /// The start of the [`Self::list_item_ladder`] band a marker line's
+    /// section-frame indent falls in — the content column of the item
+    /// whose reparse frame pandoc would check `listStart` in. Pandoc's
+    /// 3-column tolerance is measured from here, so a marker fences iff
+    /// `indent_cols <= band_start + 3` (and the innermost advance
+    /// failed, which bounds `indent_cols` below the innermost content
+    /// column). Returns 0 — the flat `nonindentSpaces` rule — with no
+    /// ladder captured.
+    pub fn list_start_band_start(&self, indent_cols: usize) -> usize {
+        self.list_item_ladder
+            .iter()
+            .map(|c| *c as usize)
+            .take_while(|c| *c <= indent_cols)
+            .last()
+            .unwrap_or(0)
+    }
+
     /// Total number of `BlockQuoteMarker` ops. Kept as a back-compat
     /// accessor for callers that previously read `prefix.bq_depth`.
     pub fn bq_depth(&self) -> usize {
@@ -663,6 +704,7 @@ impl ContainerPrefix {
             div_closer_ends_lines: false,
             note_marker_op_bound: None,
             list_start_detect: None,
+            list_item_ladder: SmallVec::new(),
             html_closer_tag: None,
             div_closer_supplies_blank: true,
             list_start_supplies_blank: true,
@@ -738,6 +780,8 @@ impl ContainerPrefix {
             note_marker_op_bound,
             // A column bound, not an op index: no remap needed.
             list_start_detect: self.list_start_detect,
+            // Columns, not op indices: no remap needed.
+            list_item_ladder: self.list_item_ladder.clone(),
             // A tag, not an op index: no remap needed.
             html_closer_tag: self.html_closer_tag.clone(),
             div_closer_supplies_blank: self.div_closer_supplies_blank,

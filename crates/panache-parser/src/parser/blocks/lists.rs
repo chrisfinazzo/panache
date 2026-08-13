@@ -1,6 +1,7 @@
 use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
+use smallvec::SmallVec;
 
 use crate::parser::utils::container_stack::{
     Container, ContainerStack, leading_indent, leading_indent_from,
@@ -1478,6 +1479,92 @@ pub(in crate::parser) fn open_list_hint_at_indent(
         }
     }
     OpenListHint::None
+}
+
+/// A marker line caught by pandoc's `listStart` fence in the frame of
+/// one of the open nested lists: the stack level of that list, and
+/// whether the marker continues it as a sibling item (matching marker
+/// kind) or replaces it with a new list at the same position.
+pub(in crate::parser) struct BandFence {
+    pub level: usize,
+    pub marker_matches: bool,
+}
+
+/// Locate the band fence for a marker at `indent_cols`, under pandoc's
+/// per-level `listStart` rule (verified against `pandoc -f markdown -t
+/// native`; see the `list_start` band pins in `tests/frame_pinning.rs`).
+///
+/// Pandoc parses each nested list inside the enclosing item's content
+/// reparse, so within the innermost run of nested items — content
+/// columns `c_1 < ... < c_n`, cumulative in the section frame — a
+/// marker's `listStart` tolerance is 3 columns past the start of
+/// whichever band `[c_{j-1}, c_j)` (`c_0 = 0`) its indent falls in.
+/// Within the tolerance it terminates every list above band `j`:
+/// level `j`'s own continuation gobble can't reach it, and `listStart`
+/// fires in level `j`'s frame. Past the tolerance it is a lazy
+/// continuation, and at or past `c_n` it is nested content; both
+/// return `None`, as does any marker under a dialect other than
+/// Pandoc — this is pandoc's raw-collection model, not CommonMark's.
+///
+/// The walk stops at the containers that break a list section
+/// (mirroring `ContainerPrefix::from_stack`'s ladder): their content
+/// reparse restarts the frame, so bands never cross them.
+pub(in crate::parser) fn band_fence_level(
+    containers: &ContainerStack,
+    marker: &ListMarker,
+    indent_cols: usize,
+    dialect: crate::Dialect,
+) -> Option<BandFence> {
+    if dialect != crate::Dialect::Pandoc {
+        return None;
+    }
+    // (list level, its open item's content col), innermost first.
+    let mut levels: SmallVec<[(usize, usize); 4]> = SmallVec::new();
+    let mut open_item_col: Option<usize> = None;
+    for (i, c) in containers.stack.iter().enumerate().rev() {
+        match c {
+            Container::BlockQuote { .. }
+            | Container::FootnoteDefinition { .. }
+            | Container::Definition { .. }
+            | Container::Admonition { .. } => break,
+            Container::ListItem { content_col, .. } => open_item_col = Some(*content_col),
+            Container::List { .. } => {
+                if let Some(cc) = open_item_col.take() {
+                    levels.push((i, cc));
+                }
+            }
+            _ => {}
+        }
+    }
+    // At or past the innermost content column the marker is nested
+    // content, not a fence.
+    if levels.first().is_none_or(|(_, cc)| indent_cols >= *cc) {
+        return None;
+    }
+    let mut band_start = 0;
+    let mut band = None;
+    for &(level, cc) in levels.iter().rev() {
+        if indent_cols < cc {
+            band = Some(level);
+            break;
+        }
+        band_start = cc;
+    }
+    let level = band?;
+    if indent_cols > band_start + 3 {
+        return None;
+    }
+    let marker_matches = match &containers.stack[level] {
+        Container::List {
+            marker: list_marker,
+            ..
+        } => markers_match(marker, list_marker, dialect),
+        _ => false,
+    };
+    Some(BandFence {
+        level,
+        marker_matches,
+    })
 }
 
 /// Find matching list level for a marker with the given indent.

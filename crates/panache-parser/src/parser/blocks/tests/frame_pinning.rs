@@ -917,6 +917,60 @@ fn list_start_ends_container_lines_three_way_split() {
     );
 }
 
+/// The fence tolerance is per nesting level: pandoc checks `listStart`
+/// in the frame each nested list was parsed in — the outer item's
+/// content reparse — so a marker's 3-column tolerance is measured from
+/// the start of whichever band `[c_{j-1}, c_j)` of the section's
+/// item-column ladder it falls in, not from the section frame's column
+/// 0. Verified against `pandoc -f markdown -t native` over
+/// `- outer` / `  10.  item` (ladder 2, 7): markers at columns 3-5
+/// (within 3 of the enclosing item's column 2) end the run, 6 is a
+/// lazy continuation, 7 is nested-list content.
+#[test]
+fn list_start_fence_tolerance_is_per_band_of_the_item_ladder() {
+    use crate::parser::blocks::tables::LineView;
+
+    let prefix = ContainerPrefix::from_stack(
+        &[list(), list_item(2), list(), list_item(7)],
+        false,
+        &opts(Dialect::Pandoc),
+    );
+    let raw = [
+        "10.  item",
+        "       x    y",
+        "   - sib",
+        "    - band",
+        "     - band",
+        "      - lazy",
+        "       - nested",
+    ];
+    let view = StrippedLines::new(&raw, 0, &prefix);
+    assert!(
+        !view.ends_container_lines(1),
+        "a line inside the item's frame is content"
+    );
+    assert!(
+        view.ends_container_lines(2),
+        "a marker within 3 columns of the section frame ends the run"
+    );
+    assert!(
+        view.ends_container_lines(3),
+        "a marker within 3 columns of the enclosing item's column ends the run"
+    );
+    assert!(
+        view.ends_container_lines(4),
+        "the band tolerance reaches the enclosing item's column + 3"
+    );
+    assert!(
+        !view.ends_container_lines(5),
+        "past the band tolerance is a lazy continuation, not a fence"
+    );
+    assert!(
+        !view.ends_container_lines(6),
+        "a marker at the content column is nested-list content"
+    );
+}
+
 /// The captured detection bits come from the caller's config: a fancy
 /// `a.` marker is a fence under Pandoc options but plain text under
 /// CommonMark ones, where `fancy_lists` is off.

@@ -1681,6 +1681,19 @@ impl<'a> Parser<'a> {
             return false;
         }
 
+        // A marker within its ladder band's `listStart` tolerance is
+        // pandoc's fence, never lazy text (see `band_fence_level`).
+        if lists::band_fence_level(
+            &self.containers,
+            &prepared.marker,
+            prepared.indent_cols,
+            self.config.dialect,
+        )
+        .is_some()
+        {
+            return false;
+        }
+
         match self.containers.last() {
             Some(Container::Paragraph { .. }) => {
                 paragraphs::append_paragraph_line(
@@ -1835,6 +1848,25 @@ impl<'a> Parser<'a> {
             prepared.indent_cols,
             self.config.dialect,
         );
+        // Pandoc's `listStart` fence: a marker within 3 columns of the
+        // start of its band of the open item ladder terminates every
+        // list above the band (see `band_fence_level`). A matching
+        // marker kind makes it a sibling item of the band's list —
+        // overriding whatever drift heuristic `find_matching_list_level`
+        // picked — while a different kind can continue nothing: the
+        // band's list closes and a new one opens in its place (the
+        // band-targeted close in the fallback below).
+        let band = lists::band_fence_level(
+            &self.containers,
+            &prepared.marker,
+            prepared.indent_cols,
+            self.config.dialect,
+        );
+        let matched_level = match &band {
+            Some(b) if b.marker_matches => Some(b.level),
+            Some(_) => None,
+            None => matched_level,
+        };
         let list_item = ListItemEmissionInput {
             content,
             marker_len: prepared.marker_len,
@@ -2016,11 +2048,19 @@ impl<'a> Parser<'a> {
         if matches!(self.containers.last(), Some(Container::Paragraph { .. })) {
             self.close_containers_to(self.containers.depth() - 1);
         }
-        while matches!(
-            self.containers.last(),
-            Some(Container::ListItem { .. } | Container::List { .. })
-        ) {
-            self.close_containers_to(self.containers.depth() - 1);
+        if let Some(b) = &band {
+            // The band fence closes only the lists at and above the
+            // band's level; the enclosing item stays open and receives
+            // the new list (pandoc: the item's continuation gobble
+            // reaches the marker, so it stays in the item's content).
+            self.close_containers_to(b.level);
+        } else {
+            while matches!(
+                self.containers.last(),
+                Some(Container::ListItem { .. } | Container::List { .. })
+            ) {
+                self.close_containers_to(self.containers.depth() - 1);
+            }
         }
 
         self.builder.start_node(SyntaxKind::LIST.into());
