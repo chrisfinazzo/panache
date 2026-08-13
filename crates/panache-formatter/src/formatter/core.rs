@@ -441,6 +441,28 @@ impl Formatter {
             .collect::<String>()
     }
 
+    /// Format `node` into a scratch buffer instead of `self.output`.
+    ///
+    /// Callers that re-prefix the result line by line (blockquote children,
+    /// most of all) need the rendering in isolation. `width_reduction` shrinks
+    /// `line_width` for the duration so wrapped content still fits once the
+    /// prefix is put back in front of it.
+    fn render_to_buffer(
+        &mut self,
+        node: &SyntaxNode,
+        indent: usize,
+        width_reduction: usize,
+    ) -> String {
+        let saved_output = std::mem::take(&mut self.output);
+        let saved_line_width = self.config.line_width;
+        self.config.line_width = saved_line_width.saturating_sub(width_reduction);
+
+        self.format_node_sync(node, indent);
+
+        self.config.line_width = saved_line_width;
+        std::mem::replace(&mut self.output, saved_output)
+    }
+
     fn append_blockquote_prefixed_block(
         &mut self,
         rendered: &str,
@@ -463,6 +485,35 @@ impl Formatter {
                     // columns down the fence and lose them on the next parse.
                     self.output.push_str(indent);
                 }
+                self.output.push_str(line);
+            }
+            self.output.push('\n');
+        }
+    }
+
+    /// Re-prefix a rendered child that may itself contain a nested blockquote.
+    ///
+    /// A nested `BLOCK_QUOTE` derives its prefix from its own ancestor depth,
+    /// so its lines arrive already carrying `> ` for every enclosing quote and
+    /// only need the base indent. Unlike
+    /// [`Self::append_blockquote_prefixed_block`], which is for content that
+    /// can legitimately start a line with `>` (code, raw HTML), this trusts
+    /// that a leading `> ` means "already quoted".
+    fn append_blockquote_prefixed_nested_block(
+        &mut self,
+        rendered: &str,
+        base_indent: &str,
+        content_prefix: &str,
+        blank_prefix: &str,
+    ) {
+        for line in rendered.lines() {
+            if line.is_empty() {
+                self.output.push_str(blank_prefix);
+            } else if line.starts_with("> ") {
+                self.output.push_str(base_indent);
+                self.output.push_str(line);
+            } else {
+                self.output.push_str(content_prefix);
                 self.output.push_str(line);
             }
             self.output.push('\n');
@@ -1496,30 +1547,17 @@ impl Formatter {
                                         self.output.push('\n');
                                     }
                                     _ => {
-                                        let saved_output = self.output.clone();
-                                        let saved_line_width = self.config.line_width;
-                                        self.output.clear();
-                                        self.config.line_width = self
-                                            .config
-                                            .line_width
-                                            .saturating_sub(content_prefix.len());
-                                        self.format_node_sync(&alert_child, indent);
-                                        let rendered = self.output.clone();
-                                        self.config.line_width = saved_line_width;
-                                        self.output = saved_output;
-
-                                        for line in rendered.lines() {
-                                            if line.is_empty() {
-                                                self.output.push_str(&blank_prefix);
-                                            } else if line.starts_with("> ") {
-                                                self.output.push_str(&base_indent);
-                                                self.output.push_str(line);
-                                            } else {
-                                                self.output.push_str(&content_prefix);
-                                                self.output.push_str(line);
-                                            }
-                                            self.output.push('\n');
-                                        }
+                                        let rendered = self.render_to_buffer(
+                                            &alert_child,
+                                            indent,
+                                            content_prefix.len(),
+                                        );
+                                        self.append_blockquote_prefixed_nested_block(
+                                            &rendered,
+                                            &base_indent,
+                                            &content_prefix,
+                                            &blank_prefix,
+                                        );
                                     }
                                 }
                             }
@@ -1553,19 +1591,10 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::LIST => {
-                            // Format list with blockquote prefix
-                            // Save current output, format list to temp, then prefix each line
-                            let saved_output = self.output.clone();
-                            let saved_line_width = self.config.line_width;
-                            self.output.clear();
-                            self.config.line_width =
-                                self.config.line_width.saturating_sub(content_prefix.len());
+                            // Format list to a temp buffer, then prefix each line.
                             // We trim list-temp indentation before re-prefixing with `content_prefix`.
                             // Format at indent 0 here to avoid double-accounting indentation width.
-                            self.format_node_sync(child, 0);
-                            let list_output = self.output.clone();
-                            self.config.line_width = saved_line_width;
-                            self.output = saved_output;
+                            let list_output = self.render_to_buffer(child, 0, content_prefix.len());
 
                             let ends_in_list_continuation = self
                                 .append_blockquote_prefixed_list_output(
@@ -1579,14 +1608,9 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::CODE_BLOCK => {
-                            // Format code block with blockquote prefix
-                            // Save current output, format code block to temp, then prefix each line
+                            // Format code block to a temp buffer, then prefix each line
                             let code_block_leading_indent = Self::code_block_leading_indent(child);
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, indent);
-                            let code_output = self.output.clone();
-                            self.output = saved_output;
+                            let code_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
                                 &code_output,
@@ -1605,11 +1629,7 @@ impl Formatter {
                             // are stripped by the HTML_BLOCK handler) and re-emit
                             // the blockquote prefix per line so the output stays
                             // lossless.
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, indent);
-                            let html_output = self.output.clone();
-                            self.output = saved_output;
+                            let html_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
                                 &html_output,
@@ -1623,11 +1643,7 @@ impl Formatter {
                         }
                         SyntaxKind::TEX_BLOCK => {
                             // Keep raw TeX content verbatim, but preserve blockquote prefixes.
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, indent);
-                            let tex_output = self.output.clone();
-                            self.output = saved_output;
+                            let tex_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
                                 &tex_output,
@@ -1644,11 +1660,7 @@ impl Formatter {
                             // self-indent table types apply at the top level,
                             // then re-emit each line behind the blockquote
                             // prefix so the table stays inside the quote.
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, 0);
-                            let table_output = self.output.clone();
-                            self.output = saved_output;
+                            let table_output = self.render_to_buffer(child, 0, 0);
 
                             let min_indent = table_output
                                 .lines()
@@ -1687,11 +1699,7 @@ impl Formatter {
                             // list item an idempotency break as well.
                             // `content_prefix` already carries `base_indent`,
                             // so format at indent 0 to avoid double-indenting.
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, 0);
-                            let line_block_output = self.output.clone();
-                            self.output = saved_output;
+                            let line_block_output = self.render_to_buffer(child, 0, 0);
 
                             self.append_blockquote_prefixed_block(
                                 &line_block_output,
@@ -1710,11 +1718,7 @@ impl Formatter {
                             // definition escapes the blockquote (dropping the
                             // `>` prefix), which reparses as a top-level
                             // paragraph -- a lossless/idempotency break.
-                            let saved_output = self.output.clone();
-                            self.output.clear();
-                            self.format_node_sync(child, indent);
-                            let def_output = self.output.clone();
-                            self.output = saved_output;
+                            let def_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
                                 &def_output,
@@ -1726,14 +1730,34 @@ impl Formatter {
                                 ctx.in_list_continuation = false;
                             }
                         }
-                        _ => {
-                            // Handle other content within block quotes
+                        SyntaxKind::BLOCK_QUOTE => {
+                            // A nested blockquote prefixes itself: its depth
+                            // counts every enclosing quote, so it already emits
+                            // `> ` once per level. Re-prefixing here would
+                            // deepen it by one on every format pass.
                             self.format_node_sync(child, indent);
                             if let Some(ctx) = self.blockquote_context.as_mut() {
-                                ctx.in_list_continuation = matches!(
-                                    child.kind(),
-                                    SyntaxKind::LIST | SyntaxKind::LIST_ITEM
-                                );
+                                ctx.in_list_continuation = false;
+                            }
+                        }
+                        _ => {
+                            // Fail closed. Any block kind without an arm above
+                            // is rendered to a temp buffer and re-prefixed line
+                            // by line; emitting it straight into `self.output`
+                            // would drop the `> ` and move the content out of
+                            // the quote entirely -- a losslessness break, not
+                            // merely ugly output. `content_prefix` already
+                            // carries `base_indent`, so render at indent 0.
+                            let rendered = self.render_to_buffer(child, 0, content_prefix.len());
+
+                            self.append_blockquote_prefixed_nested_block(
+                                &rendered,
+                                &base_indent,
+                                &content_prefix,
+                                &blank_prefix,
+                            );
+                            if let Some(ctx) = self.blockquote_context.as_mut() {
+                                ctx.in_list_continuation = false;
                             }
                         }
                     }

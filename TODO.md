@@ -759,14 +759,25 @@ panache starts caching NodePtrs across edits.
     blanks with `is_blank_line` first. Same conflation, different op --- worth
     closing when a caller is bitten by it.
 
-  - [ ] Make the formatter's **BLOCK_QUOTE arm fail closed**. The `_` fallback
-    emits a child without the `> ` prefix, so any block kind missing a
-    per-kind arm is a losslessness break rather than merely ugly output
-    (`PLAIN` was the latest; found via idempotency, not review). Invert the
-    default: an exhaustive match, or a fallback that renders to a temp
-    buffer and re-prefixes every line --- the save/format/re-prefix pattern
-    half the arms already copy-paste, which wants extracting into a helper
-    regardless.
+  - [x] Made the formatter's **BLOCK_QUOTE arm fail closed**. The `_` fallback
+    now renders the child to a temp buffer and re-prefixes every line, so a
+    block kind with no per-kind arm stays inside the quote instead of
+    escaping it. `FENCED_DIV`, `FIGURE`, `FOOTNOTE_DEFINITION`, and
+    `REFERENCE_DEFINITION` were all escaping. The save/format/re-prefix
+    copy-paste is now `render_to_buffer`, and the nested-quote-aware
+    re-prefixing (a nested `BLOCK_QUOTE` derives its own depth, so it must
+    not be prefixed twice) is `append_blockquote_prefixed_nested_block`,
+    shared with the `ALERT` arm. `BLOCK_QUOTE` got an explicit arm for that
+    reason.
+
+    Fixing the escape exposed two parser divergences behind it, both now fixed
+    and pinned by pandoc corpus 0538/0539: a blockquote could not open as the
+    first child of a fenced div nested in a quote (`can_start_blockquote`'s div
+    hatch existed only at depth 0 --- `opens_fenced_div_at_depth` now strips the
+    enclosing markers first), and the closing `> :::` folded into the nested
+    quote as lazy text instead of closing the div (`quoted_div_closes_at` probes
+    the reduced-marker form when the div was opened inside a quote the line
+    still carries).
 
 - [ ] Probe findings from the seam migration, **untriaged candidates** (each
   needs confirming against existing fixtures/allowlists before being called

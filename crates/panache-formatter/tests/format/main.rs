@@ -1,5 +1,6 @@
 mod admonitions;
 mod bare_uris;
+mod blockquotes;
 mod bullet_standardization;
 mod citations;
 mod code_chunks;
