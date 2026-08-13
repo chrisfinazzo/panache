@@ -3332,8 +3332,8 @@ impl<'a> Parser<'a> {
         // unquoted `>` never arrives stays paragraph text. The prefix
         // strips later lines' `>` markers so they don't count as the
         // tag's closing bracket; the innermost list advance is dropped
-        // because a lazy line never reaches the item's content column
-        // (`ListAdvance` would blindly eat the tag's first columns).
+        // because a lazy line never reaches the item's content column,
+        // so the scan resolves every line in the frame below the item.
         let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config)
             .without_innermost_list_advance();
         html_blocks::pandoc_html_open_tag_closes(&self.lines, self.pos, &prefix)

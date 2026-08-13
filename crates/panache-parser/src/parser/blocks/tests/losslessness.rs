@@ -462,10 +462,11 @@ fn test_losslessness_setext_heading_inside_blockquote() {
 #[test]
 fn test_losslessness_line_block_in_list_item_with_lazy_pipe_line() {
     // Found by the incremental fuzz harness. The line-block classifier peeked
-    // with the column-blind `advance_columns` strip while the emitter used the
-    // whitespace-bounded one, so on the lazy line ` b |` the peek consumed the
-    // `b` and read the trailing `|` as a line-block marker. Emission then found
-    // no marker and hit `expect("marker presence verified upstream")`.
+    // with the column-blind strip while the emitter used the whitespace-bounded
+    // one, so on the lazy line ` b |` the peek consumed the `b` and read the
+    // trailing `|` as a line-block marker. Emission then found no marker and hit
+    // `expect("marker presence verified upstream")`. Both walks are
+    // whitespace-bounded now.
     let input = "- x\n\n  | a\n b |\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();

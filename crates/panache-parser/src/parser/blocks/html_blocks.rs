@@ -1368,8 +1368,14 @@ pub(crate) fn parse_html_block_with_wrapper(
         let last_open_line = multiline_open_end.unwrap_or(start_pos);
         let mut opens = 0usize;
         let mut closes = 0usize;
-        for line in &lines[start_pos..=last_open_line] {
-            let inner = prefix.strip(line);
+        for (offset, line) in lines[start_pos..=last_open_line].iter().enumerate() {
+            // Line 0 is the dispatch line: its innermost `ListAdvance`
+            // may be the marker the core emitted, not indent.
+            let inner = if offset == 0 {
+                prefix.strip_dispatch_line(line)
+            } else {
+                prefix.strip(line)
+            };
             let (o, c) = count_tag_balance(inner, tag_name);
             opens += o;
             closes += c;

@@ -43,9 +43,16 @@ use super::lists::ListMarkerDetect;
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum StripOp {
     /// Advance N columns (tab-aware). Mirrors the legacy `list_content_col`
-    /// strip. On line 0, applied only when the marker line is the
-    /// upstream-emitted dispatch line (see
-    /// [`ContainerPrefix::strip_line_0_for_emission`]).
+    /// strip.
+    ///
+    /// The columns are the list item's content indent, so the strip is
+    /// whitespace-only and stops at the first content byte — a line
+    /// short of the column keeps its bytes rather than having them
+    /// counted as indent it never had. The one exception is the
+    /// *innermost* op on the dispatch line of a marker-line dispatch,
+    /// where the columns are the marker the parser core already emitted
+    /// (`- `, `1. `); see [`ContainerPrefix::strip_line_0_for_emission`]
+    /// and [`ContainerPrefix::strip_dispatch_line`].
     ListAdvance(u32),
     /// Strip one `>` marker (up to 3 leading spaces allowed per CommonMark).
     BlockQuoteMarker,
@@ -556,9 +563,18 @@ impl ContainerPrefix {
         }
     }
 
-    /// Strip every op in order. Used for continuation lines (lines 1+)
-    /// in multi-line lookahead and for callers that need the full
-    /// strip regardless of the line-0 marker flag.
+    /// Strip every op in order, reading every `ListAdvance` as the
+    /// item's content indent — so the strip stops at the first
+    /// non-whitespace byte and can never claim a column the line does
+    /// not have. Used for continuation lines (lines 1+) in multi-line
+    /// lookahead.
+    ///
+    /// The dispatch line is different: its innermost `ListAdvance` may
+    /// name the list marker the core already emitted, which is not
+    /// whitespace. Strip that line with
+    /// [`Self::strip_line_0_for_emission`] (emission, keeps an
+    /// unconsumed marker's indent) or [`Self::strip_dispatch_line`]
+    /// (detection, always consumes it).
     pub fn strip<'a>(&self, line: &'a str) -> &'a str {
         let ops = self.ops();
         let mut s = line;
@@ -630,6 +646,53 @@ impl ContainerPrefix {
         self.strip_line_0_with_indent_emit(line).0
     }
 
+    /// Detection-mode strip of the dispatch line: every op applied, with
+    /// the innermost `ListAdvance` consumed either way — as the emitted
+    /// marker's columns when `list_marker_consumed_on_line_0` says the
+    /// core put a marker there, and as ordinary list indent otherwise.
+    ///
+    /// This is [`Self::strip`]'s counterpart for line 0, for scans whose
+    /// shape test is anchored at column 0 of the item's content (grid
+    /// borders, tag balance). [`Self::strip_line_0_for_emission`] keeps
+    /// an unconsumed marker line's indent because those bytes still have
+    /// to land in the block's content; a detection scan wants them gone.
+    pub fn strip_dispatch_line<'a>(&self, line: &'a str) -> &'a str {
+        let ops = self.ops();
+        let mut s = line;
+        let mut i = 0;
+        while i < ops.len() {
+            match ops[i] {
+                StripOp::BlockQuoteMarker => {
+                    let run = blockquote_run_len(&ops[i..]);
+                    s = strip_bq_with_gobble(s, run, self.lazy_blockquote_gobble);
+                    i += run;
+                }
+                StripOp::ListAdvance(n) if self.is_innermost_list_advance(i) => {
+                    s = if self.list_marker_consumed_on_line_0 {
+                        advance_emitted_marker_columns(s, n as usize)
+                    } else {
+                        strip_list_indent(s, n as usize)
+                    };
+                    i += 1;
+                }
+                op => {
+                    s = apply_op(s, op);
+                    i += 1;
+                }
+            }
+        }
+        s
+    }
+
+    /// Whether op `i` is the last `ListAdvance` in the recipe — the one
+    /// that may name the marker the core emitted on the dispatch line.
+    fn is_innermost_list_advance(&self, i: usize) -> bool {
+        self.ops()
+            .iter()
+            .rposition(|op| matches!(op, StripOp::ListAdvance(_)))
+            == Some(i)
+    }
+
     /// Like [`Self::strip_line_0_for_emission`] but also returns the
     /// bytes consumed by the *last* `ContentIndent` op (for re-emission
     /// as WHITESPACE when a nested BlockQuote opens inside a
@@ -646,11 +709,17 @@ impl ContainerPrefix {
         while i < ops.len() {
             match ops[i] {
                 StripOp::ListAdvance(n) => {
-                    if Some(i) == last_list_idx && !self.list_marker_consumed_on_line_0 {
+                    if Some(i) != last_list_idx {
+                        // An outer section's advance: indent bytes on
+                        // this line, whatever the innermost op means.
+                        s = strip_list_indent(s, n as usize);
+                    } else if self.list_marker_consumed_on_line_0 {
+                        // The innermost op names the marker the core
+                        // already emitted — not whitespace, but skipped.
+                        s = advance_emitted_marker_columns(s, n as usize);
+                    } else {
                         // Preserve list-indent on the dispatch line
                         // when the marker wasn't upstream-emitted.
-                    } else {
-                        s = advance_columns(s, n as usize);
                     }
                     i += 1;
                 }
@@ -700,7 +769,10 @@ impl ContainerPrefix {
         for op in self.ops() {
             match op {
                 StripOp::ListAdvance(n) if phase == 0 => {
-                    let after = advance_columns(s, *n as usize);
+                    // Continuation lines only, and the captured bytes go
+                    // back out as a `WHITESPACE` token — so the strip has
+                    // to be the whitespace-only one.
+                    let after = strip_list_indent(s, *n as usize);
                     list_consumed = s.len() - after.len();
                     s = after;
                     phase = 1;
@@ -839,9 +911,10 @@ enum ColumnAdvance<'a> {
 }
 
 /// Advance up to `target` columns over spaces and tabs only (tab stop
-/// 4, matching [`leading_indent`]). Unlike [`advance_columns`], content
-/// bytes never count as columns, and a straddling tab is reported
-/// rather than silently kept or consumed.
+/// 4, matching [`leading_indent`]). Unlike
+/// [`advance_emitted_marker_columns`], content bytes never count as
+/// columns, and a straddling tab is reported rather than silently kept
+/// or consumed.
 fn advance_ws_columns(s: &str, target: u32) -> ColumnAdvance<'_> {
     let mut col = 0u32;
     let mut bytes = 0usize;
@@ -987,7 +1060,12 @@ pub(crate) fn resolve_content_indent(line: &str, content_indent: usize) -> Frame
 
 fn apply_op(line: &str, op: StripOp) -> &str {
     match op {
-        StripOp::ListAdvance(n) => advance_columns(line, n as usize),
+        // The op means "the item's content indent" on every line the
+        // full strip runs on (continuation lines and lookahead), so it
+        // stops at the first non-whitespace byte. The marker-line case,
+        // where the columns are emitted marker bytes instead, lives in
+        // `strip_line_0_with_indent_emit`.
+        StripOp::ListAdvance(n) => strip_list_indent(line, n as usize),
         StripOp::BlockQuoteMarker => strip_n_blockquote_markers(line, 1),
         StripOp::ContentIndent(n) => strip_content_indent(line, n as usize).0,
     }
@@ -1161,7 +1239,7 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
     /// marker was upstream-emitted.
     #[allow(dead_code)]
     pub fn first_unconditional(&self) -> &'a str {
-        self.prefix.strip(self.raw[self.base])
+        self.prefix.strip_dispatch_line(self.raw[self.base])
     }
 
     /// Raw line buffer (full slice — index with `raw()[base + i]` or
@@ -1212,11 +1290,10 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
     /// ABSOLUTE index `i`, emitting nothing.
     ///
     /// Use this — not [`Self::strip_at`] — when a decision made during
-    /// classification has to hold at emission time. `strip_at` walks list
-    /// indent with `advance_columns` (any character counts as a column),
-    /// emission with `strip_list_indent` (whitespace only); on an
-    /// under-indented lazy line such as `" b |"` inside a two-column list
-    /// item they return `" |"` and `"b |"` respectively.
+    /// classification has to hold at emission time. The two agree on
+    /// every continuation line (both strip list indent with
+    /// `strip_list_indent`), but `strip_at` applies the dispatch line's
+    /// marker rule, which emission does not.
     ///
     /// Equals [`Self::emit_prefix_at`]'s tail by construction: both are
     /// the same faithful walk of [`ContainerPrefix::ops`], one with a
@@ -1486,12 +1563,22 @@ fn walk_content_line_prefix<'a>(
     s
 }
 
-/// Advance past `target` columns of `line`. Tabs round up to the next
-/// 4-column stop; tab that would overshoot the target is left intact
-/// (mirrors `strip_list_item_indent`'s tab handling). Newlines / CR
-/// short-circuit to the empty string — the line ended before the target
-/// was reached.
-pub(in crate::parser::blocks) fn advance_columns(line: &str, target: usize) -> &str {
+/// Advance past `target` columns of `line`, counting **any** character
+/// as a column. Tabs round up to the next 4-column stop; a tab that
+/// would overshoot the target is left intact (mirrors
+/// `strip_list_item_indent`'s tab handling). Newlines / CR short-circuit
+/// to the empty string — the line ended before the target was reached.
+///
+/// Reserved for the one case where the bytes being skipped are known
+/// *not* to be whitespace: the list marker the parser core has already
+/// emitted upstream on a marker-line dispatch (`- `, `1. `). It is a
+/// content-eater by construction, so it must never stand in for an
+/// indent strip — a `ListAdvance` op that means "the item's content
+/// indent" resolves through [`strip_list_indent`], which stops at the
+/// first non-whitespace byte. Conflating the two is how an
+/// under-indented lazy line loses its first bytes to a column the line
+/// never had.
+pub(in crate::parser::blocks) fn advance_emitted_marker_columns(line: &str, target: usize) -> &str {
     if target == 0 {
         return line;
     }
@@ -1698,10 +1785,14 @@ mod tests {
 
     #[test]
     fn strip_list_marker_line() {
-        // `- > <div>` with content_col=2: advance past `- `, then strip `>`.
+        // `- > <div>` with content_col=2: the marker belongs to the
+        // dispatch line, so only the dispatch-line strip skips it. The
+        // continuation strip reads the advance as indent and stops at
+        // the `-`.
         let p =
-            ContainerPrefix::from_ops(&[StripOp::ListAdvance(2), StripOp::BlockQuoteMarker], false);
-        assert_eq!(p.strip("- > <div>"), "<div>");
+            ContainerPrefix::from_ops(&[StripOp::ListAdvance(2), StripOp::BlockQuoteMarker], true);
+        assert_eq!(p.strip_dispatch_line("- > <div>"), "<div>");
+        assert_eq!(p.strip("- > <div>"), "- > <div>");
     }
 
     #[test]
@@ -1719,28 +1810,31 @@ mod tests {
     }
 
     #[test]
-    fn strip_short_line_yields_empty() {
+    fn strip_short_line_keeps_its_bytes() {
         let p = ContainerPrefix::from_ops(&[StripOp::ListAdvance(4)], false);
         assert_eq!(p.strip(""), "");
-        assert_eq!(p.strip("\n"), "");
+        // The newline is content, not indent: a blank line inside a list
+        // item is short of the content column, and the strip claims only
+        // the whitespace that is really there.
+        assert_eq!(p.strip("\n"), "\n");
     }
 
     #[test]
-    fn advance_columns_lands_on_char_boundary_for_multibyte() {
-        // Regression for #314-322: `advance_columns` counted columns
+    fn advance_emitted_marker_columns_lands_on_char_boundary_for_multibyte() {
+        // Regression for #314-322: the blind column walk counted columns
         // per-byte, so advancing past N columns could slice inside a
         // multibyte char (e.g. box-drawing `├`, accented `é`, CJK,
         // emoji) and panic. Each char must count as one column.
-        assert_eq!(advance_columns("├── x", 2), "─ x");
-        assert_eq!(advance_columns("éxy", 1), "xy");
-        assert_eq!(advance_columns("黑x", 1), "x");
-        assert_eq!(advance_columns("😄.", 1), ".");
+        assert_eq!(advance_emitted_marker_columns("├── x", 2), "─ x");
+        assert_eq!(advance_emitted_marker_columns("éxy", 1), "xy");
+        assert_eq!(advance_emitted_marker_columns("黑x", 1), "x");
+        assert_eq!(advance_emitted_marker_columns("😄.", 1), ".");
         // Advancing past the whole multibyte run yields empty.
-        assert_eq!(advance_columns("├──", 5), "");
+        assert_eq!(advance_emitted_marker_columns("├──", 5), "");
         // ASCII behaviour is unchanged (one column per char).
-        assert_eq!(advance_columns("  > hello", 2), "> hello");
+        assert_eq!(advance_emitted_marker_columns("  > hello", 2), "> hello");
         // Tabs still round up to the next 4-column stop.
-        assert_eq!(advance_columns("\tfoo", 4), "foo");
+        assert_eq!(advance_emitted_marker_columns("\tfoo", 4), "foo");
     }
 
     #[test]
@@ -1825,8 +1919,9 @@ mod tests {
             builder.finish_node();
             assert_eq!(lines.peek_prefix_at(i), emitted, "line {i}: {raw_line:?}");
         }
-        // And the specific divergence that motivated the split.
-        assert_eq!(lines.strip_at(1), " |");
+        // The divergence that motivated the split is gone: both walks
+        // strip the list advance as whitespace-only indent.
+        assert_eq!(lines.strip_at(1), "b |");
         assert_eq!(lines.peek_prefix_at(1), "b |");
     }
 
@@ -1905,9 +2000,9 @@ mod tests {
     #[test]
     fn resolve_rejects_faked_indent() {
         let p = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
-        // `strip` would return `":\n"` here by counting `c` and the space as
-        // columns; the line never reaches the item's content column.
-        assert_eq!(p.strip("c :\n"), ":\n");
+        // `strip` keeps the line intact — it stops at the `c` instead of
+        // counting it as a column — and the verdict names the shortfall.
+        assert_eq!(p.strip("c :\n"), "c :\n");
         assert!(!p.resolve("c :\n").reaches_frame());
         assert!(!p.resolve(" c :\n").reaches_frame());
         // Real indent reaching the content column is accepted.
@@ -1978,7 +2073,20 @@ mod tests {
             ],
             false,
         );
-        assert_eq!(p.strip("    - > a"), "a");
+        // The continuation strip spends the indent on the definition
+        // body and then stops at the marker.
+        assert_eq!(p.strip("    - > a"), "- > a");
+        // The marker is skipped only where it was emitted: on the
+        // dispatch line of a marker-line dispatch.
+        let marked = ContainerPrefix::from_ops(
+            &[
+                StripOp::ContentIndent(4),
+                StripOp::ListAdvance(2),
+                StripOp::BlockQuoteMarker,
+            ],
+            true,
+        );
+        assert_eq!(marked.strip_dispatch_line("    - > a"), "a");
     }
 
     #[test]
@@ -2045,9 +2153,11 @@ mod tests {
                 virtual_marker_space: false,
             },
         ];
-        let p = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::CommonMark));
-        // Only the innermost (content_col=4) is applied.
-        assert_eq!(p.strip("- - foo"), "foo");
+        let p = ContainerPrefix::from_stack(&stack, true, &opts(Dialect::CommonMark));
+        // Only the innermost (content_col=4) is applied — and only the
+        // dispatch line's strip walks through the marker bytes.
+        assert_eq!(p.strip_dispatch_line("- - foo"), "foo");
+        assert_eq!(p.strip("    foo"), "foo");
     }
 
     #[test]

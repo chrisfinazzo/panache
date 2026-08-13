@@ -738,19 +738,26 @@ panache starts caching NodePtrs across edits.
     0536 (`<hr>`, strict-block void) and 0537 (leading comment) are the
     controls that must keep lifting.
 
-  - [ ] Stop `ContainerPrefix`'s **`ListAdvance` eating non-whitespace bytes**.
-    `advance_columns` advances blindly, so any consumer that strips a full
-    prefix off an under-indented line silently loses content bytes --- it
-    bit twice in one session (`pandoc_html_open_tag_closes` line 0, which
-    suppressed HTML-block detection on `- a`/`<hr>` continuation lines, and
-    the lazy-interrupt helper, which needed `without_innermost_list_advance`
-    to route around it). The three escape hatches (`strip_line_0` semantics,
-    `without_innermost_list_advance`, `lazy_blockquote_gobble`) all exist
-    because "columns the container claims" and "bytes the line carries" are
-    conflated. Cheap hardening: clamp the advance at the first non-blank
-    byte (probe whether any caller relies on the blind advance ---
-    tab-straddle handling is the suspect), or debug-assert it never eats
-    content.
+  - [x] Stopped `ContainerPrefix`'s **`ListAdvance` eating non-whitespace
+    bytes**. The blind `advance_columns` is now
+    `advance_emitted_marker_columns`, reserved for the one case where the
+    skipped bytes are known not to be whitespace: the list marker the core
+    already emitted on a marker-line dispatch. Every other `ListAdvance`
+    (continuation lines, lookahead, outer sections on line 0, `split`'s
+    capture) reads the op as the item's content indent and strips through
+    `strip_list_indent`, so `strip` now agrees with the emission-side walk
+    on every list advance and the `strip_at` / `peek_prefix_at` divergence
+    is gone. Detection scans anchored at column 0 of the dispatch line (grid
+    borders, HTML tag balance) get `strip_dispatch_line`, which applies the
+    marker rule explicitly instead of relying on the blind walk. Pinned by
+    `strip_consumes_only_container_prefix_bytes` (what the strip consumes is
+    indent or `>`, never content) plus the flipped `frame_pinning` rows; no
+    fixture or conformance case moved.
+
+    Left standing: `strip_content_indent`'s lazy trim still claims a blank
+    line's newline (`trim_start` takes `\n`), which is why lookaheads gate
+    blanks with `is_blank_line` first. Same conflation, different op --- worth
+    closing when a caller is bitten by it.
 
   - [ ] Make the formatter's **BLOCK_QUOTE arm fail closed**. The `_` fallback
     emits a child without the `> ` prefix, so any block kind missing a

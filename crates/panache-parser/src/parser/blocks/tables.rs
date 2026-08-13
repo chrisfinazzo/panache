@@ -219,7 +219,14 @@ pub(crate) struct UniformStripView<'s, 'a, 'p>(&'s StrippedLines<'a, 'p>);
 
 impl<'s, 'a, 'p> LineView for UniformStripView<'s, 'a, 'p> {
     fn line(&self, i: usize) -> &str {
-        self.0.prefix().strip(self.0.raw()[i])
+        // The dispatch line needs its own strip: its innermost
+        // `ListAdvance` may name the marker bytes the core emitted
+        // (`- +---+`), which the continuation-line strip leaves alone.
+        if i == self.0.dispatch_pos() {
+            self.0.prefix().strip_dispatch_line(self.0.raw()[i])
+        } else {
+            self.0.prefix().strip(self.0.raw()[i])
+        }
     }
     fn line_count(&self) -> usize {
         self.0.raw().len()

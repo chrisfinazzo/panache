@@ -346,10 +346,10 @@ fn lazy_definition_markers_add_further_definitions() {
 
 #[test]
 fn trailing_marker_line_outside_the_item_is_not_a_definition_marker() {
-    // `ContainerPrefix::strip` advances the item's content column with
-    // `advance_columns`, which counts any character as a column. Inside a
-    // two-column item that turns `"c :"` into `":"`, so the term lookahead
-    // used to see a bare marker and promote the line above it. Pandoc reads
+    // `ContainerPrefix::strip` used to advance the item's content
+    // column column-blind. Inside a two-column item that turned `"c :"`
+    // into `":"`, so the term lookahead saw a bare marker and promoted
+    // the line above it. Pandoc reads
     // `BulletList [[Plain [a, SoftBreak, b]]]` + `Para [c, Space, ":"]`.
     for input in [
         "- a\nb\n\nc :\n",

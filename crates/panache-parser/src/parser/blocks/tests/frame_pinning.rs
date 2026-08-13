@@ -17,8 +17,8 @@
 use super::helpers::*;
 use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
 use crate::parser::blocks::container_prefix::{
-    ContainerPrefix, FrameVerdict, StripOp, StrippedLines, advance_columns, strip_content_indent,
-    strip_list_indent,
+    ContainerPrefix, FrameVerdict, StripOp, StrippedLines, advance_emitted_marker_columns,
+    strip_content_indent, strip_list_indent,
 };
 use crate::parser::blocks::definition_lists::{
     definition_marker_in_list_frame, next_line_is_definition_marker,
@@ -48,10 +48,12 @@ fn opts(dialect: Dialect) -> ParserOptions {
 /// One `(ops, line)` shape pinned across every prefix-level helper.
 ///
 /// The columns have deliberately different semantics — that is the
-/// point. `strip` walks list indent column-blind (`advance_columns`);
-/// `peek_prefix` is the emission-side walk of the ops (graceful,
-/// whitespace-only strips); the verdict is the authoritative answer,
-/// carrying both the tail and whether the frame was reached.
+/// point. `strip` is the detection-side walk of the ops and
+/// `peek_prefix` the emission-side one; both strip list indent with
+/// `strip_list_indent` (whitespace-only), so they agree on every list
+/// advance and differ only where the line-0 marker rule applies. The
+/// verdict is the authoritative answer, carrying both the tail and
+/// whether the frame was reached.
 struct PinRow {
     name: &'static str,
     ops: &'static [StripOp],
@@ -74,17 +76,17 @@ struct PinRow {
 }
 
 const PINS: &[PinRow] = &[
-    // DISAGREES: three primitives give three different tails for a tab
-    // straddling the item's content column (see also the dedicated
-    // primitive test below). The line *does* reach column 2 — a tab has
-    // no byte boundary to split on. The verdict reports the straddle,
-    // and `next_line_is_definition_marker` reads the marker behind the
-    // tab off it; `strip` stays column-blind by design.
+    // A tab straddling the item's content column: the line *does* reach
+    // column 2, but a tab has no byte boundary to split on. `strip` and
+    // the emission-side walk both consume the tab whole (they share
+    // `strip_list_indent`); the verdict reports the straddle instead of
+    // deciding, and `next_line_is_definition_marker` reads the marker
+    // behind the tab off it.
     PinRow {
         name: "tab_straddles_list_content_col",
         ops: &[StripOp::ListAdvance(2)],
         line: "\t: def",
-        strip: "\t: def",
+        strip: ": def",
         strip_line_0_unmarked: "\t: def",
         peek_prefix: ": def",
         gobbled_len: Some((2, 0)),
@@ -94,13 +96,14 @@ const PINS: &[PinRow] = &[
         },
         expected_to_change: "",
     },
-    // DISAGREES: `strip` fakes the indent by eating `c ` as two columns;
-    // emission-side strips (peek) stop at the first non-whitespace byte.
+    // An under-indented line keeps its bytes: `strip` stops at the first
+    // non-whitespace byte, exactly as the emission-side walk does, so a
+    // `ListAdvance` can never slice `c ` off as two columns of indent.
     PinRow {
-        name: "short_line_content_sliced_as_indent",
+        name: "short_line_content_not_sliced_as_indent",
         ops: &[StripOp::ListAdvance(2)],
         line: "c :",
-        strip: ":",
+        strip: "c :",
         strip_line_0_unmarked: "c :",
         peek_prefix: "c :",
         gobbled_len: Some((2, 0)),
@@ -222,17 +225,128 @@ fn pinned_prefix_helper_matrix() {
 }
 
 /// The tab-straddle shape at the primitive level: one line, one column
-/// target, three different answers. `advance_columns` leaves the
-/// straddling tab in place (any-char column walk), `strip_list_indent`
-/// (via `byte_index_at_column`) consumes it whole, and
-/// `gobbled_indent_prefix_len` stops before it.
+/// target, three different answers. `advance_emitted_marker_columns`
+/// leaves the straddling tab in place (any-char column walk),
+/// `strip_list_indent` (via `byte_index_at_column`) consumes it whole,
+/// and `gobbled_indent_prefix_len` stops before it.
 #[test]
 fn tab_straddle_primitives_disagree() {
     let line = "\t: def";
-    assert_eq!(advance_columns(line, 2), "\t: def");
+    assert_eq!(advance_emitted_marker_columns(line, 2), "\t: def");
     assert_eq!(strip_list_indent(line, 2), ": def");
     assert_eq!(byte_index_at_column(line, 2), 1);
     assert_eq!(gobbled_indent_prefix_len(line, 2), 0);
+}
+
+/// The blind column walk is reserved for the bytes the parser core has
+/// already emitted: on a marker-line dispatch the innermost
+/// `ListAdvance` is the item's `- ` marker, which is not whitespace and
+/// must still be skipped.
+#[test]
+fn line_0_list_advance_skips_the_emitted_marker() {
+    let bullet = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], true);
+    assert_eq!(bullet.strip_line_0_for_emission("- x"), "x");
+    let ordered = ContainerPrefix::from_ops(&[StripOp::ListAdvance(3)], true);
+    assert_eq!(ordered.strip_line_0_for_emission("1. x"), "x");
+}
+
+/// Every other `ListAdvance` is an indent strip and stops at the first
+/// non-whitespace byte — including the outer sections' advances on the
+/// dispatch line, where only the *innermost* op names emitted marker
+/// bytes.
+#[test]
+fn list_advance_never_eats_content_bytes() {
+    // Continuation lines and lookahead: `strip` applies every op.
+    let prefix = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
+    assert_eq!(prefix.strip("b |"), "b |");
+    assert_eq!(prefix.strip("- x"), "- x");
+    assert_eq!(prefix.strip(" b |"), "b |");
+
+    // Line 0 with the marker consumed: the outer advance is indent, the
+    // innermost one is the marker.
+    let nested = ContainerPrefix::from_ops(
+        &[
+            StripOp::ListAdvance(2),
+            StripOp::BlockQuoteMarker,
+            StripOp::ListAdvance(2),
+        ],
+        true,
+    );
+    assert_eq!(nested.strip_line_0_for_emission("  > - x"), "x");
+    // With the outer indent missing, the outer advance strips nothing
+    // (so the blockquote op finds no marker to consume) rather than
+    // slicing `x ` off as two columns.
+    assert_eq!(nested.strip_line_0_for_emission("x > - y"), "> - y");
+}
+
+/// The invariant behind the two rules above, over every op shape the
+/// stack can produce: what the continuation strip consumes is container
+/// prefix — indent and blockquote markers — never content. A caller can
+/// therefore classify a line off `strip` and emit from the same bytes
+/// without the two disagreeing.
+#[test]
+fn strip_consumes_only_container_prefix_bytes() {
+    let shapes: &[&[StripOp]] = &[
+        &[StripOp::ListAdvance(2)],
+        &[StripOp::ListAdvance(4), StripOp::BlockQuoteMarker],
+        &[StripOp::BlockQuoteMarker, StripOp::ListAdvance(2)],
+        &[StripOp::ContentIndent(4), StripOp::ListAdvance(2)],
+        &[
+            StripOp::ListAdvance(2),
+            StripOp::BlockQuoteMarker,
+            StripOp::ListAdvance(2),
+        ],
+        &[
+            StripOp::ContentIndent(4),
+            StripOp::ListAdvance(2),
+            StripOp::BlockQuoteMarker,
+        ],
+    ];
+    // Non-blank lines only: `strip_content_indent`'s lazy trim claims a
+    // blank line's newline as well, which is why every lookahead gates
+    // blanks with `is_blank_line` before resolving a frame (see the
+    // scope bounds on `FrameVerdict`).
+    let lines = [
+        "b |",
+        " b |",
+        "  b |",
+        "\tb |",
+        "- x",
+        "c :",
+        "> x",
+        "  > x",
+        "x > y",
+        "----",
+        "",
+        "😄 x\n",
+        "├── x\n",
+        "  a\n",
+    ];
+    for ops in shapes {
+        let prefix = ContainerPrefix::from_ops(ops, false);
+        for line in lines {
+            let rest = prefix.strip(line);
+            assert!(
+                line.ends_with(rest),
+                "{ops:?} on {line:?}: {rest:?} is not a suffix"
+            );
+            let consumed = &line[..line.len() - rest.len()];
+            assert!(
+                consumed.chars().all(|c| matches!(c, ' ' | '\t' | '>')),
+                "{ops:?} on {line:?}: consumed {consumed:?}, which is not container prefix"
+            );
+        }
+    }
+}
+
+/// `split` captures the list-indent bytes for re-injection as a
+/// `WHITESPACE` token, so it must never claim content bytes either.
+#[test]
+fn split_captures_whitespace_only_list_indent() {
+    let prefix =
+        ContainerPrefix::from_ops(&[StripOp::ListAdvance(2), StripOp::BlockQuoteMarker], false);
+    assert_eq!(prefix.split("  > x"), ("  ", "> ", "x"));
+    assert_eq!(prefix.split("b > x"), ("", "", "b > x"));
 }
 
 /// The step-2 invariant: nested content containers push one
@@ -259,19 +373,29 @@ fn sequential_content_indent_ops_agree_with_summed_strip() {
 /// DISAGREES: `from_stack` preserves true stack order (content indent
 /// before the list advance for [Definition, List, ListItem]); the
 /// scalar constructors (`from_scalars`, mirroring `from_ctx`) always
-/// order list → bq → content-indent. On a line whose indent exactly
-/// covers the content container, the orders strip different bytes:
-/// stack order spends the indent on the `ContentIndent` op and then
-/// `advance_columns` eats content for the `ListAdvance`; scalar order
-/// spends part on the list advance and lazy-trims the rest.
+/// order list → bq → content-indent. Now that every indent strip is
+/// whitespace-only the two agree on a plain indent, but a blockquote
+/// marker still splits them: in stack order the content indent is spent
+/// first and the marker is reached, while the scalar order leaves four
+/// spaces in front of it — more than the three a marker tolerates.
 #[test]
 fn from_stack_and_from_scalars_orderings_diverge() {
-    let stack_order =
-        ContainerPrefix::from_ops(&[StripOp::ContentIndent(4), StripOp::ListAdvance(2)], false);
-    let scalar_order = ContainerPrefix::from_scalars(0, 2, false, 4, false, Dialect::CommonMark);
-    let line = "    x";
-    assert_eq!(stack_order.strip(line), "");
-    assert_eq!(scalar_order.strip(line), "x");
+    let stack_order = ContainerPrefix::from_ops(
+        &[
+            StripOp::ContentIndent(4),
+            StripOp::ListAdvance(2),
+            StripOp::BlockQuoteMarker,
+        ],
+        false,
+    );
+    let scalar_order = ContainerPrefix::from_scalars(1, 2, false, 4, false, Dialect::CommonMark);
+    // Agreement on the shape that used to have the stack order eat `x`
+    // as a faked list indent.
+    assert_eq!(stack_order.strip("    x"), "x");
+    assert_eq!(scalar_order.strip("    x"), "x");
+    // The ordering itself still shows through.
+    assert_eq!(stack_order.strip("      > b"), "b");
+    assert_eq!(scalar_order.strip("      > b"), "> b");
 }
 
 // Container builders for the stack-shaped tests. `Paragraph` is

@@ -4,7 +4,7 @@ use rowan::GreenNodeBuilder;
 
 use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
 use super::container_prefix::{
-    StrippedLines, advance_columns, bq_outer_of_list, strip_list_indent,
+    StrippedLines, advance_emitted_marker_columns, bq_outer_of_list, strip_list_indent,
 };
 use crate::parser::utils::container_stack::{byte_index_at_column, leading_indent};
 use crate::parser::utils::helpers::strip_newline;
@@ -27,8 +27,9 @@ pub fn try_parse_line_block_start(line: &str) -> Option<()> {
 /// The container geometry is carried by the `StrippedLines` window: the
 /// dispatch line (`window.pos()`) keeps its bespoke `emit_open_line_prefixes`
 /// emitter — `list_marker_consumed_on_line_0` selects between a silent
-/// column-advance through the upstream-emitted list marker (`advance_columns`)
-/// and a whitespace-only strip with WHITESPACE emission (`strip_list_indent`).
+/// column-advance through the upstream-emitted list marker
+/// (`advance_emitted_marker_columns`) and a whitespace-only strip with
+/// WHITESPACE emission (`strip_list_indent`).
 /// Continuation lines route through the window's `strip_at` (peek) and
 /// `emit_prefix_at` (re-emit prefix tokens), so the list-content-indent is
 /// always whitespace and blank lines aren't eaten by the column-advance.
@@ -223,7 +224,7 @@ fn emit_open_line_prefixes<'a>(
             return;
         }
         let stripped = if suppress_list {
-            advance_columns(s, list_content_col)
+            advance_emitted_marker_columns(s, list_content_col)
         } else {
             strip_list_indent(s, list_content_col)
         };

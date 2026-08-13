@@ -7,7 +7,9 @@ use crate::syntax::SyntaxKind;
 use rowan::{GreenNodeBuilder, TextRange};
 
 use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
-use super::container_prefix::{StrippedLines, advance_columns, content_line_prefix_tail};
+use super::container_prefix::{
+    StrippedLines, advance_emitted_marker_columns, content_line_prefix_tail,
+};
 use crate::options::{Dialect, Flavor};
 use crate::parser::utils::container_stack::{byte_index_at_column, leading_indent};
 use crate::parser::utils::tree_copy::copy_green_children;
@@ -625,12 +627,12 @@ fn prepare_fence_open_line<'a>(
         // On a marker-line dispatch (`suppress_list=true`), the list
         // marker bytes have already been emitted upstream and may not
         // be whitespace (e.g. `- > ```` has a leading `-`). Use
-        // `advance_columns` which counts columns through any char.
-        // On continuation lines, the leading bytes ARE whitespace
-        // (the list-content-indent) so use the whitespace-only
-        // `strip_list_indent` to stop at non-whitespace.
+        // `advance_emitted_marker_columns`, which counts columns
+        // through any char. On continuation lines, the leading bytes ARE
+        // whitespace (the list-content-indent) so use the
+        // whitespace-only `strip_list_indent` to stop at non-whitespace.
         let stripped = if suppress_list {
-            advance_columns(s, list_content_col)
+            advance_emitted_marker_columns(s, list_content_col)
         } else {
             strip_list_indent(s, list_content_col)
         };
