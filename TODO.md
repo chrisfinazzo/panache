@@ -1065,7 +1065,7 @@ panache starts caching NodePtrs across edits.
   `pandoc -f markdown -t native`. Pinned by the `quoted_band_marker_*` tests
   in `blocks/tests/blockquotes.rs` and parser goldens.
 
-- [ ] The formatter **flattens nested lists in blockquotes** (meaning change):
+- [x] The formatter **flattens nested lists in blockquotes** (meaning change):
   `> - a\n>   10.  b\n` formats to `> - a\n> 10. b\n`, dropping the nested
   ordered list's indent so it reparses as a *sibling* of the bullet list
   inside the quote. Pre-existing and independent of the band fence work
@@ -1073,7 +1073,27 @@ panache starts caching NodePtrs across edits.
   blockquoted-band fix, whose fence/lazy cases inherit the same flatten).
   Losslessness and idempotency both pass, so `debug format --checks all`
   does not catch it --- only a pandoc-AST comparison of input vs formatted
-  output does.
+  output does. Cause: `append_blockquote_prefixed_list_output` re-derived
+  indentation instead of trusting the list renderer --- marker lines were
+  trimmed to the quote prefix (also one level deeper behind a rendered `> `)
+  and continuation lines rewritten to a fixed two spaces. It now keeps each
+  line's own indentation; no other golden case relied on the trimming.
+  Meaning preservation probed against `pandoc -f markdown -t native` over a
+  matrix of quoted list shapes (nested bullet/ordered ladders, band and lazy
+  markers, sibling items, loose items, quoted lists in items, `> >` double
+  quotes, wrapped long items). Pinned by the
+  `blockquote_nested_list_keeps_indent` and
+  `quoted_band_marker_sibling_list` goldens.
+
+- [ ] A **nested blockquote on a quoted item's continuation line breaks
+  losslessness**: `> - a\n>   > nested quote\n> - b\n` fails both
+  losslessness and idempotency in `debug format --checks all` --- the CST
+  text reorders the input (`> -   > nested quote` before `a`), so this is
+  parser-side (the quoted item's buffered continuation mishandles the inner
+  `>` marker), and pass 2 then merges the quote line into the item text.
+  Pandoc keeps `> nested quote` as a `BlockQuote` block inside item `a`.
+  Pre-existing at `f60154d1` (probed while validating the quoted-list
+  flatten fix, which does not touch it).
 
 - [ ] **A nested ordered list at the outer item's exact content column goes
   lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
