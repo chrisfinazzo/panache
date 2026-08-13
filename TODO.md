@@ -1544,12 +1544,25 @@ Adjacent, found while fixing the losslessness bugs the same harness turned up:
   divergence is the missing markdown-in-html `Div` lift (panache keeps the tags
   as raw siblings), tracked in the pandoc allowlist 0464 rationale.
 
-- [ ] A **lazy block-HTML line folded into a quoted paragraph** stays inline
+- [x] A **lazy block-HTML line folded into a quoted paragraph** stays inline
   text: `> a\n<hr>\n` is `BlockQuote [Plain "a", RawBlock "<hr>"]` in pandoc
   but `BlockQuote [Para ["a", SoftBreak, RawInline "<hr>"]]` here. General
   (no markdown-in-html involved), found while probing the HTML-closer fence:
   the same shape puts a deeper-indented `</div>` (past the closer's column
   bound, so correctly gobbled) inline instead of as the quote's `RawBlock`.
+
+  Landed as an `interrupts_via_html` probe in both lazy gates (paragraph and
+  list-item buffer), sharing the dispatcher's `html_block_cannot_interrupt`
+  classification: strict-block tags (open and close forms, any indent --- the
+  fold drops it) interrupt and demote the paragraph to `Plain`; inline-block
+  tags, comments, declarations, CDATA, and unclosed opens stay lazy text;
+  CommonMark closes the quote instead (spec 5.1). Two adjacent pre-existing bugs
+  surfaced and fixed on the way: the dispatcher's `pandoc_html_open_tag_closes`
+  mangled line 0 with the innermost `ListAdvance` (so `- a`/`<hr>` never
+  interrupted even unquoted), and the formatter's BLOCK_QUOTE arm dropped the
+  `> ` prefix on a direct `PLAIN` child. Pinned in
+  `blocks/tests/blockquotes.rs`, pandoc corpus 0525-0527, and golden
+  `blockquote_lazy_html_block_interrupt`.
 
 - [x] Migrate the remaining scans' **ad-hoc container bounds** onto
   `ends_container_lines`. Landed one scan per commit, all pandoc-probed:
