@@ -1,0 +1,3 @@
+[ BlockQuote [ Para [ Str "a" ] ]
+, CodeBlock ( "" , [] , [] ) "c"
+]

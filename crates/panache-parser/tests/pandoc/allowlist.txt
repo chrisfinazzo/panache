@@ -764,3 +764,16 @@
 525
 526
 527
+
+# Lazy-interrupt gate pins for the probe families that had no corpus
+# coverage (unit/golden pins only). 0528: a div's closing fence on a lazy
+# quote line ends the paragraph instead of folding in as text (issue #310
+# shape, quoted). 0529: the byte-0 backtick fence ends the quote's gobble
+# (`endline` guard), so the fence is the quote's sibling. 0530: a lazy `#`
+# heading stays paragraph text under default pandoc (`blank_before_header`
+# on) --- the positive interrupt needs `-blank_before_header`, which this
+# harness cannot express (fixed default extensions); that side stays pinned
+# by `blocks/tests/blockquotes.rs` and `headings.rs` unit tests.
+528
+529
+530
