@@ -413,7 +413,7 @@ fn extract_table_caption_content(caption_node: &SyntaxNode) -> String {
                 caption_body.push_str(token.text());
             }
             rowan::NodeOrToken::Node(node) => {
-                caption_body.push_str(&node.text().to_string());
+                caption_body.push_str(&text_without_line_prefixes(&node));
             }
         }
     }
@@ -699,9 +699,15 @@ pub fn format_pipe_table(node: &SyntaxNode, config: &Config, indent: usize) -> S
     let mut table_data = extract_pipe_table_data(node, config);
     let mut output = String::new();
 
-    // Early return if no rows
+    // Early return if no rows. The dedented text, not `node.text()`:
+    // continuation lines carry the enclosing containers' prefix bytes as
+    // `LINE_PREFIX` tokens, and the enclosing walker re-prefixes every
+    // line, so returning raw prefixed text would double the prefix. The
+    // container indent is re-applied (list items expect it back); the
+    // `table-indent` self-indent is not, keeping top-level verbatim
+    // tables byte-for-byte.
     if table_data.rows.is_empty() {
-        return node.text().to_string();
+        return indent_table_block(&text_without_line_prefixes(node), indent);
     }
 
     // The delimiter row owns the column count: pandoc reads it off `pipeBreak`
@@ -730,7 +736,7 @@ pub fn format_pipe_table(node: &SyntaxNode, config: &Config, indent: usize) -> S
     let cols = table_data.alignments.len();
     if cols > 0 {
         if table_data.rows.iter().any(|row| row.len() > cols) {
-            return node.text().to_string();
+            return indent_table_block(&text_without_line_prefixes(node), indent);
         }
         for row in &mut table_data.rows {
             row.resize(cols, String::new());
@@ -1943,15 +1949,21 @@ fn pad_simple_cell(cell: &str, width: usize, alignment: Alignment) -> String {
 /// result independent of the incoming column spacing, so two documents that
 /// parse to the same table format identically and the output is idempotent.
 pub fn format_simple_table(node: &SyntaxNode, config: &Config, indent: usize) -> String {
-    if !node.text().to_string().is_ascii() {
-        return node.text().to_string();
+    // Dedented, not `node.text()`: continuation lines carry the enclosing
+    // containers' prefix bytes as `LINE_PREFIX` tokens, and the enclosing
+    // walker re-prefixes every line of whatever this returns. Verbatim
+    // fallbacks re-apply only the container indent, not the `table-indent`
+    // self-indent, so top-level verbatim tables stay byte-for-byte.
+    let raw_table = text_without_line_prefixes(node);
+    if !raw_table.is_ascii() {
+        return indent_table_block(&raw_table, indent);
     }
 
     let table_data = extract_simple_table_data(node, config);
 
     // Early return if no rows
     if table_data.rows.is_empty() {
-        return node.text().to_string();
+        return indent_table_block(&raw_table, indent);
     }
 
     let has_header = table_data.has_header;
@@ -2311,8 +2323,14 @@ pub fn format_multiline_table(node: &SyntaxNode, config: &Config, indent: usize)
     // (`------------`) keeps both, mismatched. When we teach the reflow path to
     // measure display width (`unicode_width` is already a dep), it should also
     // normalize the top and bottom borders to a single consistent shape.
-    if !node.text().to_string().is_ascii() {
-        return node.text().to_string();
+    // Dedented, not `node.text()`: continuation lines carry the enclosing
+    // containers' prefix bytes as `LINE_PREFIX` tokens, and the enclosing
+    // walker re-prefixes every line of whatever this returns. Verbatim
+    // fallbacks re-apply only the container indent, not the `table-indent`
+    // self-indent, so top-level verbatim tables stay byte-for-byte.
+    let raw_table = text_without_line_prefixes(node);
+    if !raw_table.is_ascii() {
+        return indent_table_block(&raw_table, indent);
     }
 
     let mut table_data = extract_multiline_table_data(node, config);
@@ -2320,7 +2338,7 @@ pub fn format_multiline_table(node: &SyntaxNode, config: &Config, indent: usize)
 
     // Early return if no rows or no column info
     if table_data.rows.is_empty() || table_data.column_positions.is_empty() {
-        return node.text().to_string();
+        return indent_table_block(&raw_table, indent);
     }
 
     // Reflow each body cell to its (fixed) column width unless wrapping is
