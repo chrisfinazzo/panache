@@ -447,23 +447,30 @@ pub(super) fn build_ir_into(
                 EscapeType::NonbreakingSpace => exts.all_symbols_escapable,
             };
             if enabled {
-                flush_text!();
-                let kind = match escape_type {
-                    EscapeType::HardLineBreak => {
-                        events.push(IrEvent::HardBreak {
-                            start: pos,
-                            end: pos + len,
+                if escape_type == EscapeType::HardLineBreak {
+                    // The break swallows the whitespace in front of it, so
+                    // the text run stops short of that run.
+                    let ws_start = hard_breaks::ws_run_start(bytes, text_run_start, pos);
+                    if ws_start > text_run_start {
+                        events.push(IrEvent::Text {
+                            start: text_run_start,
+                            end: ws_start,
                         });
-                        pos += len;
-                        text_run_start = pos;
-                        continue;
                     }
-                    EscapeType::Literal | EscapeType::NonbreakingSpace => ConstructKind::Escape,
-                };
+                    events.push(IrEvent::HardBreak {
+                        start: ws_start,
+                        end: pos + len,
+                    });
+                    pos += len;
+                    text_run_start = pos;
+                    continue;
+                }
+                // Only `Literal` and `NonbreakingSpace` reach here.
+                flush_text!();
                 events.push(IrEvent::Construct {
                     start: pos,
                     end: pos + len,
-                    kind,
+                    kind: ConstructKind::Escape,
                 });
                 pos += len;
                 text_run_start = pos;

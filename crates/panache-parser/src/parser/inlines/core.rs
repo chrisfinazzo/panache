@@ -917,13 +917,21 @@ fn parse_inline_range_impl(
                     continue;
                 }
 
+                // A backslash break swallows the whitespace in front of it, so
+                // the accumulated text stops short of that run.
+                let text_end = if escape_type == EscapeType::HardLineBreak {
+                    hard_breaks::ws_run_start(text.as_bytes(), text_start, pos)
+                } else {
+                    pos
+                };
+
                 // Emit accumulated text
-                if pos > text_start {
-                    builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos]);
+                if text_end > text_start {
+                    builder.token(SyntaxKind::TEXT.into(), &text[text_start..text_end]);
                 }
 
                 log::trace!("Matched escape at pos {}: \\{}", pos, ch);
-                emit_escape(builder, ch, escape_type);
+                emit_escape(builder, &text[text_end..pos], ch, escape_type);
                 pos += len;
                 text_start = pos;
                 continue;

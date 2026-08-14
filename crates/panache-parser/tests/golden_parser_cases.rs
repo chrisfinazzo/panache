@@ -388,6 +388,8 @@ golden_test_cases!(
     four_space_rule_nested_4sp,
     four_space_rule_ordered_4sp,
     four_space_rule_wide_marker,
+    hard_break_backslash_whitespace_commonmark,
+    hard_break_backslash_whitespace_pandoc,
     headings,
     heading_trailing_backslash_commonmark,
     heading_trailing_backslash_pandoc,

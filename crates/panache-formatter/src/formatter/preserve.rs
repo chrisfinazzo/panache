@@ -86,7 +86,7 @@ fn collect(
                     if escaped_line_breaks {
                         current.push('\\');
                     } else {
-                        current.push_str(token.text().trim_end_matches(['\r', '\n']));
+                        current.push_str(crate::utils::hard_break_marker(token.text()));
                     }
                     lines.push(std::mem::take(current));
                 }

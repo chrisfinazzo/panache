@@ -1,6 +1,7 @@
 //! ATX heading parsing utilities.
 
 use crate::options::{Dialect, ParserOptions};
+use crate::parser::inlines::hard_breaks;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
@@ -42,23 +43,31 @@ fn try_parse_mmd_header_identifier_with_pos(content: &str) -> Option<(String, us
 /// hands the inline scanner only the text of the line, so the `\`+newline pair
 /// never reaches `escapes.rs`; the break has to be recognized here instead. The
 /// newline token is the caller's to emit, so the returned break covers only the
-/// backslash.
+/// backslash and whatever whitespace precedes it.
+///
+/// Whitespace in front of the backslash is part of the break, not content:
+/// `# foo \` is `[Str "foo", LineBreak]`, with no `Space`. It rides along in
+/// the break token so no byte is lost.
 ///
 /// The last backslash escapes the line ending only if the trailing backslash
 /// run is odd: `# foo\\` is `Str "foo\"`, `# foo\\\` is `Str "foo\",
 /// LineBreak`. CommonMark keeps the backslash literal in every case, hence the
 /// dialect gate.
-fn split_trailing_line_break<'a>(content: &'a str, config: &ParserOptions) -> (&'a str, bool) {
+fn split_trailing_line_break<'a>(
+    content: &'a str,
+    config: &ParserOptions,
+) -> (&'a str, Option<&'a str>) {
     if config.dialect != Dialect::Pandoc {
-        return (content, false);
+        return (content, None);
     }
 
     let backslashes = content.bytes().rev().take_while(|&b| b == b'\\').count();
     if backslashes % 2 == 0 {
-        return (content, false);
+        return (content, None);
     }
 
-    (&content[..content.len() - 1], true)
+    let break_start = hard_breaks::ws_run_start(content.as_bytes(), 0, content.len() - 1);
+    (&content[..break_start], Some(&content[break_start..]))
 }
 
 /// Emit a heading's `HEADING_CONTENT` node, splitting off a trailing backslash
@@ -76,15 +85,15 @@ fn emit_heading_content(
     let (text_content, hard_line_break) = if at_line_end {
         split_trailing_line_break(text_content, config)
     } else {
-        (text_content, false)
+        (text_content, None)
     };
 
     builder.start_node(SyntaxKind::HEADING_CONTENT.into());
     if !text_content.is_empty() {
         inline_emission::emit_inlines(builder, text_content, config, false);
     }
-    if hard_line_break {
-        builder.token(SyntaxKind::HARD_LINE_BREAK.into(), "\\");
+    if let Some(hard_line_break) = hard_line_break {
+        builder.token(SyntaxKind::HARD_LINE_BREAK.into(), hard_line_break);
     }
     builder.finish_node();
 }

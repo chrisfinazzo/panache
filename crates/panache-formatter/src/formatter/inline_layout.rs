@@ -965,7 +965,7 @@ fn process_node_recursive(
                     let marker = if config.formatter_extensions.escaped_line_breaks {
                         "\\"
                     } else {
-                        t.text().trim_end_matches(['\r', '\n'])
+                        crate::utils::hard_break_marker(t.text())
                     };
                     sink.push_hard_line_break(marker);
                 }

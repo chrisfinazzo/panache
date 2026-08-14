@@ -51,7 +51,17 @@ pub enum EscapeType {
 }
 
 /// Emit an escape sequence to the builder.
-pub fn emit_escape(builder: &mut impl InlineSink, ch: char, escape_type: EscapeType) {
+///
+/// `leading_ws` is the whitespace run the caller peeled off the text before the
+/// escape. It is only ever non-empty for a hard line break, which swallows it:
+/// pandoc reads `foo \` + newline as `[Str "foo", LineBreak]`, with no `Space`
+/// in between, so those bytes belong to the break token.
+pub fn emit_escape(
+    builder: &mut impl InlineSink,
+    leading_ws: &str,
+    ch: char,
+    escape_type: EscapeType,
+) {
     match escape_type {
         EscapeType::NonbreakingSpace => {
             // Preserve source bytes for losslessness while still tagging the
@@ -60,7 +70,10 @@ pub fn emit_escape(builder: &mut impl InlineSink, ch: char, escape_type: EscapeT
         }
         EscapeType::HardLineBreak => {
             // Emit as a special hard line break token - include backslash for losslessness
-            builder.token(SyntaxKind::HARD_LINE_BREAK.into(), "\\\n");
+            builder.token(
+                SyntaxKind::HARD_LINE_BREAK.into(),
+                &format!("{leading_ws}\\\n"),
+            );
         }
         EscapeType::Literal => {
             // Emit the full escape sequence (backslash + character) for losslessness

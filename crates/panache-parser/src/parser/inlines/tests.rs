@@ -1674,4 +1674,79 @@ mod hard_break_tests {
             assert_eq!(tree.to_string(), input, "{dialect:?}");
         }
     }
+
+    fn break_tokens(input: &str, dialect: Dialect) -> Vec<String> {
+        let tree = crate::parser::parse(input, Some(opts(dialect)));
+        tree.descendants_with_tokens()
+            .filter(|element| element.kind() == SyntaxKind::HARD_LINE_BREAK)
+            .map(|element| element.to_string())
+            .collect()
+    }
+
+    /// Whitespace sitting immediately before a backslash hard line break is
+    /// part of the break, not content: both readers report `[Str "foo",
+    /// LineBreak]` for `foo \` + newline, with no `Space` in between. The
+    /// bytes still have to live somewhere, so the break token absorbs them
+    /// the way it already does for the whitespace-only form.
+    #[test]
+    fn backslash_break_absorbs_the_whitespace_before_it() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(
+                break_tokens("foo \\\nbar\n", dialect),
+                [" \\\n"],
+                "{dialect:?}"
+            );
+            assert_eq!(
+                break_tokens("foo  \\\nbar\n", dialect),
+                ["  \\\n"],
+                "{dialect:?}"
+            );
+            assert_eq!(
+                break_tokens("foo\t\\\nbar\n", dialect),
+                ["\t\\\n"],
+                "{dialect:?}"
+            );
+        }
+    }
+
+    /// The scan back must stop at the end of the preceding inline element
+    /// rather than walking into bytes another node already owns.
+    #[test]
+    fn backslash_break_absorbs_whitespace_after_an_inline_element() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(
+                break_tokens("*foo* \\\nbar\n", dialect),
+                [" \\\n"],
+                "{dialect:?}"
+            );
+        }
+    }
+
+    /// `# foo \` diverges the same way a paragraph does under pandoc-markdown.
+    /// The heading's break token stops at the backslash --- the newline ending
+    /// the heading line is the block parser's own `NEWLINE` token.
+    #[test]
+    fn backslash_break_in_a_heading_absorbs_the_whitespace_before_it() {
+        assert_eq!(break_tokens("# foo \\\nbar\n", Dialect::Pandoc), [" \\"]);
+    }
+
+    /// When the backslash does not form a break, the whitespace before it is
+    /// ordinary content. `pandoc -f commonmark` reads `# foo \` as
+    /// `[Str "foo", Space, Str "\\"]`.
+    #[test]
+    fn a_backslash_that_is_not_a_break_leaves_the_whitespace_alone() {
+        assert!(break_tokens("# foo \\\nbar\n", Dialect::CommonMark).is_empty());
+        let tree = crate::parser::parse("# foo \\\nbar\n", Some(opts(Dialect::CommonMark)));
+        assert!(tree.to_string().starts_with("# foo \\\n"));
+    }
+
+    /// Absorbing the whitespace must not lose it.
+    #[test]
+    fn backslash_break_whitespace_absorption_stays_lossless() {
+        let input = "foo \\\nbar\n\n*a* \t\\\nb\n\n# c  \\\nd\n";
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            let tree = crate::parser::parse(input, Some(opts(dialect)));
+            assert_eq!(tree.to_string(), input, "{dialect:?}");
+        }
+    }
 }

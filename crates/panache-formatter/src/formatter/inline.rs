@@ -657,7 +657,9 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             if config.formatter_extensions.escaped_line_breaks {
                 "\\\n".to_string()
             } else {
-                node.text().to_string()
+                let text = node.text().to_string();
+                let ending = text.find(['\r', '\n']).map_or("", |at| &text[at..]);
+                format!("{}{ending}", crate::utils::hard_break_marker(&text))
             }
         }
         SyntaxKind::NONBREAKING_SPACE => "\\ ".to_string(),

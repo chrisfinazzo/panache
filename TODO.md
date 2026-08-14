@@ -173,16 +173,13 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
-- [ ] Whitespace directly before a backslash hard line break should not survive
-  as `Space`. `pandoc -f markdown` reads `foo \` + newline as
-  `[Str "foo", LineBreak]`, but panache keeps the space in the preceding
-  `TEXT` token and the projector emits `[Str "foo", Space, LineBreak]`.
-  Affects paragraphs and headings alike (`# foo \` diverges the same way),
-  so the fix belongs wherever the backslash break is recognized, not in the
-  heading path added for `# foo\`. Losslessness means the space stays in the
-  CST; either the break token absorbs it the way the whitespace-form hard
-  break does, or `pandoc_ast.rs` drops a `Space` that immediately precedes a
-  `LineBreak`. Prefer the CST-side fix per the projector-drift item above.
+- [ ] The `gfm` flavor does not enable `escaped_line_breaks`, so a backslash
+  before a newline never becomes a hard break. `pandoc -f gfm` reads `foo \` +
+  newline as `[Str "foo", LineBreak]` (GFM follows CommonMark here); panache
+  leaves the backslash as literal text and the newline as a soft break, so
+  `panache format` rewraps the two lines into `foo \ bar`. The extension
+  default is the bug, not the parser path --- `commonmark` already has it on
+  and reads the same input correctly.
 
 - [ ] An escaped space before heading attributes is swallowed by the attribute
   gap. `pandoc -f markdown` reads `# foo\ {#id}` as

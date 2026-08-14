@@ -319,10 +319,35 @@ pub fn pandoc_slugify(text: &str) -> String {
     out
 }
 
+/// The visible marker of a `HARD_LINE_BREAK` token: its text without the line
+/// ending it carries.
+///
+/// Two source forms reach us. A whitespace-only run is the marker itself, so it
+/// has to be re-emitted verbatim --- nothing else would carry the break. The
+/// backslash form is carried by the backslash alone, and the parser folds any
+/// whitespace sitting in front of it into the same token (`foo \` reads as
+/// `[Str "foo", LineBreak]`, no `Space`, matching pandoc). That whitespace is
+/// padding, not marker, so it is dropped here rather than re-emitted.
+pub fn hard_break_marker(text: &str) -> &str {
+    let marker = text.trim_end_matches(['\r', '\n']);
+    if marker.ends_with('\\') { "\\" } else { marker }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{crossref_resolution_labels, implicit_heading_ids};
+    use super::{crossref_resolution_labels, hard_break_marker, implicit_heading_ids};
     use crate::config::FormatterExtensions;
+
+    #[test]
+    fn hard_break_marker_keeps_a_whitespace_run_but_trims_backslash_padding() {
+        assert_eq!(hard_break_marker("  \n"), "  ");
+        assert_eq!(hard_break_marker("\t\r\n"), "\t");
+        assert_eq!(hard_break_marker("\\\n"), "\\");
+        assert_eq!(hard_break_marker(" \\\n"), "\\");
+        assert_eq!(hard_break_marker("\t \\\r\n"), "\\");
+        // The heading form has no line ending of its own.
+        assert_eq!(hard_break_marker(" \\"), "\\");
+    }
 
     #[test]
     fn crossref_resolution_labels_keep_exact_match() {

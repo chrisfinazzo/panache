@@ -322,6 +322,8 @@ golden_test_cases!(
     headings,
     heading_in_list_item,
     heading_trailing_backslash,
+    hard_break_backslash_whitespace,
+    hard_break_backslash_whitespace_preserve,
     setext_headings,
     setext_after_setext_pandoc,
     setext_heading_in_list_item,

@@ -16,7 +16,25 @@
 /// clears it on its own: both `pandoc -f markdown` and `pandoc -f commonmark`
 /// report `LineBreak` for `a\t\nb`.
 pub(crate) fn trailing_ws_run(bytes: &[u8], lower_bound: usize, nl_pos: usize) -> (usize, bool) {
-    let mut start = nl_pos;
+    let (start, width) = scan_back(bytes, lower_bound, nl_pos);
+    (start, width >= 2)
+}
+
+/// Where the whitespace run immediately before `pos` starts, with no width bar.
+///
+/// The backslash form of a hard line break swallows whatever whitespace sits
+/// in front of it, however narrow: both `pandoc -f markdown` and
+/// `pandoc -f commonmark` read `foo \` + newline as `[Str "foo", LineBreak]`,
+/// with no `Space` between. Losslessness means those bytes still have to live
+/// somewhere, so the break token takes them.
+pub(crate) fn ws_run_start(bytes: &[u8], lower_bound: usize, pos: usize) -> usize {
+    scan_back(bytes, lower_bound, pos).0
+}
+
+/// Walk back over spaces and tabs from `pos`, returning where the run starts
+/// and how many columns wide it is. A tab is worth a whole tab stop.
+fn scan_back(bytes: &[u8], lower_bound: usize, pos: usize) -> (usize, usize) {
+    let mut start = pos;
     let mut width = 0usize;
 
     while start > lower_bound {
@@ -28,7 +46,7 @@ pub(crate) fn trailing_ws_run(bytes: &[u8], lower_bound: usize, nl_pos: usize) -
         start -= 1;
     }
 
-    (start, width >= 2)
+    (start, width)
 }
 
 /// Whether a line ending at `nl_end` closes the whole block rather than
