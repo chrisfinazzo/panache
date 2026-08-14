@@ -1,5 +1,6 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 111
 expression: cst_output
 ---
 DOCUMENT@0..110
@@ -77,10 +78,6 @@ DOCUMENT@0..110
     ATX_HEADING_MARKER@95..96
       ATX_HEADING_MARKER@95..96 "#"
     WHITESPACE@96..97 " "
-    HEADING_CONTENT@97..104
-      TEXT@97..104 "garply#"
-    ATTRIBUTE@104..109
-      TEXT@104..105 "{"
-      ATTR_ID@105..108 "#id"
-      TEXT@108..109 "}"
+    HEADING_CONTENT@97..109
+      TEXT@97..109 "garply#{#id}"
     NEWLINE@109..110 "\n"

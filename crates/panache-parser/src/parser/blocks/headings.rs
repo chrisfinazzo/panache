@@ -250,11 +250,18 @@ pub(crate) fn emit_setext_heading_text(
         );
     }
 
-    // Try to parse trailing attributes from heading text
+    // Try to parse trailing attributes from heading text. The block is only
+    // syntax while `header_attributes` is on; under `commonmark`, `Foo {#id}`
+    // over a `===` underline is `Header 1 ("",[],[]) [Str "Foo", Space,
+    // Str "{#id}"]`.
+    let trailing_attrs = if config.extensions.header_attributes {
+        try_parse_trailing_attributes_with_pos(text_trimmed)
+    } else {
+        None
+    };
+
     let (text_content, attr_text, space_before_attrs) =
-        if let Some((_attrs, text_before, start_brace_pos)) =
-            try_parse_trailing_attributes_with_pos(text_trimmed)
-        {
+        if let Some((_attrs, text_before, start_brace_pos)) = trailing_attrs {
             let space = &text_trimmed[text_before.len()..start_brace_pos];
             let raw_attrs = &text_trimmed[start_brace_pos..];
             (text_before, Some(raw_attrs), space)
@@ -406,6 +413,13 @@ fn closing_run_len(text: &str) -> usize {
 /// of a run is ordinary content: `# foo # {#id}` carries the id, while
 /// `# foo {#id} #` is `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]` ---
 /// braces and all, with the id auto-generated from that text.
+///
+/// The block is only syntax while `header_attributes` is on. Under
+/// `commonmark`, `gfm`, and `markdown_mmd` the braces are content
+/// (`# foo {#id}` is `[Str "foo", Space, Str "{#id}"]`), which also frees the
+/// formatter from re-emitting a closing run in front of them --- the run is
+/// load-bearing only while the block is live. The mmd `[id]` identifier rides
+/// on its own extension, so `markdown_mmd` still reads `# foo [My ID]`.
 fn split_atx_tail<'a>(
     heading_text: &'a str,
     spaces_after_marker: usize,
@@ -415,7 +429,10 @@ fn split_atx_tail<'a>(
     let mut rest = heading_text;
 
     // A `{...}` block only counts when it ends the line, so it comes off first.
-    if let Some((_attrs, text_before, open_brace)) = try_parse_trailing_attributes_with_pos(rest) {
+    if config.extensions.header_attributes
+        && let Some((_attrs, text_before, open_brace)) =
+            try_parse_trailing_attributes_with_pos(rest)
+    {
         tail.attrs = Some(&rest[open_brace..]);
         tail.attr_gap = &rest[text_before.len()..open_brace];
         rest = text_before;
@@ -671,6 +688,58 @@ mod tests {
         assert_eq!(split("foo#", &config), ("foo#".into(), String::new()));
         assert_eq!(split("foo###", &config), ("foo###".into(), String::new()));
         assert_eq!(split("foo #", &config), ("foo".into(), "#".into()));
+    }
+
+    #[test]
+    fn a_brace_block_needs_the_header_attributes_extension() {
+        // `pandoc -f commonmark`: `# foo {#id}` is
+        // `Header 1 ("",[],[]) [Str "foo", Space, Str "{#id}"]`, so the block is
+        // content and the run in front of it is decoration like any other.
+        let config = commonmark_options();
+        assert_eq!(
+            split("foo {#id}", &config),
+            ("foo {#id}".into(), String::new())
+        );
+        assert_eq!(
+            split("garply#{#id}", &config),
+            ("garply#{#id}".into(), String::new())
+        );
+        // With the extension on, the block comes off and the run in front of it
+        // stays decoration: `Header 1 (id) [Str "foo"]`.
+        let config = ParserOptions::default();
+        assert_eq!(split("foo {#id}", &config), ("foo".into(), String::new()));
+    }
+
+    #[test]
+    fn a_gated_off_brace_block_emits_no_attribute_node() {
+        for (input, flavor, want_attribute) in [
+            ("# foo {#id}\n", crate::options::Flavor::CommonMark, false),
+            (
+                "foo {#id}\n===\n",
+                crate::options::Flavor::CommonMark,
+                false,
+            ),
+            ("# foo {#id}\n", crate::options::Flavor::Pandoc, true),
+            ("foo {#id}\n===\n", crate::options::Flavor::Pandoc, true),
+        ] {
+            let config = ParserOptions {
+                flavor,
+                dialect: Dialect::for_flavor(flavor),
+                extensions: crate::options::Extensions::for_flavor(flavor),
+                ..ParserOptions::default()
+            };
+            let tree = crate::parse(input, Some(config));
+            assert_eq!(tree.text().to_string(), input);
+            let has_attribute = tree
+                .descendants()
+                .any(|n| n.kind() == SyntaxKind::ATTRIBUTE);
+            assert_eq!(
+                has_attribute,
+                want_attribute,
+                "{input:?} under {flavor:?} should{} carry an ATTRIBUTE node",
+                if want_attribute { "" } else { " not" }
+            );
+        }
     }
 
     #[test]

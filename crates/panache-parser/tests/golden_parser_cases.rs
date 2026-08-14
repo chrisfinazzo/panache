@@ -394,6 +394,8 @@ golden_test_cases!(
     hard_break_backslash_whitespace_commonmark,
     hard_break_backslash_whitespace_pandoc,
     headings,
+    heading_attributes_gated_commonmark,
+    heading_attributes_gated_pandoc,
     heading_closing_run_commonmark,
     heading_closing_run_pandoc,
     heading_trailing_backslash_commonmark,

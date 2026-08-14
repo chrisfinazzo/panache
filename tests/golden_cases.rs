@@ -320,6 +320,7 @@ golden_test_cases!(
     table_pipe_surplus_in_list_item,
     list_mixed_bullets_commonmark,
     headings,
+    heading_attributes_commonmark,
     heading_closing_run,
     heading_in_list_item,
     heading_trailing_backslash,

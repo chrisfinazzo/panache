@@ -1,0 +1,45 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 111
+expression: cst_output
+---
+DOCUMENT@0..110
+  HEADING@0..20
+    ATX_HEADING_MARKER@0..1
+      ATX_HEADING_MARKER@0..1 "#"
+    WHITESPACE@1..2 " "
+    HEADING_CONTENT@2..13
+      TEXT@2..13 "ATX heading"
+    WHITESPACE@13..14 " "
+    ATTRIBUTE@14..19
+      TEXT@14..15 "{"
+      ATTR_ID@15..18 "#id"
+      TEXT@18..19 "}"
+    NEWLINE@19..20 "\n"
+  BLANK_LINE@20..21
+    BLANK_LINE@20..21 "\n"
+  HEADING@21..73
+    HEADING_CONTENT@21..35
+      TEXT@21..35 "Setext heading"
+    WHITESPACE@35..36 " "
+    ATTRIBUTE@36..46
+      TEXT@36..37 "{"
+      ATTR_ID@37..40 "#id"
+      WHITESPACE@40..41 " "
+      ATTR_CLASS@41..45 ".cls"
+      TEXT@45..46 "}"
+    NEWLINE@46..47 "\n"
+    SETEXT_HEADING_UNDERLINE@47..72
+      SETEXT_HEADING_UNDERLINE@47..72 "===================== ..."
+    NEWLINE@72..73 "\n"
+  BLANK_LINE@73..74
+    BLANK_LINE@73..74 "\n"
+  HEADING@74..110
+    ATX_HEADING_MARKER@74..76
+      ATX_HEADING_MARKER@74..76 "##"
+    WHITESPACE@76..77 " "
+    HEADING_CONTENT@77..106
+      TEXT@77..106 "Run in front of a blo ..."
+    WHITESPACE@106..107 " "
+    ATX_HEADING_MARKER@107..109 "##"
+    NEWLINE@109..110 "\n"

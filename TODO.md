@@ -206,14 +206,28 @@ Note any known parser issues here.
   of `HEADING_CONTENT`, never part of it, so the `trim_end_matches` in
   `format_heading` only ever eats content the parser deliberately kept.
 
-- [ ] Heading attribute blocks are parsed regardless of the `header_attributes`
+- [x] Heading attribute blocks are parsed regardless of the `header_attributes`
   extension. `split_atx_tail` calls `try_parse_trailing_attributes_with_pos`
   unconditionally, so `# foo {#id}` emits an `ATTRIBUTE` node even under
   `commonmark`, where the extension is off and `pandoc -f commonmark`
   renders `<h1>foo {#id}</h1>`. Nothing in the parser reads
   `Extensions::header_attributes` at all. Gating it also settles the closing
   run the formatter re-emits in front of a brace block (`format_heading`),
-  which is only load-bearing while the block is live.
+  which is only load-bearing while the block is live. Both the ATX and the
+  setext path are gated; `mmd_header_identifiers` stays independent,
+  matching `markdown_mmd`, where `# foo [My ID]` carries the id but
+  `# foo {#id}` does not.
+
+- [ ] Heading identifiers are auto-generated regardless of the
+  `auto_identifiers` extension. `# Plain heading` under `commonmark`
+  projects as `Header 1 ("plain-heading",[],[])`, where
+  `pandoc -f commonmark` gives `("",[],[])`. The extension is off for
+  `commonmark` and `myst`, but the slug helper in `src/utils.rs` (mirrored
+  in the formatter crate) only branches on `gfm_auto_identifiers`, so it
+  hands every flavor an id. The LSP's `references` and `goto_definition`
+  handlers do gate on `auto_identifiers`; `pandoc_ast.rs` and the linter's
+  anchor rules do not. The id is derived downstream, so the fix belongs in
+  that helper and its callers, not in the CST.
 
 ### Incremental Parsing
 

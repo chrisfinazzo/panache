@@ -716,7 +716,9 @@ implicit-header-references = true
 :   Require blank line before headers (default: enabled)
 
 `header-attributes`
-:   Full attribute syntax on headers `{#id .class key=value}` (default: enabled)
+:   Full attribute syntax on headers `{#id .class key=value}` (default: enabled
+    for `pandoc`, `quarto`, and `rmarkdown`). When disabled, a trailing `{...}`
+    is ordinary heading text, matching `pandoc -f commonmark`.
 
 `implicit-header-references`
 :   Allow `[Heading]` links to reference headers (default: enabled)
