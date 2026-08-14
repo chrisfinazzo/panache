@@ -1,0 +1,58 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..84
+  HORIZONTAL_RULE@0..12
+    HORIZONTAL_RULE@0..11 "----- -----"
+    NEWLINE@11..12 "\n"
+  BLANK_LINE@12..13
+    BLANK_LINE@12..13 "\n"
+  SIMPLE_TABLE@13..37
+    TABLE_HEADER@13..19
+      TABLE_CELL@13..18
+        TEXT@13..18 "A   B"
+      TABLE_CELL@18..18
+      NEWLINE@18..19 "\n"
+    TABLE_SEPARATOR@19..31
+      TABLE_SEP_DASHES@19..24 "-----"
+      TABLE_SEP_WHITESPACE@24..25 " "
+      TABLE_SEP_DASHES@25..30 "-----"
+      NEWLINE@30..31 "\n"
+    TABLE_ROW@31..37
+      TABLE_CELL@31..36
+        TEXT@31..36 "x   y"
+      TABLE_CELL@36..36
+      NEWLINE@36..37 "\n"
+  BLANK_LINE@37..38
+    BLANK_LINE@37..38 "\n"
+  HORIZONTAL_RULE@38..50
+    HORIZONTAL_RULE@38..49 "-----------"
+    NEWLINE@49..50 "\n"
+  BLANK_LINE@50..51
+    BLANK_LINE@50..51 "\n"
+  SIMPLE_TABLE@51..71
+    TABLE_HEADER@51..57
+      TABLE_CELL@51..52
+        TEXT@51..52 "A"
+      WHITESPACE@52..55 "   "
+      TABLE_CELL@55..56
+        TEXT@55..56 "B"
+      NEWLINE@56..57 "\n"
+    TABLE_SEPARATOR@57..65
+      TABLE_SEP_DASHES@57..60 "---"
+      TABLE_SEP_WHITESPACE@60..61 " "
+      TABLE_SEP_DASHES@61..64 "---"
+      NEWLINE@64..65 "\n"
+    TABLE_ROW@65..71
+      TABLE_CELL@65..66
+        TEXT@65..66 "x"
+      WHITESPACE@66..69 "   "
+      TABLE_CELL@69..70
+        TEXT@69..70 "y"
+      NEWLINE@70..71 "\n"
+  BLANK_LINE@71..72
+    BLANK_LINE@71..72 "\n"
+  HORIZONTAL_RULE@72..84
+    HORIZONTAL_RULE@72..83 "-----------"
+    NEWLINE@83..84 "\n"

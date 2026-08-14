@@ -3585,6 +3585,16 @@ fn scan_multiline_table(
     let start_pos = window.pos();
     let is_column_sep_start = !is_full_width_start;
 
+    // A blank line directly under the opener disqualifies every reading, so the
+    // opener is a plain horizontal rule and whatever follows parses on its own.
+    // Pandoc's headed shape spells this out (`tableSep >>~ notFollowedBy
+    // blankline`); the headerless one gets it from `sepEndBy1`, which needs a
+    // row before the first row separator. A blank *between* rows stays legal ---
+    // that is what makes a multiline table multiline.
+    if start_pos + 1 >= lines.len() || window.line(start_pos + 1).trim().is_empty() {
+        return None;
+    }
+
     // Whether the opening line is a single unbroken dash run. A spaced opener
     // (`----- -----`, `- - - - -`) can still be a top border, but only the
     // unbroken form doubles as a single-column definition (see
@@ -3730,19 +3740,15 @@ fn scan_multiline_table(
     // with blank separators, `---`). Pandoc parses this shape as a table, so
     // accept it when the scan saw blank-separated content and a closing dash
     // run. Without a blank line the span stays with the headerless simple
-    // table path (one row per line, no soft-break joining), and a blank line
-    // directly after the opener disqualifies the table (pandoc keeps the
-    // rule-plus-blocks reading there), both matching pandoc.
+    // table path (one row per line, no soft-break joining), matching pandoc.
+    // (The blank-directly-after-the-opener case is already rejected above.)
     //
     // Only an unbroken opener qualifies: a spaced one already carries its own
     // column structure, so its no-column-separator reading is the headerless
     // shape (`is_column_sep_start`), not a single column spanning the runs.
-    let first_row_adjacent =
-        start_pos + 1 < lines.len() && !window.line(start_pos + 1).trim().is_empty();
     let headerless_single_column = !found_column_sep
         && is_full_width_start
         && opener_is_continuous
-        && first_row_adjacent
         && found_blank_line
         && found_closing_sep;
     if headerless_single_column {
@@ -4414,6 +4420,41 @@ mod multiline_table_tests {
         let (consumed, node) = parse_multiline(&input).expect("headerless reading still applies");
         assert_eq!(consumed, 6);
         assert!(header_cells(&node).is_empty());
+    }
+
+    #[test]
+    fn test_blank_line_after_opener_disqualifies_every_reading() {
+        // Pandoc's headed shape refuses a blank under the top border
+        // (`tableSep >>~ notFollowedBy blankline`) and the headerless one needs
+        // a row before the first row separator, so the opener stays a
+        // horizontal rule and what follows parses on its own.
+
+        // Headed: a column separator below would otherwise complete the shape.
+        assert!(
+            parse_multiline(&[
+                "-----------",
+                "",
+                "A   B",
+                "--- ---",
+                "x   y",
+                "",
+                "-----------"
+            ])
+            .is_none()
+        );
+
+        // Headerless: the spaced opener would otherwise define the columns.
+        assert!(
+            parse_multiline(&["----- -----", "", "A   B", "", "x   y", "", "----- -----"])
+                .is_none()
+        );
+
+        // Single-column: the bare dash run would otherwise be the column.
+        assert!(parse_multiline(&["-------", "", "A   B", "", "x   y", "", "-------"]).is_none());
+
+        // A blank *between* rows stays legal --- that is what makes a multiline
+        // table multiline.
+        assert!(parse_multiline(&["-------", "A   B", "", "x   y", "", "-------"]).is_some());
     }
 
     // Phase 7.1: Unit tests for emit_table_cell() helper
