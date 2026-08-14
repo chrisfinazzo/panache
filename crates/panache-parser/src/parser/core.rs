@@ -1384,7 +1384,7 @@ impl<'a> Parser<'a> {
         self.containers.push(Container::DefinitionList {});
         self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
         self.containers.push(Container::DefinitionItem {});
-        definition_lists::emit_term(&mut self.builder, &term_line, self.config);
+        definition_lists::emit_term(&mut self.builder, &term_line, None, self.config);
     }
 
     /// Append `line` to whichever open text buffer is holding the current
@@ -1676,7 +1676,7 @@ impl<'a> Parser<'a> {
             self.containers.push(Container::DefinitionList {});
             self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
             self.containers.push(Container::DefinitionItem {});
-            emit_term(&mut self.builder, first_line_content, self.config);
+            emit_term(&mut self.builder, first_line_content, None, self.config);
             self.emit_term_lookahead_blank_lines(blank_count);
             return blank_count;
         }
@@ -3272,7 +3272,7 @@ impl<'a> Parser<'a> {
                 self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
                 self.containers.push(Container::DefinitionItem {});
 
-                emit_term(&mut self.builder, content, self.config);
+                emit_term(&mut self.builder, content, indent_to_emit, self.config);
                 self.emit_term_lookahead_blank_lines(*blank_count);
                 extras = *blank_count;
             }
@@ -3621,7 +3621,7 @@ impl<'a> Parser<'a> {
         self.containers.push(Container::DefinitionList {});
         self.builder.start_node(SyntaxKind::DEFINITION_ITEM.into());
         self.containers.push(Container::DefinitionItem {});
-        emit_term(&mut self.builder, &text, self.config);
+        emit_term(&mut self.builder, &text, None, self.config);
         self.emit_term_lookahead_blank_lines(blank_count);
         Some(blank_count)
     }

@@ -115,10 +115,15 @@ pub(in crate::parser) fn definition_marker_in_list_frame(
     try_parse_definition_marker(line)
 }
 
-/// Emit a term line into the syntax tree
+/// Emit a term line into the syntax tree.
+///
+/// `stripped_indent` carries the literal container-indent bytes the dispatcher
+/// already removed from `line`; callers that pass an unstripped line pass
+/// `None` and let the indent below be read off the line itself.
 pub(crate) fn emit_term(
     builder: &mut GreenNodeBuilder<'static>,
     line: &str,
+    stripped_indent: Option<&str>,
     config: &ParserOptions,
 ) {
     builder.start_node(SyntaxKind::TERM.into());
@@ -130,6 +135,9 @@ pub(crate) fn emit_term(
     // WHITESPACE, the way the definition marker's own indent is emitted, so
     // the term's inlines are just the term and the formatter can re-apply the
     // indent it is rendering at.
+    if let Some(indent) = stripped_indent.filter(|indent| !indent.is_empty()) {
+        builder.token(SyntaxKind::WHITESPACE.into(), indent);
+    }
     let indent_len = trimmed_text.len() - trimmed_text.trim_start().len();
     if indent_len > 0 {
         builder.token(SyntaxKind::WHITESPACE.into(), &trimmed_text[..indent_len]);

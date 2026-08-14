@@ -1,0 +1,54 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..71
+  DEFINITION_LIST@0..71
+    DEFINITION_ITEM@0..71
+      TERM@0..8
+        INLINE_CODE@0..7
+          INLINE_CODE_MARKER@0..1 "`"
+          INLINE_CODE_CONTENT@1..6 "OUTER"
+          INLINE_CODE_MARKER@6..7 "`"
+        NEWLINE@7..8 "\n"
+      DEFINITION@8..71
+        DEFINITION_MARKER@8..9 ":"
+        WHITESPACE@9..12 "   "
+        PLAIN@12..18
+          TEXT@12..17 "Text."
+          NEWLINE@17..18 "\n"
+        BLANK_LINE@18..19
+          BLANK_LINE@18..19 "\n"
+        DEFINITION_LIST@19..71
+          DEFINITION_ITEM@19..44
+            TERM@19..31
+              WHITESPACE@19..23 "    "
+              INLINE_CODE@23..30
+                INLINE_CODE_MARKER@23..24 "`"
+                INLINE_CODE_CONTENT@24..29 "first"
+                INLINE_CODE_MARKER@29..30 "`"
+              NEWLINE@30..31 "\n"
+            DEFINITION@31..44
+              WHITESPACE@31..35 "    "
+              DEFINITION_MARKER@35..36 ":"
+              WHITESPACE@36..39 "   "
+              PLAIN@39..44
+                TEXT@39..43 "one."
+                NEWLINE@43..44 "\n"
+          BLANK_LINE@44..45
+            BLANK_LINE@44..45 "\n"
+          DEFINITION_ITEM@45..71
+            TERM@45..58
+              WHITESPACE@45..49 "    "
+              INLINE_CODE@49..57
+                INLINE_CODE_MARKER@49..50 "`"
+                INLINE_CODE_CONTENT@50..56 "second"
+                INLINE_CODE_MARKER@56..57 "`"
+              NEWLINE@57..58 "\n"
+            DEFINITION@58..71
+              WHITESPACE@58..62 "    "
+              DEFINITION_MARKER@62..63 ":"
+              WHITESPACE@63..66 "   "
+              PLAIN@66..71
+                TEXT@66..70 "two."
+                NEWLINE@70..71 "\n"

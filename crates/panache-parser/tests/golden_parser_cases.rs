@@ -271,6 +271,7 @@ golden_test_cases!(
     definition_list_in_nested_blockquote_pandoc,
     definition_list_inner_list_no_blank,
     definition_list_lazy_marker_in_blockquote_pandoc,
+    definition_list_nested_second_term_indent,
     definition_list_nesting,
     definition_list_orphan_marker,
     definition_list_pandoc_bare_leading_list,
