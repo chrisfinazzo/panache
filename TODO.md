@@ -1213,6 +1213,22 @@ panache starts caching NodePtrs across edits.
   either shape. Also fixes the unquoted case and continuous-opener tables
   closing on a spaced border.
 
+- [ ] A **spaced dash line followed by a blank line** swallows the simple table
+  under it: `----- -----\n\nA   B\n----- -----\nx   y\n` parses as one
+  `MULTILINE_TABLE` over the first four lines plus a `PARAGRAPH` holding
+  `x   y`, where pandoc gives `HorizontalRule` then a simple table with
+  `A`/`B` as the head and `x`/`y` as the row. Formatting is not idempotent
+  (`debug format --checks all` fails; pass 2 widens the rule to the full
+  line and mangles the row). Pre-existing and unrelated to the spaced-border
+  fix above --- confirmed identical before it. The cause is that the
+  headerless reading (`is_column_sep_start`) has no blank-line-after-opener
+  guard: the `headerless_single_column` fallback rejects that shape ("a
+  blank line directly after the opener disqualifies the table"), but the
+  ordinary headerless path in `scan_multiline_table` accepts it. Likely fix
+  is to extend the same guard, but check pandoc first --- the blank is legal
+  *between* body rows, so only a blank immediately after the opener
+  disqualifies.
+
 - [ ] Simple tables in **definition bodies nested one container deep** fail the
   debug checks (pre-existing; surfaced while probing the footer-rule fix,
   which does not touch these shapes). Four probed reproducers: a quoted
