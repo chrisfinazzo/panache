@@ -374,6 +374,30 @@ impl<'a> AtxTail<'a> {
     }
 }
 
+/// Length of the trailing `#` run that can close an ATX heading, in bytes.
+///
+/// The run stops at a hash the content escaped, since that hash is text rather
+/// than decoration: `# foo \##` is `[Str "foo", Space, Str "#"]`, so only the
+/// last hash closes the heading, and `# foo\#` closes on none at all. A
+/// backslash that is itself escaped does not escape the hash behind it, so
+/// `# foo\\##` closes on both.
+fn closing_run_len(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1] == b'#' {
+        let backslashes = bytes[..end - 1]
+            .iter()
+            .rev()
+            .take_while(|&&b| b == b'\\')
+            .count();
+        if backslashes % 2 == 1 {
+            break;
+        }
+        end -= 1;
+    }
+    bytes.len() - end
+}
+
 /// Split an ATX heading line's tail the way pandoc's `atxClosing` reads it.
 ///
 /// pandoc parses the closing decoration as an optional mmd `[id]`, then a run
@@ -399,20 +423,18 @@ fn split_atx_tail<'a>(
 
     // Then the closing `#` run, which sits in front of that block.
     let run_end = trim_end_spaces_tabs(rest).len();
-    let hashes = rest[..run_end]
-        .bytes()
-        .rev()
-        .take_while(|&b| b == b'#')
-        .count();
+    let hashes = closing_run_len(&rest[..run_end]);
     if hashes > 0 {
         let before_run = &rest[..run_end - hashes];
-        // The run has to be preceded by whitespace. That whitespace is either
-        // in `before_run`, or --- when the content is empty (`### ###`) --- the
-        // post-marker spaces the caller already consumed.
-        let preceded_by_ws = before_run
-            .chars()
-            .last()
-            .is_some_and(|c| c == ' ' || c == '\t')
+        // CommonMark requires whitespace in front of the run (`# foo#` is
+        // `<h1>foo#</h1>`); pandoc does not (`Header 1 (foo) [Str "foo"]`).
+        // That whitespace is either in `before_run`, or --- when the content is
+        // empty (`### ###`) --- the post-marker spaces the caller consumed.
+        let preceded_by_ws = config.dialect != Dialect::CommonMark
+            || before_run
+                .chars()
+                .last()
+                .is_some_and(|c| c == ' ' || c == '\t')
             || (before_run.is_empty() && spaces_after_marker > 0);
         if preceded_by_ws {
             tail.closing_run = &rest[run_end - hashes..run_end];
@@ -446,6 +468,20 @@ fn split_atx_tail<'a>(
 
     tail.content = rest;
     tail
+}
+
+/// Whether re-emitting `content` as an ATX heading's content would read part of
+/// it back as trailing decoration rather than as content.
+///
+/// The formatter drops a heading's closing `#` run, which is only safe while
+/// the content it leaves behind cannot pass for decoration itself: pandoc reads
+/// the attribute block and the run from the end of the line, so `# foo {#id} #`
+/// and `# foo # #` both lose meaning when the run goes. Callers that get `true`
+/// here have to keep a run in front of the line ending.
+pub fn content_reads_as_decoration(content: &str, config: &ParserOptions) -> bool {
+    // One post-marker space, matching the `# ` the formatter emits.
+    let tail = split_atx_tail(content, 1, config);
+    tail.attrs.is_some() || !tail.closing_run.is_empty()
 }
 
 /// Emit an ATX heading node to the builder.
@@ -595,6 +631,73 @@ mod tests {
         let input = "### Extension: `smart` ###\n";
         let tree = crate::parse(input, Some(crate::ParserOptions::default()));
         assert_eq!(tree.text().to_string(), input);
+    }
+
+    fn commonmark_options() -> ParserOptions {
+        let flavor = crate::options::Flavor::CommonMark;
+        ParserOptions {
+            flavor,
+            dialect: Dialect::for_flavor(flavor),
+            extensions: crate::options::Extensions::for_flavor(flavor),
+            ..ParserOptions::default()
+        }
+    }
+
+    /// `(content, closing_run)` for a heading line's tail, with the post-marker
+    /// space the caller consumes assumed present.
+    fn split(text: &str, config: &ParserOptions) -> (String, String) {
+        let tail = split_atx_tail(text, 1, config);
+        (tail.content.to_string(), tail.closing_run.to_string())
+    }
+
+    #[test]
+    fn pandoc_closes_a_heading_on_a_run_with_no_space_in_front() {
+        // `pandoc -f markdown`: `# foo#` is `Header 1 (foo) [Str "foo"]`.
+        let config = ParserOptions::default();
+        assert_eq!(split("foo#", &config), ("foo".into(), "#".into()));
+        assert_eq!(split("foo###", &config), ("foo".into(), "###".into()));
+        // The braces are content, since pandoc reads the block only after the
+        // run: `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]`.
+        assert_eq!(
+            split("foo {#id}#", &config),
+            ("foo {#id}".into(), "#".into())
+        );
+    }
+
+    #[test]
+    fn commonmark_requires_a_space_in_front_of_a_closing_run() {
+        // CommonMark keeps the hash in the content: `# foo#` is `<h1>foo#</h1>`.
+        let config = commonmark_options();
+        assert_eq!(split("foo#", &config), ("foo#".into(), String::new()));
+        assert_eq!(split("foo###", &config), ("foo###".into(), String::new()));
+        assert_eq!(split("foo #", &config), ("foo".into(), "#".into()));
+    }
+
+    #[test]
+    fn an_escaped_hash_ends_the_closing_run() {
+        // `# foo \##` is `[Str "foo", Space, Str "#"]`: the escaped hash is
+        // content, so the run is the single hash behind it.
+        let config = ParserOptions::default();
+        assert_eq!(split("foo \\##", &config), ("foo \\#".into(), "#".into()));
+        assert_eq!(split("foo\\###", &config), ("foo\\#".into(), "##".into()));
+        // An escaped hash with nothing behind it leaves no run at all:
+        // `# foo\#` is `Str "foo#"`.
+        assert_eq!(split("foo\\#", &config), ("foo\\#".into(), String::new()));
+        // The backslash is itself escaped, so the run is real: `# foo\\##` is
+        // `Str "foo\"`.
+        assert_eq!(split("foo\\\\##", &config), ("foo\\\\".into(), "##".into()));
+    }
+
+    #[test]
+    fn a_closing_run_still_ends_the_line() {
+        // A hash run mid-line is content, not decoration:
+        // `# foo # bar #` is `[Str "foo", Space, Str "#", Space, Str "bar"]`.
+        let config = ParserOptions::default();
+        assert_eq!(
+            split("foo # bar #", &config),
+            ("foo # bar".into(), "#".into())
+        );
+        assert_eq!(split("foo#bar", &config), ("foo#bar".into(), String::new()));
     }
 
     #[test]

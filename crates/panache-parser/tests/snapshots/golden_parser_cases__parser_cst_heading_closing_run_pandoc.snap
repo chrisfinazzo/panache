@@ -1,0 +1,90 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..110
+  HEADING@0..7
+    ATX_HEADING_MARKER@0..1
+      ATX_HEADING_MARKER@0..1 "#"
+    WHITESPACE@1..2 " "
+    HEADING_CONTENT@2..5
+      TEXT@2..5 "foo"
+    ATX_HEADING_MARKER@5..6 "#"
+    NEWLINE@6..7 "\n"
+  BLANK_LINE@7..8
+    BLANK_LINE@7..8 "\n"
+  HEADING@8..18
+    ATX_HEADING_MARKER@8..10
+      ATX_HEADING_MARKER@8..10 "##"
+    WHITESPACE@10..11 " "
+    HEADING_CONTENT@11..14
+      TEXT@11..14 "bar"
+    ATX_HEADING_MARKER@14..17 "###"
+    NEWLINE@17..18 "\n"
+  BLANK_LINE@18..19
+    BLANK_LINE@18..19 "\n"
+  HEADING@19..34
+    ATX_HEADING_MARKER@19..22
+      ATX_HEADING_MARKER@19..22 "###"
+    WHITESPACE@22..23 " "
+    HEADING_CONTENT@23..32
+      TEXT@23..32 "baz {#id}"
+    ATX_HEADING_MARKER@32..33 "#"
+    NEWLINE@33..34 "\n"
+  BLANK_LINE@34..35
+    BLANK_LINE@34..35 "\n"
+  HEADING@35..48
+    ATX_HEADING_MARKER@35..39
+      ATX_HEADING_MARKER@35..39 "####"
+    WHITESPACE@39..40 " "
+    HEADING_CONTENT@40..46
+      TEXT@40..44 "qux "
+      ESCAPED_CHAR@44..46 "\\#"
+    ATX_HEADING_MARKER@46..47 "#"
+    NEWLINE@47..48 "\n"
+  BLANK_LINE@48..49
+    BLANK_LINE@48..49 "\n"
+  HEADING@49..62
+    ATX_HEADING_MARKER@49..54
+      ATX_HEADING_MARKER@49..54 "#####"
+    WHITESPACE@54..55 " "
+    HEADING_CONTENT@55..61
+      TEXT@55..59 "quux"
+      ESCAPED_CHAR@59..61 "\\#"
+    NEWLINE@61..62 "\n"
+  BLANK_LINE@62..63
+    BLANK_LINE@62..63 "\n"
+  HEADING@63..80
+    ATX_HEADING_MARKER@63..69
+      ATX_HEADING_MARKER@63..69 "######"
+    WHITESPACE@69..70 " "
+    HEADING_CONTENT@70..77
+      TEXT@70..75 "corge"
+      ESCAPED_CHAR@75..77 "\\#"
+    ATX_HEADING_MARKER@77..79 "##"
+    NEWLINE@79..80 "\n"
+  BLANK_LINE@80..81
+    BLANK_LINE@80..81 "\n"
+  HEADING@81..94
+    ATX_HEADING_MARKER@81..82
+      ATX_HEADING_MARKER@81..82 "#"
+    WHITESPACE@82..83 " "
+    HEADING_CONTENT@83..91
+      TEXT@83..91 "grault #"
+    WHITESPACE@91..92 " "
+    ATX_HEADING_MARKER@92..93 "#"
+    NEWLINE@93..94 "\n"
+  BLANK_LINE@94..95
+    BLANK_LINE@94..95 "\n"
+  HEADING@95..110
+    ATX_HEADING_MARKER@95..96
+      ATX_HEADING_MARKER@95..96 "#"
+    WHITESPACE@96..97 " "
+    HEADING_CONTENT@97..103
+      TEXT@97..103 "garply"
+    ATX_HEADING_MARKER@103..104 "#"
+    ATTRIBUTE@104..109
+      TEXT@104..105 "{"
+      ATTR_ID@105..108 "#id"
+      TEXT@108..109 "}"
+    NEWLINE@109..110 "\n"
