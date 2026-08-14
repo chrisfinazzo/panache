@@ -1196,12 +1196,22 @@ panache starts caching NodePtrs across edits.
   types (simple, pipe, grid, multiline); pinned in
   `blocks/tests/losslessness.rs`.
 
-- [ ] A **multiline table in a blockquote is not idempotent**:
+- [x] A **multiline table in a blockquote is not idempotent**:
   `> ----- -----\n> A     B\n> ----- -----\n> x     y\n>\n> ----- -----\n`
   formats pass 1 to full-width top/bottom dash lines, and pass 2 shrinks
   them to the column width and drops the blank `>` row separator line before
   the closer. Reproduces without a footnote wrapper and predates the
   blockquote-in-footnote losslessness fix above (surfaced while pinning it).
+  Fixed in the parser: pandoc's table border is `many1 (dashedLine '-')`, so
+  a *spaced* dash line (`----- -----`) opens a headed multiline table
+  exactly like a continuous one. Panache only accepted the continuous form,
+  so pass 1 parsed the opener as a horizontal rule and rendered it
+  full-width, which pass 2 then read as a real table. The look-ahead scan is
+  now split out of `try_parse_multiline_table`, a spaced opener gets the
+  headed reading first and falls back to the headerless one (pandoc's
+  `multilineTable False` before `True`), and either border shape closes
+  either shape. Also fixes the unquoted case and continuous-opener tables
+  closing on a spaced border.
 
 - [ ] Simple tables in **definition bodies nested one container deep** fail the
   debug checks (pre-existing; surfaced while probing the footer-rule fix,

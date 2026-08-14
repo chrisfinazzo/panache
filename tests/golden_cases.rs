@@ -172,6 +172,7 @@ golden_test_cases!(
     blockquote_list_item_html_block,
     blockquote_multiline_table,
     blockquote_multiline_table_non_ascii,
+    blockquote_multiline_table_spaced_border,
     blockquote_pipe_table,
     blockquote_pipe_table_caption,
     blockquote_pipe_table_surplus_cells,

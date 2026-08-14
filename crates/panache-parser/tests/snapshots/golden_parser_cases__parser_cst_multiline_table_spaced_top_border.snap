@@ -1,0 +1,83 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..118
+  MULTILINE_TABLE@0..53
+    TABLE_SEPARATOR@0..12
+      TABLE_SEP_DASHES@0..5 "-----"
+      TABLE_SEP_WHITESPACE@5..6 " "
+      TABLE_SEP_DASHES@6..11 "-----"
+      NEWLINE@11..12 "\n"
+    TABLE_HEADER@12..20
+      TABLE_CELL@12..17
+        TEXT@12..17 "A    "
+      WHITESPACE@17..18 " "
+      TABLE_CELL@18..19
+        TEXT@18..19 "B"
+      NEWLINE@19..20 "\n"
+    TABLE_SEPARATOR@20..32
+      TABLE_SEP_DASHES@20..25 "-----"
+      TABLE_SEP_WHITESPACE@25..26 " "
+      TABLE_SEP_DASHES@26..31 "-----"
+      NEWLINE@31..32 "\n"
+    TABLE_ROW@32..40
+      TABLE_CELL@32..37
+        TEXT@32..37 "x    "
+      WHITESPACE@37..38 " "
+      TABLE_CELL@38..39
+        TEXT@38..39 "y"
+      NEWLINE@39..40 "\n"
+    BLANK_LINE@40..41
+      BLANK_LINE@40..41 "\n"
+    TABLE_SEPARATOR@41..53
+      TABLE_SEP_DASHES@41..46 "-----"
+      TABLE_SEP_WHITESPACE@46..47 " "
+      TABLE_SEP_DASHES@47..52 "-----"
+      NEWLINE@52..53 "\n"
+  BLANK_LINE@53..54
+    BLANK_LINE@53..54 "\n"
+  BLOCK_QUOTE@54..118
+    BLOCK_QUOTE_MARKER@54..55 ">"
+    WHITESPACE@55..56 " "
+    MULTILINE_TABLE@56..118
+      TABLE_SEPARATOR@56..68
+        TABLE_SEP_DASHES@56..61 "-----"
+        TABLE_SEP_WHITESPACE@61..62 " "
+        TABLE_SEP_DASHES@62..67 "-----"
+        NEWLINE@67..68 "\n"
+      TABLE_HEADER@68..78
+        LINE_PREFIX@68..69 ">"
+        LINE_PREFIX@69..70 " "
+        TABLE_CELL@70..75
+          TEXT@70..75 "A    "
+        WHITESPACE@75..76 " "
+        TABLE_CELL@76..77
+          TEXT@76..77 "B"
+        NEWLINE@77..78 "\n"
+      TABLE_SEPARATOR@78..92
+        LINE_PREFIX@78..79 ">"
+        LINE_PREFIX@79..80 " "
+        TABLE_SEP_DASHES@80..85 "-----"
+        TABLE_SEP_WHITESPACE@85..86 " "
+        TABLE_SEP_DASHES@86..91 "-----"
+        NEWLINE@91..92 "\n"
+      TABLE_ROW@92..102
+        LINE_PREFIX@92..93 ">"
+        LINE_PREFIX@93..94 " "
+        TABLE_CELL@94..99
+          TEXT@94..99 "x    "
+        WHITESPACE@99..100 " "
+        TABLE_CELL@100..101
+          TEXT@100..101 "y"
+        NEWLINE@101..102 "\n"
+      BLANK_LINE@102..104
+        LINE_PREFIX@102..103 ">"
+        BLANK_LINE@103..104 "\n"
+      TABLE_SEPARATOR@104..118
+        LINE_PREFIX@104..105 ">"
+        LINE_PREFIX@105..106 " "
+        TABLE_SEP_DASHES@106..111 "-----"
+        TABLE_SEP_WHITESPACE@111..112 " "
+        TABLE_SEP_DASHES@112..117 "-----"
+        NEWLINE@117..118 "\n"

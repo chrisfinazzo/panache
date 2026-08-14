@@ -592,7 +592,7 @@ fn is_grid_table_start(line: &str) -> bool {
 /// - A full-width dash separator (----)
 /// - A column separator with dashes and spaces (---- ---- ----)
 fn is_multiline_table_start(line: &str) -> bool {
-    try_parse_multiline_separator(line).is_some() || is_column_separator(line)
+    is_multiline_border(line)
 }
 
 /// Check if there's a table following a potential caption at this position.
@@ -3520,6 +3520,17 @@ fn is_column_separator(line: &str) -> bool {
     try_parse_table_separator(line).is_some() && !line.contains('*') && !line.contains('_')
 }
 
+/// Check if a line can serve as a multiline table's top or bottom border.
+///
+/// Pandoc's border is `many1 (dashedLine '-')` --- one *or more* dash runs --- so
+/// a spaced line (`----- -----`) borders a table exactly like a continuous one
+/// (`-----------`). Both shapes therefore open a headed table and close either
+/// shape; the narrower `try_parse_multiline_separator` alone would reject the
+/// spaced form and leave it to the horizontal-rule parser.
+fn is_multiline_border(line: &str) -> bool {
+    try_parse_multiline_separator(line).is_some() || is_column_separator(line)
+}
+
 fn is_headerless_single_row_without_blank(
     lines: &(impl LineView + ?Sized),
     row_start: usize,
@@ -3549,34 +3560,36 @@ fn is_headerless_single_row_without_blank(
     true
 }
 
-/// Try to parse a multiline table starting at the given position.
-/// Returns the number of lines consumed if successful.
-pub(crate) fn try_parse_multiline_table(
+/// The shape a successful multiline-table look-ahead scan found.
+struct MultilineShape {
+    /// One past the table's last line (the closing border).
+    end_pos: usize,
+    /// Line whose dash runs define the columns.
+    column_sep_pos: usize,
+    /// Whether the lines above `column_sep_pos` are a header.
+    has_header: bool,
+}
+
+/// Scan forward from the window's start for a complete multiline-table shape.
+///
+/// `is_full_width_start` picks the reading of the opening line: `true` treats it
+/// as a top border whose columns come from a later separator line (pandoc's
+/// `multilineTable False`), `false` treats it as the column separator itself
+/// (pandoc's headerless `multilineTable True`). The caller has already checked
+/// that the opening line can serve in the requested role.
+fn scan_multiline_table(
     window: &StrippedLines<'_, '_>,
-    builder: &mut GreenNodeBuilder<'static>,
-    config: &ParserOptions,
-) -> Option<usize> {
+    is_full_width_start: bool,
+) -> Option<MultilineShape> {
     let lines = window.raw();
     let start_pos = window.pos();
-    if start_pos >= lines.len() {
-        return None;
-    }
+    let is_column_sep_start = !is_full_width_start;
 
-    // Cheap gate: a multiline table's first line is either a full-width dash
-    // separator or a column separator. Table detection runs at every block
-    // start, so any per-line work for every paragraph that can't begin a
-    // multiline table was quadratic on large documents. Peek just the dispatch
-    // line via `strip_at` and bail before any further scanning.
-    let first_line = window.strip_at(start_pos);
-
-    // First line can be either:
-    // 1. A full-width dash separator (for tables with headers)
-    // 2. A column separator (for headerless tables)
-    let is_full_width_start = try_parse_multiline_separator(first_line).is_some();
-    let is_column_sep_start = !is_full_width_start && is_column_separator(first_line);
-    if !is_full_width_start && !is_column_sep_start {
-        return None;
-    }
+    // Whether the opening line is a single unbroken dash run. A spaced opener
+    // (`----- -----`, `- - - - -`) can still be a top border, but only the
+    // unbroken form doubles as a single-column definition (see
+    // `headerless_single_column` below).
+    let opener_is_continuous = try_parse_multiline_separator(window.line(start_pos)).is_some();
 
     // Detection scans read the container-prefix-stripped view lazily through the
     // window (see `LineView`) so a multiline table nested in `list → blockquote`
@@ -3669,7 +3682,7 @@ pub(crate) fn try_parse_multiline_table(
             if pos < lines.len() && !window.ends_container_lines(pos) {
                 let next = window.line(pos);
                 let is_valid_closer = if is_full_width_start {
-                    try_parse_multiline_separator(next).is_some()
+                    is_multiline_border(next)
                 } else {
                     // A headerless table may close with a column separator
                     // (`---- ----`) or a single continuous dash run (`--------`).
@@ -3691,8 +3704,10 @@ pub(crate) fn try_parse_multiline_table(
             continue;
         }
 
-        // Check for closing full-width dashes (only for full-width-start tables).
-        if is_full_width_start && try_parse_multiline_separator(line).is_some() {
+        // Check for the closing border (only for full-width-start tables). The
+        // column separator was already claimed above, so a second border-shaped
+        // line here closes the table whether it is continuous or spaced.
+        if is_full_width_start && is_multiline_border(line) {
             found_closing_sep = true;
             pos += 1;
             break;
@@ -3718,10 +3733,15 @@ pub(crate) fn try_parse_multiline_table(
     // table path (one row per line, no soft-break joining), and a blank line
     // directly after the opener disqualifies the table (pandoc keeps the
     // rule-plus-blocks reading there), both matching pandoc.
+    //
+    // Only an unbroken opener qualifies: a spaced one already carries its own
+    // column structure, so its no-column-separator reading is the headerless
+    // shape (`is_column_sep_start`), not a single column spanning the runs.
     let first_row_adjacent =
         start_pos + 1 < lines.len() && !window.line(start_pos + 1).trim().is_empty();
     let headerless_single_column = !found_column_sep
         && is_full_width_start
+        && opener_is_continuous
         && first_row_adjacent
         && found_blank_line
         && found_closing_sep;
@@ -3760,7 +3780,58 @@ pub(crate) fn try_parse_multiline_table(
         return None;
     }
 
-    let end_pos = pos;
+    Some(MultilineShape {
+        end_pos: pos,
+        column_sep_pos,
+        has_header,
+    })
+}
+
+/// Try to parse a multiline table starting at the given position.
+/// Returns the number of lines consumed if successful.
+pub(crate) fn try_parse_multiline_table(
+    window: &StrippedLines<'_, '_>,
+    builder: &mut GreenNodeBuilder<'static>,
+    config: &ParserOptions,
+) -> Option<usize> {
+    let lines = window.raw();
+    let start_pos = window.pos();
+    if start_pos >= lines.len() {
+        return None;
+    }
+
+    // Cheap gate: a multiline table's first line is either a full-width dash
+    // separator or a column separator. Table detection runs at every block
+    // start, so any per-line work for every paragraph that can't begin a
+    // multiline table was quadratic on large documents. Peek just the dispatch
+    // line via `strip_at` and bail before any further scanning.
+    let first_line = window.strip_at(start_pos);
+
+    // First line can be either:
+    // 1. A full-width dash separator (for tables with headers)
+    // 2. A column separator (for headerless tables)
+    let is_continuous_start = try_parse_multiline_separator(first_line).is_some();
+    let is_spaced_start = !is_continuous_start && is_column_separator(first_line);
+    if !is_continuous_start && !is_spaced_start {
+        return None;
+    }
+
+    // A spaced opener (`----- -----`) is ambiguous: pandoc's border is
+    // `many1 (dashedLine '-')`, so it can be a headed table's top border *or*
+    // the headerless shape's own column separator. Pandoc tries
+    // `multilineTable False` (headed) before `multilineTable True`, so read it
+    // as a top border first and only fall back to the headerless reading when
+    // the headed shape does not complete.
+    let shape = match scan_multiline_table(window, true) {
+        Some(shape) => shape,
+        None if is_spaced_start => scan_multiline_table(window, false)?,
+        None => return None,
+    };
+    let MultilineShape {
+        end_pos,
+        column_sep_pos,
+        has_header,
+    } = shape;
 
     // Extract column boundaries from the separator line. A single-column
     // headerless table's separator is a bare dash run, which
@@ -3829,7 +3900,7 @@ pub(crate) fn try_parse_multiline_table(
         }
 
         // Closing separator (full-width or column separator at end)
-        if try_parse_multiline_separator(line).is_some() || is_column_separator(line) {
+        if is_multiline_border(line) {
             // Emit any accumulated row lines
             if !current_row_indices.is_empty() {
                 let kind = if in_header {
@@ -4270,6 +4341,79 @@ mod multiline_table_tests {
 
         // Should not parse because first line isn't a full-width separator
         assert!(result.is_none());
+    }
+
+    /// Parse `input` as a multiline table and return the resulting node.
+    fn parse_multiline(input: &[&str]) -> Option<(usize, SyntaxNode)> {
+        let mut builder = GreenNodeBuilder::new();
+        let prefix = ContainerPrefix::default();
+        let window = StrippedLines::new(input, 0, &prefix);
+        let consumed = try_parse_multiline_table(&window, &mut builder, &ParserOptions::default())?;
+        Some((consumed, SyntaxNode::new_root(builder.finish())))
+    }
+
+    /// The cell texts of the table's `TABLE_HEADER` rows, if any.
+    fn header_cells(node: &SyntaxNode) -> Vec<String> {
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::TABLE_HEADER)
+            .flat_map(|row| {
+                row.descendants()
+                    .filter(|n| n.kind() == SyntaxKind::TABLE_CELL)
+            })
+            .map(|cell| cell.text().to_string().trim().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_multiline_border_detection() {
+        // Pandoc's border is `many1 (dashedLine '-')`, so spaced runs border a
+        // table just like a continuous one.
+        assert!(is_multiline_border("-------"));
+        assert!(is_multiline_border("----- -----"));
+        assert!(is_multiline_border("- - -"));
+        assert!(!is_multiline_border("+---+"));
+        assert!(!is_multiline_border("_____"));
+        assert!(!is_multiline_border("A     B"));
+    }
+
+    #[test]
+    fn test_spaced_top_border_opens_headed_table() {
+        // `----- -----` is a top border, not a horizontal rule: the header row
+        // and column separator below complete pandoc's `multilineTable False`.
+        let input = vec![
+            "----- -----",
+            "A     B",
+            "----- -----",
+            "x     y",
+            "",
+            "----- -----",
+        ];
+
+        let (consumed, node) = parse_multiline(&input).expect("spaced border opens a table");
+        assert_eq!(consumed, 6);
+        assert_eq!(header_cells(&node), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_spaced_closing_border_closes_table() {
+        // A continuous opener may close on a spaced border and vice versa.
+        let input = vec!["-------", "A   B", "--- ---", "x   y", "", "--- ---"];
+
+        let (consumed, node) = parse_multiline(&input).expect("spaced border closes a table");
+        assert_eq!(consumed, 6);
+        assert_eq!(header_cells(&node), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_spaced_opener_without_column_separator_stays_headerless() {
+        // No column-separator line below, so the headed reading fails and the
+        // opener falls back to defining the columns itself (pandoc's
+        // `multilineTable True`, which yields an empty table head).
+        let input = vec!["----- -----", "A   B", "", "x   y", "", "----- -----"];
+
+        let (consumed, node) = parse_multiline(&input).expect("headerless reading still applies");
+        assert_eq!(consumed, 6);
+        assert!(header_cells(&node).is_empty());
     }
 
     // Phase 7.1: Unit tests for emit_table_cell() helper
