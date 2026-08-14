@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+This update add a compatibility layer for Pandoc 3.10. Panache now parses Pandoc
+markdown at this version by default. Otherwise, this is overwhelmingly a bug
+fix release, which addresses a large number of edge cases in the parser and formatter.
+
 ## [3.3.0](https://github.com/jolars/panache/compare/v3.2.0...v3.3.0) (2026-08-07)
 
 ### Features
