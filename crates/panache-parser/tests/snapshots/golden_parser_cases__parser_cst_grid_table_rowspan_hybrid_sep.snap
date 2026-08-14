@@ -1,0 +1,60 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..140
+  GRID_TABLE@0..140
+    TABLE_SEPARATOR@0..20
+      TABLE_SEP_DELIM@0..1 "+"
+      TABLE_SEP_DASHES@1..9 "--------"
+      TABLE_SEP_DELIM@9..10 "+"
+      TABLE_SEP_DASHES@10..18 "--------"
+      TABLE_SEP_DELIM@18..19 "+"
+      NEWLINE@19..20 "\n"
+    TABLE_HEADER@20..40
+      TEXT@20..21 "|"
+      WHITESPACE@21..22 " "
+      TABLE_CELL@22..26
+        TEXT@22..26 "Name"
+      WHITESPACE@26..29 "   "
+      TEXT@29..30 "|"
+      WHITESPACE@30..31 " "
+      TABLE_CELL@31..36
+        TEXT@31..36 "Value"
+      WHITESPACE@36..38 "  "
+      TEXT@38..39 "|"
+      NEWLINE@39..40 "\n"
+    TABLE_SEPARATOR@40..60
+      TABLE_SEP_DELIM@40..41 "+"
+      TABLE_SEP_COLON@41..42 ":"
+      TABLE_SEP_EQUALS@42..48 "======"
+      TABLE_SEP_COLON@48..49 ":"
+      TABLE_SEP_DELIM@49..50 "+"
+      TABLE_SEP_EQUALS@50..57 "======="
+      TABLE_SEP_COLON@57..58 ":"
+      TABLE_SEP_DELIM@58..59 "+"
+      NEWLINE@59..60 "\n"
+    TABLE_ROW@60..120
+      TEXT@60..61 "|"
+      WHITESPACE@61..62 " "
+      TABLE_CELL@62..67
+        TEXT@62..67 "group"
+      WHITESPACE@67..69 "  "
+      TEXT@69..70 "|"
+      WHITESPACE@70..71 " "
+      TABLE_CELL@71..74
+        TEXT@71..74 "1.5"
+      WHITESPACE@74..78 "    "
+      TEXT@78..79 "|"
+      NEWLINE@79..80 "\n"
+      TEXT@80..99 "| spans  +--------+"
+      NEWLINE@99..100 "\n"
+      TEXT@100..119 "| rows   | 22.0   |"
+      NEWLINE@119..120 "\n"
+    TABLE_SEPARATOR@120..140
+      TABLE_SEP_DELIM@120..121 "+"
+      TABLE_SEP_DASHES@121..129 "--------"
+      TABLE_SEP_DELIM@129..130 "+"
+      TABLE_SEP_DASHES@130..138 "--------"
+      TABLE_SEP_DELIM@138..139 "+"
+      NEWLINE@139..140 "\n"

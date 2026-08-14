@@ -1010,8 +1010,11 @@ fn format_unified_spanning_grid_table(
     }
     let idx_of = |pos: usize| -> Option<usize> { cols_pos.iter().position(|&b| b == pos) };
 
-    // Set of separator physical-line indices.
-    let sep_lines: BTreeSet<usize> = row_seps.iter().copied().collect();
+    // Alignment-row candidates: full sep-style lines only. `row_seps` also
+    // holds hybrid boundaries (rowspan text sharing a line with a sub-row
+    // separator), whose cell text could contain `=` without being the
+    // header separator.
+    let sep_lines: BTreeSet<usize> = layout.full_seps.iter().copied().collect();
 
     // Per-line marker skeleton: the canonical-boundary index of every `+`/`|` on
     // the line, with its char. `None` if a marker doesn't land on a boundary or

@@ -38,9 +38,16 @@ pub struct GridLayout {
     /// `+` positions across all sep-style lines). `cols_pos.len() - 1` fine
     /// columns.
     pub cols_pos: Vec<usize>,
-    /// Indices into the input `lines` of the sep-style lines (canonical row
-    /// boundaries). `row_seps.len() - 1` row bands.
+    /// Indices into the input `lines` of the canonical row boundaries:
+    /// sep-style lines plus hybrid content lines that carry a separator
+    /// segment aligned to the canonical columns (a rowspan cell's text
+    /// sharing the line with a sub-row separator, e.g. `| spans  +----+`).
+    /// `row_seps.len() - 1` row bands.
     pub row_seps: Vec<usize>,
+    /// Subset of `row_seps` that are full sep-style lines (no cell text).
+    /// The alignment-bearing separator is picked from these; a hybrid
+    /// line's text could contain `=` or `:` without being an alignment row.
+    pub full_seps: Vec<usize>,
     pub cells: Vec<GridCellRect>,
 }
 
@@ -98,11 +105,53 @@ pub fn analyze_grid(lines: &[&str]) -> Option<GridLayout> {
     }
     let ncols = cols_pos.len() - 1;
 
-    // Canonical row boundaries: line indices of sep-style lines.
-    let row_seps: Vec<usize> = (0..nlines).filter(|&i| is_sep_line[i]).collect();
+    // Canonical row boundaries: the sep-style lines, plus "hybrid" content
+    // lines that embed a separator segment aligned to the canonical columns
+    // (a rowspan cell's text sharing the line with a sub-row separator, e.g.
+    // `| spans  +--------+`). A qualifying segment is a maximal run of
+    // `+`/`-`/`=`/`:` chars that starts and ends with `+`, carries at least
+    // one `-`/`=`, and whose every `+` sits on a canonical column — so a
+    // `+--+` run inside ordinary cell text never invents a row boundary.
+    // This mirrors pandoc's `gridtables` cell tracing, where any line can
+    // close a cell in just the columns its border run covers.
+    let on_boundary = |pos: usize| cols_pos.binary_search(&pos).is_ok();
+    let has_hybrid_sep = |row: &[char]| -> bool {
+        let mut i = 0;
+        while i < row.len() {
+            if !matches!(row[i], '+' | '-' | '=' | ':') {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < row.len() && matches!(row[i], '+' | '-' | '=' | ':') {
+                i += 1;
+            }
+            let run = &row[start..i];
+            if run.len() >= 3
+                && run[0] == '+'
+                && run[run.len() - 1] == '+'
+                && run.iter().any(|&c| matches!(c, '-' | '='))
+                && run
+                    .iter()
+                    .enumerate()
+                    .all(|(k, &c)| c != '+' || on_boundary(start + k))
+            {
+                return true;
+            }
+        }
+        false
+    };
+    let row_seps: Vec<usize> = (0..nlines)
+        .filter(|&i| is_sep_line[i] || has_hybrid_sep(&grid[i]))
+        .collect();
     if row_seps.len() < 2 {
         return None;
     }
+    let full_seps: Vec<usize> = row_seps
+        .iter()
+        .copied()
+        .filter(|&i| is_sep_line[i])
+        .collect();
     let nrows = row_seps.len() - 1;
 
     // Detect cells.
@@ -144,6 +193,7 @@ pub fn analyze_grid(lines: &[&str]) -> Option<GridLayout> {
     Some(GridLayout {
         cols_pos,
         row_seps,
+        full_seps,
         cells,
     })
 }
@@ -232,4 +282,55 @@ fn find_grid_cell(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(layout: &GridLayout, r: usize, c: usize) -> &GridCellRect {
+        layout
+            .cells
+            .iter()
+            .find(|cell| cell.start_row == r && cell.start_col == c)
+            .unwrap_or_else(|| panic!("no cell at ({r}, {c})"))
+    }
+
+    /// A rowspan cell's text sharing a line with a sub-row separator
+    /// (`| spans  +--------+`) splits the row band at that line, like
+    /// pandoc's `gridtables` tracing.
+    #[test]
+    fn hybrid_text_separator_line_splits_row_band() {
+        let lines = [
+            "+--------+--------+",
+            "| Name   | Value  |",
+            "+:======:+=======:+",
+            "| group  | 1.5    |",
+            "| spans  +--------+",
+            "| rows   | 22.0   |",
+            "+--------+--------+",
+        ];
+        let layout = analyze_grid(&lines).unwrap();
+        assert_eq!(layout.row_seps, vec![0, 2, 4, 6]);
+        assert_eq!(layout.full_seps, vec![0, 2, 6]);
+        let group = cell(&layout, 1, 0);
+        assert_eq!(group.row_span, 2);
+        assert_eq!(group.content, "group\nspans\nrows");
+        assert_eq!(cell(&layout, 1, 1).content, "1.5");
+        assert_eq!(cell(&layout, 2, 1).content, "22.0");
+    }
+
+    /// A `+--+` run inside ordinary cell text whose `+`s do not sit on
+    /// canonical columns must not invent a row boundary.
+    #[test]
+    fn plus_run_off_boundary_is_not_a_row_sep() {
+        let lines = [
+            "+--------+--------+",
+            "| a +--+ | 1      |",
+            "+--------+--------+",
+        ];
+        let layout = analyze_grid(&lines).unwrap();
+        assert_eq!(layout.row_seps, vec![0, 2]);
+        assert_eq!(cell(&layout, 0, 0).content, "a +--+");
+    }
 }

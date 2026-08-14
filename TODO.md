@@ -1286,7 +1286,7 @@ panache starts caching NodePtrs across edits.
   `test_simple_table_alignment_survives_a_widened_column` and the
   `simple_table_alignment_widened_column` golden.
 
-- [ ] `analyze_grid` cannot model a **rowspan cell whose text sits on a sub-row
+- [x] `analyze_grid` cannot model a **rowspan cell whose text sits on a sub-row
   separator line**, and the projector drops cells for it:
   `grid_table_rowspan_aligned`'s `| spans  +--------+` hybrid projects as
   one body row holding a single `RowSpan 1` cell (`group spans rows`) ---
@@ -1302,6 +1302,14 @@ panache starts caching NodePtrs across edits.
   boundary is a whole line index. The formatter is unaffected: its widths
   read the source borders rather than the tiling (see the comment in
   `format_unified_spanning_grid_table`), so the gap is projector-only.
+  **Fixed** without per-column boundaries: `analyze_grid` now admits a
+  hybrid line as a row boundary when it carries a `+--+` run whose every `+`
+  sits on a canonical column, and the rectangle search lets cells in other
+  columns span through it --- which is per-column splitting in effect.
+  `GridLayout` grew `full_seps` (sep-style lines only) so the formatter's
+  alignment-row pick cannot land on a hybrid whose text contains `=`. Pinned
+  by unit tests in `grid_layout.rs`, the `grid_table_rowspan_hybrid_sep`
+  parser golden, and pandoc corpus case 0544.
 
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`

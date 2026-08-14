@@ -821,3 +821,10 @@
 # blockquote) projects the table instead of dropping it.
 542
 543
+
+# A rowspan cell's text can share a line with a sub-row separator
+# (`| spans  +--------+`). `analyze_grid` admits such hybrid lines as row
+# boundaries when their `+--+` run aligns to canonical columns, so 0544
+# keeps pandoc's two body rows with `RowSpan 2` instead of collapsing to
+# one row and dropping the value cells.
+544

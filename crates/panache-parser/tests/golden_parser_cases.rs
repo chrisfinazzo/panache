@@ -620,6 +620,7 @@ golden_test_cases!(
     grid_table,
     grid_table_in_list_blockquote,
     grid_table_indented_is_paragraph,
+    grid_table_rowspan_hybrid_sep,
     grid_table_rowspan_partial_separator,
     grid_table_nordics,
     grid_table_planets,
