@@ -1591,6 +1591,42 @@ fn quoted_band_marker_past_tolerance_is_lazy_continuation() {
 /// `Plain [a, SoftBreak, >, Space, q]`, not a nested quote. The buffered
 /// item text must stay ahead of the lazy line (the reorder here was a
 /// losslessness failure).
+/// The blank-line variant of the case above: after a blank quote line
+/// (`>`), the deeper `>` legitimately opens a `BlockQuote` nested in the
+/// quoted item (pandoc: `[Para "a", BlockQuote [Para "nested quote"]]`).
+/// The outer `> ` of the nested-quote line must be emitted in place,
+/// before the nested `BLOCK_QUOTE` node — buffering it into the item's
+/// `ListItemBuffer` flushed it (plus the next line's marker) as a stray
+/// trailing `PLAIN` after the quote, reordering the document.
+#[test]
+fn quoted_item_nested_quote_after_blank_keeps_marker_order() {
+    let input = "> - a\n>\n>   > nested quote\n> - b\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(
+        tree.text().to_string(),
+        input,
+        "CST must reassemble to the source bytes, got:\n{tree:#?}"
+    );
+    assert_eq!(
+        count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE),
+        2,
+        "the deeper `>` after a blank quote line opens a nested quote, got:\n{tree:#?}"
+    );
+    let items = find_nodes_of_type(&tree, SyntaxKind::LIST_ITEM);
+    assert_eq!(items.len(), 2, "two sibling items, got:\n{tree:#?}");
+    let first_item = items[0].text().to_string();
+    assert!(
+        first_item.contains("> nested quote"),
+        "the nested quote belongs to item `a`, got:\n{tree:#?}"
+    );
+    assert_eq!(
+        items[1].text().to_string(),
+        "- b\n",
+        "item `b` must not absorb stray marker bytes, got:\n{tree:#?}"
+    );
+}
+
 #[test]
 fn quoted_item_lazy_deeper_marker_stays_in_item_text() {
     for input in [

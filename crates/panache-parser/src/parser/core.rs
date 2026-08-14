@@ -4504,10 +4504,17 @@ impl<'a> Parser<'a> {
                     self.containers.push(Container::BlockQuote {});
                 }
             } else {
-                // First, emit markers for existing blockquote levels (before opening new ones)
+                // First, emit markers for existing blockquote levels (before
+                // opening new ones). Directly, not via
+                // `emit_or_buffer_blockquote_marker`: the list-item buffer was
+                // flushed and any paragraph closed above, so everything from
+                // here on is direct structural emission — a marker pushed into
+                // the (now empty) item buffer would only flush when the item
+                // closes, stranding it after the nested quote it prefixes.
                 for level in 0..current_bq_depth {
                     if let Some(info) = marker_info.get(level) {
-                        self.emit_or_buffer_blockquote_marker(
+                        blockquotes::emit_one_blockquote_marker(
+                            &mut self.builder,
                             info.leading_spaces,
                             info.has_trailing_space,
                         );

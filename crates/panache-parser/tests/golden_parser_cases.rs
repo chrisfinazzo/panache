@@ -344,6 +344,7 @@ golden_test_cases!(
     quoted_band_marker_terminates_nested_item,
     quoted_band_marker_past_tolerance_goes_lazy,
     quoted_item_lazy_deeper_quote_marker,
+    quoted_item_nested_quote_after_blank,
     pipe_table_in_footnote_stops_at_note_marker,
     pipe_table_in_list_item_stops_at_sibling_marker,
     simple_table_in_div_stops_at_closer,
