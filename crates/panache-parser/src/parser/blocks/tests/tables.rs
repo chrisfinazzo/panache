@@ -1940,6 +1940,41 @@ fn marker_shaped_delimiter_row_completes_a_quoted_nested_item_table() {
     );
 }
 
+/// Same shape one quote deeper. `pandoc 3.10.2 -f markdown -t native` on
+/// `- > > - a | b` + `  > >   - | -`:
+/// `BulletList [[BlockQuote [BlockQuote [BulletList [[Table …]]]]]]`.
+#[test]
+fn marker_shaped_delimiter_row_completes_a_twice_quoted_nested_item_table() {
+    let input = "- > > - a | b\n  > >   - | -\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::BLOCK_QUOTE)
+            .count(),
+        2,
+        "both quote markers open a quote: {node:#?}"
+    );
+    let table = first_of(&node, SyntaxKind::PIPE_TABLE).expect("table inside the quotes");
+    assert!(
+        table.text().to_string().contains("- | -"),
+        "the marker-shaped line is the delimiter row: {}",
+        table.text()
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        2,
+        "only the outer and quoted lists open, none on the delimiter row"
+    );
+}
+
 /// The table keeps growing past its delimiter row, and a following sibling
 /// marker still ends the item (`pandoc -f markdown -t native`: a two-item
 /// `BulletList` whose first item is the `Table`).

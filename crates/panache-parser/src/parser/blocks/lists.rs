@@ -2034,15 +2034,7 @@ fn finish_list_item_with_optional_nested(
     // arm in `format_list_item` emits the LIST_MARKER and the BLOCK_QUOTE
     // contents on the same output line so the round-trip stays
     // idempotent.
-    if !buffered_is_thematic_break
-        && text_to_buffer.starts_with('>')
-        && !text_to_buffer.starts_with(">>")
-    {
-        let bytes = text_to_buffer.as_bytes();
-        let has_trailing_space = bytes.get(1).copied() == Some(b' ');
-        let content_offset = if has_trailing_space { 2 } else { 1 };
-        let remaining = &text_to_buffer[content_offset..];
-
+    if !buffered_is_thematic_break && text_to_buffer.starts_with('>') {
         // Push outer ListItem with empty buffer; the inner BLOCK_QUOTE
         // counts as real content so `marker_only` is false.
         containers.push(Container::ListItem {
@@ -2052,13 +2044,26 @@ fn finish_list_item_with_optional_nested(
             virtual_marker_space,
         });
 
-        // Open BLOCK_QUOTE node inside the LIST_ITEM and emit the marker.
-        builder.start_node(SyntaxKind::BLOCK_QUOTE.into());
-        builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
-        if has_trailing_space {
-            builder.token(SyntaxKind::WHITESPACE.into(), " ");
+        // The whole run of markers opens, one BLOCK_QUOTE each, the way the
+        // same run does at the top level: `- > > a` and `- >> a` are both
+        // `BlockQuote [BlockQuote [Para …]]` under `-f markdown` and
+        // `-f commonmark`. Each marker takes at most one space with it.
+        let mut remaining = text_to_buffer.as_str();
+        let mut content_offset = 0;
+        while let Some(after_marker) = remaining.strip_prefix('>') {
+            builder.start_node(SyntaxKind::BLOCK_QUOTE.into());
+            builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
+            content_offset += 1;
+            remaining = match after_marker.strip_prefix(' ') {
+                Some(after_space) => {
+                    builder.token(SyntaxKind::WHITESPACE.into(), " ");
+                    content_offset += 1;
+                    after_space
+                }
+                None => after_marker,
+            };
+            containers.push(Container::BlockQuote {});
         }
-        containers.push(Container::BlockQuote {});
 
         let trimmed = trim_end_newlines(remaining);
 

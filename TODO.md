@@ -975,11 +975,15 @@ panache starts caching NodePtrs across edits.
       marker matching walks the whole ladder and needs the levels
       distinguishable (zeroing it merged `- > - a` with its outer list and
       folded issue 174's sibling items into one).
-    - `- > > - a | b` / `  > >   - | -` (list > quote > quote > list) does not
-      open the second quote at all: the `>>` guard in `lists.rs` catches only
-      the unspaced form, so the inner `> - a | b` stays paragraph text and
-      pandoc's `BlockQuote [BlockQuote [BulletList [[Table …]]]]` is a `Para`
-      here. Predates the entry above and is unaffected by it.
+    - ~~`- > > - a | b` / `  > >   - | -` (list > quote > quote > list) does
+      not open the second quote at all~~:
+      fixed. The same-line quote branch in `lists.rs` opened exactly one
+      `BLOCK_QUOTE` and bailed out on `>>` entirely, so every deeper run on a
+      marker line (`- >> a`, `- > > a`, `- >>> a`) lost its inner quotes to
+      paragraph text. It now consumes the whole marker run, one quote per `>`
+      with at most one space each --- the reading both `-f markdown` and
+      `-f commonmark` give the same run at top level --- and the inner-list
+      recursion below it then reaches the marker-line table lift unchanged.
 
   - [x] **A spaced dash run after a list is a sibling `HorizontalRule` now.**
     `- x` items, then `- - - -`, nested as the list's child (the projector

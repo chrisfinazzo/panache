@@ -417,6 +417,57 @@ fn nested_blockquote_without_blank_when_extension_disabled() {
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
 }
 
+/// A list marker line opens one quote per `>` in the run that follows it,
+/// exactly as the same run does at the top level. `pandoc -f markdown` and
+/// `-f commonmark -t native` agree on every shape here, e.g. `- > > a` is
+/// `BulletList [[BlockQuote [BlockQuote [Para [Str "a"]]]]]`.
+#[test]
+fn list_item_opens_every_quote_marker_on_the_marker_line() {
+    for (input, depth) in [
+        ("- > > a\n", 2),
+        ("- >> a\n", 2),
+        ("- > >a\n", 2),
+        ("- >>x\n", 2),
+        ("- >>> a\n", 3),
+        ("- > >> a\n", 3),
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            tree.text().to_string(),
+            input,
+            "parser must remain lossless: {input:?}"
+        );
+        assert_eq!(
+            count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE),
+            depth,
+            "{input:?}"
+        );
+        assert!(
+            !find_nodes_of_type(&tree, SyntaxKind::TEXT)
+                .iter()
+                .any(|t| t.text().to_string().contains('>')),
+            "no quote marker survives as text: {input:?}"
+        );
+    }
+}
+
+/// The run reaches a list marker on the same line too: `pandoc -f markdown
+/// -t native` on `- > > - a` is
+/// `BulletList [[BlockQuote [BlockQuote [BulletList [[Plain [Str "a"]]]]]]]`.
+#[test]
+fn list_item_quote_run_still_opens_an_inner_list() {
+    let input = "- > > - a\n";
+    let tree = parse_blocks(input);
+
+    assert_eq!(
+        tree.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::LIST), 2);
+}
+
 #[test]
 fn spec_blockquote_with_indented_code() {
     let input = ">     code";
