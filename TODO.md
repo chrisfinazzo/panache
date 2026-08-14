@@ -173,6 +173,27 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
+- [ ] Whitespace directly before a backslash hard line break should not survive
+  as `Space`. `pandoc -f markdown` reads `foo \` + newline as
+  `[Str "foo", LineBreak]`, but panache keeps the space in the preceding
+  `TEXT` token and the projector emits `[Str "foo", Space, LineBreak]`.
+  Affects paragraphs and headings alike (`# foo \` diverges the same way),
+  so the fix belongs wherever the backslash break is recognized, not in the
+  heading path added for `# foo\`. Losslessness means the space stays in the
+  CST; either the break token absorbs it the way the whitespace-form hard
+  break does, or `pandoc_ast.rs` drops a `Space` that immediately precedes a
+  `LineBreak`. Prefer the CST-side fix per the projector-drift item above.
+
+- [ ] An escaped space before heading attributes is swallowed by the attribute
+  gap. `pandoc -f markdown` reads `# foo\ {#id}` as
+  `Header 1 (id) [Str "foo\160"]` --- the `\ ` is content (a nonbreaking
+  space) and the attribute block is stripped separately. Panache's
+  `try_parse_trailing_attributes_with_pos` splits at the raw space, so the
+  backslash is left stranded in `TEXT "foo\"` and the space becomes the
+  `WHITESPACE` token before `ATTRIBUTE`, projecting `Str "foo\\"`. Trailing-
+  attribute detection needs to refuse a space that is itself escaped, in
+  headings and anywhere else the helper is used.
+
 ### Incremental Parsing
 
 Multi-session effort to harden, unify, and graduate incremental reparsing to
