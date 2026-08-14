@@ -2135,6 +2135,15 @@ fn finish_list_item_with_optional_nested(
                 content: remaining.to_string(),
             };
         }
+        // Marker-only quote (`- >`): nothing downstream will emit this line's
+        // newline, since the buffer that normally carries it was bypassed. The
+        // quote's content is empty, so the newline goes in the same
+        // `BLANK_LINE` shape a bare `>` gets at the top level.
+        if !remaining.is_empty() {
+            builder.start_node(SyntaxKind::BLANK_LINE.into());
+            builder.token(SyntaxKind::BLANK_LINE.into(), remaining);
+            builder.finish_node();
+        }
         return ListItemFinish::Done;
     }
 

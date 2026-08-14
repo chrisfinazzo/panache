@@ -451,6 +451,22 @@ fn list_item_opens_every_quote_marker_on_the_marker_line() {
     }
 }
 
+/// A marker-only quote still has to account for the line's newline. The
+/// quote's content is empty (`pandoc -f markdown -t native` on `- >`:
+/// `BulletList [[BlockQuote []]]`), so the newline lands in a `BLANK_LINE`
+/// inside the innermost quote --- the shape a bare `>` gets at the top level.
+#[test]
+fn list_item_marker_only_quote_keeps_its_newline() {
+    for input in ["- >\n", "- > >\n", "- >>\n", "- >\n\nx\n"] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            tree.text().to_string(),
+            input,
+            "parser must remain lossless: {input:?}"
+        );
+    }
+}
+
 /// The run reaches a list marker on the same line too: `pandoc -f markdown
 /// -t native` on `- > > - a` is
 /// `BulletList [[BlockQuote [BlockQuote [BulletList [[Plain [Str "a"]]]]]]]`.
