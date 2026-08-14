@@ -1249,20 +1249,21 @@ panache starts caching NodePtrs across edits.
   whose expected output shows the `------- --` form; fixing this will move
   that fixture and any other simple-table golden with multi-space cells.
 
-- [ ] Simple tables in **definition bodies nested one container deep** fail the
-  debug checks (pre-existing; surfaced while probing the footer-rule fix,
-  which does not touch these shapes). Four probed reproducers: a quoted
-  definition list in a div
-  (`::: warn\n> term\n> :   body\n>\n>     A    B\n>     --- ---\n>     x    y\n:::`)
-  breaks losslessness with duplicated `> > >` prefixes; a definition body in
-  a footnote loses the `term` line's indent (losslessness) and pass 2 slices
-  the following `[^2]:` marker into table cells (idempotency); a definition
-  body in a list item and a list in a footnote wobble their reindent between
-  passes and slice the trailing marker likewise. The slicing family is
-  adjacent to the tracked "list-start fence stops at plain
-  `nonindentSpaces`" gap: after the formatter deepens the content indent,
-  the marker no longer fails the frame within tolerance, so the fences stop
-  firing on the reparse.
+- [x] Simple tables in **definition bodies nested one container deep** fail the
+  debug checks. Three separate defects, each with its own fix: a quoted
+  definition body emitted every continuation line's `>` straight to the
+  builder while the body's `PLAIN` was still buffered, so the markers landed
+  before the whole node (`> > >` duplication);
+  `strip_line_0_with_indent_emit` reported only the *last* `ContentIndent`
+  op's bytes, dropping the outer container's columns when a definition body
+  nests in a footnote; and `ContainerPrefix::from_stack` pushed a
+  `ListAdvance` in front of a definition body's `ContentIndent`, double
+  counting the item's columns (a definition's `content_col` is measured in
+  the enclosing item's frame, so it already spans them). With the frames
+  consistent, the blank-line probe inside a blockquote also had to read
+  through the `>` markers; the tables now parse as tables and match
+  pandoc-native in all three containers. Pinned by
+  `definition_body_table_nested_containers` in both golden suites.
 
 - [ ] Simple-table rows holding a **sliced multi-space cell** are not idempotent
   even where the slicing matches pandoc: `- <div>` + indented table +

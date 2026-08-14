@@ -244,6 +244,7 @@ golden_test_cases!(
     dedented_fence_closes_list_commonmark,
     dedented_fence_closes_list_pandoc,
     definition_body_table_caption,
+    definition_body_table_nested_containers,
     definition_body_table_no_caption,
     definition_continuation_indent_stripped_pandoc,
     definition_continuation_tab_indent_pandoc,

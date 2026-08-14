@@ -268,6 +268,11 @@ impl ContainerPrefix {
         }
         let mut ops: SmallVec<[StripOp; INLINE_STRIP_OPS]> = SmallVec::new();
         let mut pending_list_advance: Option<PendingListAdvance> = None;
+        // Whether the walk flushed a list item's advance, whether or not it
+        // became an op — a definition body absorbs the advance into its own
+        // `ContentIndent` but the item is open all the same, so the list-start
+        // fence below still applies.
+        let mut saw_list_advance = false;
         // Set by a `FencedDiv` seen so far in the walk, i.e. outside every
         // container pushed after it. See `div_closer_ends_lines`.
         let mut div_open = false;
@@ -302,6 +307,7 @@ impl ContainerPrefix {
                 Container::BlockQuote { .. } => {
                     if let Some(p) = pending_list_advance.take() {
                         ops.push(StripOp::ListAdvance(p.content_col));
+                        saw_list_advance = true;
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
@@ -317,6 +323,7 @@ impl ContainerPrefix {
                 Container::FootnoteDefinition { content_col } => {
                     if let Some(p) = pending_list_advance.take() {
                         ops.push(StripOp::ListAdvance(p.content_col));
+                        saw_list_advance = true;
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
@@ -334,7 +341,19 @@ impl ContainerPrefix {
                 Container::Definition { content_col, .. }
                 | Container::Admonition { content_col } => {
                     if let Some(p) = pending_list_advance.take() {
-                        ops.push(StripOp::ListAdvance(p.content_col));
+                        // A definition body's `content_col` is measured on the
+                        // marker line *without* the enclosing item's indent
+                        // stripped — the same frame `ListItem::content_col`
+                        // uses — so it already spans the item's columns.
+                        // Re-taking them here would gobble the item's width
+                        // twice, and every continuation line indented past the
+                        // body's column would lose the surplus. An admonition's
+                        // column is a fixed width relative to its parent, so it
+                        // still needs the advance in front of it.
+                        if matches!(c, Container::Admonition { .. }) {
+                            ops.push(StripOp::ListAdvance(p.content_col));
+                        }
+                        saw_list_advance = true;
                         div_closer_ends_lines |= p.div_open;
                         html_closer_tag = p.html_open.or(html_closer_tag);
                     }
@@ -386,6 +405,7 @@ impl ContainerPrefix {
         }
         if let Some(p) = pending_list_advance {
             ops.push(StripOp::ListAdvance(p.content_col));
+            saw_list_advance = true;
             div_closer_ends_lines |= p.div_open;
             html_closer_tag = p.html_open.or(html_closer_tag);
         }
@@ -407,12 +427,9 @@ impl ContainerPrefix {
             content_container_indent(stack),
             "from_stack's ContentIndent ops must mirror the stack's content-container sum"
         );
-        // No `ListAdvance` op means no open item: there is no item run
-        // for a scan to be inside, so nothing to fence.
-        let list_start_detect = ops
-            .iter()
-            .any(|op| matches!(op, StripOp::ListAdvance(_)))
-            .then(|| ListMarkerDetect::from_options(config));
+        // No list advance in the walk means no open item: there is no
+        // item run for a scan to be inside, so nothing to fence.
+        let list_start_detect = saw_list_advance.then(|| ListMarkerDetect::from_options(config));
         Self {
             ops,
             list_marker_consumed_on_line_0,
@@ -848,17 +865,29 @@ impl ContainerPrefix {
     }
 
     /// Like [`Self::strip_line_0_for_emission`] but also returns the
-    /// bytes consumed by the *last* `ContentIndent` op (for re-emission
-    /// as WHITESPACE when a nested BlockQuote opens inside a
+    /// bytes consumed by the trailing run of `ContentIndent` ops (for
+    /// re-emission as WHITESPACE when a nested BlockQuote opens inside a
     /// footnote/definition).
+    ///
+    /// Nested content containers — a definition body inside a footnote,
+    /// say — each take their own columns off the same line, so the run
+    /// is merged into one slice. Reporting only the innermost op's bytes
+    /// drops every outer container's columns on the dispatch line: the
+    /// caller emits one token, and nothing else claims those bytes.
+    /// Adjacency is required, since a strip in between (a list indent,
+    /// which the core already emitted) would otherwise be swept into the
+    /// same token and written twice.
     pub fn strip_line_0_with_indent_emit<'a>(&self, line: &'a str) -> (&'a str, Option<&'a str>) {
         let last_list_idx = self
             .ops()
             .iter()
             .rposition(|op| matches!(op, StripOp::ListAdvance(_)));
         let ops = self.ops();
+        // Every strip returns a suffix of `line`, so a consumed run is
+        // named by the offsets its endpoints sit at.
+        let offset = |s: &str| line.len() - s.len();
         let mut s = line;
-        let mut emit: Option<&'a str> = None;
+        let mut emit: Option<Range<usize>> = None;
         let mut i = 0;
         while i < ops.len() {
             match ops[i] {
@@ -889,15 +918,19 @@ impl ContainerPrefix {
                 }
                 StripOp::ContentIndent(n) => {
                     let (next, e) = strip_content_indent(s, n as usize);
-                    s = next;
                     if e.is_some() {
-                        emit = e;
+                        let range = offset(s)..offset(next);
+                        emit = Some(match emit {
+                            Some(prev) if prev.end == range.start => prev.start..range.end,
+                            _ => range,
+                        });
                     }
+                    s = next;
                     i += 1;
                 }
             }
         }
-        (s, emit)
+        (s, emit.map(|range| &line[range]))
     }
 
     /// Split a continuation line into its captured container prefix — as

@@ -202,6 +202,7 @@ golden_test_cases!(
     citation_colon_paragraph_reflow,
     citation_prefix_paren_escape_idempotency_278,
     definition_body_simple_table,
+    definition_body_table_nested_containers,
     definition_list,
     definition_list_bare_marker_body,
     definition_list_heading_content,

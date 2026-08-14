@@ -1,0 +1,141 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..192
+  BLOCK_QUOTE@0..60
+    BLOCK_QUOTE_MARKER@0..1 ">"
+    WHITESPACE@1..2 " "
+    DEFINITION_LIST@2..60
+      DEFINITION_ITEM@2..60
+        TERM@2..7
+          TEXT@2..6 "term"
+          NEWLINE@6..7 "\n"
+        BLOCK_QUOTE_MARKER@7..8 ">"
+        WHITESPACE@8..9 " "
+        DEFINITION@9..60
+          DEFINITION_MARKER@9..10 ":"
+          WHITESPACE@10..13 "   "
+          PLAIN@13..18
+            TEXT@13..17 "body"
+            NEWLINE@17..18 "\n"
+          BLOCK_QUOTE_MARKER@18..19 ">"
+          BLANK_LINE@19..20
+            BLANK_LINE@19..20 "\n"
+          BLOCK_QUOTE_MARKER@20..21 ">"
+          WHITESPACE@21..22 " "
+          SIMPLE_TABLE@22..60
+            TABLE_HEADER@22..33
+              LINE_PREFIX@22..26 "    "
+              TABLE_CELL@26..27
+                TEXT@26..27 "A"
+              WHITESPACE@27..31 "    "
+              TABLE_CELL@31..32
+                TEXT@31..32 "B"
+              NEWLINE@32..33 "\n"
+            TABLE_SEPARATOR@33..47
+              LINE_PREFIX@33..34 ">"
+              LINE_PREFIX@34..35 " "
+              LINE_PREFIX@35..39 "    "
+              TABLE_SEP_DASHES@39..42 "---"
+              TABLE_SEP_WHITESPACE@42..43 " "
+              TABLE_SEP_DASHES@43..46 "---"
+              NEWLINE@46..47 "\n"
+            TABLE_ROW@47..60
+              LINE_PREFIX@47..48 ">"
+              LINE_PREFIX@48..49 " "
+              LINE_PREFIX@49..53 "    "
+              TABLE_CELL@53..54
+                TEXT@53..54 "x"
+              WHITESPACE@54..58 "    "
+              TABLE_CELL@58..59
+                TEXT@58..59 "y"
+              NEWLINE@59..60 "\n"
+  BLANK_LINE@60..61
+    BLANK_LINE@60..61 "\n"
+  FOOTNOTE_DEFINITION@61..132
+    FOOTNOTE_LABEL_START@61..63 "[^"
+    FOOTNOTE_LABEL_ID@63..64 "1"
+    FOOTNOTE_LABEL_END@64..65 "]"
+    FOOTNOTE_LABEL_COLON@65..66 ":"
+    WHITESPACE@66..67 " "
+    DEFINITION_LIST@67..132
+      DEFINITION_ITEM@67..132
+        TERM@67..72
+          TEXT@67..71 "term"
+          NEWLINE@71..72 "\n"
+        DEFINITION@72..132
+          WHITESPACE@72..76 "    "
+          DEFINITION_MARKER@76..77 ":"
+          WHITESPACE@77..80 "   "
+          PLAIN@80..85
+            TEXT@80..84 "body"
+            NEWLINE@84..85 "\n"
+          BLANK_LINE@85..86
+            BLANK_LINE@85..86 "\n"
+          SIMPLE_TABLE@86..132
+            TABLE_HEADER@86..101
+              LINE_PREFIX@86..94 "        "
+              TABLE_CELL@94..95
+                TEXT@94..95 "A"
+              WHITESPACE@95..99 "    "
+              TABLE_CELL@99..100
+                TEXT@99..100 "B"
+              NEWLINE@100..101 "\n"
+            TABLE_SEPARATOR@101..117
+              LINE_PREFIX@101..109 "        "
+              TABLE_SEP_DASHES@109..112 "---"
+              TABLE_SEP_WHITESPACE@112..113 " "
+              TABLE_SEP_DASHES@113..116 "---"
+              NEWLINE@116..117 "\n"
+            TABLE_ROW@117..132
+              LINE_PREFIX@117..125 "        "
+              TABLE_CELL@125..126
+                TEXT@125..126 "x"
+              WHITESPACE@126..130 "    "
+              TABLE_CELL@130..131
+                TEXT@130..131 "y"
+              NEWLINE@131..132 "\n"
+  BLANK_LINE@132..133
+    BLANK_LINE@132..133 "\n"
+  LIST@133..192
+    LIST_ITEM@133..192
+      LIST_MARKER@133..134 "-"
+      WHITESPACE@134..135 " "
+      DEFINITION_LIST@135..192
+        DEFINITION_ITEM@135..192
+          TERM@135..140
+            TEXT@135..139 "term"
+            NEWLINE@139..140 "\n"
+          DEFINITION@140..192
+            WHITESPACE@140..142 "  "
+            DEFINITION_MARKER@142..143 ":"
+            WHITESPACE@143..146 "   "
+            PLAIN@146..151
+              TEXT@146..150 "body"
+              NEWLINE@150..151 "\n"
+            BLANK_LINE@151..152
+              BLANK_LINE@151..152 "\n"
+            SIMPLE_TABLE@152..192
+              TABLE_HEADER@152..165
+                LINE_PREFIX@152..158 "      "
+                TABLE_CELL@158..159
+                  TEXT@158..159 "A"
+                WHITESPACE@159..163 "    "
+                TABLE_CELL@163..164
+                  TEXT@163..164 "B"
+                NEWLINE@164..165 "\n"
+              TABLE_SEPARATOR@165..179
+                LINE_PREFIX@165..171 "      "
+                TABLE_SEP_DASHES@171..174 "---"
+                TABLE_SEP_WHITESPACE@174..175 " "
+                TABLE_SEP_DASHES@175..178 "---"
+                NEWLINE@178..179 "\n"
+              TABLE_ROW@179..192
+                LINE_PREFIX@179..185 "      "
+                TABLE_CELL@185..186
+                  TEXT@185..186 "x"
+                WHITESPACE@186..190 "    "
+                TABLE_CELL@190..191
+                  TEXT@190..191 "y"
+                NEWLINE@191..192 "\n"

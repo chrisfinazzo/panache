@@ -1106,3 +1106,35 @@ fn definition_marker_behind_a_straddling_tab_promotes_the_term() {
     assert_eq!(find_all(&tree, SyntaxKind::DEFINITION_LIST).len(), 1);
     assert_eq!(tree.text().to_string(), input, "losslessness");
 }
+
+#[test]
+fn quoted_definition_body_keeps_every_continuation_marker() {
+    // A definition body buffers its PLAIN content and emits it in one go when
+    // the block closes. A blockquote marker on a *continuation* line has to be
+    // buffered along with it: emitted straight to the builder it lands before
+    // the whole PLAIN node, so the bytes come out of source order and every
+    // line after the first loses its `>`.
+    let input = "> term\n> :   body\n>\n>     one\n>     two\n";
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "losslessness");
+
+    // Two-line body, one continuation: the marker is buffered from the very
+    // first continuation line, with no blank line involved.
+    let input = "> term\n> :   body one\n>     body two\n";
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "losslessness");
+}
+
+#[test]
+fn quoted_definition_body_reads_an_indented_simple_table() {
+    // Pandoc reads the indented block as a `Table` inside the definition body
+    // (`pandoc -f markdown -t native`); the `>` prefixes must survive it.
+    let input = "> term\n> :   body\n>\n>     A    B\n>     --- ---\n>     x    y\n";
+    let tree = parse_blocks(input);
+    assert_eq!(tree.text().to_string(), input, "losslessness");
+    assert_eq!(
+        find_all(&tree, SyntaxKind::SIMPLE_TABLE).len(),
+        1,
+        "the indented block is a simple table, not paragraph text"
+    );
+}

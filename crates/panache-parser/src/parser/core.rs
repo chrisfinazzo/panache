@@ -3980,6 +3980,21 @@ impl<'a> Parser<'a> {
             return;
         }
 
+        // A definition body buffers its PLAIN content and emits it as one node
+        // when the block closes, so a marker written straight to the builder
+        // here lands *before* that node: the bytes come out of source order and
+        // every continuation line loses its `>` (losslessness). Buffer it the
+        // way the paragraph path does.
+        if let Some(Container::Definition {
+            plain_open: true,
+            plain_buffer,
+            ..
+        }) = self.containers.stack.last_mut()
+        {
+            plain_buffer.push_marker(leading_spaces, has_trailing_space);
+            return;
+        }
+
         // If paragraph is open, buffer the marker (it will be emitted at correct position)
         if matches!(self.containers.last(), Some(Container::Paragraph { .. })) {
             // Buffer the marker in the paragraph
@@ -5548,6 +5563,17 @@ impl<'a> Parser<'a> {
                 // Definition markers at top-level should start a new definition.
             } else {
                 let policy = ContinuationPolicy::new(self.config, &self.block_registry);
+                // Inside a blockquote a separator line still carries its `>`,
+                // so the raw line is never blank; the body sees a blank all the
+                // same. Read it through the markers, as the main dispatcher's
+                // blank flags do — otherwise a block that may not interrupt a
+                // paragraph (a simple table, say) never opens in a quoted
+                // definition body and the whole thing degrades to plain text.
+                let prev_line_blank = self.pos > 0 && {
+                    let prev_line = self.lines[self.pos - 1];
+                    let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
+                    is_blank_line(prev_line) || (prev_bq_depth > 0 && is_blank_line(prev_inner))
+                };
 
                 if definition_block_breaks
                     || policy.definition_plain_can_continue(
@@ -5555,10 +5581,8 @@ impl<'a> Parser<'a> {
                         content,
                         content_indent,
                         &BlockContext {
-                            has_blank_before: self.pos == 0
-                                || is_blank_line(self.lines[self.pos - 1]),
-                            has_blank_before_strict: self.pos == 0
-                                || is_blank_line(self.lines[self.pos - 1]),
+                            has_blank_before: self.pos == 0 || prev_line_blank,
+                            has_blank_before_strict: self.pos == 0 || prev_line_blank,
                             at_document_start: self.pos == 0
                                 && self.current_blockquote_depth() == 0,
                             in_fenced_div: self.in_fenced_div(),
@@ -5980,7 +6004,12 @@ impl<'a> Parser<'a> {
                 )
                 .is_some();
 
-            let prev_line_blank = is_blank_line(prev_line);
+            // Inside a blockquote the separator line still carries its `>`, so
+            // the raw line is never blank while the quoted content sees a
+            // blank all the same. Read it through the markers, as the strict
+            // flag below already does.
+            let prev_line_blank = is_blank_line(prev_line)
+                || (current_bq_depth > 0 && prev_bq_depth > 0 && is_blank_line(prev_inner));
             prev_line_blank
                 || prev_is_fenced_div_open
                 || matches!(self.containers.last(), Some(Container::BlockQuote { .. }))
