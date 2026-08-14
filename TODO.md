@@ -1054,6 +1054,21 @@ elsewhere).
 - [ ] AST wrappers (`syntax/svelte.rs`), LSP semantic tokens, and lint rules for
   Svelte constructs.
 
+- [ ] `mdsvex_defaults` inherits `auto_identifiers` (and `gfm_auto_identifiers`)
+  from `gfm_defaults`, which is probably wrong. GitHub renders heading ids
+  itself, but mdsvex is a remark -> rehype pipeline whose default
+  `rehypePlugins` is empty, so `# My heading` should emit a bare `<h1>` ---
+  ids need `rehype-slug`, which mdsvex does not bundle. That was inert until
+  heading ids started honoring `auto_identifiers`; now it means
+  `[x](#my-heading)` resolves under `--flavor mdsvex`, so `undefined-anchor`
+  stays quiet on a link that would be dead in the rendered site. Confirm
+  against a plugin-free `svelte.config.js` before flipping it: check whether
+  mdsvex's own layout/anchor handling slugs headings on its way to `<slot>`.
+  If it does not, clear both flags in `mdsvex_defaults` after the
+  `gfm_defaults` base --- `rehype-slug` users can set
+  `auto-identifiers = true` back, and `gfm_auto_identifiers` is the right
+  algorithm for them anyway since `rehype-slug` uses `github-slugger`.
+
 ### MyST
 
 MyST (`mystmd.org`, `myst-parser`) support, modeled the same way as mdsvex: a
