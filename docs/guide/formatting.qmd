@@ -234,10 +234,15 @@ Output
 
 ### ATX Headings
 
-Headings are normalized with consistent spacing. Trailing `#` characters in ATX
-headings are removed. Spacing between the `#` characters and the heading text is
+Headings are normalized with consistent spacing. A closing `#` run in an ATX
+heading is removed. Spacing between the `#` characters and the heading text is
 normalized to a single space. Headings are separated from surrounding content by
 a blank line.
+
+A `#` that belongs to the heading's *text* is kept, since dropping it would
+change what the heading says. A run is only decoration when it ends the line, so
+`# foo # #` keeps a closing run to hold the first hash in the text, and an
+escaped hash (`# foo \#`) is text under every flavor.
 
 Input
 

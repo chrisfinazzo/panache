@@ -1,4 +1,4 @@
-use panache_parser::parser::utils::attributes::try_parse_trailing_attributes;
+use panache_parser::parser::blocks::headings::content_reads_as_decoration;
 use rowan::NodeOrToken;
 
 use super::core::normalize_attribute_text;
@@ -66,10 +66,9 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
         }
     }
 
-    // Trim trailing closing hashes and surrounding whitespace (`# Title #`).
-    let content = content
-        .trim_end_matches(|c: char| c == '#' || c.is_whitespace())
-        .trim_start();
+    // The parser splits the closing run off into its own marker token, so
+    // whatever is left is content; only surrounding whitespace goes.
+    let content = content.trim();
 
     let mut out = "#".repeat(level);
     if !content.is_empty() {
@@ -77,11 +76,15 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
         out.push_str(content);
     }
     // A closing run is decoration and normally dropped --- except when it is
-    // load-bearing. pandoc reads a heading's attribute block only *after* the
-    // run, so the run is what keeps a trailing `{...}` in the content out of
-    // the attributes: `# foo {#id} #` is `Header 1 (foo-id) [Str "foo", Space,
-    // Str "{#id}"]`, and dropping the run would rewrite the id to `id`.
-    if try_parse_trailing_attributes(content).is_some() {
+    // load-bearing, i.e. when the content it leaves in front of the line ending
+    // would read back as decoration itself. pandoc reads a heading's attribute
+    // block only *after* the run, so the run is what keeps a trailing `{...}`
+    // in the content out of the attributes: `# foo {#id} #` is `Header 1
+    // (foo-id) [Str "foo", Space, Str "{#id}"]`, and dropping the run would
+    // rewrite the id to `id`. A content hash at the end of the line is the same
+    // story one level down: the `#` in `# foo # #` is content, but alone on the
+    // line it closes the heading instead.
+    if content_reads_as_decoration(content, &config.parser_options()) {
         out.push_str(" #");
     }
     if !attributes.is_empty() {

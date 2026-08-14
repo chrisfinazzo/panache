@@ -190,7 +190,7 @@ Note any known parser issues here.
   the closing-run split already produced, so it never learns a run was
   there. Any number of closing hashes triggers it.
 
-- [ ] Pandoc does not require whitespace in front of a heading's closing `#`
+- [x] Pandoc does not require whitespace in front of a heading's closing `#`
   run. `pandoc -f markdown` reads `# foo#` as `Header 1 (foo) [Str "foo"]`,
   while panache keeps the hash in the content
   (`Header 1 (foo) [Str "foo#"]`), and `# foo {#id}#` therefore keeps its
@@ -200,11 +200,20 @@ Note any known parser issues here.
   the backwards scan has to skip a hash the content escaped, since
   `# foo \##` closes on one hash only.
 
-- [ ] The formatter strips trailing `#` characters off heading *content*, which
+- [x] The formatter strips trailing `#` characters off heading *content*, which
   can change what the line means. `# foo \#` formats to `# foo \`, turning
   an escaped hash into a hard line break. The closing run is a sibling token
   of `HEADING_CONTENT`, never part of it, so the `trim_end_matches` in
   `format_heading` only ever eats content the parser deliberately kept.
+
+- [ ] Heading attribute blocks are parsed regardless of the `header_attributes`
+  extension. `split_atx_tail` calls `try_parse_trailing_attributes_with_pos`
+  unconditionally, so `# foo {#id}` emits an `ATTRIBUTE` node even under
+  `commonmark`, where the extension is off and `pandoc -f commonmark`
+  renders `<h1>foo {#id}</h1>`. Nothing in the parser reads
+  `Extensions::header_attributes` at all. Gating it also settles the closing
+  run the formatter re-emits in front of a brace block (`format_heading`),
+  which is only load-bearing while the block is live.
 
 ### Incremental Parsing
 

@@ -31,6 +31,77 @@ fn atx_trailing_hashes_are_kept_between_content_and_attributes() {
 }
 
 #[test]
+fn atx_trailing_hashes_are_removed_without_a_space_in_front() {
+    // pandoc closes the heading on the run even with no space in front:
+    // `# foo#` is `Header 1 (foo) [Str "foo"]`.
+    let input = "# foo#\n";
+    let expected = "# foo\n";
+    let out = format(input, None, None);
+    assert_eq!(out, expected);
+    assert_eq!(format(&out, None, None), expected);
+}
+
+#[test]
+fn atx_escaped_trailing_hash_is_content() {
+    // `# foo \##` is `[Str "foo", Space, Str "#"]`: only the last hash is
+    // decoration, and the escaped one has to survive with its backslash.
+    let input = "# foo \\##\n";
+    let expected = "# foo \\#\n";
+    let out = format(input, None, None);
+    assert_eq!(out, expected);
+    assert_eq!(format(&out, None, None), expected);
+
+    let input = "# foo\\#\n";
+    let out = format(input, None, None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, None, None), input);
+}
+
+#[test]
+fn atx_trailing_hashes_are_kept_in_front_of_a_content_hash() {
+    // Content of `# foo # #` is `[Str "foo", Space, Str "#"]`. Dropping the run
+    // would leave `# foo #`, whose trailing hash pandoc reads as the closing
+    // run instead --- so the run stays.
+    let input = "# foo # #\n";
+    let out = format(input, None, None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, None, None), input);
+}
+
+#[test]
+fn atx_trailing_hash_is_content_under_commonmark() {
+    // CommonMark requires a space in front of the run, so the hash is content:
+    // `# foo#` is `<h1>foo#</h1>`.
+    let cfg = commonmark_config();
+
+    let input = "# foo#\n";
+    let out = format(input, Some(cfg.clone()), None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, Some(cfg), None), input);
+}
+
+#[test]
+fn atx_trailing_hashes_are_kept_in_front_of_a_content_hash_under_commonmark() {
+    // CommonMark closes `# foo # #` on the last hash too, since that one *is*
+    // preceded by a space --- so the run stays load-bearing here as well.
+    let cfg = commonmark_config();
+
+    let input = "# foo # #\n";
+    let out = format(input, Some(cfg.clone()), None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, Some(cfg), None), input);
+}
+
+fn commonmark_config() -> panache_formatter::Config {
+    let flavor = panache_formatter::config::Flavor::CommonMark;
+    panache_formatter::Config {
+        flavor,
+        parser_extensions: panache_formatter::config::Extensions::for_flavor(flavor),
+        ..Default::default()
+    }
+}
+
+#[test]
 fn atx_leading_spaces_are_normalized() {
     let input = "   ##   Title   \n";
     let expected = "## Title\n";
