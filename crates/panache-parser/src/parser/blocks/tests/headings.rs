@@ -583,6 +583,42 @@ fn atx_heading_with_id_immediately_after_yaml_frontmatter() {
 }
 
 #[test]
+fn atx_closing_hashes_keep_a_preceding_brace_block_as_content() {
+    // pandoc's `atxClosing` reads the attribute block *after* the closing `#`
+    // run, so a run that follows the block leaves it in the content:
+    // `# foo {#id} #` is `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]`.
+    let input = "# foo {#id} #\n";
+    let node = Parser::new(input, &ParserOptions::default()).parse();
+
+    let heading = find_first(&node, SyntaxKind::HEADING).expect("heading");
+    assert!(
+        heading
+            .children()
+            .all(|n| n.kind() != SyntaxKind::ATTRIBUTE),
+        "closing `#` run must cancel the trailing attribute block"
+    );
+    assert_eq!(get_heading_content(&node).unwrap(), "foo {#id}");
+    assert_eq!(node.text().to_string(), input);
+}
+
+#[test]
+fn atx_attribute_block_after_closing_hashes_is_an_attribute() {
+    // The other side of the same rule: `# foo # {#id}` puts the block where
+    // pandoc looks for it, so the id is taken and the run stays a marker.
+    let input = "# foo # {#id}\n";
+    let node = Parser::new(input, &ParserOptions::default()).parse();
+
+    let heading = find_first(&node, SyntaxKind::HEADING).expect("heading");
+    let attr = heading
+        .children()
+        .find(|n| n.kind() == SyntaxKind::ATTRIBUTE)
+        .expect("attribute");
+    assert_eq!(attr.text().to_string(), "{#id}");
+    assert_eq!(get_heading_content(&node).unwrap(), "foo");
+    assert_eq!(node.text().to_string(), input);
+}
+
+#[test]
 fn parses_mmd_header_identifier_before_atx_closing_hashes() {
     let mut config = ParserOptions::default();
     config.extensions.mmd_header_identifiers = true;

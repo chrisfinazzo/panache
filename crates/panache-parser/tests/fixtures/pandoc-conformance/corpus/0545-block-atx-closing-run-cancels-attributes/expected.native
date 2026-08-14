@@ -1,0 +1,8 @@
+[ Header
+    1
+    ( "foo-one" , [] , [] )
+    [ Str "foo" , Space , Str "{#one}" ]
+, Header 1 ( "two" , [] , [] ) [ Str "foo" ]
+, Header 1 ( "three" , [] , [] ) [ Str "bar" ]
+, Header 1 ( "four" , [] , [] ) [ Str "{#four}" ]
+]

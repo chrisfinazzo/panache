@@ -828,3 +828,11 @@
 # keeps pandoc's two body rows with `RowSpan 2` instead of collapsing to
 # one row and dropping the value cells.
 544
+
+# pandoc's `atxClosing` reads an ATX heading's attribute block *after* the
+# closing `#` run, so a block in front of a run is ordinary content:
+# `# foo {#one} #` is `Header 1 (foo-one) [Str "foo", Space, Str "{#one}"]`
+# with the id auto-generated, while `# foo # {#two}` carries the attribute.
+# `split_atx_tail` now peels the tail in that order instead of splitting the
+# run off first and running attribute detection on what was left.
+545

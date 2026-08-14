@@ -168,6 +168,7 @@ golden_test_cases!(
     alerts_disabled,
     all_punctuation_escapes_commonmark,
     all_punctuation_escapes_pandoc,
+    atx_closing_run_and_attributes,
     atx_empty_with_closing_fence,
     atx_heading_in_quoted_list_item_commonmark,
     atx_heading_in_quoted_list_item_pandoc,

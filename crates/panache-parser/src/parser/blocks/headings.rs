@@ -331,6 +331,123 @@ pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, und
     }
 }
 
+/// The tail of an ATX heading line --- everything after the opening marker and
+/// the spaces behind it --- split into content and closing decoration.
+///
+/// Concatenating the fields in declaration order reconstructs the input, so
+/// emission stays byte-lossless.
+struct AtxTail<'a> {
+    content: &'a str,
+    /// Whitespace between the content and an mmd `[id]` identifier.
+    mmd_gap: &'a str,
+    /// MultiMarkdown `[id]` identifier, which sits in front of the closing run.
+    mmd_attrs: Option<&'a str>,
+    /// Whitespace in front of the closing `#` run.
+    closing_gap: &'a str,
+    closing_run: &'a str,
+    /// Whitespace between the closing run and the attribute block, or the
+    /// line's trailing whitespace when there is no block.
+    attr_gap: &'a str,
+    /// Trailing `{...}` attribute block, including the line's trailing
+    /// whitespace.
+    attrs: Option<&'a str>,
+}
+
+impl<'a> AtxTail<'a> {
+    fn all_content(content: &'a str) -> Self {
+        Self {
+            content,
+            mmd_gap: "",
+            mmd_attrs: None,
+            closing_gap: "",
+            closing_run: "",
+            attr_gap: "",
+            attrs: None,
+        }
+    }
+
+    /// Whether the content runs to the end of the line, with no closing run or
+    /// attribute block behind it --- the only case where a trailing backslash
+    /// is against the line ending and so reads as a line break.
+    fn content_ends_the_line(&self) -> bool {
+        self.mmd_attrs.is_none() && self.closing_run.is_empty() && self.attrs.is_none()
+    }
+}
+
+/// Split an ATX heading line's tail the way pandoc's `atxClosing` reads it.
+///
+/// pandoc parses the closing decoration as an optional mmd `[id]`, then a run
+/// of `#`, then an optional `{...}` attribute block, all anchored to the end of
+/// the line. The run therefore comes *before* the block, and a block in front
+/// of a run is ordinary content: `# foo # {#id}` carries the id, while
+/// `# foo {#id} #` is `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]` ---
+/// braces and all, with the id auto-generated from that text.
+fn split_atx_tail<'a>(
+    heading_text: &'a str,
+    spaces_after_marker: usize,
+    config: &ParserOptions,
+) -> AtxTail<'a> {
+    let mut tail = AtxTail::all_content(heading_text);
+    let mut rest = heading_text;
+
+    // A `{...}` block only counts when it ends the line, so it comes off first.
+    if let Some((_attrs, text_before, open_brace)) = try_parse_trailing_attributes_with_pos(rest) {
+        tail.attrs = Some(&rest[open_brace..]);
+        tail.attr_gap = &rest[text_before.len()..open_brace];
+        rest = text_before;
+    }
+
+    // Then the closing `#` run, which sits in front of that block.
+    let run_end = trim_end_spaces_tabs(rest).len();
+    let hashes = rest[..run_end]
+        .bytes()
+        .rev()
+        .take_while(|&b| b == b'#')
+        .count();
+    if hashes > 0 {
+        let before_run = &rest[..run_end - hashes];
+        // The run has to be preceded by whitespace. That whitespace is either
+        // in `before_run`, or --- when the content is empty (`### ###`) --- the
+        // post-marker spaces the caller already consumed.
+        let preceded_by_ws = before_run
+            .chars()
+            .last()
+            .is_some_and(|c| c == ' ' || c == '\t')
+            || (before_run.is_empty() && spaces_after_marker > 0);
+        if preceded_by_ws {
+            tail.closing_run = &rest[run_end - hashes..run_end];
+            if tail.attrs.is_none() {
+                tail.attr_gap = &rest[run_end..];
+            }
+            let content_end = trim_end_spaces_tabs(before_run).len();
+            tail.closing_gap = &before_run[content_end..];
+            rest = &before_run[..content_end];
+        }
+    }
+
+    // The mmd identifier is the one piece pandoc reads in front of the run, and
+    // a `{...}` block outranks it, so it is only worth looking for when none
+    // was found.
+    if tail.attrs.is_none()
+        && config.extensions.mmd_header_identifiers
+        && let Some((_normalized, start_bracket, end_bracket)) =
+            try_parse_mmd_header_identifier_with_pos(rest)
+    {
+        let content = trim_end_spaces_tabs(&rest[..start_bracket]);
+        tail.mmd_gap = &rest[content.len()..start_bracket];
+        tail.mmd_attrs = Some(&rest[start_bracket..end_bracket]);
+        // The identifier scan looks past trailing whitespace, which then sits
+        // in front of the (possibly empty) closing run.
+        if end_bracket < rest.len() {
+            tail.closing_gap = &rest[end_bracket..];
+        }
+        rest = content;
+    }
+
+    tail.content = rest;
+    tail
+}
+
 /// Emit an ATX heading node to the builder.
 pub(crate) fn emit_atx_heading(
     builder: &mut GreenNodeBuilder<'static>,
@@ -383,103 +500,28 @@ pub(crate) fn emit_atx_heading(
     // Get actual heading text
     let heading_text = &after_marker[spaces_after_marker_count..];
 
-    // Parse optional closing ATX marker (` ###`) while preserving bytes.
-    let (heading_content, closing_suffix) = {
-        let without_trailing_ws = trim_end_spaces_tabs(heading_text);
-        let trailing_hashes = without_trailing_ws
-            .chars()
-            .rev()
-            .take_while(|&c| c == '#')
-            .count();
-
-        if trailing_hashes > 0 {
-            let hashes_start = without_trailing_ws.len() - trailing_hashes;
-            let before_hashes = &without_trailing_ws[..hashes_start];
-            // Closing fence requires the hashes to be preceded by whitespace.
-            // That whitespace can be in `before_hashes` (non-empty content case),
-            // or it can be the post-marker spaces we already consumed when content
-            // is empty (e.g. `### ###` → empty heading with closing fence).
-            let preceded_by_ws = before_hashes
-                .chars()
-                .last()
-                .is_some_and(|c| c == ' ' || c == '\t')
-                || (before_hashes.is_empty() && spaces_after_marker_count > 0);
-            if preceded_by_ws {
-                let content_end = trim_end_spaces_tabs(before_hashes).len();
-                (&heading_text[..content_end], &heading_text[content_end..])
-            } else {
-                (heading_text, "")
-            }
-        } else {
-            (heading_text, "")
-        }
-    };
-
-    // Try to parse trailing attributes
-    let (text_content, attr_text, space_before_attrs) =
-        if let Some((_attrs, text_before, start_brace_pos)) =
-            try_parse_trailing_attributes_with_pos(heading_content)
-        {
-            let space = &heading_content[text_before.len()..start_brace_pos];
-            let raw_attrs = &heading_content[start_brace_pos..];
-            (text_before, Some(raw_attrs), space)
-        } else if config.extensions.mmd_header_identifiers {
-            if let Some((_normalized, start_bracket_pos, end_bracket_pos)) =
-                try_parse_mmd_header_identifier_with_pos(heading_content)
-            {
-                let text_before = trim_end_spaces_tabs(&heading_content[..start_bracket_pos]);
-                let space = &heading_content[text_before.len()..start_bracket_pos];
-                let raw_attrs = &heading_content[start_bracket_pos..end_bracket_pos];
-                (text_before, Some(raw_attrs), space)
-            } else {
-                (heading_content, None, "")
-            }
-        } else {
-            (heading_content, None, "")
-        };
+    let tail = split_atx_tail(heading_text, spaces_after_marker_count, config);
 
     // Heading content node
-    emit_heading_content(
-        builder,
-        text_content,
-        attr_text.is_none() && closing_suffix.is_empty(),
-        config,
-    );
+    emit_heading_content(builder, tail.content, tail.content_ends_the_line(), config);
 
-    // Emit space before attributes if present
-    if !space_before_attrs.is_empty() {
-        builder.token(SyntaxKind::WHITESPACE.into(), space_before_attrs);
+    if !tail.mmd_gap.is_empty() {
+        builder.token(SyntaxKind::WHITESPACE.into(), tail.mmd_gap);
     }
-
-    // Emit attributes if present
-    if let Some(attr_text) = attr_text {
-        emit_attribute_node(builder, attr_text);
+    if let Some(mmd_attrs) = tail.mmd_attrs {
+        emit_attribute_node(builder, mmd_attrs);
     }
-
-    if !closing_suffix.is_empty() {
-        let closing_trimmed = trim_end_spaces_tabs(
-            crate::parser::utils::helpers::trim_start_spaces_tabs(closing_suffix),
-        );
-        let leading_ws_len = closing_suffix
-            .find(|c: char| c != ' ' && c != '\t')
-            .unwrap_or(closing_suffix.len());
-        let trailing_ws_len = closing_suffix.len() - leading_ws_len - closing_trimmed.len();
-
-        if leading_ws_len > 0 {
-            builder.token(
-                SyntaxKind::WHITESPACE.into(),
-                &closing_suffix[..leading_ws_len],
-            );
-        }
-        if !closing_trimmed.is_empty() {
-            builder.token(SyntaxKind::ATX_HEADING_MARKER.into(), closing_trimmed);
-        }
-        if trailing_ws_len > 0 {
-            builder.token(
-                SyntaxKind::WHITESPACE.into(),
-                &closing_suffix[closing_suffix.len() - trailing_ws_len..],
-            );
-        }
+    if !tail.closing_gap.is_empty() {
+        builder.token(SyntaxKind::WHITESPACE.into(), tail.closing_gap);
+    }
+    if !tail.closing_run.is_empty() {
+        builder.token(SyntaxKind::ATX_HEADING_MARKER.into(), tail.closing_run);
+    }
+    if !tail.attr_gap.is_empty() {
+        builder.token(SyntaxKind::WHITESPACE.into(), tail.attr_gap);
+    }
+    if let Some(attrs) = tail.attrs {
+        emit_attribute_node(builder, attrs);
     }
 
     // Emit trailing newline if present
