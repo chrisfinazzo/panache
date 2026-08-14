@@ -1,4 +1,4 @@
-  Item      Qty
-  ------- -------
-  apple     12
-  plum     1   2
+  Item     Qty
+  ------- -----
+  apple    12
+  plum     1 2

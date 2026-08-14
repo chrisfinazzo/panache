@@ -1230,25 +1230,6 @@ panache starts caching NodePtrs across edits.
   and headerless ones were not. A blank *between* rows stays legal --- that
   is what makes a multiline table multiline.
 
-- [ ] **Simple-table cells keep internal whitespace runs** where pandoc
-  collapses them, and panache's own multiline tables already collapse --- so
-  this is an inconsistency inside panache, not just a pandoc divergence.
-  `Head1     Head2\n--------- ---------\nA   B     c   d\n` formats to
-  `A   B   c   d` under panache and `A B     c d` under pandoc; the same
-  cells in a multiline table (with a top border) collapse correctly today.
-  Both writers size a column at *content width + 2*, so the raw text also
-  leaks into the dash runs whenever an uncollapsed cell is the widest one:
-  `A   B\n----- -----\nx   y\n` (everything lands in column 1, column 2
-  empty) gives `------- --` against pandoc's `----- --`. Not a correctness
-  bug --- output is lossless and idempotent, and the CST and pandoc-AST both
-  agree with pandoc, since the reader already reads `A   B` as
-  `Str "A", Space, Str "B"`. Purely a writer-side fidelity gap. Pipe tables
-  preserve the runs too, but that one is arguably deliberate and is not
-  directly comparable (pandoc rewrites pipe tables to the simple shape).
-  Surfaced by the `multiline_table_blank_after_opener_idempotent` golden,
-  whose expected output shows the `------- --` form; fixing this will move
-  that fixture and any other simple-table golden with multi-space cells.
-
 - [x] Simple tables in **definition bodies nested one container deep** fail the
   debug checks. Three separate defects, each with its own fix: a quoted
   definition body emitted every continuation line's `>` straight to the

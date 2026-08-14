@@ -436,8 +436,35 @@ struct TableData {
     has_header: bool,           // True if table has a header row
 }
 
-/// Format cell content, handling both TEXT tokens and inline elements
-fn format_cell_content(node: &SyntaxNode, config: &Config) -> String {
+/// Collapse each run of spaces/tabs to a single space, keeping boundary
+/// whitespace as a single space rather than trimming it — a `TEXT` token may
+/// abut an inline node (`A  ` + `` `x` ``), and the separating space is part
+/// of the cell text.
+fn collapse_cell_ws_runs(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut in_ws = false;
+    for ch in text.chars() {
+        if ch == ' ' || ch == '\t' {
+            if !in_ws {
+                result.push(' ');
+            }
+            in_ws = true;
+        } else {
+            result.push(ch);
+            in_ws = false;
+        }
+    }
+    result
+}
+
+/// Format cell content, handling both TEXT tokens and inline elements.
+///
+/// With `collapse_ws`, whitespace runs inside `TEXT` tokens collapse to a
+/// single space, matching pandoc's reader (intra-cell whitespace is a single
+/// `Space` inline). Inline nodes are untouched, so code-span content keeps its
+/// runs. Only the simple-table path opts in: pipe tables preserve runs
+/// deliberately, and multiline tables collapse later, when cells reflow.
+fn format_cell_content(node: &SyntaxNode, config: &Config, collapse_ws: bool) -> String {
     let mut result = String::new();
 
     for child in node.children_with_tokens() {
@@ -447,7 +474,11 @@ fn format_cell_content(node: &SyntaxNode, config: &Config) -> String {
                     || token.kind() == SyntaxKind::NEWLINE
                     || token.kind() == SyntaxKind::ESCAPED_CHAR
                 {
-                    result.push_str(token.text());
+                    if collapse_ws && token.kind() == SyntaxKind::TEXT {
+                        result.push_str(&collapse_cell_ws_runs(token.text()));
+                    } else {
+                        result.push_str(token.text());
+                    }
                 }
             }
             NodeOrToken::Node(node) => {
@@ -461,7 +492,7 @@ fn format_cell_content(node: &SyntaxNode, config: &Config) -> String {
 }
 
 /// Extract cell contents from TABLE_CELL nodes if present, otherwise fall back to text splitting
-fn extract_row_cells(row_node: &SyntaxNode, config: &Config) -> Vec<String> {
+fn extract_row_cells(row_node: &SyntaxNode, config: &Config, collapse_ws: bool) -> Vec<String> {
     let mut cells = Vec::new();
 
     // Check if this row has TABLE_CELL children
@@ -473,7 +504,7 @@ fn extract_row_cells(row_node: &SyntaxNode, config: &Config) -> Vec<String> {
         // New approach: extract from TABLE_CELL nodes
         for child in row_node.children() {
             if child.kind() == SyntaxKind::TABLE_CELL {
-                cells.push(format_cell_content(&child, config));
+                cells.push(format_cell_content(&child, config, collapse_ws));
             }
         }
     }
@@ -631,9 +662,9 @@ fn extract_pipe_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                 // `\|` stays inside its cell. Re-rendering the row and splitting
                 // on `|` (as `split_row` does) is escape-blind: it re-tokenizes
                 // the `\|` as a delimiter and invents a phantom column.
-                let cells = extract_row_cells(&child, config);
+                let cells = extract_row_cells(&child, config, false);
                 let cells = if cells.is_empty() {
-                    split_row(&format_cell_content(&child, config))
+                    split_row(&format_cell_content(&child, config, false))
                 } else {
                     cells
                 };
@@ -1264,7 +1295,7 @@ fn extract_grid_table_data(node: &SyntaxNode, config: &Config) -> GridTableData 
                     _ => GridRowSection::Body,
                 };
 
-                let cells = extract_row_cells(&child, config);
+                let cells = extract_row_cells(&child, config, false);
                 let has_parsed_cells = !cells.is_empty();
                 let mut seeded_from_plain_line = false;
                 if !has_parsed_cells {
@@ -1858,7 +1889,9 @@ fn split_simple_table_row(row_text: &str, columns: &[SimpleColumn]) -> Vec<Strin
         } else {
             ""
         };
-        cells.push(cell_text.to_string());
+        // Raw-text fallback: no inline structure to shelter code spans, so
+        // collapse the whole cell (pandoc-reader whitespace semantics).
+        cells.push(collapse_cell_ws_runs(cell_text));
     }
 
     cells
@@ -1901,7 +1934,7 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                 header_line = Some(raw_text_without_prefixes(&child));
 
                 // Try to extract from TABLE_CELL nodes for content
-                let cells = extract_row_cells(&child, config);
+                let cells = extract_row_cells(&child, config, true);
                 if !cells.is_empty() {
                     header_cells = Some(cells);
                 } else {
@@ -1918,13 +1951,13 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                     }
 
                     // Try to extract from TABLE_CELL nodes first
-                    let cells = extract_row_cells(&child, config);
+                    let cells = extract_row_cells(&child, config, true);
 
                     if !cells.is_empty() {
                         rows.push(cells);
                     } else {
                         // Fall back to old approach (for backwards compatibility)
-                        let row_content = format_cell_content(&child, config);
+                        let row_content = format_cell_content(&child, config, false);
                         let cells = split_simple_table_row(&row_content, &columns);
                         rows.push(cells);
                     }
@@ -2235,7 +2268,7 @@ fn extract_cells_from_table_cell_nodes(
     let formatted_text = text_without_prefixes(row, |node| {
         if node.kind() == SyntaxKind::TABLE_CELL {
             // Format the inline content within the cell
-            format_cell_content(node, config)
+            format_cell_content(node, config, false)
         } else {
             // Other nodes (shouldn't happen in well-formed CST)
             node.text().to_string()
@@ -2288,7 +2321,7 @@ fn extract_multiline_table_data(node: &SyntaxNode, config: &Config) -> Multiline
                     rows.push(cells);
                 } else {
                     // Old style: format cell content and split into cells
-                    let row_content = format_cell_content(&child, config);
+                    let row_content = format_cell_content(&child, config, false);
                     let cells = extract_multiline_cells(&row_content, &slice);
                     rows.push(cells);
                 }

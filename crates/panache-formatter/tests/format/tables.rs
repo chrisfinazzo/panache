@@ -691,10 +691,10 @@ fn test_simple_table_alignment_survives_a_widened_column() {
     let config = ConfigBuilder::default().table_indent(0).build();
     // `pandoc -f markdown -t native` reads [AlignDefault, AlignCenter]: the
     // header's `y` neither starts at the second dash run nor reaches its end.
-    // `zz   w` is the widest cell in that column, so the emitted dash run
-    // outruns the header line.
+    // `zz   w` (collapsed to `zz w`) is the widest cell in that column, so
+    // the emitted dash run outruns the header line.
     let input = "bb  x  y\n----- ---\nx  y  zz   w\n";
-    let expected = "bb  x      y\n------- --------\nx  y     zz   w\n";
+    let expected = "bb x     y\n------ ------\nx y     zz w\n";
 
     let result = format(input, Some(config.clone()), None);
     assert_eq!(result, expected, "got:\n{result}");
