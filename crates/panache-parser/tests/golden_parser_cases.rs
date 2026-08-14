@@ -389,6 +389,7 @@ golden_test_cases!(
     four_space_rule_ordered_4sp,
     attribute_escaped_space_gap_pandoc,
     four_space_rule_wide_marker,
+    hard_break_backslash_gfm,
     hard_break_backslash_whitespace_commonmark,
     hard_break_backslash_whitespace_pandoc,
     headings,

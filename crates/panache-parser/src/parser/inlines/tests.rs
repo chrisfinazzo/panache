@@ -1011,7 +1011,7 @@ mod raw_inline_tests {
 
 #[cfg(test)]
 mod extension_guard_tests {
-    use crate::options::ParserOptions;
+    use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
     use crate::syntax::SyntaxKind;
 
     fn parse_with_config(input: &str, config: ParserOptions) -> crate::syntax::SyntaxNode {
@@ -1131,6 +1131,20 @@ mod extension_guard_tests {
         config.extensions.all_symbols_escapable = false;
         config.extensions.escaped_line_breaks = true;
         let tree = parse_with_config("a\\\nb", config);
+        assert_eq!(count_kind(&tree, SyntaxKind::HARD_LINE_BREAK), 1);
+    }
+
+    #[test]
+    fn gfm_flavor_reads_trailing_backslash_as_hard_break() {
+        // `pandoc -f gfm` yields `[Str "foo", LineBreak, Str "bar"]` here,
+        // because GFM inherits CommonMark's backslash hard break.
+        let config = ParserOptions {
+            flavor: Flavor::Gfm,
+            dialect: Dialect::for_flavor(Flavor::Gfm),
+            extensions: Extensions::for_flavor(Flavor::Gfm),
+            ..ParserOptions::default()
+        };
+        let tree = parse_with_config("foo \\\nbar\n", config);
         assert_eq!(count_kind(&tree, SyntaxKind::HARD_LINE_BREAK), 1);
     }
 

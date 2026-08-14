@@ -538,6 +538,10 @@ impl Extensions {
         ext.autolinks = true;
         ext.backtick_code_blocks = true;
         ext.emoji = true;
+        // GFM is a CommonMark superset, so a trailing backslash is a hard
+        // break. `pandoc --list-extensions=gfm` doesn't list the extension
+        // because it's built into the commonmark reader rather than toggleable.
+        ext.escaped_line_breaks = true;
         ext.fenced_code_blocks = true;
         ext.footnotes = true;
         ext.gfm_auto_identifiers = true;
@@ -882,6 +886,26 @@ mod tests {
             assert!(
                 !Extensions::for_flavor(flavor).four_space_rule,
                 "four_space_rule should be off by default for {flavor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escaped_line_breaks_defaults_on_for_commonmark_derived_flavors() {
+        // A trailing backslash is a hard break in CommonMark, and GFM, MyST,
+        // and mdsvex all inherit that from their CommonMark base.
+        for flavor in [
+            Flavor::Pandoc,
+            Flavor::Quarto,
+            Flavor::RMarkdown,
+            Flavor::Gfm,
+            Flavor::CommonMark,
+            Flavor::Mdsvex,
+            Flavor::Myst,
+        ] {
+            assert!(
+                Extensions::for_flavor(flavor).escaped_line_breaks,
+                "escaped_line_breaks should be on by default for {flavor:?}"
             );
         }
     }

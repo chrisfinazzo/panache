@@ -173,7 +173,7 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
-- [ ] The `gfm` flavor does not enable `escaped_line_breaks`, so a backslash
+- [x] The `gfm` flavor does not enable `escaped_line_breaks`, so a backslash
   before a newline never becomes a hard break. `pandoc -f gfm` reads `foo \` +
   newline as `[Str "foo", LineBreak]` (GFM follows CommonMark here); panache
   leaves the backslash as literal text and the newline as a soft break, so
