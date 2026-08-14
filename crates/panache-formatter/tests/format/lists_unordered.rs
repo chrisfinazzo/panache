@@ -83,7 +83,9 @@ fn nested_tight_list_with_followup_paragraph_is_idempotent() {
 }
 
 #[test]
-fn parenthesized_marker_in_list_continuation_stays_paragraph_text() {
+fn parenthesized_marker_at_content_column_nests_idempotently() {
+    // pandoc opens a nested `(b)` OrderedList here; the round trip has to
+    // survive that rather than flattening the marker back into the paragraph.
     let input = "- Parent item\n\n  - First paragraph line that introduces context and\n    (b) continues as regular text, not a nested list marker.\n";
     let output1 = format(input, None, None);
     let output2 = format(&output1, None, None);

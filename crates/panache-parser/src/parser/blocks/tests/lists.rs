@@ -910,3 +910,25 @@ fn continuation_indent_is_stripped_from_inline_code_content() {
     assert_eq!(content, "x\n y");
     assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
 }
+
+#[test]
+fn ordered_marker_at_content_column_opens_nested_list() {
+    // `pandoc -f markdown -t native` nests every one of these as an
+    // `OrderedList` inside the outer item; only the outer item's content
+    // column matters, not the marker's number or delimiter style.
+    for input in [
+        "1.  a\n    10.  b\n",
+        "1.  a\n    2.  b\n",
+        "1.  a\n    (b)  b\n",
+        "1.  a\n    (2)  b\n",
+    ] {
+        let tree = parse_blocks(input);
+        let lists = find_all(&tree, SyntaxKind::LIST);
+        assert_eq!(
+            lists.len(),
+            2,
+            "marker at the outer item's content column should nest: {input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}

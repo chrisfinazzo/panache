@@ -737,41 +737,6 @@ impl BlockParser for ListParser {
             return None;
         }
         let (indent_cols, indent_bytes) = super::utils::container_stack::leading_indent(content);
-        if !ctx.has_blank_before
-            && ctx.in_list
-            && let Some(list_indent) = ctx.list_indent_info
-            && list_indent.content_col >= 4
-            && indent_cols == list_indent.content_col
-            && indent_cols <= 4
-        {
-            let should_suppress = match &marker_match.marker {
-                ListMarker::Ordered(OrderedMarker::Decimal {
-                    number,
-                    style: ListDelimiter::Parens | ListDelimiter::Period,
-                }) => number != "1",
-                ListMarker::Ordered(OrderedMarker::LowerAlpha {
-                    style: ListDelimiter::Parens,
-                    ..
-                })
-                | ListMarker::Ordered(OrderedMarker::UpperAlpha {
-                    style: ListDelimiter::Parens,
-                    ..
-                })
-                | ListMarker::Ordered(OrderedMarker::LowerRoman {
-                    style: ListDelimiter::Parens,
-                    ..
-                })
-                | ListMarker::Ordered(OrderedMarker::UpperRoman {
-                    style: ListDelimiter::Parens,
-                    ..
-                }) => true,
-                _ => false,
-            };
-
-            if should_suppress {
-                return None;
-            }
-        }
 
         if indent_cols >= 4 && !ctx.in_list {
             return None;

@@ -1159,14 +1159,27 @@ panache starts caching NodePtrs across edits.
   `quoted_item_lazy_blockquote_marker` formatter golden, the quoted mirror
   of `list_item_lazy_blockquote_marker`.
 
-- [ ] **A nested ordered list at the outer item's exact content column goes
+- [x] **A nested ordered list at the outer item's exact content column goes
   lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
   item's content column) merges into the paragraph as `a 10. b` instead of
   opening a nested `OrderedList` the way pandoc does. Bullets at the same
   position nest fine; something in the ordered-marker path (the deep-ordered
   drift matcher or the marker-line interceptors) eats it before the
   `indent >= current_content_col` branch. Pre-existing (identical at
-  `89bc3cdb`).
+  `89bc3cdb`). The culprit was neither: `ListParser::detect` in
+  `block_dispatcher.rs` explicitly declined any fancy ordered marker sitting
+  at a content column of exactly 4, so detection never returned `Yes` and
+  the paragraph-open branch swallowed the line. The suppression came from
+  `af73bd44`, which reached for a parser veto to cure a *formatter*
+  idempotency loss on `(b)` continuation lines; pandoc nests all of these
+  (`(b)`, `(2)`, `2.`, `10.`), so the veto was wrong at the source. Deleting
+  it fixes the whole family, and the idempotency case it was protecting
+  still round-trips (the formatter learned to render the nested list in the
+  meantime). Pinned by `ordered_marker_at_content_column_opens_nested_list`
+  in `blocks/tests/lists.rs`, the `list_ordered_marker_at_content_col_nests`
+  parser golden, and the renamed
+  `parenthesized_marker_at_content_column_nests_idempotently` formatter
+  test.
 
 - [x] A **simple table in a blockquote in a footnote body is not lossless**:
   `[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n` parses with

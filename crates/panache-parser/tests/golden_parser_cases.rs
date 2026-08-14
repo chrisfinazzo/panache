@@ -711,6 +711,7 @@ golden_test_cases!(
     list_marker_indent_4_below_content_col,
     list_empty_marker_indent_four_past_content_col,
     list_orphan_indent4_marker_after_blank_becomes_codeblock,
+    list_ordered_marker_at_content_col_nests,
     list_mixed_bullets_commonmark,
     list_mixed_bullets_pandoc,
     list_nested_same_line_marker_commonmark,
