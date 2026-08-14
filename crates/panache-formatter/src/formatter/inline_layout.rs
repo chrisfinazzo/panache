@@ -227,9 +227,9 @@ pub(super) enum WrapStrategy {
     ParagraphReflow,
     ParagraphSentence,
     ParagraphSemantic,
-    ListReflow { in_blockquote: bool },
-    ListSentence { in_blockquote: bool },
-    ListSemantic { in_blockquote: bool },
+    ListReflow,
+    ListSentence,
+    ListSemantic,
 }
 
 #[derive(Clone, Copy)]
@@ -237,7 +237,6 @@ pub(super) struct NodeWrapOptions<'a> {
     pub widths: &'a [usize],
     pub mode: NodeWrapMode,
     pub atomic_links_root: bool,
-    pub strip_standalone_blockquote_markers: bool,
     pub avoid_unsafe_line_start: bool,
     pub avoid_blockquote_line_start: bool,
     /// Avoid starting a wrapped line with an ATX heading (`#`) or setext/thematic
@@ -260,7 +259,6 @@ impl<'a> NodeWrapOptions<'a> {
             widths,
             mode: NodeWrapMode::Reflow,
             atomic_links_root: false,
-            strip_standalone_blockquote_markers: false,
             avoid_unsafe_line_start: false,
             avoid_blockquote_line_start: false,
             avoid_heading_line_start: true,
@@ -276,7 +274,6 @@ impl<'a> NodeWrapOptions<'a> {
             widths: &[],
             mode: NodeWrapMode::Sentence,
             atomic_links_root: true,
-            strip_standalone_blockquote_markers: false,
             avoid_unsafe_line_start: true,
             avoid_blockquote_line_start: true,
             avoid_heading_line_start: true,
@@ -312,22 +309,15 @@ impl WrapStrategy {
             },
             Self::ParagraphSentence => NodeWrapOptions::sentence(),
             Self::ParagraphSemantic => NodeWrapOptions::semantic(),
-            Self::ListReflow { in_blockquote } => NodeWrapOptions {
-                strip_standalone_blockquote_markers: in_blockquote,
+            Self::ListReflow => NodeWrapOptions {
                 avoid_unsafe_line_start: true,
                 avoid_blockquote_line_start: avoid_blockquote_start,
                 ..NodeWrapOptions::reflow(widths)
             },
-            // `sentence()` already guards every block-start token, so list items
-            // only add blockquote-marker stripping when nested in a blockquote.
-            Self::ListSentence { in_blockquote } => NodeWrapOptions {
-                strip_standalone_blockquote_markers: in_blockquote,
-                ..NodeWrapOptions::sentence()
-            },
-            Self::ListSemantic { in_blockquote } => NodeWrapOptions {
-                strip_standalone_blockquote_markers: in_blockquote,
-                ..NodeWrapOptions::semantic()
-            },
+            // `sentence()` already guards every block-start token, so list
+            // items need nothing beyond it.
+            Self::ListSentence => NodeWrapOptions::sentence(),
+            Self::ListSemantic => NodeWrapOptions::semantic(),
         }
     }
 }
@@ -470,7 +460,6 @@ struct StreamingCoreSink<'a> {
     line_has_piece: bool,
     prev_ws_after: bool,
     pending_piece: Option<SentenceSegment>,
-    strip_standalone_blockquote_markers: bool,
     merge_initialism_year: bool,
     profile: ResolvedProfile<'a>,
     avoid_unsafe_line_start: bool,
@@ -483,7 +472,6 @@ impl<'a> StreamingCoreSink<'a> {
     fn new(
         line_widths: &'a [usize],
         sentence_mode: bool,
-        strip_standalone_blockquote_markers: bool,
         merge_initialism_year: bool,
         profile: ResolvedProfile<'a>,
         avoid_unsafe_line_start: bool,
@@ -500,7 +488,6 @@ impl<'a> StreamingCoreSink<'a> {
             line_has_piece: false,
             prev_ws_after: false,
             pending_piece: None,
-            strip_standalone_blockquote_markers,
             merge_initialism_year,
             profile,
             avoid_unsafe_line_start,
@@ -580,9 +567,6 @@ impl<'a> StreamingCoreSink<'a> {
         ws_after: bool,
         boundary_class: SentenceBoundaryClass,
     ) {
-        if self.strip_standalone_blockquote_markers && piece == ">" {
-            return;
-        }
         let incoming = SentenceSegment {
             text: piece,
             has_whitespace_after: ws_after,
@@ -639,7 +623,6 @@ pub(super) fn wrap_text_first_fit(text: &str, line_width: usize) -> Vec<String> 
     let line_widths = [line_width];
     let mut sink = StreamingCoreSink::new(
         &line_widths,
-        false,
         false,
         false,
         ResolvedProfile::builtin_only(SentenceLanguage::English),
@@ -802,7 +785,6 @@ impl<'a> TraversalBuilder<'a> {
     fn new(
         line_widths: &'a [usize],
         sentence_mode: bool,
-        strip_standalone_blockquote_markers: bool,
         profile: ResolvedProfile<'a>,
         avoid_unsafe_line_start: bool,
         avoid_blockquote_line_start: bool,
@@ -813,7 +795,6 @@ impl<'a> TraversalBuilder<'a> {
             sink: StreamingCoreSink::new(
                 line_widths,
                 sentence_mode,
-                strip_standalone_blockquote_markers,
                 true,
                 profile,
                 avoid_unsafe_line_start,
@@ -1007,11 +988,16 @@ fn process_node_recursive(
                         sink.push_piece(t.text());
                     }
                 }
-                SyntaxKind::LINE_PREFIX => {
-                    // Container prefix re-injected at a continuation line
-                    // start (indent or `>` bytes): container syntax, never
-                    // inline content. The NEWLINE before it already set the
-                    // pending break, so skip without touching sink state.
+                SyntaxKind::LINE_PREFIX | SyntaxKind::BLOCK_QUOTE_MARKER => {
+                    // Container syntax, never inline content: a prefix
+                    // re-injected at a continuation line start (indent or `>`
+                    // bytes), or a quote marker opening a block the caller
+                    // re-prefixes itself. Skipping by kind is what keeps
+                    // marker bytes out of the piece stream -- a `>` that
+                    // reaches the stream as TEXT is pandoc's `Str ">"` and
+                    // must survive. The NEWLINE before a LINE_PREFIX already
+                    // set the pending break, so skip without touching sink
+                    // state.
                 }
                 SyntaxKind::ESCAPED_CHAR => {
                     if in_link_text && t.text() == r"\_" {
@@ -1437,7 +1423,6 @@ pub(super) fn wrapped_lines_for_node(
     let mut builder = TraversalBuilder::new(
         line_widths,
         sentence_mode,
-        options.strip_standalone_blockquote_markers,
         profile,
         options.avoid_unsafe_line_start,
         options.avoid_blockquote_line_start,

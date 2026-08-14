@@ -2,7 +2,7 @@ use crate::config::WrapMode;
 use crate::formatter::indent_utils::{calculate_list_item_indent, is_alignable_marker};
 use crate::formatter::inline_layout::{self, WrapStrategy};
 use crate::formatter::tables;
-use crate::syntax::{AstNode, BlockQuote, FencedDiv, SyntaxKind, SyntaxNode};
+use crate::syntax::{AstNode, FencedDiv, SyntaxKind, SyntaxNode};
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use rowan::NodeOrToken;
 
@@ -971,7 +971,6 @@ impl Formatter {
             .as_ref()
             .map(|content| content.text().to_string().trim_start().starts_with('>'))
             .unwrap_or(false);
-        let in_blockquote = BlockQuote::contains_node(node) && !content_starts_with_blockquote;
         let line_widths = [available_width];
         let lines = match wrap_mode {
             WrapMode::Preserve | WrapMode::Sentence | WrapMode::Semantic => Vec::new(),
@@ -982,7 +981,7 @@ impl Formatter {
                         source,
                         &line_widths,
                         &|n| self.format_inline_node(n),
-                        WrapStrategy::ListReflow { in_blockquote },
+                        WrapStrategy::ListReflow,
                     )
                 })
                 .unwrap_or_default(),
@@ -1023,9 +1022,9 @@ impl Formatter {
         let sentence_lines: Option<Vec<String>> = match wrap_mode {
             WrapMode::Sentence | WrapMode::Semantic => {
                 let strategy = if matches!(wrap_mode, WrapMode::Semantic) {
-                    WrapStrategy::ListSemantic { in_blockquote }
+                    WrapStrategy::ListSemantic
                 } else {
-                    WrapStrategy::ListSentence { in_blockquote }
+                    WrapStrategy::ListSentence
                 };
                 Some(
                     wrap_source

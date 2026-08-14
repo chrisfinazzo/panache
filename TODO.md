@@ -1130,7 +1130,7 @@ panache starts caching NodePtrs across edits.
   `blocks/tests/blockquotes.rs`, the `quoted_item_nested_quote_after_blank`
   parser golden, and the `quoted_item_nested_quote` formatter golden.
 
-- [ ] The formatter **drops a literal `>` word from quoted list items** (meaning
+- [x] The formatter **drops a literal `>` word from quoted list items** (meaning
   change): `> - a > b\n` formats to `> - a b\n`, deleting pandoc's `Str ">"` ---
   losslessness and idempotency both pass, so the debug checks cannot catch
   it. Cause: `ListReflow`/`ListSentence`/`ListSemantic` set
@@ -1142,7 +1142,22 @@ panache starts caching NodePtrs across edits.
   `> - a\n>   > nested quote\n` reflows to `> - a nested quote`). The
   paragraph path handles this right (`> a\n> > b\n` keeps its `>`), so the
   fix is to keep marker bytes out of the list piece stream instead of
-  stripping by shape. Pre-existing, independent of the parser fixes.
+  stripping by shape. Pre-existing, independent of the parser fixes. Fixed
+  by deleting the flag and its whole plumbing (`NodeWrapOptions`,
+  `StreamingCoreSink`, `TraversalBuilder`, the `in_blockquote` payload on
+  the three `WrapStrategy` list variants) and instead skipping
+  `BLOCK_QUOTE_MARKER` by kind in `process_node_recursive`, alongside the
+  `LINE_PREFIX` arm that already did this --- container bytes never become
+  pieces, so a `>` reaching the stream as `TEXT` is always genuine content.
+  The two parser fixes above are what made this safe: no
+  `BLOCK_QUOTE_MARKER` survives inside a quoted item's `PLAIN`/`PARAGRAPH`
+  any more, and the whole workspace passed with the strip disabled before
+  the removal. Verified against `pandoc -f markdown -t native` (only
+  `SoftBreak` -> `Space`, from reflow onto one line). Pinned by three
+  `quoted_item_keeps_*` tests in `crates/panache-formatter/tests/format/`
+  `blockquotes.rs` (reflow, lazy continuation, sentence wrap) and the
+  `quoted_item_lazy_blockquote_marker` formatter golden, the quoted mirror
+  of `list_item_lazy_blockquote_marker`.
 
 - [ ] **A nested ordered list at the outer item's exact content column goes
   lazy**: in `1.  a\n    10.  b\n` the `10.` marker at column 4 (the `1.  `
