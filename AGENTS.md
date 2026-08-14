@@ -363,6 +363,9 @@ Four principles, in priority order when they conflict:
 4. **Single-pass stays single-pass.** If a classification depends on surrounding
    state, plumb that state into detection as context --- do not re-classify or
    post-process the parsed result. Two passes is a regression, not a refactor.
+5. **Document parser and formatter issues.** Add a note in `TODO.md` when you
+   encounter a bug (such as divergence from pandoc or commonmark, a losslesness
+   bug, or a idempotency bug).
 
 ### DO
 
