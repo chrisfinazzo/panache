@@ -1292,6 +1292,25 @@ panache starts caching NodePtrs across edits.
   by unit tests in `grid_layout.rs`, the `grid_table_rowspan_hybrid_sep`
   parser golden, and pandoc corpus case 0544.
 
+- [ ] **Pipe-table header cells ignore column alignment**, and the canonical
+  pipe style deserves an explicit decision. The writer's `row_idx == 0`
+  branch always left-aligns the header (`ce4378f0`, no recorded rationale),
+  so a `:----:` column emits `| c d    |` in the header row where pandoc
+  emits `|  c d   |` --- centered, matching how GFM renderers display it.
+  Unlike simple/multiline tables, no idempotency risk blocks the fix: pipe
+  alignment is carried by the separator colons, not header geometry, so the
+  header row can simply go through the same alignment match as data rows.
+  Surfaced by the `pipe_table_cell_whitespace_collapse` golden, whose
+  expected output pins the left-aligned form; fixing moves that fixture plus
+  any golden with an aligned column whose header is narrower than the
+  column. While in there, decide and document the canonical style overall,
+  since panache diverges from pandoc's pipe writer in other deliberate-ish
+  ways: spaced separator cells sized to the column width with a 3-dash
+  minimum (`| :----: |`) vs pandoc's flush content+2 runs (`|:------:|`),
+  and a `table-indent` self-indent (default 2) where pandoc's gfm writer
+  emits pipe tables flush left. Whatever survives should be stated in
+  `docs/guide/formatting.qmd` as the style contract, not left implicit.
+
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
   and the refs/heading-id reparse helpers) re-tokenize source the CST should
