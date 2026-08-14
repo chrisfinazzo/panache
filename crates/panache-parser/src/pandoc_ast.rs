@@ -41,6 +41,10 @@ const PANDOC_API_VERSION: [u32; 4] = [1, 23, 1, 1];
 
 #[derive(Default)]
 struct RefsCtx {
+    /// Whether the reader derives an auto-id for headings that carry no
+    /// explicit `{#id}`. Off for `commonmark` and `myst`, where pandoc leaves
+    /// every heading with an empty id.
+    auto_identifiers: bool,
     refs: HashMap<String, (String, String)>,
     heading_ids: HashSet<String>,
     /// Heading text-range start → final disambiguated id. Lets
@@ -72,7 +76,12 @@ thread_local! {
     static REFS_CTX: RefCell<RefsCtx> = RefCell::new(RefsCtx::default());
 }
 
-/// Render the given panache CST as pandoc-native AST text.
+/// Render the given panache CST as pandoc-native AST text, assuming the
+/// `markdown` reader's extension set.
+///
+/// Use [`to_pandoc_ast_with_options`] when the tree was parsed under another
+/// flavor, since a few projections (heading auto-ids) depend on which
+/// extensions the reader had on.
 ///
 /// Output mirrors `pandoc -f markdown -t native` for supported constructs.
 /// Unsupported nodes emit a visible `Unsupported "<KIND>"` sentinel rather
@@ -80,7 +89,12 @@ thread_local! {
 /// comparing against captured pandoc output to ignore pretty-print
 /// whitespace differences.
 pub fn to_pandoc_ast(tree: &SyntaxNode) -> String {
-    let ctx = build_refs_ctx(tree);
+    to_pandoc_ast_with_options(tree, &pandoc_flavor_options())
+}
+
+/// [`to_pandoc_ast`], honoring the extension set the tree was parsed under.
+pub fn to_pandoc_ast_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
+    let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
     let blocks = blocks_from_doc(tree);
     let mut out = String::new();
@@ -117,7 +131,12 @@ pub fn to_pandoc_ast(tree: &SyntaxNode) -> String {
 /// `{"t": "Unsupported", "c": "<KIND>"}` sentinel rather than being
 /// silently dropped. This sentinel is not emitted by real pandoc.
 pub fn to_pandoc_json(tree: &SyntaxNode) -> String {
-    let ctx = build_refs_ctx(tree);
+    to_pandoc_json_with_options(tree, &pandoc_flavor_options())
+}
+
+/// [`to_pandoc_json`], honoring the extension set the tree was parsed under.
+pub fn to_pandoc_json_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
+    let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
     let blocks = blocks_from_doc(tree);
     let blocks_json: Vec<Value> = blocks.iter().map(block_to_json).collect();
@@ -130,12 +149,30 @@ pub fn to_pandoc_json(tree: &SyntaxNode) -> String {
     serde_json::to_string(&doc).expect("pandoc-json serialization is infallible")
 }
 
-fn build_refs_ctx(tree: &SyntaxNode) -> RefsCtx {
-    build_refs_ctx_inherited(tree, None)
+/// The `markdown` reader's option set --- the projector's default assumption,
+/// and what the recursive cell/div reparses below run under.
+fn pandoc_flavor_options() -> crate::ParserOptions {
+    crate::ParserOptions {
+        flavor: crate::Flavor::Pandoc,
+        dialect: crate::Dialect::for_flavor(crate::Flavor::Pandoc),
+        extensions: crate::Extensions::for_flavor(crate::Flavor::Pandoc),
+        ..crate::ParserOptions::default()
+    }
 }
 
-fn build_refs_ctx_inherited(tree: &SyntaxNode, parent: Option<&RefsCtx>) -> RefsCtx {
-    let mut ctx = RefsCtx::default();
+fn build_refs_ctx(tree: &SyntaxNode, options: &crate::ParserOptions) -> RefsCtx {
+    build_refs_ctx_inherited(tree, None, options.extensions.auto_identifiers)
+}
+
+fn build_refs_ctx_inherited(
+    tree: &SyntaxNode,
+    parent: Option<&RefsCtx>,
+    auto_identifiers: bool,
+) -> RefsCtx {
+    let mut ctx = RefsCtx {
+        auto_identifiers,
+        ..RefsCtx::default()
+    };
     collect_cite_note_nums(tree, &mut ctx);
     let mut example_counter: usize = 0;
     collect_example_numbering(tree, &mut ctx, &mut example_counter);
@@ -349,6 +386,10 @@ fn collect_refs_and_headings(
                     // warns on conflicts but does not auto-disambiguate.
                     seen_ids.entry(id.clone()).or_insert(0);
                     id
+                } else if !ctx.auto_identifiers {
+                    // Without the extension there is no id to derive, and so
+                    // nothing to disambiguate or fall back to `section` for.
+                    String::new()
                 } else {
                     let mut base = id;
                     if base.is_empty() {
@@ -2109,13 +2150,7 @@ fn parse_pandoc_blocks(text: &str) -> Vec<Block> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let opts = crate::ParserOptions {
-        flavor: crate::Flavor::Pandoc,
-        dialect: crate::Dialect::for_flavor(crate::Flavor::Pandoc),
-        extensions: crate::Extensions::for_flavor(crate::Flavor::Pandoc),
-        ..crate::ParserOptions::default()
-    };
-    let doc = crate::parse(text, Some(opts));
+    let doc = crate::parse(text, Some(pandoc_flavor_options()));
     // Swap REFS_CTX with one built from the inner CST so heading auto-ids,
     // reference-link defs, and footnote defs inside the recursive parse
     // resolve against inner offsets/labels rather than the outer document's.
@@ -2127,7 +2162,7 @@ fn parse_pandoc_blocks(text: &str) -> Vec<Block> {
     // for shared keys); offset-aware document-order resolution would be
     // needed for full parity but is not exercised by current corpus.
     let outer = REFS_CTX.with(|c| std::mem::take(&mut *c.borrow_mut()));
-    let inner_ctx = build_refs_ctx_inherited(&doc, Some(&outer));
+    let inner_ctx = build_refs_ctx_inherited(&doc, Some(&outer), outer.auto_identifiers);
     REFS_CTX.with(|c| *c.borrow_mut() = inner_ctx);
     let mut out = Vec::new();
     for child in doc.children() {
@@ -3241,13 +3276,7 @@ fn parse_grid_cell_text(text: &str) -> Vec<Block> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let opts = crate::ParserOptions {
-        flavor: crate::Flavor::Pandoc,
-        dialect: crate::Dialect::for_flavor(crate::Flavor::Pandoc),
-        extensions: crate::Extensions::for_flavor(crate::Flavor::Pandoc),
-        ..crate::ParserOptions::default()
-    };
-    let doc = crate::parse(text, Some(opts));
+    let doc = crate::parse(text, Some(pandoc_flavor_options()));
     let mut out = Vec::new();
     for child in doc.children() {
         if let Some(block) = block_from(&child) {
@@ -3470,13 +3499,7 @@ fn parse_cell_text_inlines(text: &str) -> Vec<Inline> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let opts = crate::ParserOptions {
-        flavor: crate::Flavor::Pandoc,
-        dialect: crate::Dialect::for_flavor(crate::Flavor::Pandoc),
-        extensions: crate::Extensions::for_flavor(crate::Flavor::Pandoc),
-        ..crate::ParserOptions::default()
-    };
-    let doc = crate::parse(text, Some(opts));
+    let doc = crate::parse(text, Some(pandoc_flavor_options()));
     for node in doc.descendants() {
         if matches!(node.kind(), SyntaxKind::PARAGRAPH | SyntaxKind::PLAIN) {
             return inlines_from(&node);
@@ -6069,6 +6092,37 @@ mod tests {
             !native.contains("RawBlock"),
             "the lifted bq-def div must not leave any opaque RawBlock, got: {native}"
         );
+    }
+
+    #[test]
+    fn headings_get_no_auto_id_without_the_extension() {
+        // `pandoc -f commonmark -t native` reports `Header 1 ("",[],[])` for
+        // every heading, including duplicates that would otherwise be
+        // disambiguated and empty slugs that would fall back to `section`.
+        let opts = crate::options::ParserOptions {
+            flavor: crate::options::Flavor::CommonMark,
+            dialect: crate::options::Dialect::for_flavor(crate::options::Flavor::CommonMark),
+            extensions: crate::options::Extensions::for_flavor(crate::options::Flavor::CommonMark),
+            ..crate::options::ParserOptions::default()
+        };
+        let tree = parse(
+            "# Plain heading\n\n# Plain heading\n\n# !\n",
+            Some(opts.clone()),
+        );
+        let native = to_pandoc_ast_with_options(&tree, &opts);
+        assert_eq!(native.matches("( \"\" , [] , [] )").count(), 3, "{native}");
+    }
+
+    #[test]
+    fn explicit_heading_ids_survive_without_auto_identifiers() {
+        // `header_attributes` is off for commonmark, so use a flavor that has
+        // explicit ids but no auto-ids of its own to derive.
+        let mut opts = pandoc_options();
+        opts.extensions.auto_identifiers = false;
+        let tree = parse("# Explicit {#kept}\n\n# Derived\n", Some(opts.clone()));
+        let native = to_pandoc_ast_with_options(&tree, &opts);
+        assert!(native.contains("( \"kept\" , [] , [] )"), "{native}");
+        assert!(native.contains("( \"\" , [] , [] )"), "{native}");
     }
 
     #[test]

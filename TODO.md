@@ -218,7 +218,7 @@ Note any known parser issues here.
   matching `markdown_mmd`, where `# foo [My ID]` carries the id but
   `# foo {#id}` does not.
 
-- [ ] Heading identifiers are auto-generated regardless of the
+- [x] Heading identifiers are auto-generated regardless of the
   `auto_identifiers` extension. `# Plain heading` under `commonmark`
   projects as `Header 1 ("plain-heading",[],[])`, where
   `pandoc -f commonmark` gives `("",[],[])`. The extension is off for
@@ -227,7 +227,17 @@ Note any known parser issues here.
   hands every flavor an id. The LSP's `references` and `goto_definition`
   handlers do gate on `auto_identifiers`; `pandoc_ast.rs` and the linter's
   anchor rules do not. The id is derived downstream, so the fix belongs in
-  that helper and its callers, not in the CST.
+  that helper and its callers, not in the CST. `heading_slugify` now treats
+  `auto_identifiers` as the master switch and `gfm_auto_identifiers` as an
+  algorithm choice, which gates every `implicit_heading_ids` consumer at
+  once (salsa symbol index, linter anchors, LSP link conversion).
+  `FormatterExtensions` gained the flag so the formatter mirror agrees. The
+  projector needed the extension set it never had: `to_pandoc_ast` assumes
+  the `markdown` reader, and `to_pandoc_ast_with_options` (plus the JSON
+  twin) honors the flavor the tree was parsed under, which is what
+  `panache parse --to pandoc-ast` now passes. Explicit `{#id}` attributes
+  are untouched, and the empty-slug `section` fallback is skipped rather
+  than fired with the extension off.
 
 ### Incremental Parsing
 

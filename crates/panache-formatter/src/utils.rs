@@ -217,6 +217,10 @@ pub fn implicit_heading_ids(
     tree: &SyntaxNode,
     extensions: &FormatterExtensions,
 ) -> Vec<ImplicitHeadingId> {
+    if !extensions.auto_identifiers {
+        return Vec::new();
+    }
+
     let mut out = Vec::new();
     let mut seen: HashMap<String, usize> = HashMap::new();
 
@@ -253,8 +257,14 @@ pub fn implicit_heading_ids(
 }
 
 /// Generate an auto identifier from heading text based on extension settings.
+///
+/// `auto_identifiers` is the master switch, and `gfm_auto_identifiers` only
+/// picks the algorithm. Readers that leave it off (`commonmark`, `myst`) give
+/// every heading an empty id, so there is no slug to derive at all.
 pub fn heading_slugify(text: &str, extensions: &FormatterExtensions) -> String {
-    if extensions.gfm_auto_identifiers {
+    if !extensions.auto_identifiers {
+        String::new()
+    } else if extensions.gfm_auto_identifiers {
         gfm_slugify(text)
     } else {
         pandoc_slugify(text)
@@ -383,5 +393,15 @@ mod tests {
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["3-applications"]);
+    }
+
+    #[test]
+    fn implicit_heading_ids_are_empty_without_auto_identifiers() {
+        let tree = crate::parser::parse("# Plain heading\n", None);
+        let ext = FormatterExtensions {
+            auto_identifiers: false,
+            ..FormatterExtensions::default()
+        };
+        assert!(implicit_heading_ids(&tree, &ext).is_empty());
     }
 }

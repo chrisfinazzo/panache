@@ -961,6 +961,7 @@ fn main() -> io::Result<()> {
             }
 
             let input = read_all(file.as_ref())?;
+            let parser_options = cfg.parser_options();
             let tree = parse(&input, Some(cfg));
             if let Some(json_path) = json {
                 let json_value = panache::syntax::cst_to_json(&tree);
@@ -972,10 +973,16 @@ fn main() -> io::Result<()> {
                 match to {
                     ParseOutput::Cst => println!("{:#?}", tree),
                     ParseOutput::PandocAst => {
-                        println!("{}", panache::parser::to_pandoc_ast(&tree));
+                        println!(
+                            "{}",
+                            panache::parser::to_pandoc_ast_with_options(&tree, &parser_options)
+                        );
                     }
                     ParseOutput::PandocJson => {
-                        println!("{}", panache::parser::to_pandoc_json(&tree));
+                        println!(
+                            "{}",
+                            panache::parser::to_pandoc_json_with_options(&tree, &parser_options)
+                        );
                     }
                 }
             }

@@ -58,6 +58,7 @@ fn to_formatter_config(config: &Config) -> panache_formatter::Config {
     };
     let formatter_extensions = panache_formatter::config::FormatterExtensions {
         // Keep shared extension behavior aligned with parser-facing extensions.
+        auto_identifiers: config.extensions.auto_identifiers,
         blank_before_header: config.extensions.blank_before_header,
         bookdown_references: config.extensions.bookdown_references,
         east_asian_line_breaks: config.extensions.east_asian_line_breaks,

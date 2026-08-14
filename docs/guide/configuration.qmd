@@ -710,7 +710,8 @@ implicit-header-references = true
 
 `gfm-auto-identifiers`
 :   Use GitHub's heading identifier algorithm (default: disabled, enabled for
-    `gfm` flavor)
+    `gfm` flavor). This only selects the slug algorithm; with `auto-identifiers`
+    disabled no identifier is generated at all.
 
 `blank-before-header`
 :   Require blank line before headers (default: enabled)

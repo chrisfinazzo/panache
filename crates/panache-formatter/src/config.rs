@@ -98,6 +98,7 @@ pub enum BlankLines {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FormatterExtensions {
+    pub auto_identifiers: bool,
     pub blank_before_header: bool,
     pub bookdown_references: bool,
     pub east_asian_line_breaks: bool,
@@ -120,6 +121,7 @@ impl FormatterExtensions {
         let smart_default = matches!(flavor, Flavor::Pandoc | Flavor::Quarto | Flavor::RMarkdown);
 
         Self {
+            auto_identifiers: parser_defaults.auto_identifiers,
             blank_before_header: parser_defaults.blank_before_header,
             bookdown_references: parser_defaults.bookdown_references,
             east_asian_line_breaks: parser_defaults.east_asian_line_breaks,
@@ -177,6 +179,7 @@ macro_rules! known_formatter_extensions {
 }
 
 known_formatter_extensions! {
+    "auto-identifiers" => auto_identifiers,
     "blank-before-header" => blank_before_header,
     "bookdown-references" => bookdown_references,
     "east-asian-line-breaks" => east_asian_line_breaks,
