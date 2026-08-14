@@ -181,15 +181,14 @@ Note any known parser issues here.
   default is the bug, not the parser path --- `commonmark` already has it on
   and reads the same input correctly.
 
-- [ ] An escaped space before heading attributes is swallowed by the attribute
-  gap. `pandoc -f markdown` reads `# foo\ {#id}` as
-  `Header 1 (id) [Str "foo\160"]` --- the `\ ` is content (a nonbreaking
-  space) and the attribute block is stripped separately. Panache's
-  `try_parse_trailing_attributes_with_pos` splits at the raw space, so the
-  backslash is left stranded in `TEXT "foo\"` and the space becomes the
-  `WHITESPACE` token before `ATTRIBUTE`, projecting `Str "foo\\"`. Trailing-
-  attribute detection needs to refuse a space that is itself escaped, in
-  headings and anywhere else the helper is used.
+- [ ] A closing `#` run cancels a heading's trailing attribute block in pandoc
+  but not in panache. `pandoc -f markdown` reads `# foo {#id} #` as
+  `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]` --- the `{#id}` is
+  content and the id is auto-generated from it --- while panache lifts it
+  into an `ATTRIBUTE` node and reports `Header 1 (id) [Str "foo"]`.
+  Attribute detection in `emit_atx_heading_text` runs on the content that
+  the closing-run split already produced, so it never learns a run was
+  there. Any number of closing hashes triggers it.
 
 ### Incremental Parsing
 

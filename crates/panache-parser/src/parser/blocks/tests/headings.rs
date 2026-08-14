@@ -991,12 +991,58 @@ fn atx_heading_backslash_space_stays_a_nonbreaking_space() {
 fn atx_heading_backslash_before_attributes_is_not_a_hard_break() {
     // Attributes come off first, so the backslash is no longer at the line
     // ending: pandoc reads `# foo\ {#id}` as `Header 1 (id) [Str "foo\160"]`,
-    // with no `LineBreak`. (That the escaped space lands in the attribute gap
-    // rather than in the content is a separate, pre-existing divergence.)
+    // with no `LineBreak`.
     let input = "# foo\\ {#id}\n";
     let node = parse_blocks(input);
     assert_eq!(node.text().to_string(), input, "parser must stay lossless");
     assert!(!heading_content_kinds(&node).contains(&SyntaxKind::HARD_LINE_BREAK));
+}
+
+/// An escaped space is content, not the gap in front of a trailing attribute
+/// block. `pandoc -f markdown` reads `# foo\ {#id}` as
+/// `Header 1 (id) [Str "foo\160"]` --- a nonbreaking space, with the attribute
+/// stripped separately (pandoc needs no gap at all: `# foo{#id}` carries the
+/// attribute too). Trimming it would strand the backslash in the content.
+#[test]
+fn atx_heading_escaped_space_before_attributes_stays_content() {
+    let input = "# foo\\ {#id}\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(get_heading_content(&node).as_deref(), Some("foo\\ "));
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::TEXT, SyntaxKind::NONBREAKING_SPACE]
+    );
+}
+
+/// Only the escaped whitespace character is content; the rest of the run is
+/// still the gap. Pandoc reads `# foo\  {#id}` as `[Str "foo\160"]`.
+#[test]
+fn atx_heading_escaped_space_keeps_only_the_character_it_escapes() {
+    let input = "# foo\\  {#id}\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(get_heading_content(&node).as_deref(), Some("foo\\ "));
+}
+
+/// An *escaped backslash* does not escape the space after it, so the gap is
+/// ordinary: pandoc reads `# baz\\ {#id}` as `[Str "baz\\"]`.
+#[test]
+fn atx_heading_escaped_backslash_before_attributes_leaves_the_gap_alone() {
+    let input = "# baz\\\\ {#id}\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(get_heading_content(&node).as_deref(), Some("baz\\\\"));
+}
+
+/// Odd runs escape, even runs don't, all the way up: pandoc reads
+/// `# foo\\\ {#id}` as `[Str "foo\\\160"]`.
+#[test]
+fn atx_heading_odd_backslash_run_escapes_the_gap() {
+    let input = "# foo\\\\\\ {#id}\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(get_heading_content(&node).as_deref(), Some("foo\\\\\\ "));
 }
 
 #[test]

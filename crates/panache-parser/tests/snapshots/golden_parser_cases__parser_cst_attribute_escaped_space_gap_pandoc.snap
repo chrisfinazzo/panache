@@ -1,0 +1,123 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..148
+  HEADING@0..13
+    ATX_HEADING_MARKER@0..1
+      ATX_HEADING_MARKER@0..1 "#"
+    WHITESPACE@1..2 " "
+    HEADING_CONTENT@2..7
+      TEXT@2..5 "foo"
+      NONBREAKING_SPACE@5..7 "\\ "
+    ATTRIBUTE@7..12
+      TEXT@7..8 "{"
+      ATTR_ID@8..11 "#id"
+      TEXT@11..12 "}"
+    NEWLINE@12..13 "\n"
+  BLANK_LINE@13..14
+    BLANK_LINE@13..14 "\n"
+  HEADING@14..30
+    ATX_HEADING_MARKER@14..16
+      ATX_HEADING_MARKER@14..16 "##"
+    WHITESPACE@16..17 " "
+    HEADING_CONTENT@17..22
+      TEXT@17..20 "bar"
+      NONBREAKING_SPACE@20..22 "\\ "
+    WHITESPACE@22..23 " "
+    ATTRIBUTE@23..29
+      TEXT@23..24 "{"
+      ATTR_ID@24..28 "#id2"
+      TEXT@28..29 "}"
+    NEWLINE@29..30 "\n"
+  BLANK_LINE@30..31
+    BLANK_LINE@30..31 "\n"
+  HEADING@31..48
+    ATX_HEADING_MARKER@31..34
+      ATX_HEADING_MARKER@31..34 "###"
+    WHITESPACE@34..35 " "
+    HEADING_CONTENT@35..40
+      TEXT@35..38 "baz"
+      ESCAPED_CHAR@38..40 "\\\\"
+    WHITESPACE@40..41 " "
+    ATTRIBUTE@41..47
+      TEXT@41..42 "{"
+      ATTR_ID@42..46 "#id3"
+      TEXT@46..47 "}"
+    NEWLINE@47..48 "\n"
+  BLANK_LINE@48..49
+    BLANK_LINE@48..49 "\n"
+  HEADING@49..68
+    ATX_HEADING_MARKER@49..53
+      ATX_HEADING_MARKER@49..53 "####"
+    WHITESPACE@53..54 " "
+    HEADING_CONTENT@54..61
+      TEXT@54..57 "qux"
+      ESCAPED_CHAR@57..59 "\\\\"
+      NONBREAKING_SPACE@59..61 "\\ "
+    ATTRIBUTE@61..67
+      TEXT@61..62 "{"
+      ATTR_ID@62..66 "#id4"
+      TEXT@66..67 "}"
+    NEWLINE@67..68 "\n"
+  BLANK_LINE@68..69
+    BLANK_LINE@68..69 "\n"
+  HEADING@69..95
+    HEADING_CONTENT@69..75
+      TEXT@69..73 "quux"
+      NONBREAKING_SPACE@73..75 "\\ "
+    ATTRIBUTE@75..81
+      TEXT@75..76 "{"
+      ATTR_ID@76..80 "#id5"
+      TEXT@80..81 "}"
+    NEWLINE@81..82 "\n"
+    SETEXT_HEADING_UNDERLINE@82..94
+      SETEXT_HEADING_UNDERLINE@82..94 "============"
+    NEWLINE@94..95 "\n"
+  BLANK_LINE@95..96
+    BLANK_LINE@95..96 "\n"
+  PIPE_TABLE@96..148
+    TABLE_CAPTION@96..117
+      TABLE_CAPTION_PREFIX@96..98 ": "
+      TEXT@98..105 "caption"
+      NONBREAKING_SPACE@105..107 "\\ "
+      ATTRIBUTE@107..116
+        TEXT@107..108 "{"
+        ATTR_ID@108..115 "#tbl-id"
+        TEXT@115..116 "}"
+      NEWLINE@116..117 "\n"
+    BLANK_LINE@117..118
+      BLANK_LINE@117..118 "\n"
+    TABLE_HEADER@118..128
+      TEXT@118..119 "|"
+      WHITESPACE@119..120 " "
+      TABLE_CELL@120..121
+        TEXT@120..121 "a"
+      WHITESPACE@121..122 " "
+      TEXT@122..123 "|"
+      WHITESPACE@123..124 " "
+      TABLE_CELL@124..125
+        TEXT@124..125 "b"
+      WHITESPACE@125..126 " "
+      TEXT@126..127 "|"
+      NEWLINE@127..128 "\n"
+    TABLE_SEPARATOR@128..138
+      TABLE_SEP_DELIM@128..129 "|"
+      TABLE_SEP_DASHES@129..132 "---"
+      TABLE_SEP_DELIM@132..133 "|"
+      TABLE_SEP_DASHES@133..136 "---"
+      TABLE_SEP_DELIM@136..137 "|"
+      NEWLINE@137..138 "\n"
+    TABLE_ROW@138..148
+      TEXT@138..139 "|"
+      WHITESPACE@139..140 " "
+      TABLE_CELL@140..141
+        TEXT@140..141 "1"
+      WHITESPACE@141..142 " "
+      TEXT@142..143 "|"
+      WHITESPACE@143..144 " "
+      TABLE_CELL@144..145
+        TEXT@144..145 "2"
+      WHITESPACE@145..146 " "
+      TEXT@146..147 "|"
+      NEWLINE@147..148 "\n"

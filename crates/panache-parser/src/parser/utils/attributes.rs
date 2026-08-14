@@ -55,10 +55,42 @@ pub fn try_parse_trailing_attributes_with_pos(text: &str) -> Option<(AttributeBl
     let attr_content = &trimmed[open_brace + 1..trimmed.len() - 1];
     let attr_block = parse_attribute_content(attr_content)?;
 
-    // Get text before attributes (trim trailing whitespace)
-    let before_attrs = trimmed[..open_brace].trim_end();
+    // Get text before attributes (trim the gap, but not an escaped space)
+    let before_attrs = trim_attribute_gap(&trimmed[..open_brace]);
 
     Some((attr_block, before_attrs, open_brace))
+}
+
+/// Trim the whitespace gap in front of a trailing attribute block.
+///
+/// The gap has to be *unescaped* whitespace. `pandoc -f markdown` reads
+/// `# foo\ {#id}` as `Header 1 (id) [Str "foo\160"]`: the `\ ` is a
+/// nonbreaking space belonging to the content, and the attribute block comes
+/// off on its own --- pandoc asks for no gap at all, so `# foo{#id}` carries
+/// the attribute too. Trimming an escaped space would strand its backslash in
+/// the content, turning `foo\160` into a literal `foo\`.
+///
+/// Only the escaped character itself is content; any further whitespace in
+/// front of the block is still gap. Whether the last backslash escapes at all
+/// depends on the parity of the run behind it: `# foo\\ {#id}` is
+/// `[Str "foo\\"]` with an ordinary gap, `# foo\\\ {#id}` is
+/// `[Str "foo\\\160"]`.
+fn trim_attribute_gap(before: &str) -> &str {
+    let trimmed = before.trim_end();
+    if trimmed.len() == before.len() {
+        return before;
+    }
+
+    let backslashes = trimmed.bytes().rev().take_while(|&b| b == b'\\').count();
+    if backslashes % 2 == 0 {
+        return trimmed;
+    }
+
+    // Hand the odd backslash back the one character it escapes.
+    match before[trimmed.len()..].chars().next() {
+        Some(escaped) => &before[..trimmed.len() + escaped.len_utf8()],
+        None => trimmed,
+    }
 }
 
 fn find_matching_open_brace_for_trailing_block(text: &str) -> Option<usize> {
@@ -1207,6 +1239,28 @@ mod tests {
         assert!(result.is_some());
         let (_, before) = result.unwrap();
         assert_eq!(before, "Heading");
+    }
+
+    /// An escaped space is content, not gap. `pandoc -f markdown` reads
+    /// `# foo\ {#id}` as `Header 1 (id) [Str "foo\160"]`, so the backslash
+    /// keeps the space it escapes and only the rest of the run is trimmed.
+    #[test]
+    fn escaped_space_before_attrs_is_not_part_of_the_gap() {
+        let cases = [
+            ("Heading\\ {#id}", "Heading\\ "),
+            ("Heading\\   {#id}", "Heading\\ "),
+            ("Heading\\\t{#id}", "Heading\\\t"),
+            // An escaped backslash does not escape the space after it.
+            ("Heading\\\\ {#id}", "Heading\\\\"),
+            ("Heading\\\\\\ {#id}", "Heading\\\\\\ "),
+            // Nothing to give back when there is no gap at all.
+            ("Heading\\{#id}", "Heading\\"),
+            ("Heading {#id}", "Heading"),
+        ];
+        for (input, expected) in cases {
+            let (_, before) = try_parse_trailing_attributes(input).expect(input);
+            assert_eq!(before, expected, "{input:?}");
+        }
     }
 
     /// Regression: the inline-code attribute path used to reconstruct a
