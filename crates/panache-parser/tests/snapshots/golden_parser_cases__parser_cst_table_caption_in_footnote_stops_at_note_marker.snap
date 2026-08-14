@@ -36,8 +36,7 @@ DOCUMENT@0..73
         TABLE_SEP_DASHES@39..42 "---"
         NEWLINE@42..43 "\n"
       BLANK_LINE@43..44
-        LINE_PREFIX@43..44 "\n"
-        BLANK_LINE@44..44 ""
+        BLANK_LINE@43..44 "\n"
       TABLE_CAPTION@44..54
         LINE_PREFIX@44..48 "    "
         TABLE_CAPTION_PREFIX@48..50 ": "

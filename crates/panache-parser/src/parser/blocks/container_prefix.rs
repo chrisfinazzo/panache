@@ -1277,24 +1277,25 @@ fn strip_bq_with_gobble(line: &str, bq_depth: usize, lazy_gobble: bool) -> &str 
 /// Mirrors the strip done by `parse_inner_content` in `core.rs` for
 /// footnote/definition base-indent: when the line's leading indent
 /// reaches `content_indent`, strip exactly `content_indent` columns;
-/// otherwise (lazy continuation) strip whatever leading whitespace
-/// exists.
+/// otherwise (lazy continuation) strip whatever leading indent exists.
+///
+/// The short-line branch measures with [`leading_indent`], which counts
+/// spaces and tabs only. A line terminator is content, never container
+/// prefix: claiming a blank line's newline tags it `LINE_PREFIX` inside a
+/// code block, and the formatter folds that into the next line's indent,
+/// drifting it one content column per pass.
 pub(crate) fn strip_content_indent(line: &str, content_indent: usize) -> (&str, Option<&str>) {
     if content_indent == 0 {
         return (line, None);
     }
-    let (indent_cols, _) = leading_indent(line);
+    let (indent_cols, indent_bytes) = leading_indent(line);
     if indent_cols >= content_indent {
         let idx = byte_index_at_column(line, content_indent);
         (&line[idx..], Some(&line[..idx]))
+    } else if indent_bytes > 0 {
+        (&line[indent_bytes..], Some(&line[..indent_bytes]))
     } else {
-        let trimmed_start = line.trim_start();
-        let ws_len = line.len() - trimmed_start.len();
-        if ws_len > 0 {
-            (trimmed_start, Some(&line[..ws_len]))
-        } else {
-            (line, None)
-        }
+        (line, None)
     }
 }
 
@@ -2445,6 +2446,19 @@ mod tests {
         let (stripped, emit) = p.strip_line_0_with_indent_emit("  short");
         assert_eq!(stripped, "short");
         assert_eq!(emit, Some("  "));
+    }
+
+    #[test]
+    fn strip_content_indent_leaves_a_blank_line_intact() {
+        // A blank line has no indent to spend, and its line terminator is
+        // content, not container prefix. Claiming it tags the newline as
+        // `LINE_PREFIX` inside a code block, and the formatter then folds it
+        // into the next line's indent — four columns of drift per pass.
+        for line in ["\n", "\r\n", ""] {
+            assert_eq!(strip_content_indent(line, 4), (line, None), "on {line:?}");
+        }
+        // A short indent still comes off, but stops at the terminator.
+        assert_eq!(strip_content_indent("  \n", 4), ("\n", Some("  ")));
     }
 
     #[test]

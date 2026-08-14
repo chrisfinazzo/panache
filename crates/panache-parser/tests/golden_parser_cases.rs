@@ -255,6 +255,7 @@ golden_test_cases!(
     citation_prefix_paren_escape_278,
     dedented_fence_closes_list_commonmark,
     dedented_fence_closes_list_pandoc,
+    definition_body_code_block_blank_line_pandoc,
     definition_body_table_caption,
     definition_body_table_nested_containers,
     definition_body_table_no_caption,

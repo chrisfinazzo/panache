@@ -302,11 +302,12 @@ fn strip_consumes_only_container_prefix_bytes() {
             StripOp::BlockQuoteMarker,
         ],
     ];
-    // Non-blank lines only: `strip_content_indent`'s lazy trim claims a
-    // blank line's newline as well, which is why every lookahead gates
-    // blanks with `is_blank_line` before resolving a frame (see the
-    // scope bounds on `FrameVerdict`).
+    // Blank lines included: a line terminator is content, so no strip may
+    // claim one even when the line falls short of the frame.
     let lines = [
+        "\n",
+        "  \n",
+        "\r\n",
         "b |",
         " b |",
         "  b |",

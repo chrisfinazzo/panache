@@ -1,0 +1,9 @@
+Term
+
+:   Body text.
+
+    ```python
+    x = 1
+
+        y = 2
+    ```

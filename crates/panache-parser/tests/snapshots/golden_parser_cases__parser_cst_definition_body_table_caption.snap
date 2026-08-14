@@ -25,8 +25,7 @@ DOCUMENT@0..47
             TEXT@16..21 "  def"
             NEWLINE@21..22 "\n"
           BLANK_LINE@22..23
-            LINE_PREFIX@22..23 "\n"
-            BLANK_LINE@23..23 ""
+            BLANK_LINE@22..23 "\n"
           TABLE_SEPARATOR@23..32
             LINE_PREFIX@23..27 "    "
             TABLE_SEP_DASHES@27..31 "----"

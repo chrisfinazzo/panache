@@ -592,15 +592,6 @@ panache starts caching NodePtrs across edits.
 
 ## Parser
 
-- [ ] A fenced code block inside a definition-list body is **not idempotent**
-  when its content holds a blank line followed by an indented line: the
-  body's content indent is re-applied to that line on every pass, so it
-  drifts four columns right each time. Pre-existing and independent of the
-  list-start rule (it reproduces with `1.` just as well as `2.`); dropping
-  the blank line or moving the fence to the top level avoids it. Hit while
-  documenting `[compat] pandoc`, which is why that example has no blank line
-  in its fence.
-
 - [ ] `table_grid_starts_at`'s bare-dash-run branch was dead:
   `parse_single_dash_run` and `try_parse_multiline_separator` accept exactly
   the same lines, so the multiline check above it always won and the

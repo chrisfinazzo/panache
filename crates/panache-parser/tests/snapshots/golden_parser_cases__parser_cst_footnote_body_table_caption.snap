@@ -21,8 +21,7 @@ DOCUMENT@0..44
         TEXT@15..18 "cap"
         NEWLINE@18..19 "\n"
       BLANK_LINE@19..20
-        LINE_PREFIX@19..20 "\n"
-        BLANK_LINE@20..20 ""
+        BLANK_LINE@19..20 "\n"
       TABLE_SEPARATOR@20..29
         LINE_PREFIX@20..24 "    "
         TABLE_SEP_DASHES@24..28 "----"
