@@ -12,6 +12,25 @@ fn atx_trailing_hashes_are_removed() {
 }
 
 #[test]
+fn atx_trailing_hashes_are_kept_in_front_of_a_brace_block() {
+    // The closing run is what keeps the braces out of the heading's attributes:
+    // pandoc reads `# foo {#id} #` as `Header 1 (foo-id) [Str "foo", Space,
+    // Str "{#id}"]`, so dropping the run would rewrite the id to `id`.
+    let input = "# foo {#id} #\n";
+    let out = format(input, None, None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, None, None), input);
+}
+
+#[test]
+fn atx_trailing_hashes_are_kept_between_content_and_attributes() {
+    let input = "# foo {#id} # {.cls}\n";
+    let out = format(input, None, None);
+    assert_eq!(out, input);
+    assert_eq!(format(&out, None, None), input);
+}
+
+#[test]
 fn atx_leading_spaces_are_normalized() {
     let input = "   ##   Title   \n";
     let expected = "## Title\n";

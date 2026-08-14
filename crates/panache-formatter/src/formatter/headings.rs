@@ -1,3 +1,4 @@
+use panache_parser::parser::utils::attributes::try_parse_trailing_attributes;
 use rowan::NodeOrToken;
 
 use super::core::normalize_attribute_text;
@@ -74,6 +75,14 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
     if !content.is_empty() {
         out.push(' ');
         out.push_str(content);
+    }
+    // A closing run is decoration and normally dropped --- except when it is
+    // load-bearing. pandoc reads a heading's attribute block only *after* the
+    // run, so the run is what keeps a trailing `{...}` in the content out of
+    // the attributes: `# foo {#id} #` is `Header 1 (foo-id) [Str "foo", Space,
+    // Str "{#id}"]`, and dropping the run would rewrite the id to `id`.
+    if try_parse_trailing_attributes(content).is_some() {
+        out.push_str(" #");
     }
     if !attributes.is_empty() {
         out.push(' ');
