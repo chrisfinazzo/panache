@@ -627,6 +627,15 @@ impl Extensions {
         // extras that remark-parse@8's `gfm: true` does NOT include: footnotes
         // (a separate, default-off option), math (needs remark-math), emoji
         // (needs remark-gemoji), and GitHub alerts (postdates this remark).
+        //
+        // Heading ids also go: unlike GitHub, which slugs headings itself,
+        // mdsvex is a remark -> rehype pipeline whose default `rehypePlugins`
+        // is empty and whose own transformers never touch `h1`-`h6`, so
+        // `# My heading` emits a bare `<h1>` and `[x](#my-heading)` is a dead
+        // link. `gfm_auto_identifiers` stays on because it is inert while
+        // `auto_identifiers` is off, and it is the *correct* algorithm for the
+        // sites that do add `rehype-slug` (which slugs with `github-slugger`):
+        // they only have to set `auto-identifiers = true`.
         let mut ext = Self::gfm_defaults();
 
         ext.footnotes = false;
@@ -634,6 +643,7 @@ impl Extensions {
         ext.tex_math_gfm = false;
         ext.emoji = false;
         ext.alerts = false;
+        ext.auto_identifiers = false;
 
         ext.svelte_template = true;
 
@@ -1017,6 +1027,13 @@ mod tests {
         assert!(!ext.tex_math_dollars);
         assert!(!ext.emoji);
         assert!(!ext.alerts);
+
+        // Heading ids are a rehype concern, and mdsvex ships no rehype plugins
+        // of its own, so `# My heading` renders as a bare `<h1>`. The GFM
+        // algorithm stays selected for anyone who adds `rehype-slug` and flips
+        // `auto-identifiers` back on.
+        assert!(!ext.auto_identifiers);
+        assert!(ext.gfm_auto_identifiers);
 
         // CommonMark dialect, so the Pandoc `{...}` attribute constructs are off
         // — this is what frees `{` for Svelte template syntax.

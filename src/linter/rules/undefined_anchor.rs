@@ -243,6 +243,22 @@ mod tests {
     }
 
     #[test]
+    fn reports_implicit_heading_under_mdsvex() {
+        // mdsvex ships no `rehype-slug`, so a heading gets no id and the link
+        // would be dead in the rendered site.
+        let input = "# Heading Name\n\nSee [there](#heading-name).\n";
+        let config = Config {
+            flavor: Flavor::Mdsvex,
+            extensions: crate::config::Extensions::for_flavor(Flavor::Mdsvex),
+            ..Default::default()
+        };
+        let diagnostics = parse_and_lint_with_config(input, config);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "undefined-anchor");
+        assert!(diagnostics[0].message.contains("#heading-name"));
+    }
+
+    #[test]
     fn reports_typo_anchor() {
         let input = "# Heading {#real}\n\nSee [link](#reel).\n";
         let diagnostics = parse_and_lint(input);

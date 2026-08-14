@@ -706,12 +706,17 @@ implicit-header-references = true
 
 `auto-identifiers`
 :   Auto-generate heading identifiers (default: enabled for `pandoc`, `quarto`,
-    `rmarkdown`, `gfm`, and `multimarkdown`)
+    `rmarkdown`, `gfm`, and `multimarkdown`). Disabled for `mdsvex`, which
+    renders headings through rehype with no plugins of its own, so a heading
+    gets an `id` only if you add `rehype-slug` --- if you do, turn this back on.
 
 `gfm-auto-identifiers`
 :   Use GitHub's heading identifier algorithm (default: disabled, enabled for
-    `gfm` flavor). This only selects the slug algorithm; with `auto-identifiers`
-    disabled no identifier is generated at all.
+    `gfm` and `mdsvex`). This only selects the slug algorithm; with
+    `auto-identifiers` disabled no identifier is generated at all, which is why
+    `mdsvex` selects the algorithm without enabling identifiers: `rehype-slug`
+    slugs with `github-slugger`, so this is the right choice for the sites that
+    do install it.
 
 `blank-before-header`
 :   Require blank line before headers (default: enabled)
