@@ -592,19 +592,6 @@ panache starts caching NodePtrs across edits.
 
 ## Parser
 
-- [ ] An ordered marker indented *past* its list's base column but short of the
-  open item's content column opens a `LIST` directly inside the enclosing
-  `LIST` instead of a sibling `LIST_ITEM`, and the pandoc-ast projector
-  drops the whole subtree. `a. Grant\n\n   1. One\n\n    2. Drifted\n` loses
-  `Drifted` entirely; pandoc reads it as a second item of the `1.` list.
-  Pre-existing (reproduces under `[compat] pandoc = "3.9"` too) and not
-  covered by the conformance corpus. It surfaced while adding the 3.10
-  compat target: under 3.10 the formatter's normalized output for that shape
-  no longer round-trips, so
-  `tests/fixtures/cases/issue_212_license_nested_list_idempotency` and five
-  parser golden cases are pinned to `3.9` until this is fixed. Unpin them
-  once a sibling `LIST_ITEM` is emitted.
-
 - [ ] A fenced code block inside a definition-list body is **not idempotent**
   when its content holds a blank line followed by an indented line: the
   body's content indent is re-applied to that line on every pass, so it

@@ -887,6 +887,7 @@ golden_test_cases!(
     issue_314_advance_columns_multibyte,
     issue_336_gfm_strong_colon_bare_uri,
     issue_398_headerless_multiline_dash_closer,
+    drifted_sibling_marker_after_blank_line,
     multiline_table_blank_after_opener,
     multiline_table_spaced_top_border,
     simple_table_stops_at_div_closer_in_quote,

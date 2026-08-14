@@ -1012,3 +1012,54 @@ fn ordered_sublist_starting_at_one_still_nests() {
         assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
     }
 }
+
+/// A marker indented past its list's base column but short of the open item's
+/// content column is a sibling item of that list, not a new nested list.
+/// The blank line has already closed the item, so there is nothing left to
+/// nest into — emitting a `LIST` there would make it a direct child of a
+/// `LIST`, a shape the pandoc-ast projector drops wholesale. Checked against
+/// `pandoc -f markdown -t native`, which reads `Drifted` as a second item of
+/// the inner list.
+#[test]
+fn drifted_marker_short_of_content_col_is_a_sibling_item() {
+    for input in [
+        "a. Grant\n\n   1. One\n\n    2. Drifted\n",
+        "- Grant\n\n  - One\n\n   - Drifted\n",
+    ] {
+        let tree = parse_blocks(input);
+        let lists = find_all(&tree, SyntaxKind::LIST);
+        assert_eq!(
+            lists.len(),
+            2,
+            "a drifted marker must not open a third list: {input:?}"
+        );
+        assert_eq!(
+            count_children(&lists[1], SyntaxKind::LIST_ITEM),
+            2,
+            "the drifted marker belongs to the inner list: {input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}
+
+/// A `LIST` is never a direct child of a `LIST`; every list nests through a
+/// `LIST_ITEM`. Guards the whole drift band around a closed item's list.
+#[test]
+fn no_list_is_a_direct_child_of_a_list() {
+    for input in [
+        "a. Grant\n\n   1. One\n\n    2. Drifted\n",
+        "a. Grant\n\n   1. One\n\n     2. Drifted\n",
+        "a. Grant\n\n   1. One\n\n      1. Deeper\n",
+        "- Grant\n\n  - One\n\n   - Drifted\n",
+        "- Grant\n\n  - One\n\n    - Deeper\n",
+    ] {
+        let tree = parse_blocks(input);
+        for list in find_all(&tree, SyntaxKind::LIST) {
+            assert!(
+                list.parent().is_none_or(|p| p.kind() != SyntaxKind::LIST),
+                "LIST directly inside LIST: {input:?}"
+            );
+        }
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}

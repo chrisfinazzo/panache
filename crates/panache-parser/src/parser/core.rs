@@ -1969,7 +1969,25 @@ impl<'a> Parser<'a> {
                 _ => None,
             });
 
+        // A matched `List` with no open `LIST_ITEM` above it — its item was
+        // closed by a blank line — is the marker's own list, not content of
+        // the enclosing item. `current_content_col` reports that *enclosing*
+        // item's column, which is shallower, so the nesting test below would
+        // wrongly read the marker as nested content and open a `LIST` with a
+        // `LIST` as its parent (`a. x` / `   1. y` / `    2. z`). There is no
+        // item left to nest into: the marker is a sibling item of the matched
+        // list, which is what the fallthrough emits.
+        let matched_list_awaits_item = matched_level.is_some_and(|level| {
+            matches!(
+                self.containers.stack.get(level),
+                Some(Container::List { .. })
+            ) && !self.containers.stack[level + 1..]
+                .iter()
+                .any(|c| matches!(c, Container::ListItem { .. }))
+        });
+
         if deep_ordered_matched_level.is_none()
+            && !matched_list_awaits_item
             && current_content_col > 0
             && prepared.indent_cols >= current_content_col
         {

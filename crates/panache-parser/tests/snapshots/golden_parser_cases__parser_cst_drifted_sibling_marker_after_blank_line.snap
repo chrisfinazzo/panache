@@ -1,0 +1,59 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..68
+  LIST@0..36
+    LIST_ITEM@0..36
+      LIST_MARKER@0..2 "a."
+      WHITESPACE@2..3 " "
+      PLAIN@3..9
+        TEXT@3..8 "Grant"
+        NEWLINE@8..9 "\n"
+      BLANK_LINE@9..10
+        BLANK_LINE@9..10 "\n"
+      LIST@10..36
+        LIST_ITEM@10..20
+          WHITESPACE@10..13 "   "
+          LIST_MARKER@13..15 "1."
+          WHITESPACE@15..16 " "
+          PLAIN@16..20
+            TEXT@16..19 "One"
+            NEWLINE@19..20 "\n"
+        BLANK_LINE@20..21
+          BLANK_LINE@20..21 "\n"
+        LIST_ITEM@21..36
+          WHITESPACE@21..25 "    "
+          LIST_MARKER@25..27 "2."
+          WHITESPACE@27..28 " "
+          PLAIN@28..36
+            TEXT@28..35 "Drifted"
+            NEWLINE@35..36 "\n"
+  BLANK_LINE@36..37
+    BLANK_LINE@36..37 "\n"
+  LIST@37..68
+    LIST_ITEM@37..68
+      LIST_MARKER@37..38 "-"
+      WHITESPACE@38..39 " "
+      PLAIN@39..45
+        TEXT@39..44 "Grant"
+        NEWLINE@44..45 "\n"
+      BLANK_LINE@45..46
+        BLANK_LINE@45..46 "\n"
+      LIST@46..68
+        LIST_ITEM@46..54
+          WHITESPACE@46..48 "  "
+          LIST_MARKER@48..49 "-"
+          WHITESPACE@49..50 " "
+          PLAIN@50..54
+            TEXT@50..53 "One"
+            NEWLINE@53..54 "\n"
+        BLANK_LINE@54..55
+          BLANK_LINE@54..55 "\n"
+        LIST_ITEM@55..68
+          WHITESPACE@55..58 "   "
+          LIST_MARKER@58..59 "-"
+          WHITESPACE@59..60 " "
+          PLAIN@60..68
+            TEXT@60..67 "Drifted"
+            NEWLINE@67..68 "\n"

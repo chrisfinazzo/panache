@@ -9,12 +9,12 @@ a. **License grant.**
    4. **Media and formats; technical modifications allowed.** The Licensor
       authorizes You to exercise the Licensed Rights.
 
-      5. **Downstream recipients.**
+   5. **Downstream recipients.**
 
-         A. **Offer from the Licensor -- Licensed Material.** Every recipient
-         receives an offer.
+      A. **Offer from the Licensor -- Licensed Material.** Every recipient
+      receives an offer.
 
-         B. **No downstream restrictions.** You may not offer restrictions.
+      B. **No downstream restrictions.** You may not offer restrictions.
 
-      6. **No endorsement.** Nothing in this Public License constitutes
-         endorsement.
+   6. **No endorsement.** Nothing in this Public License constitutes
+      endorsement.
