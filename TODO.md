@@ -1104,7 +1104,7 @@ panache starts caching NodePtrs across edits.
   `blocks/tests/blockquotes.rs` and the
   `quoted_item_lazy_deeper_quote_marker` parser golden.
 
-- [ ] The **blank-line variant still breaks losslessness**:
+- [x] The **blank-line variant still breaks losslessness**:
   `> - a\n>\n>   > nested quote\n> - b\n` (blank quote line, so the nested
   `BlockQuote` inside item `a` is legitimate and parses structurally like
   pandoc) drops the outer `> ` of the nested-quote line from its position ---
@@ -1113,7 +1113,22 @@ panache starts caching NodePtrs across edits.
   trailing `PLAIN` before item `b`. Both losslessness and idempotency fail.
   Different mechanism from the lazy case above (the can-nest path's marker
   bookkeeping around a quote nested in a quoted item); pre-existing at
-  `f60154d1` and unaffected by the lazy-continuation fix.
+  `f60154d1` and unaffected by the lazy-continuation fix. Two bugs, one per
+  side. Parser: the can-nest arm pushed the existing-level `> ` through
+  `emit_or_buffer_blockquote_marker` into the (already flushed) item buffer,
+  which only flushed at item close --- after the nested quote it prefixes;
+  it now emits those markers directly, since everything after the buffer
+  flush in that arm is direct structural emission. Formatter (surfaced once
+  the CST was right, and reproducible independently via `> - > foo`): the
+  `BLOCK_QUOTE` arm counted every quote ancestor for its prefix, but quotes
+  above a `LIST_ITEM` are re-added by the list re-prefixing paths, so each
+  pass went one `> ` deeper; the depth count now stops at the nearest
+  `LIST_ITEM`. Both probed against `pandoc -f markdown -t native` (exact
+  match for the blank-line case; `SoftBreak`/`Space` only for the same-line
+  reflow). Pinned by
+  `quoted_item_nested_quote_after_blank_keeps_marker_order` in
+  `blocks/tests/blockquotes.rs`, the `quoted_item_nested_quote_after_blank`
+  parser golden, and the `quoted_item_nested_quote` formatter golden.
 
 - [ ] The formatter **drops a literal `>` word from quoted list items** (meaning
   change): `> - a > b\n` formats to `> - a b\n`, deleting pandoc's `Str ">"` ---
