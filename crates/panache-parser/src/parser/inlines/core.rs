@@ -31,6 +31,7 @@ use super::citations::{
 use super::code_spans::{emit_code_span, try_parse_code_span};
 use super::emoji::{emit_emoji, try_parse_emoji};
 use super::escapes::{EscapeType, emit_escape, try_parse_escape};
+use super::hard_breaks;
 use super::inline_executable::{emit_inline_executable, try_parse_inline_executable};
 use super::inline_footnotes::{
     emit_footnote_reference, emit_inline_footnote, try_parse_footnote_reference,
@@ -1581,18 +1582,19 @@ fn parse_inline_range_impl(
         if byte == b'\r' && pos + 1 < end && text.as_bytes()[pos + 1] == b'\n' {
             let text_before = &text[text_start..pos];
 
-            // Check for trailing spaces hard line break (always enabled in Pandoc)
-            let trailing_spaces = text_before.chars().rev().take_while(|&c| c == ' ').count();
-            if trailing_spaces >= 2 {
-                // Emit text before the trailing spaces
-                let text_content = &text_before[..text_before.len() - trailing_spaces];
+            // Check for trailing whitespace hard line break (always enabled in
+            // Pandoc), which does not apply on the last line of the block.
+            let (ws_start, wide_enough) =
+                hard_breaks::trailing_ws_run(text.as_bytes(), text_start, pos);
+            if wide_enough && !hard_breaks::ends_block(text, pos + 2, end) {
+                // Emit text before the trailing whitespace
+                let text_content = &text[text_start..ws_start];
                 if !text_content.is_empty() {
                     builder.token(SyntaxKind::TEXT.into(), text_content);
                 }
-                let spaces = " ".repeat(trailing_spaces);
                 builder.token(
                     SyntaxKind::HARD_LINE_BREAK.into(),
-                    &format!("{}\r\n", spaces),
+                    &format!("{}\r\n", &text[ws_start..pos]),
                 );
                 pos += 2;
                 text_start = pos;
@@ -1623,16 +1625,20 @@ fn parse_inline_range_impl(
         if byte == b'\n' {
             let text_before = &text[text_start..pos];
 
-            // Check for trailing spaces hard line break (always enabled in Pandoc)
-            let trailing_spaces = text_before.chars().rev().take_while(|&c| c == ' ').count();
-            if trailing_spaces >= 2 {
-                // Emit text before the trailing spaces
-                let text_content = &text_before[..text_before.len() - trailing_spaces];
+            // Check for trailing whitespace hard line break (always enabled in
+            // Pandoc), which does not apply on the last line of the block.
+            let (ws_start, wide_enough) =
+                hard_breaks::trailing_ws_run(text.as_bytes(), text_start, pos);
+            if wide_enough && !hard_breaks::ends_block(text, pos + 1, end) {
+                // Emit text before the trailing whitespace
+                let text_content = &text[text_start..ws_start];
                 if !text_content.is_empty() {
                     builder.token(SyntaxKind::TEXT.into(), text_content);
                 }
-                let spaces = " ".repeat(trailing_spaces);
-                builder.token(SyntaxKind::HARD_LINE_BREAK.into(), &format!("{}\n", spaces));
+                builder.token(
+                    SyntaxKind::HARD_LINE_BREAK.into(),
+                    &format!("{}\n", &text[ws_start..pos]),
+                );
                 pos += 1;
                 text_start = pos;
                 continue;

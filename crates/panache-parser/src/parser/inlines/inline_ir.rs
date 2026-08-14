@@ -48,6 +48,7 @@
 //! brackets fall through to plain text.
 
 use crate::options::ParserOptions;
+use crate::parser::inlines::hard_breaks;
 use crate::parser::inlines::refdef_map::{RefdefMap, normalize_label};
 use std::collections::{BTreeMap, HashSet};
 
@@ -772,19 +773,13 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Hard line break: 2+ trailing spaces before newline. We detect
-        // this when we're sitting on a `\n` (or `\r\n`) and the preceding
-        // bytes within the current text run are spaces.
+        // Hard line break: a wide enough trailing whitespace run before a
+        // newline. We detect this when we're sitting on a `\n` (or `\r\n`)
+        // and the preceding bytes within the current text run are whitespace.
         if b == b'\n' || (b == b'\r' && pos + 1 < end && bytes[pos + 1] == b'\n') {
-            // Count trailing spaces in the text accumulated so far.
             let nl_len = if b == b'\r' { 2 } else { 1 };
-            let mut trailing_spaces = 0;
-            let mut s = pos;
-            while s > text_run_start && bytes[s - 1] == b' ' {
-                trailing_spaces += 1;
-                s -= 1;
-            }
-            if trailing_spaces >= 2 {
+            let (s, wide_enough) = hard_breaks::trailing_ws_run(bytes, text_run_start, pos);
+            if wide_enough && !hard_breaks::ends_block(text, pos + nl_len, end) {
                 // Flush text *before* the trailing spaces.
                 if s > text_run_start {
                     events.push(IrEvent::Text {

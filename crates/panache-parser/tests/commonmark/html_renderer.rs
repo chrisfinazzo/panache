@@ -239,10 +239,17 @@ fn render_paragraph(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut
     // A backslash-form hard line break (`\\\n`) at end-of-block leaves the
     // backslash as literal text per spec ("Hard line breaks at the end of a
     // block are removed"; the spec example uses `foo\` ⇒ `<p>foo\</p>`).
+    //
+    // The whitespace form needs no such carve-out: the parser already declines
+    // to call a trailing run on the last line of a block a hard break, so it
+    // arrives here as ordinary text and is stripped by §4.8's "removing initial
+    // and final whitespace" rule. `decode_entities` has already swapped
+    // entity-produced whitespace for placeholders, so that survives the strip.
     let trailing_backslash = paragraph_ends_with_backslash_hard_break(node);
     loop {
-        if let Some(rest) = inner.strip_suffix('\n') {
-            inner.truncate(rest.len());
+        let trimmed = inner.trim_end_matches([' ', '\t', '\n']);
+        if trimmed.len() < inner.len() {
+            inner.truncate(trimmed.len());
             continue;
         }
         if let Some(rest) = inner.strip_suffix("<br />") {

@@ -18,6 +18,8 @@ pub mod core; // Public for use in block parsing and list postprocessor
 pub mod emoji;
 #[path = "inlines/escapes.rs"]
 pub mod escapes;
+#[path = "inlines/hard_breaks.rs"]
+pub(crate) mod hard_breaks;
 #[path = "inlines/inline_executable.rs"]
 pub mod inline_executable;
 #[path = "inlines/inline_footnotes.rs"]

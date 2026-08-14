@@ -1583,3 +1583,95 @@ mod complex_emphasis_tests {
         assert!(emph_count >= 1, "Should have at least 1 EMPH node");
     }
 }
+
+#[cfg(test)]
+mod hard_break_tests {
+    use crate::options::{Dialect, ParserOptions};
+    use crate::syntax::SyntaxKind;
+
+    fn opts(dialect: Dialect) -> ParserOptions {
+        ParserOptions {
+            dialect,
+            ..ParserOptions::default()
+        }
+    }
+
+    fn count_kind(tree: &crate::syntax::SyntaxNode, kind: SyntaxKind) -> usize {
+        tree.descendants_with_tokens()
+            .filter(|element| element.kind() == kind)
+            .count()
+    }
+
+    fn breaks(input: &str, dialect: Dialect) -> usize {
+        let tree = crate::parser::parse(input, Some(opts(dialect)));
+        count_kind(&tree, SyntaxKind::HARD_LINE_BREAK)
+    }
+
+    /// Both pandoc readers agree: a run of trailing whitespace on the *last*
+    /// line of a block is not a hard break, it is just discardable padding.
+    /// CommonMark spells this out ("Neither syntax for hard line breaks works
+    /// at the end of a paragraph or other block element").
+    #[test]
+    fn trailing_spaces_at_end_of_paragraph_are_not_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("four  \n", dialect), 0, "{dialect:?}");
+            assert_eq!(breaks("four  ", dialect), 0, "{dialect:?}");
+            assert_eq!(breaks("four   \n\nnext\n", dialect), 0, "{dialect:?}");
+        }
+    }
+
+    /// The same run *within* a block still is a hard break.
+    #[test]
+    fn trailing_spaces_mid_paragraph_are_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("two  \nthree\n", dialect), 1, "{dialect:?}");
+            assert_eq!(breaks("two   \nthree\n", dialect), 1, "{dialect:?}");
+        }
+    }
+
+    /// A single trailing space is a soft break in every dialect.
+    #[test]
+    fn single_trailing_space_is_not_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("seven \neight\n", dialect), 0, "{dialect:?}");
+        }
+    }
+
+    /// `pandoc -f markdown` and `pandoc -f commonmark` both report `LineBreak`
+    /// for a trailing tab, because a tab is worth a full tab stop and so
+    /// clears the two-column bar on its own.
+    #[test]
+    fn trailing_tab_is_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("five\t\nsix\n", dialect), 1, "{dialect:?}");
+            assert_eq!(breaks("c \t\nd\n", dialect), 1, "{dialect:?}");
+            assert_eq!(breaks("e\t\t\nf\n", dialect), 1, "{dialect:?}");
+        }
+    }
+
+    /// ... but not when it lands on the last line of the block.
+    #[test]
+    fn trailing_tab_at_end_of_paragraph_is_not_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("g\t\n", dialect), 0, "{dialect:?}");
+        }
+    }
+
+    /// Whitespace runs that are not at a line ending are ordinary text.
+    #[test]
+    fn interior_whitespace_is_not_a_break() {
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            assert_eq!(breaks("h  \ti\n", dialect), 0, "{dialect:?}");
+        }
+    }
+
+    /// Every byte still has to survive the round trip.
+    #[test]
+    fn hard_break_edge_cases_stay_lossless() {
+        let input = "one\ntwo   \nthree\n\nfour  \n\nfive\t\nsix\n\nseven \neight\n";
+        for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
+            let tree = crate::parser::parse(input, Some(opts(dialect)));
+            assert_eq!(tree.to_string(), input, "{dialect:?}");
+        }
+    }
+}
