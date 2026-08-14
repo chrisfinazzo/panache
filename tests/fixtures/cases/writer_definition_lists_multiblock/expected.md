@@ -15,7 +15,7 @@ Multiple blocks with italics:
 :   orange fruit
 
     ```
-        { orange code block }
+    { orange code block }
     ```
 
     > orange block quote

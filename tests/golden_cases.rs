@@ -595,6 +595,7 @@ golden_test_cases!(
     issue_482_chunk_after_wrapped_list_item,
     issue_484_fenced_div_after_wrapped_list_item,
     issue_497_definition_body_chunk_blank_line,
+    issue_498_definition_body_indented_code,
     writer_autolinks,
     writer_blockquote_not,
     writer_definition_lists_multiblock,

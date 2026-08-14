@@ -12,21 +12,21 @@ Term
 
     - Another bullet
 
-Indented with 2 spaces, so code inside block will have 2 spaces
-
-:   ```markdown
-      code
-      a <- 1
-    ```
-
-Indented with 4 spaces, so code inside block will have 4 spaces
+Marker at 2 columns; the payload is measured from the content column
 
 :   ```markdown
         code
         a <- 1
     ```
 
-Indented with tabs, so code keeps one tab-stop of extra indentation
+Marker at 4 columns; the same payload, just a deeper marker
+
+:   ```markdown
+        code
+        a <- 1
+    ```
+
+Tab marker and tab-indented body; the payload keeps two tab stops
 
 :   ```markdown
             code

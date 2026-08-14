@@ -325,7 +325,7 @@ impl Formatter {
         first_line_prefix: &str,
         continuation_indent: usize,
         trim_first_line_start: bool,
-        normalize_content_indent: bool,
+        strip_content_columns: Option<usize>,
         indent_blank_content_lines: bool,
     ) {
         let formatted = self.format_code_block_to_string(node);
@@ -347,11 +347,6 @@ impl Formatter {
         }
 
         let closing = remaining.pop().unwrap();
-        let content_indent_cols = if normalize_content_indent {
-            continuation_indent
-        } else {
-            0
-        };
 
         let continuation_prefix = " ".repeat(continuation_indent);
         for line in remaining {
@@ -361,21 +356,21 @@ impl Formatter {
             }
 
             self.output.push_str(&continuation_prefix);
-            if normalize_content_indent {
-                self.output
-                    .push_str(&Self::strip_leading_columns(line, content_indent_cols));
-            } else {
-                self.output.push_str(line);
+            match strip_content_columns {
+                Some(cols) => self
+                    .output
+                    .push_str(&Self::strip_leading_columns(line, cols)),
+                None => self.output.push_str(line),
             }
             self.output.push('\n');
         }
 
         self.output.push_str(&continuation_prefix);
-        if normalize_content_indent {
-            self.output
-                .push_str(&Self::strip_leading_columns(closing, content_indent_cols));
-        } else {
-            self.output.push_str(closing);
+        match strip_content_columns {
+            Some(cols) => self
+                .output
+                .push_str(&Self::strip_leading_columns(closing, cols)),
+            None => self.output.push_str(closing),
         }
         self.output.push('\n');
     }
@@ -405,21 +400,26 @@ impl Formatter {
 
         let indent_str = " ".repeat(indent);
 
-        // For an indented (non-fenced) code block inside a list item, the CST
-        // content whitespace embeds the list's content indent *plus* the 4-space
-        // code marker (e.g. `      code` = 2 for the list + 4 for the marker).
-        // The inner renderer only strips the 4-space marker, leaving the list
-        // indent in the content; re-prefixing with `indent` would then double
-        // it. Normalize the content by `indent` columns so the list indent is
-        // stripped once and re-applied once. Fenced blocks already carry their
-        // own fence indent and need no extra normalization.
-        let normalize_content_indent = !is_fenced && in_list_item;
+        // For an indented (non-fenced) code block inside a container, the CST
+        // content whitespace embeds the container's content indent *plus* the
+        // 4-space code marker (e.g. `      code` = 2 for the definition body +
+        // 4 for the marker). The inner renderer only strips the 4-space marker,
+        // leaving the container indent in the content; re-prefixing with
+        // `indent` would then double it. Strip the *source* container offset --
+        // not `indent`, which is where the container lands after formatting --
+        // so a container whose indent changes width (`: ` at 2 columns
+        // reformatted to `:   ` at 4) does not shift the code payload. Fenced
+        // blocks already carry their own fence indent and need no extra
+        // normalization.
+        let strip_content_columns = (!is_fenced)
+            .then(|| Self::container_content_offset(node))
+            .filter(|cols| *cols > 0);
         self.format_container_code_block(
             node,
             &indent_str,
             indent,
             false,
-            normalize_content_indent,
+            strip_content_columns,
             false,
         );
 
@@ -427,6 +427,74 @@ impl Formatter {
         if !self.output.ends_with('\n') {
             self.output.push('\n');
         }
+    }
+
+    /// Visual column at which the content of `node`'s enclosing container
+    /// starts *in the source*.
+    ///
+    /// The parser leaves that offset on every body line of an indented code
+    /// block, so it is what has to come off before the block is re-prefixed at
+    /// its formatted indent. Mirrors `definition_content_offset` and
+    /// `list_item_content_offset` in the pandoc-native projector
+    /// (`panache_parser::to_pandoc_ast`); the two must agree on what a code
+    /// block's payload is.
+    fn container_content_offset(node: &SyntaxNode) -> usize {
+        let Some(parent) = node.parent() else {
+            return 0;
+        };
+        match parent.kind() {
+            SyntaxKind::DEFINITION => {
+                Self::marker_content_offset(&parent, SyntaxKind::DEFINITION_MARKER)
+            }
+            SyntaxKind::LIST_ITEM => {
+                let parent_ws = match parent.prev_sibling_or_token() {
+                    Some(NodeOrToken::Token(t)) if t.kind() == SyntaxKind::WHITESPACE => {
+                        Self::advance_col(0, t.text())
+                    }
+                    _ => 0,
+                };
+                parent_ws + Self::marker_content_offset(&parent, SyntaxKind::LIST_MARKER)
+            }
+            _ => 0,
+        }
+    }
+
+    /// Column reached by `container`'s leading whitespace, its `marker` token,
+    /// and the padding that follows the marker.
+    fn marker_content_offset(container: &SyntaxNode, marker: SyntaxKind) -> usize {
+        let mut col = 0usize;
+        let mut saw_marker = false;
+        for el in container.children_with_tokens() {
+            match el {
+                NodeOrToken::Token(t) if t.kind() == marker => {
+                    col = Self::advance_col(col, t.text());
+                    saw_marker = true;
+                }
+                NodeOrToken::Token(t) if t.kind() == SyntaxKind::WHITESPACE => {
+                    col = Self::advance_col(col, t.text());
+                    if saw_marker {
+                        return col;
+                    }
+                }
+                _ if saw_marker => return col,
+                _ => {}
+            }
+        }
+        col
+    }
+
+    /// Advance a column counter by `s`, tabs rounding up to the next 4-column
+    /// stop.
+    fn advance_col(start: usize, s: &str) -> usize {
+        let mut col = start;
+        for c in s.chars() {
+            if c == '\t' {
+                col = (col / 4 + 1) * 4;
+            } else {
+                col += 1;
+            }
+        }
+        col
     }
 
     fn code_block_leading_indent(node: &SyntaxNode) -> String {
@@ -2409,7 +2477,12 @@ impl Formatter {
                                 SyntaxKind::CODE_BLOCK => {
                                     if self.output.ends_with(":   ") {
                                         self.format_container_code_block(
-                                            n, "", def_indent, true, true, false,
+                                            n,
+                                            "",
+                                            def_indent,
+                                            true,
+                                            Some(Self::container_content_offset(n)),
+                                            false,
                                         );
                                     } else {
                                         // Add blank line before code block if needed
