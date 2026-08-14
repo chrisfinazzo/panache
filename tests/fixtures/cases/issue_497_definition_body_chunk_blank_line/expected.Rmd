@@ -1,0 +1,14 @@
+Interpreted Script
+
+:   An interpreted script is a text file that is executed by a binary
+    executable.
+
+    ```{python}
+    #| eval: false
+
+    ##!/usr/bin/env python
+
+    def factorial(x):
+        result = 1
+        return result
+    ```
