@@ -257,6 +257,7 @@ golden_test_cases!(
     nested_list_band_marker_terminates_item,
     blockquote_nested_list_keeps_indent,
     quoted_band_marker_sibling_list,
+    quoted_item_nested_quote,
     simple_table_closer_kept_before_sibling_marker,
     pipe_table_in_footnote_stops_at_note_marker,
     pipe_table_in_list_item_stops_at_sibling_marker,

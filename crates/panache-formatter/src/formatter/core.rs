@@ -1,6 +1,6 @@
 use crate::config::{Config, HorizontalRuleStyle, WrapMode};
 use crate::directives::{DirectiveTracker, extract_directive_from_node};
-use crate::syntax::{BlockQuote, DefinitionItem, DisplayMath, FencedDiv, SyntaxKind, SyntaxNode};
+use crate::syntax::{DefinitionItem, DisplayMath, FencedDiv, SyntaxKind, SyntaxNode};
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use panache_parser::parser::blocks::horizontal_rules::try_parse_horizontal_rule;
@@ -1387,10 +1387,19 @@ impl Formatter {
 
             SyntaxKind::BLOCK_QUOTE => {
                 log::trace!("Formatting blockquote");
-                // Determine nesting depth by counting ancestor BlockQuote nodes (including self)
-                let depth = BlockQuote::cast(node.clone())
-                    .map(|bq| bq.depth())
-                    .unwrap_or(1);
+                // Determine nesting depth by counting ancestor BlockQuote
+                // nodes (including self), stopping at the nearest LIST_ITEM:
+                // quotes above a list item are re-added by the list
+                // re-prefixing paths (`append_blockquote_prefixed_list_output`
+                // and the same-line marker splice in the list formatter), so
+                // counting past the item emits their markers twice — one
+                // level deeper on every pass.
+                let depth = node
+                    .ancestors()
+                    .take_while(|ancestor| ancestor.kind() != SyntaxKind::LIST_ITEM)
+                    .filter(|ancestor| ancestor.kind() == SyntaxKind::BLOCK_QUOTE)
+                    .count()
+                    .max(1);
 
                 // Prefixes for quoted content and blank quoted lines
                 let base_indent = " ".repeat(indent);
