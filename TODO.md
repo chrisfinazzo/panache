@@ -957,11 +957,29 @@ panache starts caching NodePtrs across edits.
     - ~~A marker-line *grid* table projects wrongly~~: fixed --- `grid_table`
       reads rows through `text_without_line_prefixes` (see the container-prefix
       entry below), corpus cases 0542/0543.
-    - `- > - a | b` / `  >   - | -` (list > quote > list) *panics* the formatter
-      in `line_blocks.rs` ("marker presence verified upstream"). The lift is not
-      involved: the inner item is already closed when the second line
-      dispatches, so `try_buffer_marker_line_table_delimiter` never runs and
-      `- | -` opens a nested list whose content is a line block.
+    - ~~`- > - a | b` / `  >   - | -` (list > quote > list)~~: fixed. The panic
+      went first, incidentally, with `f7d50eeb` ("match line-block peek to
+      emitted prefix") --- same `expect` site, different route --- and is pinned
+      now, since that commit's own regression tests cover a different input. The
+      lift gap behind it is fixed too: `- > - x` has its own recursion in
+      `finish_list_item_with_optional_nested` rather than going through
+      `BqDispatch`, and it framed the inner *item*'s `content_col` in raw-line
+      columns while every continuation line reaches the container checks with
+      the quote prefix already stripped. The delimiter row read as dedented out
+      of the item, so `try_buffer_marker_line_table_delimiter` never ran and
+      `- | -` opened a nested list whose content was a line block --- which the
+      pandoc-AST projector then dropped outright, because the stranded `LIST`
+      hung directly off a `LIST` rather than off an item. The item now records
+      the blockquote-content frame the quoted-list path already used; the
+      enclosing `Container::List` keeps its raw-line `base_indent_cols`, because
+      marker matching walks the whole ladder and needs the levels
+      distinguishable (zeroing it merged `- > - a` with its outer list and
+      folded issue 174's sibling items into one).
+    - `- > > - a | b` / `  > >   - | -` (list > quote > quote > list) does not
+      open the second quote at all: the `>>` guard in `lists.rs` catches only
+      the unspaced form, so the inner `> - a | b` stays paragraph text and
+      pandoc's `BlockQuote [BlockQuote [BulletList [[Table …]]]]` is a `Para`
+      here. Predates the entry above and is unaffected by it.
 
   - [x] **A spaced dash run after a list is a sibling `HorizontalRule` now.**
     `- x` items, then `- - - -`, nested as the list's child (the projector

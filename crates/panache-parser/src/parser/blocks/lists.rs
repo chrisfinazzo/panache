@@ -2079,6 +2079,9 @@ fn finish_list_item_with_optional_nested(
                 let bq_content_col = content_col + content_offset;
                 builder.start_node(SyntaxKind::LIST.into());
                 containers.push(Container::List {
+                    // Raw-line frame: marker matching walks the whole ladder,
+                    // so this level has to stay distinguishable from the
+                    // enclosing list's own `base_indent_cols`.
                     marker: inner_match.marker.clone(),
                     base_indent_cols: bq_content_col,
                     has_blank_between_items: false,
@@ -2088,7 +2091,15 @@ fn finish_list_item_with_optional_nested(
                     marker_len: inner_match.marker_len,
                     spaces_after_cols: inner_match.spaces_after_cols,
                     spaces_after_bytes: inner_match.spaces_after_bytes,
-                    indent_cols: bq_content_col,
+                    // Blockquote-content frame, unlike the list above: an
+                    // item's `content_col` is only ever compared against
+                    // continuation lines, which reach the container checks
+                    // with the quote prefix already stripped -- the same
+                    // frame `> - a | b` records. A raw-line column here reads
+                    // the next quoted line as dedented out of the item and
+                    // closes it a line early. `remaining` starts at the inner
+                    // marker, so that frame's origin is 0.
+                    indent_cols: 0,
                     indent_bytes: 0,
                     virtual_marker_space: inner_match.virtual_marker_space,
                 };

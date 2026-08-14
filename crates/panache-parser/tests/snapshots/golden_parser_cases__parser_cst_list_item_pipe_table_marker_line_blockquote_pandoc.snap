@@ -2,7 +2,7 @@
 source: crates/panache-parser/tests/golden_parser_cases.rs
 expression: cst_output
 ---
-DOCUMENT@0..88
+DOCUMENT@0..113
   BLOCK_QUOTE@0..20
     BLOCK_QUOTE_MARKER@0..1 ">"
     WHITESPACE@1..2 " "
@@ -117,3 +117,38 @@ DOCUMENT@0..88
               TABLE_SEP_WHITESPACE@85..86 " "
               TABLE_SEP_DASHES@86..87 "-"
               NEWLINE@87..88 "\n"
+  BLANK_LINE@88..89
+    BLANK_LINE@88..89 "\n"
+  LIST@89..113
+    LIST_ITEM@89..113
+      LIST_MARKER@89..90 "-"
+      WHITESPACE@90..91 " "
+      BLOCK_QUOTE@91..113
+        BLOCK_QUOTE_MARKER@91..92 ">"
+        WHITESPACE@92..93 " "
+        LIST@93..113
+          LIST_ITEM@93..113
+            LIST_MARKER@93..94 "-"
+            WHITESPACE@94..95 " "
+            PIPE_TABLE@95..113
+              TABLE_HEADER@95..101
+                TABLE_CELL@95..96
+                  TEXT@95..96 "a"
+                WHITESPACE@96..97 " "
+                TEXT@97..98 "|"
+                WHITESPACE@98..99 " "
+                TABLE_CELL@99..100
+                  TEXT@99..100 "b"
+                NEWLINE@100..101 "\n"
+              TABLE_SEPARATOR@101..113
+                LINE_PREFIX@101..102 " "
+                LINE_PREFIX@102..103 " "
+                LINE_PREFIX@103..104 ">"
+                LINE_PREFIX@104..105 " "
+                LINE_PREFIX@105..107 "  "
+                TABLE_SEP_DASHES@107..108 "-"
+                TABLE_SEP_WHITESPACE@108..109 " "
+                TABLE_SEP_DELIM@109..110 "|"
+                TABLE_SEP_WHITESPACE@110..111 " "
+                TABLE_SEP_DASHES@111..112 "-"
+                NEWLINE@112..113 "\n"

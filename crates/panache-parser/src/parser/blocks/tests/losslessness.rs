@@ -474,6 +474,20 @@ fn test_losslessness_line_block_in_list_item_with_lazy_pipe_line() {
 }
 
 #[test]
+fn test_losslessness_marker_line_table_delimiter_in_quoted_nested_list() {
+    // The delimiter line of a marker-line table nested list > quote > list used
+    // to reach the same `expect("marker presence verified upstream")` panic: the
+    // inner item is already closed when `  >   - | -` dispatches, so the
+    // delimiter is never buffered and `- | -` opens a list whose content is a
+    // line block, whose `| ` marker the peek and the emitter disagreed about.
+    // Pinned here because the fix landed for a different input.
+    let input = "- > - a | b\n  >   - | -\n";
+    let config = ParserOptions::default();
+    let tree = Parser::new(input, &config).parse();
+    assert_eq!(tree.text().to_string(), input);
+}
+
+#[test]
 fn test_losslessness_fenced_div_open_after_list_item_line() {
     // Same trap as the refdef case: a `:::` opener detected as `Yes` while a
     // list item's content is still buffered would emit the div *before* the

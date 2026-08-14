@@ -1899,6 +1899,47 @@ fn marker_shaped_delimiter_row_completes_the_item_table() {
     );
 }
 
+/// The lift reaches through a quote that itself opened on a list marker
+/// line. `pandoc 3.10.2 -f markdown -t native` on `- > - a | b` +
+/// `  >   - | -`: `BulletList [[BlockQuote [BulletList [[Table …]]]]]`.
+///
+/// `- > - x` has its own recursion in `finish_list_item_with_optional_nested`
+/// rather than going through `BqDispatch`, and that path used to frame the
+/// inner item in raw-line columns while every continuation line is measured
+/// after the quote prefix is stripped. The item was closed as "dedented" on
+/// the delimiter row, so the lift's probe never ran and the row opened a
+/// nested list whose content was a line block --- which the pandoc-AST
+/// projector then dropped entirely.
+#[test]
+fn marker_shaped_delimiter_row_completes_a_quoted_nested_item_table() {
+    let input = "- > - a | b\n  >   - | -\n";
+    let node = parse_blocks(input);
+
+    assert_eq!(
+        node.text().to_string(),
+        input,
+        "parser must remain lossless"
+    );
+    let quote = first_of(&node, SyntaxKind::BLOCK_QUOTE).expect("block quote");
+    let table = first_of(&quote, SyntaxKind::PIPE_TABLE).expect("table inside the quote");
+    assert!(
+        table.text().to_string().contains("- | -"),
+        "the marker-shaped line is the delimiter row: {}",
+        table.text()
+    );
+    assert_eq!(
+        node.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LIST)
+            .count(),
+        2,
+        "only the outer and quoted lists open, none on the delimiter row"
+    );
+    assert!(
+        first_of(&node, SyntaxKind::LINE_BLOCK).is_none(),
+        "the delimiter row is not a line block: {node:#?}"
+    );
+}
+
 /// The table keeps growing past its delimiter row, and a following sibling
 /// marker still ends the item (`pandoc -f markdown -t native`: a two-item
 /// `BulletList` whose first item is the `Table`).
