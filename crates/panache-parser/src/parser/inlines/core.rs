@@ -878,7 +878,17 @@ fn parse_inline_range_impl(
             // Try escapes (after bookdown refs and backslash math)
             if let Some((len, ch, escape_type)) = try_parse_escape(&text[pos..]) {
                 let escape_enabled = match escape_type {
-                    EscapeType::HardLineBreak => config.extensions.escaped_line_breaks,
+                    EscapeType::HardLineBreak => {
+                        // CommonMark keeps the backslash as literal text when
+                        // the line ending closes the block ("Neither syntax for
+                        // hard line breaks works at the end of a paragraph or
+                        // other block element"), where pandoc-markdown still
+                        // reads a `LineBreak`. A genuine dialect divergence, so
+                        // it branches on `Dialect` rather than an extension.
+                        config.extensions.escaped_line_breaks
+                            && !(config.dialect == crate::Dialect::CommonMark
+                                && hard_breaks::ends_block(text, pos + len, end))
+                    }
                     EscapeType::NonbreakingSpace => config.extensions.all_symbols_escapable,
                     EscapeType::Literal => {
                         // BASE_ESCAPABLE matches Pandoc's markdown_strict /

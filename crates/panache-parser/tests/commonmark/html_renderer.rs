@@ -236,16 +236,15 @@ fn render_paragraph(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut
     render_inlines(node, refs, &mut inner);
     // CommonMark: trailing newlines of a paragraph are not part of its
     // content, and any hard line breaks at the end of the block are removed.
-    // A backslash-form hard line break (`\\\n`) at end-of-block leaves the
-    // backslash as literal text per spec ("Hard line breaks at the end of a
-    // block are removed"; the spec example uses `foo\` ⇒ `<p>foo\</p>`).
     //
-    // The whitespace form needs no such carve-out: the parser already declines
-    // to call a trailing run on the last line of a block a hard break, so it
-    // arrives here as ordinary text and is stripped by §4.8's "removing initial
-    // and final whitespace" rule. `decode_entities` has already swapped
-    // entity-produced whitespace for placeholders, so that survives the strip.
-    let trailing_backslash = paragraph_ends_with_backslash_hard_break(node);
+    // Neither hard-break syntax needs a carve-out here: under
+    // `Dialect::CommonMark` the parser declines to call a trailing whitespace
+    // run *or* a trailing backslash on the last line of a block a hard break,
+    // so both arrive as ordinary text and are stripped by §4.8's "removing
+    // initial and final whitespace" rule (the backslash itself survives, which
+    // is what `foo\` ⇒ `<p>foo\</p>` wants). `decode_entities` has already
+    // swapped entity-produced whitespace for placeholders, so that survives
+    // the strip.
     loop {
         let trimmed = inner.trim_end_matches([' ', '\t', '\n']);
         if trimmed.len() < inner.len() {
@@ -257,9 +256,6 @@ fn render_paragraph(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut
             continue;
         }
         break;
-    }
-    if trailing_backslash {
-        inner.push('\\');
     }
     inner = strip_paragraph_line_indent(&inner);
     out.push_str("<p>");
@@ -304,24 +300,6 @@ fn strip_paragraph_line_indent(inner: &str) -> String {
         at_line_start = false;
     }
     out
-}
-
-fn paragraph_ends_with_backslash_hard_break(node: &SyntaxNode) -> bool {
-    for el in node
-        .descendants_with_tokens()
-        .collect::<Vec<_>>()
-        .iter()
-        .rev()
-    {
-        if let NodeOrToken::Token(t) = el {
-            match t.kind() {
-                SyntaxKind::HARD_LINE_BREAK => return t.text().starts_with('\\'),
-                SyntaxKind::NEWLINE | SyntaxKind::WHITESPACE => continue,
-                _ => return false,
-            }
-        }
-    }
-    false
 }
 
 fn render_list(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut String) {

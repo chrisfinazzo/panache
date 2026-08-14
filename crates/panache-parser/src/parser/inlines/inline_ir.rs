@@ -436,7 +436,14 @@ pub(super) fn build_ir_into(
         {
             let enabled = match escape_type {
                 EscapeType::Literal => is_commonmark || exts.all_symbols_escapable,
-                EscapeType::HardLineBreak => exts.escaped_line_breaks,
+                // CommonMark keeps the backslash as literal text when the line
+                // ending closes the block ("Neither syntax for hard line breaks
+                // works at the end of a paragraph or other block element"),
+                // where pandoc-markdown still reads a `LineBreak`.
+                EscapeType::HardLineBreak => {
+                    exts.escaped_line_breaks
+                        && !(is_commonmark && hard_breaks::ends_block(text, pos + len, end))
+                }
                 EscapeType::NonbreakingSpace => exts.all_symbols_escapable,
             };
             if enabled {

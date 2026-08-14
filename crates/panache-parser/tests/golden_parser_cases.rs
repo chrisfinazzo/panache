@@ -425,6 +425,8 @@ golden_test_cases!(
     setext_text_thematic_break_pandoc,
     thematic_break_interrupts_paragraph_commonmark,
     thematic_break_interrupts_paragraph_pandoc,
+    trailing_backslash_ends_block_commonmark,
+    trailing_backslash_ends_block_pandoc,
     headerless_table,
     multiline_table_single_col_code_fence,
     horizontal_rules,
