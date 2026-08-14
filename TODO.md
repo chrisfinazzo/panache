@@ -173,6 +173,20 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
+- [ ] A backslash at the end of a block is a dialect divergence we get wrong on
+  the CommonMark side. Pandoc-markdown reads `foo\` as
+  `Para [Str "foo", LineBreak]`, CommonMark reads it as `Para [Str "foo\\"]`
+  (spec: "Neither syntax for hard line breaks works at the end of a
+  paragraph or other block element", `<p>foo\</p>`). Panache emits
+  `HARD_LINE_BREAK` for both, so `Dialect::CommonMark` needs a branch in
+  `escapes.rs` plus paired parser fixtures. The *whitespace* form of the
+  same rule was fixed in the #496 work (`parser/inlines/hard_breaks.rs`);
+  the backslash form was left alone because it is a divergence, not a shared
+  bug. Note the test-only `paragraph_ends_with_backslash_hard_break`
+  carve-out in `tests/commonmark/html_renderer.rs` is what keeps the
+  conformance suite at 652/652 today --- it should be deletable once the
+  parser is right.
+
 ### Incremental Parsing
 
 Multi-session effort to harden, unify, and graduate incremental reparsing to

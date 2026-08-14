@@ -139,6 +139,35 @@ Output
     Second line
     ```
 
+A tab at the end of a line counts as a hard break too, the same way pandoc reads
+it.
+
+Trailing whitespace that is *not* a hard break is removed, again under every
+wrapping mode. That covers a single trailing space, which never made a break,
+and any run on the last line of a block, which pandoc discards because a hard
+break only separates lines *within* a block. So this:
+
+Input (trailing spaces marked `.`)
+
+:   ```markdown
+    Only paragraph line..
+
+    A single trailing space.
+    continues the sentence
+    ```
+
+Output
+
+:   ```markdown
+    Only paragraph line
+
+    A single trailing space
+    continues the sentence
+    ```
+
+Verbatim content is exempt: trailing whitespace inside code blocks, code spans,
+and math is content, so it is left alone.
+
 ### YAML frontmatter and chunk options
 
 Under a wrapping mode (`reflow`, `sentence`, or `semantic`), Panache also wraps
