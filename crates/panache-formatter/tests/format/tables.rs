@@ -676,3 +676,27 @@ fn surplus_cells_in_a_list_item_leave_the_table_verbatim() {
     assert_eq!(result, input, "got:\n{result}");
     assert_eq!(format(&result, Some(config), None), result, "idempotent");
 }
+
+// ---------------------------------------------------------------------------
+// Alignment must not depend on the emitted line width
+// ---------------------------------------------------------------------------
+
+/// Pandoc reads a simple table's alignment off the header's position against
+/// the dash runs, and the emitted table is *wider* than the source whenever a
+/// body cell is the widest in its column. Bounding the header slice at the
+/// header line's length made the verdict fall back to `AlignDefault` on that
+/// second pass, so a centered column wobbled between two layouts forever.
+#[test]
+fn test_simple_table_alignment_survives_a_widened_column() {
+    let config = ConfigBuilder::default().table_indent(0).build();
+    // `pandoc -f markdown -t native` reads [AlignDefault, AlignCenter]: the
+    // header's `y` neither starts at the second dash run nor reaches its end.
+    // `zz   w` is the widest cell in that column, so the emitted dash run
+    // outruns the header line.
+    let input = "bb  x  y\n----- ---\nx  y  zz   w\n";
+    let expected = "bb  x      y\n------- --------\nx  y     zz   w\n";
+
+    let result = format(input, Some(config.clone()), None);
+    assert_eq!(result, expected, "got:\n{result}");
+    assert_eq!(format(&result, Some(config), None), result, "idempotent");
+}

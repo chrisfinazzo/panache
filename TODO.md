@@ -1265,13 +1265,26 @@ panache starts caching NodePtrs across edits.
   pandoc-native in all three containers. Pinned by
   `definition_body_table_nested_containers` in both golden suites.
 
-- [ ] Simple-table rows holding a **sliced multi-space cell** are not idempotent
-  even where the slicing matches pandoc: `- <div>` + indented table +
-  `</div>` collects the closer as a `</di` / `v>` row (as pandoc does), but
-  pass 1 renders `A       B` / `</di    v>` and pass 2 re-measures to
-  `A      B` / `</di   v>`. Same family as the "simple tables inside a
-  blockquote are not idempotent" entry above, but reproduces without a
-  blockquote.
+- [x] Simple-table rows holding a **sliced multi-space cell** are not idempotent
+  even where the slicing matches pandoc. The `- <div>` shape the entry was
+  filed under no longer reproduces, but the class did, with no container at
+  all: `Item      Qty` / `------- ------` / `apple      12` /
+  `plum    1   2` renders `Qty` centered on pass 1 and flush left on pass 2.
+  The formatter, not the parser: the CST and the projector both read
+  `AlignCenter`, matching `pandoc -t native`, but
+  `determine_simple_alignments` re-derived its own verdict from the header
+  string and bailed to `Default` once `col.end > header.len()`. A column's
+  emitted dash run is *widest cell + 2*, so whenever the widest cell sits in
+  a body row (`1   2` here, wide precisely because the slice kept its
+  whitespace run) the run outruns the header line and the verdict flips on
+  the very output the first pass produced. It also indexed the header
+  including its newline, which let the `\n` pass as a column's trailing
+  space. The rule is now stated as pandoc's `alignType` --- slice at the
+  *column starts*, ask `left_space`/`right_space` of the right-trimmed slice ---
+  the same restatement the projector's `simple_table_aligns` already
+  carried, so the two agree by construction. Pinned by
+  `test_simple_table_alignment_survives_a_widened_column` and the
+  `simple_table_alignment_widened_column` golden.
 
 - [ ] `analyze_grid` cannot model a **rowspan cell whose text sits on a sub-row
   separator line**, and the projector drops cells for it:

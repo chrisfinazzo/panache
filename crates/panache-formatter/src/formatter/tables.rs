@@ -1771,52 +1771,62 @@ fn extract_simple_table_columns(separator: &SyntaxNode) -> Vec<SimpleColumn> {
 /// to the separator dash runs. The reference line is the header when present,
 /// or (for headerless tables) the first data row — both sit against the dash
 /// runs, so the same flushness rule applies.
+///
+/// This restates pandoc's `alignType` (`Readers/Markdown.hs`), which slices the
+/// line at the *column starts* — a cell owns the gap to the next column, and
+/// the last one owns the rest of the line — then asks two questions of the
+/// right-trimmed slice: does it begin past the dash run's first character
+/// (`leftSpace`), and does it stop strictly before the run's last one
+/// (`rightSpace`)? The same rule lives in the pandoc-AST projector
+/// (`simple_table_aligns`), which is what the conformance suite pins.
+///
+/// Both bounds matter for idempotency, because the emitted dash run is
+/// `content width + 2` of the *widest* cell in the column, which may sit in a
+/// body row well past the end of the header line. Truncating the slice at the
+/// dash-run end, or bailing to `Default` once the run outran the header, made
+/// the verdict depend on the emitted line width, so a centered column flipped
+/// to `Default` on the second pass and the table wobbled between two layouts.
 fn determine_simple_alignments(
     columns: &mut [SimpleColumn],
     _separator_line: &str,
     header_line: Option<&str>,
 ) {
-    if let Some(header) = header_line {
-        for col in columns.iter_mut() {
-            if col.end > header.len() {
-                col.alignment = Alignment::Default;
-                continue;
-            }
+    let Some(header) = header_line else {
+        return;
+    };
+    let header = header.trim_end_matches(['\n', '\r']);
+    let starts: Vec<usize> = columns.iter().map(|col| col.start).collect();
 
-            // Extract header text for this column
-            let header_text = if col.end <= header.len() {
-                header[col.start..col.end].trim()
-            } else if col.start < header.len() {
-                header[col.start..].trim()
-            } else {
-                ""
-            };
-
-            if header_text.is_empty() {
-                col.alignment = Alignment::Default;
-                continue;
-            }
-
-            // Find where the header text starts and ends within the column
-            let header_in_col = &header[col.start..col.end.min(header.len())];
-            let text_start = header_in_col.len() - header_in_col.trim_start().len();
-            // text_end is the position AFTER the last non-whitespace character
-            let trimmed_text = header_in_col.trim();
-            let text_end = text_start + trimmed_text.len();
-
-            // Column width is separator length
-            let col_width = col.end - col.start;
-
-            let flush_left = text_start == 0;
-            let flush_right = text_end == col_width;
-
-            col.alignment = match (flush_left, flush_right) {
-                (true, true) => Alignment::Default,
-                (true, false) => Alignment::Left,
-                (false, true) => Alignment::Right,
-                (false, false) => Alignment::Center,
-            };
+    for (idx, col) in columns.iter_mut().enumerate() {
+        // The slice runs to the next column's start (or end of line), so a cell
+        // that overruns its own dash run is still measured whole.
+        let slice_end = starts
+            .get(idx + 1)
+            .copied()
+            .unwrap_or(header.len())
+            .min(header.len());
+        let slice = header.get(col.start..slice_end).unwrap_or("");
+        let right_trimmed = slice.trim_end_matches([' ', '\t']);
+        if right_trimmed.is_empty() {
+            // No text in this column: pandoc's `nonempty` filter leaves nothing
+            // to measure. (An all-blank slice reads as centered upstream, but
+            // the formatter never emits trailing padding, so honoring that
+            // would itself be a wobble.)
+            col.alignment = Alignment::Default;
+            continue;
         }
+
+        let leading = right_trimmed.len() - right_trimmed.trim_start_matches([' ', '\t']).len();
+        let col_width = col.end - col.start;
+        let left_space = leading > 0;
+        let right_space = right_trimmed.len() < col_width;
+
+        col.alignment = match (left_space, right_space) {
+            (false, false) => Alignment::Default,
+            (false, true) => Alignment::Left,
+            (true, false) => Alignment::Right,
+            (true, true) => Alignment::Center,
+        };
     }
 }
 
