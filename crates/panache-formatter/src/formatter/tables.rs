@@ -462,8 +462,9 @@ fn collapse_cell_ws_runs(text: &str) -> String {
 /// With `collapse_ws`, whitespace runs inside `TEXT` tokens collapse to a
 /// single space, matching pandoc's reader (intra-cell whitespace is a single
 /// `Space` inline). Inline nodes are untouched, so code-span content keeps its
-/// runs. Only the simple-table path opts in: pipe tables preserve runs
-/// deliberately, and multiline tables collapse later, when cells reflow.
+/// runs. The simple- and pipe-table paths opt in; the multiline paths slice
+/// cells by byte offsets against the source geometry (collapsing would skew
+/// the columns) and collapse later instead, when cells reflow.
 fn format_cell_content(node: &SyntaxNode, config: &Config, collapse_ws: bool) -> String {
     let mut result = String::new();
 
@@ -662,9 +663,9 @@ fn extract_pipe_table_data(node: &SyntaxNode, config: &Config) -> TableData {
                 // `\|` stays inside its cell. Re-rendering the row and splitting
                 // on `|` (as `split_row` does) is escape-blind: it re-tokenizes
                 // the `\|` as a delimiter and invents a phantom column.
-                let cells = extract_row_cells(&child, config, false);
+                let cells = extract_row_cells(&child, config, true);
                 let cells = if cells.is_empty() {
-                    split_row(&format_cell_content(&child, config, false))
+                    split_row(&format_cell_content(&child, config, true))
                 } else {
                     cells
                 };

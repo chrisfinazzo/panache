@@ -267,6 +267,7 @@ golden_test_cases!(
     simple_table_in_div_stops_at_closer,
     simple_table_closer_before_div_closer,
     simple_table_cell_whitespace_collapse,
+    pipe_table_cell_whitespace_collapse,
     caption_fence_continuation_before_table,
     table_caption_in_footnote_stops_at_note_marker,
     multiline_table_in_div_stops_at_closer,

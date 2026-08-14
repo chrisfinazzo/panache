@@ -671,7 +671,8 @@ below show the default indent of 2.
 
 Pipe tables are normalized to have consistent spacing and alignment. The header
 separator row is standardized to use hyphens and colons for alignment, and
-spacing within cells is normalized.
+spacing within cells is normalized: whitespace runs inside a cell collapse to a
+single space, just as Pandoc reads them (code spans keep their spacing).
 
 Input
 
