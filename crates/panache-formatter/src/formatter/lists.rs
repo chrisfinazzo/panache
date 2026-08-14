@@ -7,6 +7,7 @@ use panache_parser::parser::blocks::definition_lists::try_parse_definition_marke
 use rowan::NodeOrToken;
 
 use super::Formatter;
+use super::preserve;
 
 impl Formatter {
     fn is_marker_only_blockquote_continuation(node: &SyntaxNode) -> bool {
@@ -247,7 +248,6 @@ impl Formatter {
     /// Format a paragraph that is a continuation of a list item.
     /// Strips existing indentation from the text and applies the correct list item indentation.
     pub(super) fn format_list_continuation_paragraph(&mut self, node: &SyntaxNode, indent: usize) {
-        let text = node.text().to_string();
         let line_width = self.config.line_width.saturating_sub(indent);
         let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
         // This arm emits the paragraph's lines itself rather than going through
@@ -257,7 +257,8 @@ impl Formatter {
         match wrap_mode {
             WrapMode::Preserve => {
                 // Strip existing indentation and apply list item indentation
-                for line in text.lines() {
+                let escaped = self.config.formatter_extensions.escaped_line_breaks;
+                for line in preserve::preserve_lines(node, escaped) {
                     self.output.push_str(&" ".repeat(indent));
                     self.output.push_str(line.trim_start());
                     self.output.push('\n');
@@ -1004,12 +1005,16 @@ impl Formatter {
 
         let preserve_lines = match wrap_mode {
             WrapMode::Preserve => {
-                let source = content_node
-                    .as_ref()
-                    .map(|content| content.text().to_string())
-                    .unwrap_or_default();
-                Some(source.lines().map(ToString::to_string).collect::<Vec<_>>())
+                let escaped = self.config.formatter_extensions.escaped_line_breaks;
+                Some(
+                    content_node
+                        .as_ref()
+                        .map(|content| preserve::preserve_lines(content, escaped))
+                        .unwrap_or_default(),
+                )
             }
+            // A format-off directive means "leave these bytes alone", trailing
+            // whitespace included, so this path deliberately does not trim.
             _ if content_has_format_directive => {
                 let source = content_node
                     .as_ref()

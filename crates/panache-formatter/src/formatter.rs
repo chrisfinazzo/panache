@@ -13,6 +13,7 @@ mod inline_layout;
 mod lists;
 mod metadata;
 mod paragraphs;
+mod preserve;
 mod sentence_wrap;
 mod shortcodes;
 mod smart;

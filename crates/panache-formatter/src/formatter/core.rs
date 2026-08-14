@@ -14,6 +14,7 @@ use super::headings;
 use super::inline;
 use super::inline_layout;
 use super::paragraphs;
+use super::preserve::{preserve_lines, preserve_lines_unprefixed};
 use super::smart::normalize_smart_punctuation;
 use super::tables;
 use super::utils::{is_block_element, is_structural_block};
@@ -1041,19 +1042,20 @@ impl Formatter {
                             let available_width =
                                 self.config.line_width.saturating_sub(child_indent);
                             let lines = match wrap_mode {
-                                WrapMode::Preserve => child
-                                    .text()
+                                WrapMode::Preserve => preserve_lines(
+                                    child,
+                                    self.config.formatter_extensions.escaped_line_breaks,
+                                )
+                                .iter()
+                                .map(|line| {
+                                    normalize_smart_punctuation(
+                                        line.trim_start_matches([' ', '\t']),
+                                        self.config.formatter_extensions.smart,
+                                        self.config.formatter_extensions.smart_quotes,
+                                    )
                                     .to_string()
-                                    .lines()
-                                    .map(|line| {
-                                        normalize_smart_punctuation(
-                                            line.trim_start_matches([' ', '\t']),
-                                            self.config.formatter_extensions.smart,
-                                            self.config.formatter_extensions.smart_quotes,
-                                        )
-                                        .to_string()
-                                    })
-                                    .collect(),
+                                })
+                                .collect(),
                                 WrapMode::Reflow => {
                                     self.wrapped_lines_for_paragraph(child, available_width)
                                 }
@@ -1148,19 +1150,20 @@ impl Formatter {
                                 self.config.line_width.saturating_sub(child_indent);
                             let widths = [first_line_space, available_width];
                             let lines = match wrap_mode {
-                                WrapMode::Preserve => {
-                                    let text = child.text().to_string();
-                                    text.lines()
-                                        .map(|line| {
-                                            normalize_smart_punctuation(
-                                                line,
-                                                self.config.formatter_extensions.smart,
-                                                self.config.formatter_extensions.smart_quotes,
-                                            )
-                                            .to_string()
-                                        })
-                                        .collect()
-                                }
+                                WrapMode::Preserve => preserve_lines(
+                                    child,
+                                    self.config.formatter_extensions.escaped_line_breaks,
+                                )
+                                .iter()
+                                .map(|line| {
+                                    normalize_smart_punctuation(
+                                        line,
+                                        self.config.formatter_extensions.smart,
+                                        self.config.formatter_extensions.smart_quotes,
+                                    )
+                                    .to_string()
+                                })
+                                .collect(),
                                 WrapMode::Reflow => {
                                     self.wrapped_lines_for_paragraph_with_widths(child, &widths)
                                 }
@@ -1229,8 +1232,9 @@ impl Formatter {
 
                             match wrap_mode {
                                 WrapMode::Preserve => {
-                                    let text = child.text().to_string();
-                                    for line in text.lines() {
+                                    let escaped =
+                                        self.config.formatter_extensions.escaped_line_breaks;
+                                    for line in preserve_lines(child, escaped) {
                                         self.output.push_str(&" ".repeat(child_indent));
                                         self.output.push_str(
                                             normalize_smart_punctuation(
@@ -1500,28 +1504,21 @@ impl Formatter {
                             let para_start = self.output.len();
                             match wrap_mode {
                                 WrapMode::Preserve => {
-                                    // Build paragraph text while skipping BlockQuoteMarker tokens
-                                    // (they're in the tree for losslessness but we add prefixes dynamically)
-                                    let mut lines_text = String::new();
-                                    for item in child.children_with_tokens() {
-                                        match item {
-                                            NodeOrToken::Token(t)
-                                                if t.kind() == SyntaxKind::LINE_PREFIX =>
-                                            {
-                                                // Container prefix — re-added dynamically.
-                                            }
-                                            NodeOrToken::Token(t) => {
-                                                lines_text.push_str(t.text());
-                                            }
-                                            NodeOrToken::Node(n) => {
-                                                lines_text.push_str(&n.text().to_string());
-                                            }
+                                    // We write `content_prefix` on every line
+                                    // ourselves, so the tree's own LINE_PREFIX
+                                    // tokens have to come back out.
+                                    let escaped =
+                                        self.config.formatter_extensions.escaped_line_breaks;
+                                    for line in preserve_lines_unprefixed(child, escaped) {
+                                        // An empty quoted line takes the bare
+                                        // marker, so the prefix does not become
+                                        // trailing whitespace itself.
+                                        if line.is_empty() {
+                                            self.output.push_str(content_prefix.trim_end());
+                                        } else {
+                                            self.output.push_str(&content_prefix);
+                                            self.output.push_str(&line);
                                         }
-                                    }
-
-                                    for line in lines_text.lines() {
-                                        self.output.push_str(&content_prefix);
-                                        self.output.push_str(line);
                                         self.output.push('\n');
                                     }
                                 }
@@ -1566,10 +1563,17 @@ impl Formatter {
                                 match alert_child.kind() {
                                     SyntaxKind::PARAGRAPH => match wrap_mode {
                                         WrapMode::Preserve => {
-                                            let text = alert_child.text().to_string();
-                                            for line in text.lines() {
-                                                self.output.push_str(&content_prefix);
-                                                self.output.push_str(line);
+                                            let escaped = self
+                                                .config
+                                                .formatter_extensions
+                                                .escaped_line_breaks;
+                                            for line in preserve_lines(&alert_child, escaped) {
+                                                if line.is_empty() {
+                                                    self.output.push_str(content_prefix.trim_end());
+                                                } else {
+                                                    self.output.push_str(&content_prefix);
+                                                    self.output.push_str(&line);
+                                                }
                                                 self.output.push('\n');
                                             }
                                         }
@@ -1952,25 +1956,17 @@ impl Formatter {
                 match wrap_mode {
                     WrapMode::Preserve => {
                         log::trace!("Preserving paragraph line breaks");
-                        if indent > 0 {
-                            for (i, line) in text.lines().enumerate() {
-                                if i > 0 {
-                                    self.output.push('\n');
-                                }
-                                self.output.push_str(&paragraph_indent);
-                                self.output.push_str(
-                                    normalize_smart_punctuation(
-                                        line.trim_start(),
-                                        self.config.formatter_extensions.smart,
-                                        self.config.formatter_extensions.smart_quotes,
-                                    )
-                                    .as_ref(),
-                                );
+                        let escaped = self.config.formatter_extensions.escaped_line_breaks;
+                        for (i, line) in preserve_lines(node, escaped).iter().enumerate() {
+                            if i > 0 {
+                                self.output.push('\n');
                             }
-                        } else {
+                            if indent > 0 {
+                                self.output.push_str(&paragraph_indent);
+                            }
                             self.output.push_str(
                                 normalize_smart_punctuation(
-                                    &text,
+                                    if indent > 0 { line.trim_start() } else { line },
                                     self.config.formatter_extensions.smart,
                                     self.config.formatter_extensions.smart_quotes,
                                 )
@@ -2051,31 +2047,31 @@ impl Formatter {
                     && !self.output.ends_with(":   ");
                 match wrap_mode {
                     WrapMode::Preserve => {
-                        if needs_indent {
-                            for line in text.lines() {
+                        let escaped = self.config.formatter_extensions.escaped_line_breaks;
+                        for (i, line) in preserve_lines(node, escaped).iter().enumerate() {
+                            if needs_indent {
                                 self.output.push_str(&" ".repeat(indent));
-                                self.output.push_str(
-                                    normalize_smart_punctuation(
-                                        line.trim_start(),
-                                        self.config.formatter_extensions.smart,
-                                        self.config.formatter_extensions.smart_quotes,
-                                    )
-                                    .as_ref(),
-                                );
+                            } else if i > 0 {
                                 self.output.push('\n');
                             }
-                        } else {
                             self.output.push_str(
                                 normalize_smart_punctuation(
-                                    &text,
+                                    if needs_indent {
+                                        line.trim_start()
+                                    } else {
+                                        line
+                                    },
                                     self.config.formatter_extensions.smart,
                                     self.config.formatter_extensions.smart_quotes,
                                 )
                                 .as_ref(),
                             );
-                            if !self.output.ends_with('\n') {
+                            if needs_indent {
                                 self.output.push('\n');
                             }
+                        }
+                        if !self.output.ends_with('\n') {
+                            self.output.push('\n');
                         }
                     }
                     WrapMode::Reflow => {
@@ -2545,10 +2541,12 @@ impl Formatter {
                                         let widths = [first_line_space, available_width];
 
                                         let lines = match wrap_mode {
-                                            WrapMode::Preserve => {
-                                                let text = n.text().to_string();
-                                                text.lines().map(|line| line.to_string()).collect()
-                                            }
+                                            WrapMode::Preserve => preserve_lines(
+                                                n,
+                                                self.config
+                                                    .formatter_extensions
+                                                    .escaped_line_breaks,
+                                            ),
                                             WrapMode::Reflow => self
                                                 .wrapped_lines_for_paragraph_with_widths(
                                                     n, &widths,
