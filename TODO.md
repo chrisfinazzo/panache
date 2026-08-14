@@ -173,15 +173,6 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
-- [ ] A backslash at the end of an ATX heading is a remaining Pandoc-side
-  divergence. `pandoc -f markdown` reads `# foo\` as
-  `Header 1 [Str "foo", LineBreak]`; panache emits `TEXT "foo\"` because
-  heading content excludes the line ending, so the escape scanner never sees
-  the `\`+newline pair. CommonMark agrees with panache here (`Str "foo\\"`),
-  so this needs a Pandoc-dialect branch at the heading-content boundary
-  rather than a change in `escapes.rs`. Low value on its own; fold it into
-  the next pass over heading inline parsing.
-
 ### Incremental Parsing
 
 Multi-session effort to harden, unify, and graduate incremental reparsing to

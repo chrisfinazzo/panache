@@ -914,3 +914,107 @@ fn commonmark_nested_underline_at_full_depth_is_a_heading() {
     assert_eq!(child_kinds(&inner), vec![SyntaxKind::HEADING]);
     assert_eq!(get_heading_content(&node).as_deref(), Some("a"));
 }
+
+/// Kinds of the tokens and nodes directly under the first `HEADING_CONTENT`.
+fn heading_content_kinds(node: &SyntaxNode) -> Vec<SyntaxKind> {
+    find_first(node, SyntaxKind::HEADING_CONTENT)
+        .map(|n| n.children_with_tokens().map(|el| el.kind()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn atx_heading_trailing_backslash_is_a_hard_break_in_pandoc() {
+    // `pandoc -f markdown` reads `# foo\` as `Header 1 [Str "foo", LineBreak]`:
+    // the newline ending the heading line is part of its inline stream.
+    let input = "# foo\\\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::TEXT, SyntaxKind::HARD_LINE_BREAK]
+    );
+}
+
+#[test]
+fn atx_heading_lone_trailing_backslash_is_a_hard_break_in_pandoc() {
+    let input = "# \\\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::HARD_LINE_BREAK]
+    );
+}
+
+#[test]
+fn atx_heading_escaped_backslash_is_not_a_hard_break() {
+    // `# foo\\` is `Str "foo\"` -- the second backslash is escaped, so nothing
+    // is left to escape the line ending.
+    let input = "# foo\\\\\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::TEXT, SyntaxKind::ESCAPED_CHAR]
+    );
+}
+
+#[test]
+fn atx_heading_odd_backslash_run_ends_in_a_hard_break() {
+    // `# foo\\\` is `Str "foo\", LineBreak`.
+    let input = "# foo\\\\\\\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![
+            SyntaxKind::TEXT,
+            SyntaxKind::ESCAPED_CHAR,
+            SyntaxKind::HARD_LINE_BREAK
+        ]
+    );
+}
+
+#[test]
+fn atx_heading_backslash_space_stays_a_nonbreaking_space() {
+    // The backslash escapes the space, not the line ending: `Str "foo\160"`.
+    let input = "# foo\\ \n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::TEXT, SyntaxKind::NONBREAKING_SPACE]
+    );
+}
+
+#[test]
+fn atx_heading_backslash_before_attributes_is_not_a_hard_break() {
+    // Attributes come off first, so the backslash is no longer at the line
+    // ending: pandoc reads `# foo\ {#id}` as `Header 1 (id) [Str "foo\160"]`,
+    // with no `LineBreak`. (That the escaped space lands in the attribute gap
+    // rather than in the content is a separate, pre-existing divergence.)
+    let input = "# foo\\ {#id}\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert!(!heading_content_kinds(&node).contains(&SyntaxKind::HARD_LINE_BREAK));
+}
+
+#[test]
+fn setext_heading_trailing_backslash_is_a_hard_break_in_pandoc() {
+    let input = "foo\\\n---\n";
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(
+        heading_content_kinds(&node),
+        vec![SyntaxKind::TEXT, SyntaxKind::HARD_LINE_BREAK]
+    );
+}
+
+#[test]
+fn atx_heading_trailing_backslash_stays_literal_in_commonmark() {
+    // CommonMark disagrees with pandoc here: `# foo\` is `Str "foo\\"`.
+    let input = "# foo\\\n";
+    let node = Parser::new(input, &commonmark_options()).parse();
+    assert_eq!(node.text().to_string(), input, "parser must stay lossless");
+    assert_eq!(heading_content_kinds(&node), vec![SyntaxKind::TEXT]);
+}

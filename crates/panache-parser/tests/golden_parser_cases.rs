@@ -389,6 +389,8 @@ golden_test_cases!(
     four_space_rule_ordered_4sp,
     four_space_rule_wide_marker,
     headings,
+    heading_trailing_backslash_commonmark,
+    heading_trailing_backslash_pandoc,
     hr_as_list_item_content_commonmark,
     hr_as_list_item_content_pandoc,
     hr_closes_list_commonmark,

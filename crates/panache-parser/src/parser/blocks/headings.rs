@@ -1,6 +1,6 @@
 //! ATX heading parsing utilities.
 
-use crate::options::ParserOptions;
+use crate::options::{Dialect, ParserOptions};
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
@@ -32,6 +32,61 @@ fn try_parse_mmd_header_identifier_with_pos(content: &str) -> Option<(String, us
     }
 
     Some((normalized, start, end))
+}
+
+/// Split a trailing backslash line break off a heading's inline text.
+///
+/// Under the Pandoc dialect the newline that ends a heading line belongs to the
+/// heading's inline stream, so `# foo\` reads as `Header 1 [Str "foo",
+/// LineBreak]` exactly the way `foo\` does mid-paragraph. Heading emission
+/// hands the inline scanner only the text of the line, so the `\`+newline pair
+/// never reaches `escapes.rs`; the break has to be recognized here instead. The
+/// newline token is the caller's to emit, so the returned break covers only the
+/// backslash.
+///
+/// The last backslash escapes the line ending only if the trailing backslash
+/// run is odd: `# foo\\` is `Str "foo\"`, `# foo\\\` is `Str "foo\",
+/// LineBreak`. CommonMark keeps the backslash literal in every case, hence the
+/// dialect gate.
+fn split_trailing_line_break<'a>(content: &'a str, config: &ParserOptions) -> (&'a str, bool) {
+    if config.dialect != Dialect::Pandoc {
+        return (content, false);
+    }
+
+    let backslashes = content.bytes().rev().take_while(|&b| b == b'\\').count();
+    if backslashes % 2 == 0 {
+        return (content, false);
+    }
+
+    (&content[..content.len() - 1], true)
+}
+
+/// Emit a heading's `HEADING_CONTENT` node, splitting off a trailing backslash
+/// line break when the Pandoc dialect calls for one.
+///
+/// `at_line_end` is false when a closing `#` run or an attribute block follows
+/// the content, since then the backslash is not against the line ending and
+/// pandoc reads it as an ordinary escape.
+fn emit_heading_content(
+    builder: &mut GreenNodeBuilder<'static>,
+    text_content: &str,
+    at_line_end: bool,
+    config: &ParserOptions,
+) {
+    let (text_content, hard_line_break) = if at_line_end {
+        split_trailing_line_break(text_content, config)
+    } else {
+        (text_content, false)
+    };
+
+    builder.start_node(SyntaxKind::HEADING_CONTENT.into());
+    if !text_content.is_empty() {
+        inline_emission::emit_inlines(builder, text_content, config, false);
+    }
+    if hard_line_break {
+        builder.token(SyntaxKind::HARD_LINE_BREAK.into(), "\\");
+    }
+    builder.finish_node();
 }
 
 /// Try to parse an ATX heading from content, returns heading level (1-6) if found.
@@ -210,11 +265,7 @@ pub(crate) fn emit_setext_heading_text(
         };
 
     // Emit heading content with inline parsing
-    builder.start_node(SyntaxKind::HEADING_CONTENT.into());
-    if !text_content.is_empty() {
-        inline_emission::emit_inlines(builder, text_content, config, false);
-    }
-    builder.finish_node();
+    emit_heading_content(builder, text_content, attr_text.is_none(), config);
 
     // Emit space before attributes if present
     if !space_before_attrs.is_empty() {
@@ -379,11 +430,12 @@ pub(crate) fn emit_atx_heading(
         };
 
     // Heading content node
-    builder.start_node(SyntaxKind::HEADING_CONTENT.into());
-    if !text_content.is_empty() {
-        inline_emission::emit_inlines(builder, text_content, config, false);
-    }
-    builder.finish_node();
+    emit_heading_content(
+        builder,
+        text_content,
+        attr_text.is_none() && closing_suffix.is_empty(),
+        config,
+    );
 
     // Emit space before attributes if present
     if !space_before_attrs.is_empty() {

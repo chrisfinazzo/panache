@@ -321,6 +321,7 @@ golden_test_cases!(
     list_mixed_bullets_commonmark,
     headings,
     heading_in_list_item,
+    heading_trailing_backslash,
     setext_headings,
     setext_after_setext_pandoc,
     setext_heading_in_list_item,
