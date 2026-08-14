@@ -96,6 +96,4 @@ B. Williams
     with a continuation
 
     iv. sublist with roman numerals, starting with 4
-     v. more items
-        (A) a subsublist
-        (B) a subsublist
+    v. more items (A) a subsublist (B) a subsublist

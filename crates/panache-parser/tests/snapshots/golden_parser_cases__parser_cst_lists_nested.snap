@@ -1,5 +1,6 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 111
 expression: cst_output
 ---
 DOCUMENT@0..311
@@ -115,19 +116,9 @@ DOCUMENT@0..311
           PLAIN@226..239
             TEXT@226..238 "Upper Roman."
             NEWLINE@238..239 "\n"
-          LIST@239..311
-            LIST_ITEM@239..311
-              WHITESPACE@239..247 "        "
-              LIST_MARKER@247..250 "(6)"
-              WHITESPACE@250..251 " "
-              PLAIN@251..272
-                TEXT@251..271 "Decimal start with 6"
-                NEWLINE@271..272 "\n"
-              LIST@272..311
-                LIST_ITEM@272..311
-                  WHITESPACE@272..284 "            "
-                  LIST_MARKER@284..286 "c)"
-                  WHITESPACE@286..288 "  "
-                  PLAIN@288..311
-                    TEXT@288..310 "Lower alpha with paren"
-                    NEWLINE@310..311 "\n"
+          PLAIN@239..311
+            TEXT@239..271 "        (6) Decimal s ..."
+            NEWLINE@271..272 "\n"
+            LINE_PREFIX@272..280 "        "
+            TEXT@280..310 "    c)  Lower alpha w ..."
+            NEWLINE@310..311 "\n"

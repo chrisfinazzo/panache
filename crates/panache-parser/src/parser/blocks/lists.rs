@@ -1428,6 +1428,111 @@ pub(in crate::parser) fn in_list(containers: &ContainerStack) -> bool {
         .any(|c| matches!(c, Container::List { .. }))
 }
 
+/// Whether any enclosing container is a list item or a definition body.
+///
+/// This is the scope of pandoc's "ordered sublists must start at 1" rule
+/// (jgm/pandoc#11735, pandoc 3.10.1). Pandoc reparses list-item and
+/// definition-body content through `parseFromString`, and the restriction
+/// rides on that nested parse — so it applies transitively through any
+/// blockquotes or divs opened *inside* such an item, while a blockquote or
+/// div at document level is unaffected. Verified against
+/// `pandoc -f markdown -t native` 3.10.2 for each of those shapes.
+pub(in crate::parser) fn in_list_item_or_definition_body(containers: &ContainerStack) -> bool {
+    containers
+        .stack
+        .iter()
+        .any(|c| matches!(c, Container::ListItem { .. } | Container::Definition { .. }))
+}
+
+/// Content column of the list item open directly inside the list at
+/// `list_level`, if that item is still open.
+///
+/// Used to tell a sibling item from a marker nested in the current item's
+/// content: `find_matching_list_level` cannot, because it tolerates indent
+/// drift and so hands back the enclosing list for both. A marker reaching
+/// this column is inside the open item, hence a new sublist.
+///
+/// `None` when the item has already been closed — which is what a blank line
+/// between loose items does, and why the answer must come from the matched
+/// list rather than from the innermost item on the stack.
+pub(in crate::parser) fn open_item_content_col_in_list(
+    containers: &ContainerStack,
+    list_level: usize,
+) -> Option<usize> {
+    match containers.stack.get(list_level + 1) {
+        Some(Container::ListItem { content_col, .. }) => Some(*content_col),
+        _ => None,
+    }
+}
+
+/// Content column of the innermost open list item or definition body, if any.
+pub(in crate::parser) fn innermost_content_col(containers: &ContainerStack) -> Option<usize> {
+    containers
+        .stack
+        .iter()
+        .rev()
+        .find_map(|c| match c {
+            Container::ListItem { content_col, .. } | Container::Definition { content_col, .. } => {
+                Some(*content_col)
+            }
+            // A blockquote re-bases columns, so an item outside it cannot be
+            // compared against a marker indent measured inside it.
+            Container::BlockQuote { .. } => Some(usize::MAX),
+            _ => None,
+        })
+        .filter(|col| *col != usize::MAX)
+}
+
+/// The start number a marker declares, or `None` for auto-numbered markers
+/// (`#.` and example lists) that pandoc always reports as starting at 1.
+///
+/// Bullets have no start number and return `None` as well — the sublist
+/// restriction only constrains ordered lists.
+pub(in crate::parser) fn marker_start_number(marker: &ListMarker) -> Option<u32> {
+    let ordered = match marker {
+        ListMarker::Ordered(o) => o,
+        ListMarker::Bullet(_) => return None,
+    };
+    match ordered {
+        OrderedMarker::Hash | OrderedMarker::Example { .. } => None,
+        OrderedMarker::Decimal { number, .. } => number.parse().ok(),
+        OrderedMarker::LowerAlpha { letter, .. } => Some(*letter as u32 - 'a' as u32 + 1),
+        OrderedMarker::UpperAlpha { letter, .. } => Some(*letter as u32 - 'A' as u32 + 1),
+        OrderedMarker::LowerRoman { numeral, .. } => roman_to_number(numeral),
+        OrderedMarker::UpperRoman { numeral, .. } => roman_to_number(numeral),
+    }
+}
+
+/// Parse a Roman numeral, case-insensitively. Only used to answer "is this
+/// start value 1?", so an unparseable numeral yielding `None` is harmless.
+fn roman_to_number(numeral: &str) -> Option<u32> {
+    let value = |c: char| match c.to_ascii_lowercase() {
+        'i' => Some(1),
+        'v' => Some(5),
+        'x' => Some(10),
+        'l' => Some(50),
+        'c' => Some(100),
+        'd' => Some(500),
+        'm' => Some(1000),
+        _ => None,
+    };
+    let digits: Option<Vec<u32>> = numeral.chars().map(value).collect();
+    let digits = digits?;
+    if digits.is_empty() {
+        return None;
+    }
+    // Subtractive notation: a digit smaller than the one after it is negated.
+    let total = digits
+        .iter()
+        .enumerate()
+        .map(|(i, d)| match digits.get(i + 1) {
+            Some(next) if d < next => -(*d as i64),
+            _ => *d as i64,
+        })
+        .sum::<i64>();
+    u32::try_from(total).ok()
+}
+
 /// Check if we're in a list inside a blockquote.
 pub(in crate::parser) fn in_blockquote_list(containers: &ContainerStack) -> bool {
     let mut seen_blockquote = false;
@@ -1861,6 +1966,16 @@ fn finish_list_item_with_optional_nested(
     if !buffered_is_thematic_break
         && let Some(inner_match) =
             try_parse_list_marker(&text_to_buffer, config, OpenListHint::None)
+        // Everything this branch emits is a sublist of the item being
+        // finished, so pandoc 3.10's start-at-1 rule applies unconditionally
+        // here — no container-stack lookup needed. `- 2. foo` and `1. - 2. foo`
+        // keep the marker as item text instead.
+        // CommonMark keeps nesting these, so the gate is dialect-scoped.
+        && !(config.dialect != crate::Dialect::CommonMark
+            && config
+                .effective_pandoc_compat()
+                .restricts_ordered_sublist_start()
+            && marker_start_number(&inner_match.marker).is_some_and(|start| start != 1))
     {
         let inner_content_start = inner_match.marker_len + inner_match.spaces_after_bytes;
         let after_inner =

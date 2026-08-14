@@ -214,6 +214,18 @@ pub(crate) struct BlockContext<'a> {
     /// candidates {i,v,x,I,V,X} against an open alpha list in a single
     /// classification pass under Pandoc dialect.
     pub open_alpha_hint: super::blocks::lists::OpenListHint,
+
+    /// Whether the current line's ordered marker would open a *new* sublist
+    /// inside an enclosing list item or definition body while declaring a
+    /// start number other than 1.
+    ///
+    /// Pandoc 3.10.1 stopped recognizing those as lists (jgm/pandoc#11735);
+    /// under `PandocCompat::V3_10` they stay paragraph text. Precomputed by
+    /// the parser core because answering it needs the container stack (which
+    /// is intentionally not threaded through `BlockContext` — see the note
+    /// above) to tell a genuinely new sublist from a sibling item continuing
+    /// an already-open list, where any start number is still fine.
+    pub restricted_ordered_sublist: bool,
 }
 
 /// Result of detecting whether a block can be parsed.
@@ -691,6 +703,13 @@ impl BlockParser for ListParser {
     ) -> Option<(BlockDetectionResult, Option<Box<dyn Any>>)> {
         let content = lines.first();
         let marker_match = try_parse_list_marker(content, ctx.config, ctx.open_alpha_hint)?;
+        // Pandoc 3.10.1: an ordered sublist must start at 1 (or its
+        // equivalent in the marker's own numbering — `i.`, `a.`, `A.`, `(1)`).
+        // Declining here leaves the line to the paragraph parser, which is
+        // exactly what pandoc produces.
+        if ctx.restricted_ordered_sublist {
+            return None;
+        }
         let after_marker_text = {
             let (_, indent_bytes) = super::utils::container_stack::leading_indent(content);
             let marker_end = indent_bytes + marker_match.marker_len;

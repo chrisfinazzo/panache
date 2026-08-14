@@ -1,6 +1,6 @@
 use super::helpers::{
     assert_block_kinds, count_children, find_all, find_first, parse_blocks,
-    parse_blocks_with_config,
+    parse_blocks_pandoc_3_9, parse_blocks_with_config,
 };
 use crate::options::{Extensions, Flavor, ParserOptions};
 use crate::syntax::{SyntaxKind, SyntaxNode};
@@ -138,15 +138,19 @@ fn outdented_item_after_nested_list_returns_to_outer_level() {
     );
 }
 
+/// Pinned to the pandoc 3.9 target: the nested lists here start at `iv.` and
+/// `(A)`, which pandoc 3.10 reads as paragraph text (jgm/pandoc#11735). The
+/// indented-code question this case guards only arises once they nest.
 #[test]
 fn fancy_list_continuation_with_nested_list_is_not_indented_code() {
-    use crate::options::{Extensions, ParserOptions};
+    use crate::options::{Extensions, PandocCompat, ParserOptions};
 
     let config = ParserOptions {
         extensions: Extensions {
             fancy_lists: true,
             ..Default::default()
         },
+        pandoc_compat: PandocCompat::V3_9,
         ..Default::default()
     };
     let input = "(2) begins with 2\n(3) and now 3\n\n    with a continuation\n\n    iv. sublist with roman numerals,\n        starting with 4\n    v.  more items\n        (A)  a subsublist\n        (B)  a subsublist\n";
@@ -912,22 +916,98 @@ fn continuation_indent_is_stripped_from_inline_code_content() {
 }
 
 #[test]
-fn ordered_marker_at_content_column_opens_nested_list() {
-    // `pandoc -f markdown -t native` nests every one of these as an
-    // `OrderedList` inside the outer item; only the outer item's content
-    // column matters, not the marker's number or delimiter style.
+fn ordered_marker_at_content_column_opens_nested_list_under_pandoc_3_9() {
+    // Under the 3.9 target `pandoc -f markdown -t native` nests every one of
+    // these as an `OrderedList` inside the outer item; only the outer item's
+    // content column matters, not the marker's number or delimiter style.
     for input in [
         "1.  a\n    10.  b\n",
         "1.  a\n    2.  b\n",
         "1.  a\n    (b)  b\n",
         "1.  a\n    (2)  b\n",
     ] {
-        let tree = parse_blocks(input);
+        let tree = parse_blocks_pandoc_3_9(input);
         let lists = find_all(&tree, SyntaxKind::LIST);
         assert_eq!(
             lists.len(),
             2,
             "marker at the outer item's content column should nest: {input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}
+
+/// Pandoc 3.10.1 requires an ordered sublist to start at 1 — or its
+/// equivalent in the marker's own numbering — so every shape above is now
+/// paragraph text instead (jgm/pandoc#11735). Each string below was checked
+/// against `pandoc -f markdown -t native` 3.10.2.
+#[test]
+fn ordered_sublist_must_start_at_one_under_pandoc_3_10() {
+    for input in [
+        "1.  a\n    10.  b\n",
+        "1.  a\n    2.  b\n",
+        "1.  a\n    (b)  b\n",
+        "1.  a\n    (2)  b\n",
+        "-   a\n\n    iv. b\n",
+        "-   a\n\n    C.  b\n",
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::LIST).len(),
+            1,
+            "sublist starting past 1 must stay paragraph text: {input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}
+
+/// The restriction is about *starting* a sublist, not about the numbers a
+/// list may run through: a marker that continues an already-open list is
+/// still a sibling item whatever its number.
+#[test]
+fn ordered_sublist_start_rule_leaves_sibling_items_alone() {
+    for (input, expected_lists) in [
+        ("1. a\n2. b\n", 1),
+        ("- item\n  1. a\n  2. b\n", 2),
+        ("2. top level\n3. still fine\n", 1),
+        ("> 2. quoted top level\n> 3. fine\n", 1),
+    ] {
+        let tree = parse_blocks(input);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::LIST).len(),
+            expected_lists,
+            "sibling continuation must keep its list: {input:?}"
+        );
+        assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
+    }
+}
+
+/// Start-1 equivalents in every numbering style still open a sublist, as do
+/// the auto-numbered markers, which pandoc always reports as starting at 1.
+#[test]
+fn ordered_sublist_starting_at_one_still_nests() {
+    let config = ParserOptions {
+        extensions: Extensions {
+            fancy_lists: true,
+            example_lists: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    for input in [
+        "-   a\n\n    1. b\n",
+        "-   a\n\n    i. b\n",
+        "-   a\n\n    a. b\n",
+        "-   a\n\n    A.  b\n",
+        "-   a\n\n    (1) b\n",
+        "-   a\n\n    #. b\n",
+        "-   a\n\n    (@) b\n",
+    ] {
+        let tree = parse_blocks_with_config(input, &config);
+        assert_eq!(
+            find_all(&tree, SyntaxKind::LIST).len(),
+            2,
+            "a sublist starting at 1 must still nest: {input:?}"
         );
         assert_eq!(tree.text().to_string(), input, "parse must stay lossless");
     }

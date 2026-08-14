@@ -1,9 +1,23 @@
-use crate::options::{Dialect, Extensions, Flavor, ParserOptions};
+use crate::options::{Dialect, Extensions, Flavor, PandocCompat, ParserOptions};
 use crate::parser::Parser;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub fn parse_blocks(input: &str) -> SyntaxNode {
     let config = ParserOptions::default();
+    Parser::new(input, &config).parse()
+}
+
+/// Parse against the pandoc 3.9 compat target.
+///
+/// For cases whose shape depends on an ordered sublist that starts at a
+/// number other than 1 — pandoc 3.10.1 stopped reading those as lists
+/// (jgm/pandoc#11735), so under the default target they are paragraph text
+/// and whatever the case was written to exercise no longer occurs.
+pub fn parse_blocks_pandoc_3_9(input: &str) -> SyntaxNode {
+    let config = ParserOptions {
+        pandoc_compat: PandocCompat::V3_9,
+        ..Default::default()
+    };
     Parser::new(input, &config).parse()
 }
 

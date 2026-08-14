@@ -1,15 +1,28 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 111
 expression: cst_output
 ---
 DOCUMENT@0..72
   HTML_BLOCK@0..72
     HTML_BLOCK_TAG@0..29
-      TEXT@0..28 "<video controls width ..."
+      TEXT@0..6 "<video"
+      WHITESPACE@6..7 " "
+      HTML_ATTRS@7..27
+        ATTR_KEY_VALUE@7..15
+          ATTR_KEY@7..15 "controls"
+        WHITESPACE@15..16 " "
+        ATTR_KEY_VALUE@16..27
+          ATTR_KEY@16..21 "width"
+          TEXT@21..22 "="
+          ATTR_VALUE@22..27 "\"320\""
+      TEXT@27..28 ">"
       NEWLINE@28..29 "\n"
-    HTML_BLOCK_CONTENT@29..63
-      TEXT@29..53 "<source src=\"movie.mp4\">"
-      NEWLINE@53..54 "\n"
+    HTML_BLOCK@29..54
+      HTML_BLOCK_TAG@29..54
+        TEXT@29..53 "<source src=\"movie.mp4\">"
+        NEWLINE@53..54 "\n"
+    PLAIN@54..63
       TEXT@54..62 "fallback"
       NEWLINE@62..63 "\n"
     HTML_BLOCK_TAG@63..72

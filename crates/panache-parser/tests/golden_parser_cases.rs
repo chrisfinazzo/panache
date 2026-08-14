@@ -10,7 +10,7 @@
 //! Run `INSTA_UPDATE=always cargo test -p panache-parser --test golden_parser_cases`
 //! to update snapshots intentionally.
 
-use panache_parser::{Dialect, Extensions, Flavor, ParserOptions, parse};
+use panache_parser::{Dialect, Extensions, Flavor, PandocCompat, ParserOptions, parse};
 use std::{
     collections::HashMap,
     fs,
@@ -55,6 +55,18 @@ fn load_test_parser_options(dir: &Path) -> Option<ParserOptions> {
         options.flavor = flavor;
         options.dialect = Dialect::for_flavor(flavor);
         options.extensions = Extensions::for_flavor(flavor);
+    }
+
+    // `pandoc-compat` pins a case to the target it was written against, for
+    // shapes a later pandoc stopped producing at all.
+    if let Some(compat_str) = value.get("pandoc-compat").and_then(toml::Value::as_str) {
+        options.pandoc_compat = match compat_str {
+            "3.7" => PandocCompat::V3_7,
+            "3.9" => PandocCompat::V3_9,
+            "3.10" => PandocCompat::V3_10,
+            "latest" => PandocCompat::Latest,
+            other => panic!("unknown pandoc-compat in parser-options.toml: {other:?}"),
+        };
     }
 
     if let Some(ext_table) = value.get("extensions").and_then(toml::Value::as_table) {

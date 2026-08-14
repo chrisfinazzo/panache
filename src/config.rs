@@ -1691,6 +1691,28 @@ mod tests {
     }
 
     #[test]
+    fn compat_pandoc_accepts_3_10_and_its_aliases() {
+        for spelling in ["3.10", "3-10", "v3.10", "v3-10"] {
+            let toml = format!("[compat]\npandoc = \"{spelling}\"\n");
+            let cfg = parse_config_str(&toml, Path::new("panache.toml"))
+                .unwrap_or_else(|e| panic!("[compat] pandoc = {spelling:?} must parse: {e}"));
+            assert_eq!(cfg.parser, PandocCompat::V3_10, "spelling: {spelling:?}");
+        }
+    }
+
+    #[test]
+    fn compat_pandoc_defaults_to_the_pinned_latest_target() {
+        let cfg =
+            parse_config_str("", Path::new("panache.toml")).expect("an empty config must parse");
+        assert_eq!(cfg.parser, PandocCompat::V3_10);
+        assert_eq!(
+            PandocCompat::Latest.effective(),
+            cfg.parser,
+            "`latest` must resolve to the same target as the default"
+        );
+    }
+
+    #[test]
     fn deprecated_top_level_pandoc_compat_still_applies() {
         let toml = "pandoc-compat = \"3.7\"\n";
         let cfg = parse_config_str(toml, Path::new("panache.toml"))

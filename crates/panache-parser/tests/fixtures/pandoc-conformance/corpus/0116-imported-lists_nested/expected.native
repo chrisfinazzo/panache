@@ -39,31 +39,26 @@
       , OrderedList
           ( 1 , UpperRoman , Period )
           [ [ Plain [ Str "Upper" , Space , Str "Roman." ]
-            , OrderedList
-                ( 6 , Decimal , TwoParens )
-                [ [ Plain
-                      [ Str "Decimal"
-                      , Space
-                      , Str "start"
-                      , Space
-                      , Str "with"
-                      , Space
-                      , Str "6"
-                      ]
-                  , OrderedList
-                      ( 3 , LowerAlpha , OneParen )
-                      [ [ Plain
-                            [ Str "Lower"
-                            , Space
-                            , Str "alpha"
-                            , Space
-                            , Str "with"
-                            , Space
-                            , Str "paren"
-                            ]
-                        ]
-                      ]
-                  ]
+            , Plain
+                [ Str "(6)"
+                , Space
+                , Str "Decimal"
+                , Space
+                , Str "start"
+                , Space
+                , Str "with"
+                , Space
+                , Str "6"
+                , SoftBreak
+                , Str "c)"
+                , Space
+                , Str "Lower"
+                , Space
+                , Str "alpha"
+                , Space
+                , Str "with"
+                , Space
+                , Str "paren"
                 ]
             ]
           ]

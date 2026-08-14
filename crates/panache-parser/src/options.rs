@@ -1029,23 +1029,46 @@ pub enum PandocCompat {
     )]
     V3_7,
     /// Match Pandoc 3.9 behavior for ambiguous syntax edge cases.
-    #[default]
     #[cfg_attr(
         feature = "serde",
         serde(rename = "3.9", alias = "3-9", alias = "v3.9", alias = "v3-9")
     )]
     V3_9,
+    /// Match Pandoc 3.10 behavior for ambiguous syntax edge cases.
+    #[default]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "3.10", alias = "3-10", alias = "v3.10", alias = "v3-10")
+    )]
+    V3_10,
 }
 
 impl PandocCompat {
     /// Pinned target for `latest`.
-    pub const PINNED_LATEST: Self = Self::V3_9;
+    pub const PINNED_LATEST: Self = Self::V3_10;
 
     pub fn effective(self) -> Self {
         match self {
             Self::Latest => Self::PINNED_LATEST,
             other => other,
         }
+    }
+
+    /// Whether an ordered list nested inside a list item or definition body
+    /// must start at 1 (`1.`, `i.`, `a.`, `A.`, `(1)`, ...) to be recognized
+    /// as a list at all.
+    ///
+    /// Pandoc 3.10.1 aligned the markdown reader with CommonMark here
+    /// (jgm/pandoc#11735) to avoid unintended list starts: under the new rule
+    /// `- item\n\n  2. sub` reads `2. sub` as a paragraph, not a sublist.
+    /// Top-level lists (including inside blockquotes and divs) still accept
+    /// any start number.
+    ///
+    /// Deliberately a named predicate rather than an `Ord` comparison: the
+    /// `Latest` variant sorts first, so deriving an ordering on this enum
+    /// would silently give the wrong answer.
+    pub fn restricts_ordered_sublist_start(self) -> bool {
+        matches!(self.effective(), Self::V3_10)
     }
 }
 
@@ -1177,7 +1200,8 @@ impl schemars::JsonSchema for PandocCompat {
             "enum": [
                 "latest",
                 "3.7", "3-7", "v3.7", "v3-7",
-                "3.9", "3-9", "v3.9", "v3-9"
+                "3.9", "3-9", "v3.9", "v3-9",
+                "3.10", "3-10", "v3.10", "v3-10"
             ]
         })
     }

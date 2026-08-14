@@ -1,4 +1,4 @@
-Pandoc-native conformance report (pandoc 3.9.0.2)
+Pandoc-native conformance report (pandoc 3.10.2)
 544 / 544 cases passing (100.0%)
 0 failing
 0 blocked-list entries

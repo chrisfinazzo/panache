@@ -1,7 +1,7 @@
 {
   "blocked": 0,
   "failing": 0,
-  "pandoc_version": "3.9.0.2",
+  "pandoc_version": "3.10.2",
   "pass_pct": 100.0,
   "passing": 544,
   "passing_ids": [

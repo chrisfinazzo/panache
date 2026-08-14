@@ -284,31 +284,41 @@
           , Space
           , Str "continuation"
           ]
-      , OrderedList
-          ( 4 , LowerRoman , Period )
-          [ [ Plain
-                [ Str "sublist"
-                , Space
-                , Str "with"
-                , Space
-                , Str "roman"
-                , Space
-                , Str "numerals,"
-                , SoftBreak
-                , Str "starting"
-                , Space
-                , Str "with"
-                , Space
-                , Str "4"
-                ]
-            ]
-          , [ Plain [ Str "more" , Space , Str "items" ]
-            , OrderedList
-                ( 1 , UpperAlpha , TwoParens )
-                [ [ Plain [ Str "a" , Space , Str "subsublist" ] ]
-                , [ Plain [ Str "a" , Space , Str "subsublist" ] ]
-                ]
-            ]
+      , Para
+          [ Str "iv."
+          , Space
+          , Str "sublist"
+          , Space
+          , Str "with"
+          , Space
+          , Str "roman"
+          , Space
+          , Str "numerals,"
+          , SoftBreak
+          , Str "starting"
+          , Space
+          , Str "with"
+          , Space
+          , Str "4"
+          ]
+      , Para
+          [ Str "v."
+          , Space
+          , Str "more"
+          , Space
+          , Str "items"
+          , SoftBreak
+          , Str "(A)"
+          , Space
+          , Str "a"
+          , Space
+          , Str "subsublist"
+          , SoftBreak
+          , Str "(B)"
+          , Space
+          , Str "a"
+          , Space
+          , Str "subsublist"
           ]
       ]
     ]

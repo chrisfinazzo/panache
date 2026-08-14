@@ -1111,6 +1111,79 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Whether `content`'s ordered list marker is one pandoc 3.10 refuses to
+    /// read as a sublist: a start number other than 1 on a list that would be
+    /// newly opened inside an enclosing list item or definition body.
+    ///
+    /// The "newly opened" half is what keeps `1. a` / `2. b` a two-item list —
+    /// there `2.` matches the open list on the stack and continues it as a
+    /// sibling item, which pandoc still accepts at any number. Only a marker
+    /// with no matching open list would push a fresh `Container::List`.
+    /// Returns the marker's indent (columns) when restricted, so callers that
+    /// care about *where* the marker sits can apply their own column rules.
+    ///
+    /// CommonMark is unaffected: `pandoc -f commonmark -t native` still nests
+    /// `- item` / `2. sub` as an `OrderedList (2, ...)`. The 3.10 change is a
+    /// pandoc-markdown reader rule, so it branches on dialect, not just on the
+    /// compat target (which every flavor shares).
+    fn restricted_ordered_sublist_indent(&self, content: &str) -> Option<usize> {
+        if self.config.dialect == crate::options::Dialect::CommonMark {
+            return None;
+        }
+        if !self
+            .config
+            .effective_pandoc_compat()
+            .restricts_ordered_sublist_start()
+        {
+            return None;
+        }
+        if !lists::in_list_item_or_definition_body(&self.containers) {
+            return None;
+        }
+        let indent_cols = leading_indent(content).0;
+        let marker_match = lists::try_parse_list_marker(
+            content,
+            self.config,
+            lists::open_list_hint_at_indent(&self.containers, indent_cols),
+        )?;
+        if lists::marker_start_number(&marker_match.marker).is_none_or(|start| start == 1) {
+            return None;
+        }
+        // Two ways this marker opens a *new* list rather than continuing one:
+        // no open list matches it at all, or it is indented into the content
+        // area of that list's open item (where `find_matching_list_level`'s
+        // drift tolerance would still hand back the enclosing list).
+        let opens_new_list = match lists::find_matching_list_level(
+            &self.containers,
+            &marker_match.marker,
+            indent_cols,
+            self.config.dialect,
+        ) {
+            None => true,
+            Some(level) => lists::open_item_content_col_in_list(&self.containers, level)
+                .is_some_and(|col| indent_cols >= col),
+        };
+        opens_new_list.then_some(indent_cols)
+    }
+
+    fn restricted_ordered_sublist(&self, content: &str) -> bool {
+        self.restricted_ordered_sublist_indent(content).is_some()
+    }
+
+    /// Whether a restricted marker on this line still ends the block above it.
+    ///
+    /// It does everywhere a block could start, but 4+ columns past the
+    /// enclosing content column no block can start at all — that is indented
+    /// code territory, and indented code cannot interrupt a paragraph — so
+    /// pandoc folds the line in as a soft break instead. `A.`/`I.`/`(6)`/`c)`
+    /// (corpus case 0116) is the shape that depends on this.
+    fn restricted_sublist_interrupts(&self, content: &str) -> bool {
+        let Some(indent_cols) = self.restricted_ordered_sublist_indent(content) else {
+            return false;
+        };
+        lists::innermost_content_col(&self.containers).is_none_or(|col| indent_cols < col + 4)
+    }
+
     /// Whether a definition marker on this line has to *end* the list item
     /// content above it rather than continue it.
     ///
@@ -2735,6 +2808,11 @@ impl<'a> Parser<'a> {
             list_item_content_open: false,
             next_line: self.lines.get(self.pos + 1).map(|line| prefix.strip(line)),
             open_alpha_hint: lists::OpenListHint::None,
+            // This probe context deliberately presents no container state
+            // (`in_list: false`, no alpha hint), so the sublist restriction —
+            // which is entirely a statement about enclosing containers — has
+            // nothing to act on either.
+            restricted_ordered_sublist: false,
         };
 
         let block_match = self.block_registry.detect_prepared(&ctx, &window)?;
@@ -3311,6 +3389,7 @@ impl<'a> Parser<'a> {
                 &self.containers,
                 leading_indent(content).0,
             ),
+            restricted_ordered_sublist: self.restricted_ordered_sublist(content),
         }
     }
 
@@ -4057,6 +4136,23 @@ impl<'a> Parser<'a> {
         }
         let current_bq_depth = self.current_blockquote_depth();
 
+        // A marker pandoc 3.10 refuses to read as a sublist still ends the
+        // block above it: pandoc's marker parser matches, so `endline` will
+        // not continue a paragraph across the line, and only the list
+        // *construction* fails. The line therefore opens its own paragraph
+        // (which then absorbs following plain lines normally) instead of
+        // being folded into the one above as a soft break.
+        if self.restricted_sublist_interrupts(if current_bq_depth > 0 {
+            inner_content
+        } else {
+            line
+        }) {
+            self.emit_list_item_buffer_if_needed();
+            if matches!(self.containers.last(), Some(Container::Paragraph { .. })) {
+                self.close_containers_to(self.containers.depth() - 1);
+            }
+        }
+
         let has_blank_before = self.pos == 0 || is_blank_line(self.lines[self.pos - 1]);
         let mut blockquote_match: Option<PreparedBlockMatch> = None;
         let dispatcher_ctx = if current_bq_depth == 0 {
@@ -4096,6 +4192,7 @@ impl<'a> Parser<'a> {
                     &self.containers,
                     leading_indent(line).0,
                 ),
+                restricted_ordered_sublist: self.restricted_ordered_sublist(line),
             })
         } else {
             None
@@ -5620,6 +5717,8 @@ impl<'a> Parser<'a> {
                                 &self.containers,
                                 leading_indent(stripped_content).0,
                             ),
+                            restricted_ordered_sublist: self
+                                .restricted_ordered_sublist(stripped_content),
                         },
                         &self.lines,
                         self.pos,
@@ -5949,6 +6048,7 @@ impl<'a> Parser<'a> {
                 &self.containers,
                 leading_indent(content).0,
             ),
+            restricted_ordered_sublist: self.restricted_ordered_sublist(content),
         };
 
         // We'll update these two fields shortly (after they are computed), but we can still

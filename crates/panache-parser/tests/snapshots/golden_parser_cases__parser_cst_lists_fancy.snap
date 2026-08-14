@@ -1,5 +1,6 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
+assertion_line: 111
 expression: cst_output
 ---
 DOCUMENT@0..1432
@@ -471,36 +472,18 @@ DOCUMENT@0..1432
         NEWLINE@1298..1299 "\n"
       BLANK_LINE@1299..1300
         BLANK_LINE@1299..1300 "\n"
-      LIST@1300..1432
-        LIST_ITEM@1300..1361
-          WHITESPACE@1300..1304 "    "
-          LIST_MARKER@1304..1307 "iv."
-          WHITESPACE@1307..1308 " "
-          PLAIN@1308..1361
-            TEXT@1308..1336 "sublist with roman nu ..."
-            NEWLINE@1336..1337 "\n"
-            LINE_PREFIX@1337..1345 "        "
-            TEXT@1345..1360 "starting with 4"
-            NEWLINE@1360..1361 "\n"
-        LIST_ITEM@1361..1432
-          WHITESPACE@1361..1365 "    "
-          LIST_MARKER@1365..1367 "v."
-          WHITESPACE@1367..1369 "  "
-          PLAIN@1369..1380
-            TEXT@1369..1379 "more items"
-            NEWLINE@1379..1380 "\n"
-          LIST@1380..1432
-            LIST_ITEM@1380..1406
-              WHITESPACE@1380..1388 "        "
-              LIST_MARKER@1388..1391 "(A)"
-              WHITESPACE@1391..1393 "  "
-              PLAIN@1393..1406
-                TEXT@1393..1405 "a subsublist"
-                NEWLINE@1405..1406 "\n"
-            LIST_ITEM@1406..1432
-              WHITESPACE@1406..1414 "        "
-              LIST_MARKER@1414..1417 "(B)"
-              WHITESPACE@1417..1419 "  "
-              PLAIN@1419..1432
-                TEXT@1419..1431 "a subsublist"
-                NEWLINE@1431..1432 "\n"
+      PLAIN@1300..1361
+        TEXT@1300..1336 "    iv. sublist with  ..."
+        NEWLINE@1336..1337 "\n"
+        LINE_PREFIX@1337..1341 "    "
+        TEXT@1341..1360 "    starting with 4"
+        NEWLINE@1360..1361 "\n"
+      PLAIN@1361..1432
+        TEXT@1361..1379 "    v.  more items"
+        NEWLINE@1379..1380 "\n"
+        LINE_PREFIX@1380..1384 "    "
+        TEXT@1384..1405 "    (A)  a subsublist"
+        NEWLINE@1405..1406 "\n"
+        LINE_PREFIX@1406..1410 "    "
+        TEXT@1410..1431 "    (B)  a subsublist"
+        NEWLINE@1431..1432 "\n"

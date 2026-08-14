@@ -1,4 +1,6 @@
-use super::helpers::{parse_blocks, parse_blocks_gfm, parse_blocks_with_config};
+use super::helpers::{
+    parse_blocks, parse_blocks_gfm, parse_blocks_pandoc_3_9, parse_blocks_with_config,
+};
 use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 
@@ -549,6 +551,7 @@ fn dispatcher_blockquote_detection() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -594,6 +597,7 @@ fn dispatcher_blockquote_requires_blank_before() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -645,6 +649,7 @@ fn dispatcher_blockquote_payload_basic() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -693,6 +698,7 @@ fn dispatcher_blockquote_payload_nested_requires_blank() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -739,6 +745,7 @@ fn dispatcher_blockquote_ignored_inside_blockquote() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -781,6 +788,7 @@ fn dispatcher_blockquote_payload_nested_with_blank() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -827,6 +835,7 @@ fn dispatcher_blockquote_payload_nested_after_blank_line() {
         list_item_content_open: false,
         next_line: None,
         open_alpha_hint: crate::parser::blocks::lists::OpenListHint::None,
+        restricted_ordered_sublist: false,
     };
 
     let prefix = crate::parser::blocks::container_prefix::ContainerPrefix::default();
@@ -1528,11 +1537,14 @@ fn div_closer_outside_the_quote_still_ends_it() {
 /// ladder open for dispatch's `band_fence_level`; pre-closing only the
 /// inner item strands its `LIST` and the new list mis-nests as a `LIST`
 /// directly inside a `LIST`, which the pandoc-ast projector drops.
+///
+/// Pinned to the pandoc 3.9 target: the band it exercises is opened by the
+/// `10.` sublist, which 3.10 reads as paragraph text.
 #[test]
 fn quoted_band_marker_opens_sibling_list_in_enclosing_item() {
     for indent in ["    ", "     "] {
         let input = format!("> - a\n>   10.  b\n> {indent}- c\n");
-        let tree = parse_blocks(&input);
+        let tree = parse_blocks_pandoc_3_9(&input);
 
         for list in find_nodes_of_type(&tree, SyntaxKind::LIST) {
             assert_ne!(
@@ -1565,10 +1577,13 @@ fn quoted_band_marker_opens_sibling_list_in_enclosing_item() {
 /// marker is a lazy continuation of the inner item, not a fence:
 /// pandoc keeps `- c` in item `b`'s paragraph
 /// (`Plain [b, SoftBreak, -, Space, c]`).
+///
+/// Pinned to the pandoc 3.9 target for the same reason as the sibling-band
+/// case above: 3.10 does not open a list on `10.` at all.
 #[test]
 fn quoted_band_marker_past_tolerance_is_lazy_continuation() {
     let input = "> - a\n>   10.  b\n>       - c\n";
-    let tree = parse_blocks(input);
+    let tree = parse_blocks_pandoc_3_9(input);
 
     assert_eq!(
         count_nodes_of_type(&tree, SyntaxKind::LIST),

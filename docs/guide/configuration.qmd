@@ -386,14 +386,30 @@ quarto = "1.9"
 :   Compatibility target for ambiguous Pandoc behavior, used where Pandoc
     behavior changed across releases.
 
-    - `3.9` (default): match Pandoc 3.9 behavior.
+    - `3.10` (default): match Pandoc 3.10 behavior.
+    - `3.9`: match Pandoc 3.9 behavior.
     - `3.7`: match Pandoc 3.7 behavior.
     - `latest`: alias for Panache's pinned newest verified target (currently
-      `3.9`).
+      `3.10`).
 
     This option is intentionally narrow in scope and only affects cases where Pandoc
     changed behavior across versions. It is global, so parser, formatter, and LSP
     all use the same target behavior.
+
+    The difference between `3.9` and `3.10` is that Pandoc 3.10.1 requires an
+    ordered sublist to start at 1 --- or its equivalent in the marker's own
+    numbering (`i.`, `a.`, `A.`, `(1)`) --- bringing the Markdown reader in line
+    with CommonMark and avoiding unintended list starts. Under `3.10`,
+
+    ```markdown
+    -   Item
+        2.  Not a sublist
+    ```
+
+    reads `2.  Not a sublist` as a paragraph rather than opening a list. Lists at
+    the top level (including inside blockquotes and fenced divs) still accept any
+    start number, as do sibling items continuing a list that is already open. Set
+    `pandoc = "3.9"` if you author for an older Pandoc.
 
 `quarto`
 

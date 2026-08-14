@@ -1,0 +1,5 @@
+# Pinned to pandoc 3.9: the band/nesting mechanics this case pins are
+# reached through a `10.`/`(b)` sublist, which pandoc 3.10 no longer opens
+# (jgm/pandoc#11735). The 3.10 rule itself is covered by the pandoc
+# conformance corpus and the `lists.rs` unit tests.
+pandoc-compat = "3.9"

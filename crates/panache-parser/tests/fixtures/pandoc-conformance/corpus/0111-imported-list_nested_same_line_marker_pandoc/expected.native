@@ -2,10 +2,7 @@
 , OrderedList
     ( 1 , Decimal , Period )
     [ [ BulletList
-          [ [ OrderedList
-                ( 2 , Decimal , Period ) [ [ Plain [ Str "foo" ] ] ]
-            ]
-          ]
+          [ [ Plain [ Str "2." , Space , Str "foo" ] ] ]
       ]
     ]
 ]

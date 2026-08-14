@@ -19,5 +19,4 @@ Nested case:
 
 A.  Upper Alpha
     I.  Upper Roman.
-        (6) Decimal start with 6
-            c) Lower alpha with paren
+        (6) Decimal start with 6 c) Lower alpha with paren
