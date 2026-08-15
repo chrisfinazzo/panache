@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use wincode::{SchemaRead, SchemaWrite};
 
+use crate::io_context::IoResultExt;
+
 const CACHE_SCHEMA_VERSION: u32 = 2;
 const CACHE_FILE_NAME: &str = "cli-cache-v1.bin";
 
@@ -174,7 +176,7 @@ impl CliCache {
         start_dir: &Path,
     ) -> io::Result<Option<Self>> {
         let cache_dir = resolve_cache_dir_for_cli(cfg, explicit_config, start_dir)?;
-        fs::create_dir_all(&cache_dir)?;
+        fs::create_dir_all(&cache_dir).with_path(&cache_dir)?;
         let cache_path = cache_dir.join(CACHE_FILE_NAME);
 
         let state = match fs::read(&cache_path) {
@@ -191,7 +193,7 @@ impl CliCache {
                 }
             },
             Err(err) if err.kind() == io::ErrorKind::NotFound => PersistentCache::default(),
-            Err(err) => return Err(err),
+            Err(err) => return Err(err).with_path(&cache_path),
         };
 
         Ok(Some(Self {
@@ -211,8 +213,8 @@ impl CliCache {
             std::process::id(),
             unique_suffix()
         ));
-        fs::write(&tmp_path, raw)?;
-        fs::rename(tmp_path, &self.path)?;
+        fs::write(&tmp_path, raw).with_path(&tmp_path)?;
+        fs::rename(&tmp_path, &self.path).with_path(&self.path)?;
         self.dirty = false;
         Ok(())
     }

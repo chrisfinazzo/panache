@@ -13,12 +13,14 @@ use serde_json::json;
 mod cache;
 mod cli;
 mod diagnostic_renderer;
+mod io_context;
 use cache::{
     CachedLintDocument, CliCache, FormatCacheMode, FormatStoreArgs, global_cache_base_dir,
     resolve_cache_dir_for_cli,
 };
 use cli::{Cli, CliFlavor, ColorMode, Commands, DebugChecks, DebugCommands, ParseOutput};
 use diagnostic_renderer::print_diagnostics;
+use io_context::IoResultExt;
 use panache::config::{Flavor, WrapMode};
 
 impl From<CliFlavor> for Flavor {
@@ -158,7 +160,7 @@ fn init_logger(debug_log: Option<&Path>) {
 fn init_lsp_debug_log() -> io::Result<PathBuf> {
     let mut base = dirs::state_dir().unwrap_or_else(|| PathBuf::from("."));
     base.push("panache");
-    fs::create_dir_all(&base)?;
+    fs::create_dir_all(&base).with_path(&base)?;
     base.push("lsp-debug.log");
     Ok(base)
 }
@@ -361,7 +363,7 @@ fn parse_range(range_str: &str) -> Result<(usize, usize), String> {
 
 fn read_all(path: Option<&PathBuf>) -> io::Result<String> {
     match path {
-        Some(p) => fs::read_to_string(p),
+        Some(p) => fs::read_to_string(p).with_path(p),
         None => {
             let mut buf = String::new();
             io::stdin().read_to_string(&mut buf)?;
@@ -509,7 +511,7 @@ fn remove_dir_if_exists(path: &Path) -> io::Result<bool> {
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(err) => {
                 if !should_retry_remove(&err, attempt) {
-                    return Err(err);
+                    return Err(err).with_path(path);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25u64 << attempt));
                 attempt += 1;
@@ -544,7 +546,7 @@ fn summarize_dir(path: &Path) -> io::Result<Option<(usize, u64)>> {
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err),
+            Err(err) => return Err(err).with_path(&dir),
         };
         for entry in entries.flatten() {
             let Ok(file_type) = entry.file_type() else {
@@ -815,7 +817,14 @@ fn write_debug_artifacts(
     artifacts: &DebugRunArtifacts,
     dump_passes: bool,
 ) -> io::Result<()> {
-    fs::create_dir_all(dump_dir)?;
+    fs::create_dir_all(dump_dir).with_path(dump_dir)?;
+
+    // The artifact paths are built inline, so route every write through a
+    // helper rather than binding each one just to name it in the error.
+    let write = |name: String, contents: &str| -> io::Result<()> {
+        let path = dump_dir.join(name);
+        fs::write(&path, contents).with_path(&path)
+    };
 
     if let Some((input, tree_text)) = artifacts.losslessness.as_ref()
         && (dump_passes
@@ -824,14 +833,8 @@ fn write_debug_artifacts(
                 .iter()
                 .any(|failure| matches!(failure.kind, CheckKind::Losslessness)))
     {
-        fs::write(
-            dump_dir.join(format!("{stem}.losslessness.input.txt")),
-            input,
-        )?;
-        fs::write(
-            dump_dir.join(format!("{stem}.losslessness.parsed.txt")),
-            tree_text,
-        )?;
+        write(format!("{stem}.losslessness.input.txt"), input)?;
+        write(format!("{stem}.losslessness.parsed.txt"), tree_text)?;
     }
 
     if let Some((input, once, twice)) = artifacts.idempotency.as_ref()
@@ -841,27 +844,15 @@ fn write_debug_artifacts(
                 .iter()
                 .any(|failure| matches!(failure.kind, CheckKind::Idempotency)))
     {
-        fs::write(
-            dump_dir.join(format!("{stem}.idempotency.input.txt")),
-            input,
-        )?;
-        fs::write(dump_dir.join(format!("{stem}.idempotency.once.txt")), once)?;
-        fs::write(
-            dump_dir.join(format!("{stem}.idempotency.twice.txt")),
-            twice,
-        )?;
+        write(format!("{stem}.idempotency.input.txt"), input)?;
+        write(format!("{stem}.idempotency.once.txt"), once)?;
+        write(format!("{stem}.idempotency.twice.txt"), twice)?;
     }
 
     for failure in &artifacts.failures {
         let kind = failure.kind.label();
-        fs::write(
-            dump_dir.join(format!("{stem}.{kind}.left.txt")),
-            &failure.left,
-        )?;
-        fs::write(
-            dump_dir.join(format!("{stem}.{kind}.right.txt")),
-            &failure.right,
-        )?;
+        write(format!("{stem}.{kind}.left.txt"), &failure.left)?;
+        write(format!("{stem}.{kind}.right.txt"), &failure.right)?;
     }
 
     Ok(())
@@ -982,7 +973,7 @@ fn run() -> io::Result<()> {
                 let json_value = panache::syntax::cst_to_json(&tree);
                 let json_output =
                     serde_json::to_string_pretty(&json_value).map_err(io::Error::other)?;
-                fs::write(json_path, json_output)?;
+                fs::write(&json_path, json_output).with_path(&json_path)?;
             }
             if !cli.quiet {
                 match to {
@@ -1163,7 +1154,7 @@ fn run() -> io::Result<()> {
                     log::debug!("Using default config");
                 }
 
-                let input = fs::read_to_string(file_path)?;
+                let input = fs::read_to_string(file_path).with_path(file_path)?;
                 let mode = if check {
                     FormatCacheMode::Check
                 } else {
@@ -1273,7 +1264,7 @@ fn run() -> io::Result<()> {
                         println!("{} is correctly formatted", o.file_path.display());
                     }
                 } else if o.input != o.output {
-                    fs::write(&o.file_path, &o.output)?;
+                    fs::write(&o.file_path, &o.output).with_path(&o.file_path)?;
                     if !cli.quiet {
                         println!("Formatted {}", o.file_path.display());
                     }
@@ -1565,7 +1556,7 @@ fn run() -> io::Result<()> {
                             Some(file_path),
                             cli.flavor.map(Flavor::from),
                         )?;
-                        let input = fs::read_to_string(file_path)?;
+                        let input = fs::read_to_string(file_path).with_path(file_path)?;
                         files_checked += 1;
                         let file_label = file_path.to_str().unwrap_or("<unknown>");
 
@@ -1862,7 +1853,7 @@ fn run() -> io::Result<()> {
                         log::debug!("Using default config");
                     }
 
-                    let input = fs::read_to_string(file_path)?;
+                    let input = fs::read_to_string(file_path).with_path(file_path)?;
 
                     let (supports, fingerprints, cached_docs) =
                         if let Some(cache_handle) = cache_shared.as_ref() {
@@ -2198,7 +2189,7 @@ fn run() -> io::Result<()> {
                             let fixed =
                                 apply_fixes(&root_doc.input, &root_doc.diagnostics, unsafe_fixes);
                             conflicted = fixed.conflicted;
-                            fs::write(&file_path, fixed.output)?;
+                            fs::write(&file_path, fixed.output).with_path(&file_path)?;
                         }
                         // Conflicting fixes were counted as fixable but did
                         // not land, so keep the summary honest.
@@ -2393,7 +2384,7 @@ fn lint_quarto_manifest(
     cache_dir: Option<&Path>,
     flavor: Option<Flavor>,
 ) -> io::Result<LintedDocument> {
-    let input = fs::read_to_string(path)?;
+    let input = fs::read_to_string(path).with_path(path)?;
     let root = panache::linter::quarto_schema::manifest_schema_root(path)
         .expect("caller only passes recognized manifest paths");
     let start_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -2442,7 +2433,7 @@ fn lint_manifest_bibliography(
     cache_dir: Option<&Path>,
     flavor: Option<Flavor>,
 ) -> io::Result<LintedDocument> {
-    let input = fs::read_to_string(path)?;
+    let input = fs::read_to_string(path).with_path(path)?;
     let start_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let (cfg, _cfg_source) =
         load_config_for_cli(config, isolated, cache_dir, &start_dir, Some(path), flavor)?;

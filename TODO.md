@@ -144,13 +144,6 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Severity levels (error, warning, info)
 - [ ] Auto-fix capability per rule (infrastructure exists, rules need
   implementation)
-- [ ] Attach the offending path to bare `io::Error`s in the CLI. Top-level
-  errors now print via `Display` (`main` returns `ExitCode` and delegates to
-  `run()`), but a plain OS error still lacks context:
-  `panache parse missing.md` says
-  `Error: No such file or directory (os error 2)` without naming the file.
-  Wrapping the `fs`/`read_all` call sites so each error carries its path
-  would finish the job.
 
 ## Parser
 

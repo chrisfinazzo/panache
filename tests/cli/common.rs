@@ -109,7 +109,8 @@ fn test_invalid_config_error_is_not_debug_formatted() {
 }
 
 /// A plain OS error carries no custom payload; it must still print its message
-/// rather than the `Os { code: .. }` debug form.
+/// rather than the `Os { code: .. }` debug form, and it must name the file it
+/// failed on.
 #[test]
 fn test_os_error_is_not_debug_formatted() {
     let temp_dir = TempDir::new().unwrap();
@@ -120,8 +121,50 @@ fn test_os_error_is_not_debug_formatted() {
         .arg(&missing)
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("Error: No such file or directory"))
+        .stderr(predicate::str::contains(format!(
+            "Error: {}: No such file or directory",
+            missing.display()
+        )))
         .stderr(predicate::str::contains("Os {").not());
+}
+
+/// A decoding failure has no OS-level path either, so the read site must supply
+/// it; otherwise a batch run cannot tell which file was not UTF-8.
+#[test]
+fn test_undecodable_file_error_names_the_file() {
+    let temp_dir = TempDir::new().unwrap();
+    let doc = temp_dir.path().join("binary.md");
+    fs::write(&doc, [0x23, 0x20, 0xff, 0xfe, 0x0a]).unwrap();
+
+    cargo_bin_cmd!("panache")
+        .arg("parse")
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(format!(
+            "Error: {}: stream did not contain valid UTF-8",
+            doc.display()
+        )));
+}
+
+/// `format` reads through its own call site, and it walks several files, so the
+/// path matters even more there.
+#[test]
+fn test_format_read_error_names_the_file() {
+    let temp_dir = TempDir::new().unwrap();
+    fs::write(temp_dir.path().join("good.md"), "# Title\n").unwrap();
+    let bad = temp_dir.path().join("binary.md");
+    fs::write(&bad, [0x23, 0x20, 0xff, 0xfe, 0x0a]).unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["format", "--check"])
+        .arg(temp_dir.path())
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(format!(
+            "Error: {}: stream did not contain valid UTF-8",
+            bad.display()
+        )));
 }
 
 #[test]
