@@ -64,5 +64,13 @@ fn test_indented_yaml_block_in_list_is_not_treated_as_frontmatter() {
     let output2 = format(&output1, None, None);
 
     assert_eq!(output1, output2, "Formatting should be idempotent");
-    assert!(output1.contains("        title: *foo*"));
+    // The delimiters sit far past the item's content column, so they are an
+    // indented code block, not metadata (pandoc's `yamlMetaBlock` is
+    // anchored at column 0 of the container's content). The formatter
+    // fences it at the item's content column and keeps the block's own
+    // two-space indent as content.
+    assert!(
+        output1.contains("  ```\n    ---\n    title: *foo*\n    ---\n  ```"),
+        "indented block should stay code, got:\n{output1}"
+    );
 }

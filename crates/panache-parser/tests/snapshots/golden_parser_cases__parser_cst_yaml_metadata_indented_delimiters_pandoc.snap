@@ -1,0 +1,41 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..74
+  PARAGRAPH@0..5
+    TEXT@0..4 "para"
+    NEWLINE@4..5 "\n"
+  BLANK_LINE@5..6
+    BLANK_LINE@5..6 "\n"
+  CODE_BLOCK@6..35
+    CODE_CONTENT@6..35
+      WHITESPACE@6..10 "    "
+      TEXT@10..13 "---"
+      NEWLINE@13..14 "\n"
+      WHITESPACE@14..18 "    "
+      TEXT@18..26 "title: x"
+      NEWLINE@26..27 "\n"
+      WHITESPACE@27..31 "    "
+      TEXT@31..34 "---"
+      NEWLINE@34..35 "\n"
+  BLANK_LINE@35..36
+    BLANK_LINE@35..36 "\n"
+  PARAGRAPH@36..45
+    TEXT@36..44 "para two"
+    NEWLINE@44..45 "\n"
+  BLANK_LINE@45..46
+    BLANK_LINE@45..46 "\n"
+  HORIZONTAL_RULE@46..50
+    HORIZONTAL_RULE@46..49 "---"
+    NEWLINE@49..50 "\n"
+  PARAGRAPH@50..67
+    TEXT@50..58 "title: y"
+    NEWLINE@58..59 "\n"
+    TEXT@59..66 "    ---"
+    NEWLINE@66..67 "\n"
+  BLANK_LINE@67..68
+    BLANK_LINE@67..68 "\n"
+  PARAGRAPH@68..74
+    TEXT@68..73 "after"
+    NEWLINE@73..74 "\n"

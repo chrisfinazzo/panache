@@ -50,8 +50,8 @@ use super::blocks::lists::{
 };
 use super::blocks::metadata::{
     YamlContentOutcome, collect_yaml_content, emit_yaml_block, find_yaml_block_closing_pos,
-    prepare_yaml_content, try_parse_mmd_title_block, try_parse_pandoc_title_block,
-    try_parse_yaml_block,
+    is_metadata_open_delim, prepare_yaml_content, try_parse_mmd_title_block,
+    try_parse_pandoc_title_block, try_parse_yaml_block,
 };
 use super::blocks::myst_directives::{
     DirectiveOpen, DirectiveOption, is_directive_closing_fence, try_parse_directive_open,
@@ -528,9 +528,13 @@ impl BlockParser for YamlMetadataParser {
         ctx: &BlockContext,
         lines: &StrippedLines<'_, '_>,
     ) -> Option<(BlockDetectionResult, Option<Box<dyn Any>>)> {
-        let content = lines.first();
-        let line_pos = lines.pos();
-        let lines = lines.raw();
+        let stripped = lines;
+        // Column-0 detection strip: the delimiter has to sit at the
+        // container's content column, which the emission strip of a
+        // continuation-line dispatch would leave indented.
+        let content = stripped.first_unconditional();
+        let line_pos = stripped.pos();
+        let lines = stripped.raw();
         if !ctx.config.extensions.yaml_metadata_block {
             return None;
         }
@@ -540,8 +544,8 @@ impl BlockParser for YamlMetadataParser {
             return None;
         }
 
-        // Must start with ---
-        if content.trim() != "---" {
+        // Must start with `---`, unindented.
+        if !is_metadata_open_delim(content) {
             return None;
         }
 
@@ -566,7 +570,10 @@ impl BlockParser for YamlMetadataParser {
             return None;
         }
 
-        let closing_pos = find_yaml_block_closing_pos(lines, line_pos, ctx.at_document_start)?;
+        let closing_pos =
+            find_yaml_block_closing_pos(lines, line_pos, ctx.at_document_start, |i| {
+                stripped.detect_at(i)
+            })?;
 
         // Metadata gate: well-formed YAML whose top level is not a mapping
         // or null is not metadata under pandoc — fall through so the lines

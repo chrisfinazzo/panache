@@ -1446,6 +1446,23 @@ impl<'a, 'p> StrippedLines<'a, 'p> {
         }
     }
 
+    /// Peek-strip the line at ABSOLUTE index `i` with *detection*
+    /// semantics: [`ContainerPrefix::strip_dispatch_line`] on the dispatch
+    /// line, [`ContainerPrefix::strip`] otherwise.
+    ///
+    /// The counterpart to [`Self::strip_at`] for scans whose shape test is
+    /// anchored at column 0 of the container's content: a continuation-line
+    /// dispatch keeps its list indent under the emission strip, which would
+    /// defeat such a test.
+    pub fn detect_at(&self, i: usize) -> &'a str {
+        let line = self.raw[i];
+        if i == self.dispatch {
+            self.prefix.strip_dispatch_line(line)
+        } else {
+            self.prefix.strip(line)
+        }
+    }
+
     /// Peek the tail [`Self::emit_prefix_at`] would return for the line at
     /// ABSOLUTE index `i`, emitting nothing.
     ///

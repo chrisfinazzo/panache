@@ -12,8 +12,8 @@ use rowan::{GreenNode, GreenNodeBuilder, TextRange};
 /// Returns the new position after the block if successful, None otherwise.
 ///
 /// A YAML block:
-/// - Starts with `---` (not followed by blank line)
-/// - Ends with `---` or `...`
+/// - Starts with `---` at column 0 (not followed by blank line)
+/// - Ends with `---` or `...`, also at column 0
 /// - At document start OR preceded by blank line
 /// - Content passes [`prepare_yaml_content`]'s metadata gate
 pub(crate) fn try_parse_yaml_block(
@@ -24,7 +24,7 @@ pub(crate) fn try_parse_yaml_block(
     diags: &Diagnostics,
     flavor: Flavor,
 ) -> Option<usize> {
-    let closing_pos = find_yaml_block_closing_pos(lines, pos, at_document_start)?;
+    let closing_pos = find_yaml_block_closing_pos(lines, pos, at_document_start, |i| lines[i])?;
     let content = collect_yaml_content(lines, pos, closing_pos);
     let outcome = prepare_yaml_content(&content, flavor)?;
     emit_yaml_block(lines, pos, closing_pos, builder, diags, &outcome)
@@ -144,19 +144,50 @@ fn scalar_is_null(scalar: &SyntaxNode) -> bool {
     matches!(text.trim(), "~" | "null" | "Null" | "NULL")
 }
 
-pub(crate) fn find_yaml_block_closing_pos(
-    lines: &[&str],
+/// Whether `line` is the metadata delimiter `marker` at column 0 of its
+/// container's content.
+///
+/// Pandoc's `yamlMetaBlock` opens with `string "---" >> blankline` and its
+/// closer (`stopLine`) has the same shape; neither is preceded by a
+/// leading-space parser, so *any* indentation disqualifies the line and it
+/// reparses as an ordinary block (indented code at 4+ columns, a simple
+/// table rule or thematic break below that). Trailing spaces and tabs are
+/// fine --- `blankline` skips them.
+fn is_delim(line: &str, marker: &str) -> bool {
+    line.strip_prefix(marker)
+        .is_some_and(|rest| rest.trim().is_empty())
+}
+
+/// Whether `line` opens a YAML metadata block. Callers must pass the line
+/// with its container prefix stripped, so column 0 is the container's
+/// content column.
+pub(crate) fn is_metadata_open_delim(line: &str) -> bool {
+    is_delim(line, "---")
+}
+
+/// Whether `line` closes a YAML metadata block (pandoc's `stopLine`).
+fn is_metadata_close_delim(line: &str) -> bool {
+    is_delim(line, "---") || is_delim(line, "...")
+}
+
+/// Locate the closing delimiter of the metadata block opening at `pos`.
+///
+/// `strip` maps an ABSOLUTE line index to that line with its container
+/// prefix removed; delimiter recognition is anchored at column 0 of the
+/// stripped text, so a metadata block nested in a list item is measured
+/// against the item's content column, not the document's.
+pub(crate) fn find_yaml_block_closing_pos<'a>(
+    lines: &[&'a str],
     pos: usize,
     at_document_start: bool,
+    strip: impl Fn(usize) -> &'a str,
 ) -> Option<usize> {
     if pos >= lines.len() {
         return None;
     }
 
-    let line = lines[pos];
-
-    // Must start with ---
-    if line.trim() != "---" {
+    // Must start with `---`, unindented.
+    if !is_metadata_open_delim(strip(pos)) {
         return None;
     }
 
@@ -181,14 +212,7 @@ pub(crate) fn find_yaml_block_closing_pos(
     }
 
     // Find a closing delimiter before emitting; otherwise this is not a valid YAML block.
-    let mut closing_pos = None;
-    for (i, content_line) in lines.iter().enumerate().skip(pos + 1) {
-        if content_line.trim() == "---" || content_line.trim() == "..." {
-            closing_pos = Some(i);
-            break;
-        }
-    }
-    closing_pos
+    (pos + 1..lines.len()).find(|&i| is_metadata_close_delim(strip(i)))
 }
 
 pub(crate) fn emit_yaml_block(
@@ -510,8 +534,82 @@ mod tests {
     #[test]
     fn test_find_yaml_block_closing_pos() {
         let lines = vec!["---", "title: Test", "---", "Content"];
-        let result = find_yaml_block_closing_pos(&lines, 0, true);
+        let result = find_yaml_block_closing_pos(&lines, 0, true, |i| lines[i]);
         assert_eq!(result, Some(2));
+    }
+
+    #[test]
+    fn test_indented_opening_delimiter_is_not_metadata() {
+        // Pandoc's `yamlMetaBlock` is `string "---"` with no leading-space
+        // parser in front, so even one column of indent takes the lines out
+        // of the metadata reading (they become a simple table at 1-3
+        // columns, an indented code block at 4+).
+        for indent in [" ", "  ", "   ", "    ", "\t"] {
+            let opener = format!("{indent}---");
+            let content = format!("{indent}title: Test");
+            let lines = vec![opener.as_str(), content.as_str(), opener.as_str()];
+            let mut builder = GreenNodeBuilder::new();
+            let result = try_parse_yaml_block(
+                &lines,
+                0,
+                &mut builder,
+                true,
+                &Diagnostics::default(),
+                Flavor::Pandoc,
+            );
+            assert_eq!(result, None, "indent {indent:?} should not open metadata");
+        }
+    }
+
+    #[test]
+    fn test_indented_closing_delimiter_does_not_close_metadata() {
+        // `stopLine` is anchored the same way, so an indented `---` / `...`
+        // is content, not a closer --- and with no other closer the block
+        // is not metadata at all.
+        for closer in ["  ---", "    ---", "  ...", "    ..."] {
+            let lines = vec!["---", "title: Test", closer];
+            let mut builder = GreenNodeBuilder::new();
+            let result = try_parse_yaml_block(
+                &lines,
+                0,
+                &mut builder,
+                true,
+                &Diagnostics::default(),
+                Flavor::Pandoc,
+            );
+            assert_eq!(result, None, "{closer:?} should not close metadata");
+        }
+    }
+
+    #[test]
+    fn test_delimiter_trailing_whitespace_is_allowed() {
+        // `blankline` skips spaces and tabs after the delimiter.
+        let lines = vec!["---  ", "title: Test", "---\t"];
+        let mut builder = GreenNodeBuilder::new();
+        let result = try_parse_yaml_block(
+            &lines,
+            0,
+            &mut builder,
+            true,
+            &Diagnostics::default(),
+            Flavor::Pandoc,
+        );
+        assert_eq!(result, Some(3));
+    }
+
+    #[test]
+    fn test_metadata_in_list_item_is_measured_from_content_column() {
+        // The column-0 anchor is relative to the container's content
+        // column: pandoc parses (and swallows) a metadata block inside a
+        // list item whose delimiters sit at the item's content column.
+        let input = "- item\n\n  ---\n  title: x\n  ---\n\n  after\n";
+        let tree = crate::parse(input, Some(crate::ParserOptions::default()));
+        assert_eq!(tree.text().to_string(), input);
+        assert!(
+            tree.descendants()
+                .any(|n| n.kind() == SyntaxKind::YAML_METADATA),
+            "list-item metadata block should still be recognized"
+        );
     }
 
     #[test]
