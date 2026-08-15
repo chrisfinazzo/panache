@@ -181,11 +181,6 @@ Note any known parser issues here.
   would retain green trees across parses and would also flatter the
   benchmark, which reuses one process).
 
-- [ ] `pandoc_ast.rs` applies smart dashes (`---` -> em dash, `--` -> en dash)
-  unconditionally, ignoring the `smart` extension. Under `gfm`, pandoc emits
-  `Str "---"` while the projector emits `Str "\8212"`; the CST is correct
-  (`TEXT "a --- b"`), so this is projector-only.
-
 ### Incremental Parsing
 
 Multi-session effort to harden, unify, and graduate incremental reparsing to

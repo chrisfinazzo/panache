@@ -15,7 +15,7 @@
 //! comparison normalizer collapses whitespace runs, so ppShow's pretty-print
 //! line breaks/indentation are not load-bearing.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use crate::SyntaxNode;
@@ -74,6 +74,33 @@ struct RefsCtx {
 
 thread_local! {
     static REFS_CTX: RefCell<RefsCtx> = RefCell::new(RefsCtx::default());
+    /// Whether the reader that produced the tree has pandoc's `smart`
+    /// extension on. Set once per projection from the flavor and read deep
+    /// inside inline coalescing, which has no `ParserOptions` in scope.
+    static SMART: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Whether pandoc's `smart` extension is on for `flavor`.
+///
+/// `smart` governs curly quotes, en/em dashes, ellipsis, and the NBSP that
+/// follows an abbreviation. Pandoc enables it for the `markdown` reader
+/// (hence Quarto and R Markdown, which both read pandoc markdown) and leaves
+/// it off for `gfm`, `commonmark`, `markdown_mmd`, and `markdown_strict`.
+/// mdsvex (remark, no smartypants) and MyST (`smartquotes` is opt-in) have no
+/// smart typography either.
+fn smart_for_flavor(flavor: crate::Flavor) -> bool {
+    match flavor {
+        crate::Flavor::Pandoc | crate::Flavor::Quarto | crate::Flavor::RMarkdown => true,
+        crate::Flavor::Gfm
+        | crate::Flavor::CommonMark
+        | crate::Flavor::MultiMarkdown
+        | crate::Flavor::Mdsvex
+        | crate::Flavor::Myst => false,
+    }
+}
+
+fn smart_enabled() -> bool {
+    SMART.with(Cell::get)
 }
 
 /// Render the given panache CST as pandoc-native AST text, assuming the
@@ -96,6 +123,7 @@ pub fn to_pandoc_ast(tree: &SyntaxNode) -> String {
 pub fn to_pandoc_ast_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
     let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
+    SMART.set(smart_for_flavor(options.flavor));
     let blocks = blocks_from_doc(tree);
     let mut out = String::new();
     out.push('[');
@@ -108,6 +136,7 @@ pub fn to_pandoc_ast_with_options(tree: &SyntaxNode, options: &crate::ParserOpti
     }
     out.push_str(" ]");
     REFS_CTX.with(|c| *c.borrow_mut() = RefsCtx::default());
+    SMART.set(true);
     out
 }
 
@@ -138,9 +167,11 @@ pub fn to_pandoc_json(tree: &SyntaxNode) -> String {
 pub fn to_pandoc_json_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
     let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
+    SMART.set(smart_for_flavor(options.flavor));
     let blocks = blocks_from_doc(tree);
     let blocks_json: Vec<Value> = blocks.iter().map(block_to_json).collect();
     REFS_CTX.with(|c| *c.borrow_mut() = RefsCtx::default());
+    SMART.set(true);
     let doc = json!({
         "pandoc-api-version": PANDOC_API_VERSION,
         "meta": {},
@@ -4993,9 +5024,14 @@ fn coalesce_inlines_inner(input: Vec<Inline>, trim_edges: bool) -> Vec<Inline> {
             out.pop();
         }
     }
-    // Pandoc's `smart` extension is on by default for markdown. Apply the
-    // simple in-Str substitutions here (apostrophe, dashes, ellipsis), then
-    // restructure paired straight quotes into `Quoted` nodes.
+    // Pandoc's `smart` extension is on by default for the `markdown` reader
+    // family only; under `gfm`/`commonmark`/`markdown_mmd` pandoc leaves the
+    // bytes alone (`Str "---"`, `Str "it's"`, `Str "Dr."` + `Space`).
+    if !smart_enabled() {
+        return out;
+    }
+    // Apply the simple in-Str substitutions here (apostrophe, dashes,
+    // ellipsis), then restructure paired straight quotes into `Quoted` nodes.
     for inline in out.iter_mut() {
         if let Inline::Str(s) = inline {
             let mut t = smart_intraword_apostrophe(s);
@@ -6061,12 +6097,86 @@ mod tests {
     }
 
     fn pandoc_options() -> crate::options::ParserOptions {
+        flavor_options(crate::options::Flavor::Pandoc)
+    }
+
+    fn flavor_options(flavor: crate::options::Flavor) -> crate::options::ParserOptions {
         crate::options::ParserOptions {
-            flavor: crate::options::Flavor::Pandoc,
-            dialect: crate::options::Dialect::for_flavor(crate::options::Flavor::Pandoc),
-            extensions: crate::options::Extensions::for_flavor(crate::options::Flavor::Pandoc),
+            flavor,
+            dialect: crate::options::Dialect::for_flavor(flavor),
+            extensions: crate::options::Extensions::for_flavor(flavor),
             ..crate::options::ParserOptions::default()
         }
+    }
+
+    /// Every construct pandoc's `smart` extension touches: em dash, en dash,
+    /// ellipsis, paired quotes, intraword apostrophe, and the NBSP that
+    /// replaces the space after an abbreviation.
+    const SMART_INPUT: &str = "a --- b -- c ... \"q\" it's Dr. Smith\n";
+
+    #[test]
+    fn smart_typography_applies_under_the_markdown_reader_flavors() {
+        // `pandoc -f markdown -t native`. Quarto and R Markdown read pandoc
+        // markdown, so they get the same treatment.
+        for flavor in [
+            crate::options::Flavor::Pandoc,
+            crate::options::Flavor::Quarto,
+            crate::options::Flavor::RMarkdown,
+        ] {
+            let opts = flavor_options(flavor);
+            let out = to_pandoc_ast_with_options(&parse(SMART_INPUT, Some(opts.clone())), &opts);
+            // Non-ASCII is written as pandoc's decimal escapes: em dash
+            // 8212, en dash 8211, ellipsis 8230, apostrophe 8217, NBSP 160.
+            assert!(out.contains(r#"Str "\8212""#), "{flavor:?}: {out}");
+            assert!(out.contains(r#"Str "\8211""#), "{flavor:?}: {out}");
+            assert!(out.contains(r#"Str "\8230""#), "{flavor:?}: {out}");
+            assert!(
+                out.contains(r#"Quoted DoubleQuote [ Str "q" ]"#),
+                "{flavor:?}: {out}"
+            );
+            assert!(out.contains(r#"Str "it\8217s""#), "{flavor:?}: {out}");
+            assert!(out.contains(r#"Str "Dr.\160Smith""#), "{flavor:?}: {out}");
+        }
+    }
+
+    #[test]
+    fn smart_typography_is_off_for_flavors_whose_reader_lacks_it() {
+        // `pandoc -f gfm|commonmark|markdown_mmd -t native` leaves the bytes
+        // alone: `Str "---"`, `Str "\"q\""`, `Str "Dr."` + `Space`. mdsvex and
+        // MyST have no smart typography on by default either.
+        for flavor in [
+            crate::options::Flavor::Gfm,
+            crate::options::Flavor::CommonMark,
+            crate::options::Flavor::MultiMarkdown,
+            crate::options::Flavor::Mdsvex,
+            crate::options::Flavor::Myst,
+        ] {
+            let opts = flavor_options(flavor);
+            let out = to_pandoc_ast_with_options(&parse(SMART_INPUT, Some(opts.clone())), &opts);
+            assert!(out.contains("Str \"---\""), "{flavor:?}: {out}");
+            assert!(out.contains("Str \"--\""), "{flavor:?}: {out}");
+            assert!(out.contains("Str \"...\""), "{flavor:?}: {out}");
+            assert!(out.contains(r#"Str "\"q\"""#), "{flavor:?}: {out}");
+            assert!(out.contains("Str \"it's\""), "{flavor:?}: {out}");
+            assert!(
+                out.contains(r#"Str "Dr.", Space, Str "Smith""#),
+                "{flavor:?}: {out}"
+            );
+            assert!(
+                !out.contains("Quoted"),
+                "no smart quote restructuring for {flavor:?}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn smart_flag_does_not_leak_between_projections() {
+        // The flag lives in a thread-local, so a non-smart projection must not
+        // sour the next default (`markdown` reader) one.
+        let gfm = flavor_options(crate::options::Flavor::Gfm);
+        let _ = to_pandoc_ast_with_options(&parse(SMART_INPUT, Some(gfm.clone())), &gfm);
+        let out = to_pandoc_ast(&parse(SMART_INPUT, Some(pandoc_options())));
+        assert!(out.contains(r#"Str "\8212""#), "{out}");
     }
 
     #[test]
