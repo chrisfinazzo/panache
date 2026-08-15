@@ -2,6 +2,8 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn test_help() {
@@ -80,6 +82,46 @@ fn test_lint_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Lint a"));
+}
+
+/// Top-level errors are rendered via `Display`, so a config error must read as
+/// a plain message instead of leaking the `io::Error` `Debug` wrapper.
+#[test]
+fn test_invalid_config_error_is_not_debug_formatted() {
+    let temp_dir = TempDir::new().unwrap();
+    fs::write(
+        temp_dir.path().join("panache.toml"),
+        "line-width = \"wide\"\n",
+    )
+    .unwrap();
+    let doc = temp_dir.path().join("doc.md");
+    fs::write(&doc, "# Title\n").unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["format", "--check"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Error: invalid config"))
+        .stderr(predicate::str::contains("expected usize"))
+        .stderr(predicate::str::contains("Custom {").not())
+        .stderr(predicate::str::contains("InvalidData").not());
+}
+
+/// A plain OS error carries no custom payload; it must still print its message
+/// rather than the `Os { code: .. }` debug form.
+#[test]
+fn test_os_error_is_not_debug_formatted() {
+    let temp_dir = TempDir::new().unwrap();
+    let missing = temp_dir.path().join("nope.md");
+
+    cargo_bin_cmd!("panache")
+        .arg("parse")
+        .arg(&missing)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Error: No such file or directory"))
+        .stderr(predicate::str::contains("Os {").not());
 }
 
 #[test]

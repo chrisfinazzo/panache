@@ -144,15 +144,13 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Severity levels (error, warning, info)
 - [ ] Auto-fix capability per rule (infrastructure exists, rules need
   implementation)
-- [ ] Unwrap the CLI's top-level error print. `main() -> io::Result<()>` renders
-  a returned error via `Debug`, so a config (or any other) error surfaces as
-  `Error: Custom { kind: InvalidData, error: ... }`. The inner message is
-  now readable (`ConfigError`'s `Debug` mirrors `Display`), but the
-  `Custom { kind }` wrapper is noise. Fixing it properly means handling
-  errors at the \~13 `load_config_for_cli(...)?` call sites (or switching
-  `main` to a custom error type with a `Display`-based `Termination`) so the
-  user sees just `Error: invalid config <path>: ...`. Affects all
-  `io::Error`s, not only config.
+- [ ] Attach the offending path to bare `io::Error`s in the CLI. Top-level
+  errors now print via `Display` (`main` returns `ExitCode` and delegates to
+  `run()`), but a plain OS error still lacks context:
+  `panache parse missing.md` says
+  `Error: No such file or directory (os error 2)` without naming the file.
+  Wrapping the `fs`/`read_all` call sites so each error carries its path
+  would finish the job.
 
 ## Parser
 

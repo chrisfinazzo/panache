@@ -144,9 +144,9 @@ pub struct ConfigError {
     pub message: String,
 }
 
-// `main() -> io::Result<()>` prints a returned error via `Debug`, so mirror
-// `Display` here to keep the CLI's `Error: invalid config ...: ...` message
-// readable instead of dumping the struct fields.
+// Mirror `Display` so that `Debug` renderings (panic messages from `unwrap`,
+// `{:?}` in logs) stay readable instead of dumping the struct fields. The CLI
+// itself prints `Display`; see `run()` in `src/main.rs`.
 impl fmt::Debug for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)

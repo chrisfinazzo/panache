@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
@@ -930,7 +931,21 @@ fn run_debug_checks_for_content(
     artifacts
 }
 
-fn main() -> io::Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        // `Result`'s own `Termination` renders the error with `Debug`, which
+        // leaks the `io::Error` wrapper (`Custom { kind: InvalidData, .. }`).
+        // Print `Display` instead so the user sees only the message, and keep
+        // the exit code `Result` would have produced.
+        Err(err) => {
+            eprintln!("Error: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> io::Result<()> {
     let cli = Cli::parse();
     let use_color = color_enabled(cli.color, cli.no_color);
     panache::set_warning_color_override(use_color);
