@@ -18,6 +18,28 @@ pub fn try_parse_horizontal_rule(line: &str) -> Option<char> {
     if leading >= 4 {
         return None;
     }
+
+    // Fast reject before the unicode-aware `trim` below. This runs on every
+    // line of the document (from `HorizontalRuleParser::detect_prepared` and
+    // from the head of `try_parse_list_marker_with`), and `str::trim` walks a
+    // unicode whitespace predicate over both ends. A rule line's first
+    // non-blank byte is always `*`, `-`, or `_`, so an ASCII byte outside that
+    // set can be rejected without trimming. Bytes 0x0b/0x0c are whitespace to
+    // `char::is_whitespace` but not to `u8::is_ascii_whitespace`, so they are
+    // skipped explicitly; a leading non-ASCII byte falls through to the trim
+    // so the unicode behavior is unchanged.
+    let bytes = line.as_bytes();
+    let mut first = 0;
+    while first < bytes.len() && (bytes[first].is_ascii_whitespace() || bytes[first] == 0x0b) {
+        first += 1;
+    }
+    if let Some(&b) = bytes.get(first)
+        && b.is_ascii()
+        && !matches!(b, b'*' | b'-' | b'_')
+    {
+        return None;
+    }
+
     let trimmed = line.trim();
 
     // Must have at least 3 characters
