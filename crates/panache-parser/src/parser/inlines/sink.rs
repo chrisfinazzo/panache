@@ -13,6 +13,7 @@
 //! whose offset coincides with a node boundary is emitted *outside* the node
 //! (before `start_node`) so it never nests inside e.g. an `EMPHASIS_MARKER`.
 
+use crate::parser::utils::helpers::space_run;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
@@ -105,7 +106,7 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
                     // container: kind-tagged, legacy token boundaries.
                     if leading_spaces > 0 {
                         self.inner
-                            .token(SyntaxKind::LINE_PREFIX.into(), &" ".repeat(leading_spaces));
+                            .token(SyntaxKind::LINE_PREFIX.into(), &space_run(leading_spaces));
                     }
                     self.inner.token(SyntaxKind::LINE_PREFIX.into(), ">");
                     if has_trailing_space {

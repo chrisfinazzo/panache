@@ -2,6 +2,7 @@
 //!
 //! Re-exports marker parsing functions from marker_utils for backward compatibility.
 
+use crate::parser::utils::helpers::space_run;
 use crate::syntax::SyntaxKind;
 use rowan::GreenNodeBuilder;
 
@@ -105,7 +106,7 @@ pub(in crate::parser) fn emit_one_blockquote_marker(
     has_trailing_space: bool,
 ) {
     if leading_spaces > 0 {
-        builder.token(SyntaxKind::WHITESPACE.into(), &" ".repeat(leading_spaces));
+        builder.token(SyntaxKind::WHITESPACE.into(), &space_run(leading_spaces));
     }
     builder.token(SyntaxKind::BLOCK_QUOTE_MARKER.into(), ">");
     if has_trailing_space {
@@ -122,7 +123,7 @@ pub(in crate::parser) fn emit_one_line_prefix_marker(
     has_trailing_space: bool,
 ) {
     if leading_spaces > 0 {
-        builder.token(SyntaxKind::LINE_PREFIX.into(), &" ".repeat(leading_spaces));
+        builder.token(SyntaxKind::LINE_PREFIX.into(), &space_run(leading_spaces));
     }
     builder.token(SyntaxKind::LINE_PREFIX.into(), ">");
     if has_trailing_space {

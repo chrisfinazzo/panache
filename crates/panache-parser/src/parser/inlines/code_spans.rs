@@ -1,4 +1,5 @@
 use super::sink::InlineSink;
+use crate::parser::utils::helpers::backtick_run;
 /// Parsing for inline code spans (`code`)
 use crate::syntax::SyntaxKind;
 
@@ -120,7 +121,7 @@ pub fn emit_code_span(
     // Opening backticks
     builder.token(
         SyntaxKind::INLINE_CODE_MARKER.into(),
-        &"`".repeat(backtick_count),
+        &backtick_run(backtick_count),
     );
 
     // Code content
@@ -129,7 +130,7 @@ pub fn emit_code_span(
     // Closing backticks
     builder.token(
         SyntaxKind::INLINE_CODE_MARKER.into(),
-        &"`".repeat(backtick_count),
+        &backtick_run(backtick_count),
     );
 
     // Emit attributes if present, structured over the raw source bytes.

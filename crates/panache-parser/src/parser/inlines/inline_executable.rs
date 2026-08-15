@@ -1,4 +1,5 @@
 use super::sink::InlineSink;
+use crate::parser::utils::helpers::backtick_run;
 use crate::syntax::SyntaxKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +92,7 @@ pub(crate) fn emit_inline_executable(builder: &mut impl InlineSink, m: &InlineEx
     builder.start_node(SyntaxKind::INLINE_EXEC.into());
     builder.token(
         SyntaxKind::INLINE_EXEC_MARKER.into(),
-        &"`".repeat(m.backtick_count),
+        &backtick_run(m.backtick_count),
     );
     if !m.prefix.is_empty() {
         builder.token(SyntaxKind::TEXT.into(), m.prefix);
@@ -105,7 +106,7 @@ pub(crate) fn emit_inline_executable(builder: &mut impl InlineSink, m: &InlineEx
     builder.token(SyntaxKind::INLINE_EXEC_CONTENT.into(), m.code);
     builder.token(
         SyntaxKind::INLINE_EXEC_MARKER.into(),
-        &"`".repeat(m.backtick_count),
+        &backtick_run(m.backtick_count),
     );
     builder.finish_node();
 }

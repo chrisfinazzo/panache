@@ -182,6 +182,35 @@ pub(crate) fn trim_end_spaces_tabs(s: &str) -> &str {
     unsafe { std::str::from_utf8_unchecked(&bytes[..end]) }
 }
 
+/// Backing store for [`backtick_run`] and [`space_run`]. Sized so every
+/// delimiter run a real document carries is served from the static.
+const BACKTICK_POOL: &str = "````````````````````````````````````````````````````````````````";
+const SPACE_POOL: &str = "                                                                ";
+
+/// A run of `n` backticks, borrowed from a static when `n` fits it.
+///
+/// Emitting a code-span or raw-inline delimiter used to `"`".repeat(n)`,
+/// allocating a `String` per marker — two per span, and a prose document is
+/// dense with code spans. The bytes are identical either way, so the emitted
+/// token is byte-for-byte what the source held.
+#[inline]
+pub(crate) fn backtick_run(n: usize) -> std::borrow::Cow<'static, str> {
+    match BACKTICK_POOL.get(..n) {
+        Some(run) => std::borrow::Cow::Borrowed(run),
+        None => std::borrow::Cow::Owned("`".repeat(n)),
+    }
+}
+
+/// A run of `n` spaces, borrowed from a static when `n` fits it. The
+/// container-prefix emitters call this once per quoted line.
+#[inline]
+pub(crate) fn space_run(n: usize) -> std::borrow::Cow<'static, str> {
+    match SPACE_POOL.get(..n) {
+        Some(run) => std::borrow::Cow::Borrowed(run),
+        None => std::borrow::Cow::Owned(" ".repeat(n)),
+    }
+}
+
 /// Split input into lines while preserving line endings (LF or CRLF).
 /// This is like split_inclusive but handles both \n and \r\n.
 pub(crate) fn split_lines_inclusive(input: &str) -> Vec<&str> {

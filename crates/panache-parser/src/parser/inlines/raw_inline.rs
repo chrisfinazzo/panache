@@ -11,6 +11,7 @@
 
 use super::sink::InlineSink;
 use crate::parser::utils::attributes::{AttributeBlock, emit_attribute_node};
+use crate::parser::utils::helpers::backtick_run;
 use crate::syntax::SyntaxKind;
 
 /// Check if a code span with attributes is actually a raw inline span.
@@ -51,7 +52,7 @@ pub fn emit_raw_inline(
     // Opening backticks
     builder.token(
         SyntaxKind::RAW_INLINE_MARKER.into(),
-        &"`".repeat(backtick_count),
+        &backtick_run(backtick_count),
     );
 
     // Raw content
@@ -60,7 +61,7 @@ pub fn emit_raw_inline(
     // Closing backticks
     builder.token(
         SyntaxKind::RAW_INLINE_MARKER.into(),
-        &"`".repeat(backtick_count),
+        &backtick_run(backtick_count),
     );
 
     // Format attribute `{=format}`, structured over the raw source bytes.
