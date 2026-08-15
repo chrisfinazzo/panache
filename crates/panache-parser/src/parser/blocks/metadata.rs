@@ -4,7 +4,7 @@ use crate::options::Flavor;
 use crate::parser::diagnostics::{Diagnostics, SyntaxError, SyntaxErrorSource};
 use crate::parser::utils::helpers::{emit_line_tokens, strip_newline};
 use crate::parser::utils::tree_copy::copy_green_children;
-use crate::parser::yaml::{YamlValidationContext, locate_yaml_diagnostic_ctx, parse_stream};
+use crate::parser::yaml::{YamlValidationContext, parse_stream, validate_yaml_with_context_tree};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use rowan::{GreenNode, GreenNodeBuilder, TextRange};
 
@@ -71,14 +71,28 @@ pub(crate) enum YamlContentOutcome {
 /// consumer (pandoc-family); GFM/CommonMark-family frontmatter stays lenient.
 pub(crate) fn prepare_yaml_content(content: &str, flavor: Flavor) -> Option<YamlContentOutcome> {
     let yaml_ctx = YamlValidationContext::frontmatter(flavor);
-    if let Some((diag, start, end)) = locate_yaml_diagnostic_ctx(content, "", yaml_ctx) {
+    // The validator already builds the `YAML_STREAM` its structural checks run
+    // against, so take that tree instead of re-parsing `content`. This is the
+    // empty-prefix case of `locate_yaml_diagnostic_ctx`, whose offsets are the
+    // identity, so the range arithmetic is inlined here unchanged. The block
+    // dispatcher reaches this per `---` line during lookahead, so the second
+    // parse was a measurable share of whole-document parse time.
+    let (diag, tree) = validate_yaml_with_context_tree(content, yaml_ctx);
+    if let Some(diag) = diag {
+        let start = diag.byte_start.min(content.len());
+        let end = diag.byte_end.min(content.len()).max(start);
         return Some(YamlContentOutcome::Invalid {
             message: diag.message,
             start,
             end,
         });
     }
-    let stream = parse_stream(content);
+    let stream = match tree {
+        Some(tree) => tree,
+        // Unreachable in practice: a `None` tree always carries a diagnostic,
+        // handled above. Re-parse rather than assume it.
+        None => parse_stream(content),
+    };
     if !yaml_ctx.consumers().is_empty() && !top_level_is_mapping_or_null(&stream) {
         return None;
     }

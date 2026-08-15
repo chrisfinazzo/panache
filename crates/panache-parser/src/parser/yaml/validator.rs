@@ -167,86 +167,68 @@ pub(crate) fn validate_yaml_with_context(
     input: &str,
     ctx: YamlValidationContext,
 ) -> Option<YamlDiagnostic> {
+    validate_yaml_with_context_tree(input, ctx).0
+}
+
+/// [`validate_yaml_with_context`] plus the `YAML_STREAM` tree the structural
+/// checks were run against, so a caller that needs both the verdict and the
+/// parse does not build the CST twice.
+///
+/// The tree is `None` only when a pre-tree check (directives, tag handles,
+/// aliases, unterminated quotes, required simple key) rejected the input
+/// before the stream was built — in which case the diagnostic is `Some` and
+/// the caller has no use for a tree.
+pub(crate) fn validate_yaml_with_context_tree(
+    input: &str,
+    ctx: YamlValidationContext,
+) -> (Option<YamlDiagnostic>, Option<SyntaxNode>) {
+    macro_rules! reject {
+        ($diag:expr) => {
+            if let Some(diag) = $diag {
+                return (Some(diag), None);
+            }
+        };
+    }
+    macro_rules! reject_with_tree {
+        ($diag:expr, $tree:expr) => {
+            if let Some(diag) = $diag {
+                return (Some(diag), Some($tree));
+            }
+        };
+    }
     let tokens = collect_tokens(input);
-    if let Some(diag) = check_directives(input, &tokens) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_tag_handle_scope(input, &tokens) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_undeclared_alias(input, &tokens) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_unterminated_quoted(input) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_required_simple_key(input) {
-        return Some(diag);
-    }
+    reject!(check_directives(input, &tokens));
+    reject!(check_tag_handle_scope(input, &tokens));
+    reject!(check_undeclared_alias(input, &tokens));
+    reject!(check_unterminated_quoted(input));
+    reject!(check_required_simple_key(input));
     let tree = parse_stream(input);
-    if let Some(diag) = check_trailing_content(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_flow_commas(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_unterminated_flow(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_flow_context_anomalies(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_multiline_quoted_indent(&tree, input, ctx) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_block_indent_anomalies(&tree, ctx) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_block_scalar_header(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_block_scalar_leading_indent(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_doc_level_bare_scalar_then_colon_map(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_block_collection_after_value_scalar(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_flow_continuation_indent(&tree, input) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_flow_doc_markers(&tree, input) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_invalid_dq_escapes(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_comment_not_preceded_by_space(&tree, input) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_anchor_decorates_alias(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_anchor_before_block_indicator(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_anchor_without_target(&tree) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_node_property_underindented(&tree, input) {
-        return Some(diag);
-    }
-    if let Some(diag) = check_invalid_tag_chars(&tree) {
-        return Some(diag);
-    }
+    reject_with_tree!(check_trailing_content(&tree), tree);
+    reject_with_tree!(check_flow_commas(&tree), tree);
+    reject_with_tree!(check_unterminated_flow(&tree), tree);
+    reject_with_tree!(check_flow_context_anomalies(&tree), tree);
+    reject_with_tree!(check_multiline_quoted_indent(&tree, input, ctx), tree);
+    reject_with_tree!(check_block_indent_anomalies(&tree, ctx), tree);
+    reject_with_tree!(check_block_scalar_header(&tree), tree);
+    reject_with_tree!(check_block_scalar_leading_indent(&tree), tree);
+    reject_with_tree!(check_doc_level_bare_scalar_then_colon_map(&tree), tree);
+    reject_with_tree!(check_block_collection_after_value_scalar(&tree), tree);
+    reject_with_tree!(check_flow_continuation_indent(&tree, input), tree);
+    reject_with_tree!(check_flow_doc_markers(&tree, input), tree);
+    reject_with_tree!(check_invalid_dq_escapes(&tree), tree);
+    reject_with_tree!(check_comment_not_preceded_by_space(&tree, input), tree);
+    reject_with_tree!(check_anchor_decorates_alias(&tree), tree);
+    reject_with_tree!(check_anchor_before_block_indicator(&tree), tree);
+    reject_with_tree!(check_anchor_without_target(&tree), tree);
+    reject_with_tree!(check_node_property_underindented(&tree, input), tree);
+    reject_with_tree!(check_invalid_tag_chars(&tree), tree);
 
     // Pool 2: consumer-only checks. Never on the substrate path.
     if ctx.is_substrate() {
-        return None;
+        return (None, Some(tree));
     }
-    check_consumer_rejections(&tree, ctx)
+    let diag = check_consumer_rejections(&tree, ctx);
+    (diag, Some(tree))
 }
 
 /// Consumer-only checks: valid YAML 1.2 that a real consumer rejects. Each is

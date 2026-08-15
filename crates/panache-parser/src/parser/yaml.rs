@@ -34,6 +34,7 @@ pub use parser::{
 };
 pub use profile::{ConsumerSet, YamlConsumer, YamlLocation, YamlValidationContext};
 pub(crate) use scanner::ScalarStyle;
+pub(crate) use validator::validate_yaml_with_context_tree;
 
 #[doc(hidden)]
 pub fn validate_yaml_for_test(input: &str) -> Option<YamlDiagnostic> {
