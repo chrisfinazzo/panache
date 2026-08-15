@@ -173,6 +173,27 @@ Note any known parser issues here.
   verified against pandoc-native + CommonMark (both must stay byte-identical
   or improve).
 
+- [ ] Indented `---` opens a YAML metadata block. `find_yaml_block_closing_pos`
+  and `YamlMetadataParser::detect_prepared` both gate on
+  `line.trim() == "---"`, which accepts any indent. Pandoc's `yamlMetaBlock`
+  is `nonindentSpaces`-led, so at 4+ spaces the lines are an indented code
+  block. Reproducer (`para`, blank, `    ---` / `    title: x` / `    ---`,
+  blank, `after`): pandoc emits `CodeBlock "---\ntitle: x\n---"` between the
+  two paragraphs, panache emits `[ Para "para", Para "after" ]` --- the
+  block is swallowed and vanishes from the AST. Fixing this needs paired
+  fixtures (pandoc + commonmark dialect) since it changes block precedence.
+
+  This is also the parser's single largest hotspot. `prepare_yaml_content` is
+  \~14% of `parse` on `pandoc/MANUAL.txt` (measured by stubbing it out: \~11.9
+  ms -> \~10.2 ms/iter), because the manual's indented YAML *examples* are all
+  detected as metadata openers and fully YAML-validated \~57 times per parse.
+  The indent gate would remove most of those calls. A second, independent lever:
+  the dispatcher reaches `detect_prepared` for the same line 2-3 times per parse
+  (via `continuation.rs`'s re-detection), so the gate is recomputed for content
+  it has already seen --- a per-parse memo would collapse that, but it needs
+  parse-scoped storage (a thread-local cache would retain green trees across
+  parses and would also flatter the benchmark, which reuses one process).
+
 ### Incremental Parsing
 
 Multi-session effort to harden, unify, and graduate incremental reparsing to
