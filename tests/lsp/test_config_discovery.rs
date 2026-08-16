@@ -80,3 +80,39 @@ fn lsp_does_not_inherit_panache_toml_above_git_root() {
         "discovery must not ascend above the .git boundary"
     );
 }
+
+/// Two documents in the *same directory* with the *same extension* can resolve
+/// to different configs: a `[flavor-overrides]` glob matches on the file name,
+/// and the resolved flavor rewrites the extension set the document is parsed
+/// under.
+///
+/// This pins the config key. Resolution is per document path, so the
+/// interned handle is too --- caching it per parent directory (the shape a
+/// sibling project uses, where discovery genuinely is directory-scoped) would
+/// hand one of these documents the other's config.
+#[test]
+fn flavor_overrides_distinguish_documents_in_one_directory() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(
+        root.join("panache.toml"),
+        "[flavor-overrides]\n\"quarto-ish.md\" = \"quarto\"\n",
+    )
+    .unwrap();
+
+    let quarto_uri = Uri::from_file_path(root.join("quarto-ish.md")).expect("quarto uri");
+    let plain_uri = Uri::from_file_path(root.join("plain.md")).expect("plain uri");
+    let root_uri = Uri::from_file_path(root).expect("root uri");
+
+    let mut server = TestLspServer::new();
+    server.initialize(root_uri.as_str());
+    server.open_document(quarto_uri.as_str(), "# A\n", "markdown");
+    server.open_document(plain_uri.as_str(), "# B\n", "markdown");
+
+    assert!(
+        server.document_salsa_config(quarto_uri.as_str())
+            != server.document_salsa_config(plain_uri.as_str()),
+        "a flavor-overrides glob on the file name must not be shared across a directory"
+    );
+}

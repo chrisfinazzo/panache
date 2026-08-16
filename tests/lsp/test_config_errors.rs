@@ -109,7 +109,7 @@ fn broken_config_toasts_once() {
         toast.message
     );
 
-    // A keystroke reloads config but the same error must not re-toast.
+    // A keystroke does not resolve config at all, so it cannot re-toast.
     server.edit_document(
         doc.as_str(),
         vec![full_document_change("# Title\n\nmore\n")],
@@ -117,6 +117,13 @@ fn broken_config_toasts_once() {
     assert!(
         server.drain_show_messages().is_empty(),
         "the same config error must not toast again on every edit"
+    );
+
+    // A save does re-resolve it, which is where the toast dedup earns its keep.
+    server.save_document(doc.as_str());
+    assert!(
+        server.drain_show_messages().is_empty(),
+        "the same config error must not toast again on every save"
     );
 }
 

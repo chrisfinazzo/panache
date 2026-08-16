@@ -274,9 +274,25 @@ impl StateSnapshot {
         crate::lsp::config::select_workspace_root(&self.workspace_folders, Some(uri))
     }
 
-    /// Load config with URI-based flavor detection.
+    /// The config `uri` is open under: the value behind its interned
+    /// `FileConfig`, which is the one its tree was parsed under.
+    ///
+    /// Reading the handle rather than the disk is both faster and *more*
+    /// correct. Faster because it replaces an ancestor-directory walk plus a
+    /// TOML read and parse -- on handlers like `documentHighlight` and
+    /// `completion`, which fire on cursor movement and on typed characters.
+    /// More correct because a fresh load can disagree with the handle a
+    /// concurrent write has already moved on from, leaving a request walking a
+    /// tree parsed under one config while deciding under another.
+    ///
+    /// A URI with no open document has no handle to read, so it falls back to a
+    /// load. Handlers that must surface a broken `panache.toml` (formatting,
+    /// diagnostics) deliberately load it themselves instead of calling this.
     pub(crate) fn config(&self, uri: &Uri) -> Config {
-        load_config(&self.workspace_folders, Some(uri))
+        match self.document_map.get(&uri.to_string()) {
+            Some(state) => state.salsa_config.config(self.db()).clone(),
+            None => load_config(&self.workspace_folders, Some(uri)),
+        }
     }
 
     /// Document text + config in one call.

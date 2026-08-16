@@ -88,18 +88,51 @@ pub(crate) fn reload_open_documents_referenced_files(gs: &mut GlobalState) {
     }
 }
 
+/// Re-resolve `uri`'s on-disk config and re-point its `DocumentState` at the
+/// interned handle for the new value. Returns whether the handle moved.
+///
+/// Every path that can change a document's resolved config goes through here:
+/// resolution reads the document's *path* and the config files above it, never
+/// its text, so nothing a text edit does can invalidate it.
+fn refresh_document_config(gs: &mut GlobalState, uri_str: &str, uri: &lsp_types::Uri) -> bool {
+    let new_config = gs.load_config_notifying(uri);
+    // Re-point at the shared handle for the reloaded value: a no-op when the
+    // config is unchanged, and a switch to the value's shared handle when it
+    // changed (rather than mutating a handle other documents may share).
+    let interned = gs.intern_config(new_config);
+    let Some(previous) = gs.document_map.get(uri_str).map(|state| state.salsa_config) else {
+        return false;
+    };
+    if previous == interned {
+        // Nothing moved, so skip the write: `document_map_mut` is an
+        // `Arc::make_mut`, which clones the whole map while a worker holds a
+        // snapshot of it.
+        return false;
+    }
+    let Some(state) = gs.document_map_mut().get_mut(uri_str) else {
+        return false;
+    };
+    state.salsa_config = interned;
+    let salsa_file = state.salsa_file;
+    // Re-admit under the handle the document now holds. The base recorded under
+    // the old handle can never be hit again, and nothing else admits after a
+    // reload -- so without this the document silently loses incremental parsing
+    // until it is closed and reopened.
+    if gs.runtime_settings.experimental_incremental_parsing {
+        gs.salsa.reparse_admit(salsa_file, interned);
+    }
+    true
+}
+
 /// Re-read on-disk config for every open document and refresh its `FileConfig`
 /// salsa input.
 ///
-/// Config is otherwise resolved only on `did_open`, so an open document keeps
-/// stale config when `panache.toml` changes underneath it. This refreshes those
-/// documents on demand (config-file watcher event, a
+/// Config is otherwise resolved only on `did_open` and `did_save`, so an open
+/// document keeps stale config when `panache.toml` changes underneath it. This
+/// refreshes those documents on demand (config-file watcher event, a
 /// `workspace/didChangeConfiguration` notification, or a workspace-folder
 /// change); the caller arms the settle so the all-docs re-lint re-publishes
 /// diagnostics.
-///
-/// A document whose handle moves is also re-admitted to the incremental side
-/// channel, because this is the only path that moves it.
 pub(crate) fn reload_open_documents_config(gs: &mut GlobalState) {
     let entries: Vec<(String, lsp_types::Uri)> = gs
         .document_map
@@ -107,36 +140,7 @@ pub(crate) fn reload_open_documents_config(gs: &mut GlobalState) {
         .filter_map(|uri_str| Some((uri_str.clone(), uri_str.parse().ok()?)))
         .collect();
     for (uri_str, uri) in entries {
-        let new_config = gs.load_config_notifying(&uri);
-        // Re-point at the shared handle for the reloaded value: a no-op when the
-        // config is unchanged, and a switch to the value's shared handle when it
-        // changed (rather than mutating a handle other documents may share).
-        let interned = gs.intern_config(new_config);
-        let Some(previous) = gs
-            .document_map
-            .get(&uri_str)
-            .map(|state| state.salsa_config)
-        else {
-            continue;
-        };
-        if previous == interned {
-            // Nothing moved, so skip the write: `document_map_mut` is an
-            // `Arc::make_mut`, which clones the whole map while a worker holds a
-            // snapshot of it.
-            continue;
-        }
-        let Some(state) = gs.document_map_mut().get_mut(&uri_str) else {
-            continue;
-        };
-        state.salsa_config = interned;
-        let salsa_file = state.salsa_file;
-        // Re-admit under the handle the document now holds. The base recorded
-        // under the old handle can never be hit again, and nothing else admits
-        // after a reload -- so without this the document silently loses
-        // incremental parsing until it is closed and reopened.
-        if gs.runtime_settings.experimental_incremental_parsing {
-            gs.salsa.reparse_admit(salsa_file, interned);
-        }
+        refresh_document_config(gs, &uri_str, &uri);
     }
 }
 
@@ -215,13 +219,13 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     log::debug!("did_change uri={uri_string}, changes={change_count}");
     let start = Instant::now();
 
-    let config = gs.load_config_notifying(&uri);
-
-    let Some((salsa_file, previous_config)) = gs
-        .document_map
-        .get(&uri_string)
-        .map(|doc| (doc.salsa_file, doc.salsa_config))
-    else {
+    // No config work here. Resolving a document's config reads its path and the
+    // config files above it, never its text, so a text edit cannot change the
+    // answer: the document keeps the interned handle it already holds. Config
+    // changes arrive through the notifications routed to
+    // `reload_open_documents_config`, and `did_save` re-resolves as a backstop
+    // for clients whose file watching does not cover every config file.
+    let Some(salsa_file) = gs.document_map.get(&uri_string).map(|doc| doc.salsa_file) else {
         return;
     };
 
@@ -244,30 +248,10 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
             .to(Some(std::sync::Arc::from(updated_text)));
     }
 
-    // Re-point the document at the shared handle for its (possibly reloaded)
-    // config value. When the config is unchanged this is the same interned
-    // handle the document already held, so it is a no-op; when it changed, the
-    // document moves to the value's shared handle rather than mutating a handle
-    // other documents may share (see `GlobalState::intern_config`).
-    let interned_config = gs.intern_config(config);
-    if let Some(doc_state) = gs.document_map_mut().get_mut(&uri_string) {
-        // `file_id`/`salsa_file` are invariant across a content edit (the same
-        // path resolves to the same interned input), so only the (possibly
-        // re-interned) config handle needs refreshing.
-        doc_state.salsa_config = interned_config;
-    } else {
-        return;
-    }
-
-    // Re-admit under whatever config handle the document now holds: a config
-    // reload mints a new one, and the base recorded under the old handle can
-    // never be hit again. Only when it actually moved -- `did_open` (or the
-    // runtime toggle) already admitted the handle the document arrived with,
-    // and re-admitting is a scan of the channel on a path that runs per
-    // keystroke.
-    if gs.runtime_settings.experimental_incremental_parsing && interned_config != previous_config {
-        gs.salsa.reparse_admit(salsa_file, interned_config);
-    }
+    // Nothing else to write: `file_id`, `salsa_file` and `salsa_config` are all
+    // invariant across a content edit, so the document map is untouched -- which
+    // also spares the `Arc::make_mut` clone of the whole map that touching it
+    // costs while a worker holds a snapshot.
 
     // No parse here at all. The settle demands it within the debounce window,
     // on a pool thread, and salsa's per-key claim dedupes concurrent demands --
@@ -287,6 +271,14 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
 /// document runs external linters.
 pub(crate) fn did_save(gs: &mut GlobalState, params: DidSaveTextDocumentParams) {
     let uri = params.text_document.uri;
+    // Re-resolve config on save, as a backstop for config changes no watcher
+    // event reports. The watch registration is sent unconditionally, so a client
+    // without dynamic registration silently delivers nothing; and the XDG global
+    // config lives outside every workspace folder, so no client watches it at
+    // all. One ancestor walk per save is noise next to the external linters a
+    // save schedules -- the same reasoning as the disk re-read in
+    // `reload_open_documents_referenced_files`.
+    refresh_document_config(gs, &uri.to_string(), &uri);
     // A save may have introduced new includes/bibliography since the document
     // was opened; load them on the writer so the debounced pass's snapshot sees
     // them. (The dispatch write phase reloads too, but doing it here keeps

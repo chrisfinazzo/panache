@@ -116,6 +116,77 @@ fn panache_toml_watcher_reloads_disk_config() {
     );
 }
 
+/// Typing does not re-read `panache.toml`. Resolving a document's config reads
+/// its path and the config files above it, never its text, so `did_change` keeps
+/// the interned handle the document already holds instead of paying an ancestor
+/// walk and a TOML parse per keystroke.
+///
+/// This is the inverse of [`panache_toml_watcher_reloads_disk_config`]: the same
+/// on-disk edit, without the notification that reports it.
+#[test]
+fn keystroke_does_not_reload_disk_config() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let config_path = root.join("panache.toml");
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = false\n").unwrap();
+
+    let doc_path = root.join("doc.qmd");
+    let doc_uri = Uri::from_file_path(&doc_path).expect("doc uri");
+    let root_uri = Uri::from_file_path(root).expect("root uri");
+
+    let mut server = TestLspServer::new();
+    server.initialize(root_uri.as_str());
+    server.open_document(doc_uri.as_str(), "# H1\n\n### H3 skip\n", "quarto");
+    assert!(!has_heading_hierarchy(&server, doc_uri.as_str()));
+    let before = server.document_salsa_config(doc_uri.as_str());
+
+    // Flip the rule on disk and send no notification at all, only an edit.
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = true\n").unwrap();
+    server.edit_document(
+        doc_uri.as_str(),
+        vec![full_document_change("# H1\n\n### H3 skipped\n")],
+    );
+
+    assert!(
+        !has_heading_hierarchy(&server, doc_uri.as_str()),
+        "a keystroke must not re-read panache.toml"
+    );
+    assert!(
+        before == server.document_salsa_config(doc_uri.as_str()),
+        "an edit must leave the document on the handle it already held"
+    );
+}
+
+/// Save re-resolves config, as a backstop for changes no watcher event reports:
+/// a client without dynamic registration delivers none, and the XDG global
+/// config lies outside every workspace folder so no client watches it.
+#[test]
+fn saving_re_resolves_disk_config() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let config_path = root.join("panache.toml");
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = false\n").unwrap();
+
+    let doc_path = root.join("doc.qmd");
+    let doc_uri = Uri::from_file_path(&doc_path).expect("doc uri");
+    let root_uri = Uri::from_file_path(root).expect("root uri");
+
+    let mut server = TestLspServer::new();
+    server.initialize(root_uri.as_str());
+    server.open_document(doc_uri.as_str(), "# H1\n\n### H3 skip\n", "quarto");
+    assert!(!has_heading_hierarchy(&server, doc_uri.as_str()));
+
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = true\n").unwrap();
+    server.save_document(doc_uri.as_str());
+
+    assert!(
+        has_heading_hierarchy(&server, doc_uri.as_str()),
+        "a save should re-resolve config even with no watcher event"
+    );
+}
+
 /// A config reload re-points the document at a new `FileConfig` handle, and the
 /// incremental reparse base is recorded per `(file, config)` pair --- so the
 /// reload must re-admit under the new handle or the document silently

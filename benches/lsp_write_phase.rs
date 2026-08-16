@@ -31,16 +31,15 @@
 //!
 //! | row | what runs | what it proves |
 //! | --- | --------- | -------------- |
-//! | `config` | step 1 + step 5 alone | the per-keystroke config resolution; must be **size-independent** |
+//! | `config` | one config resolution + intern | that resolving config stays **size-independent**, and how much a keystroke would pay if it were ever put back on this path |
 //! | `keystroke` | a whole `didChange`, one 1-char ranged edit | the headline: what a keystroke costs the main loop |
 //! | `batch4` | a whole `didChange`, four scattered 1-char edits | the per-change fan-out --- N copies **and** N index builds |
 //! | `end_to_end` | `keystroke` plus the parse it schedules | the machine-relative denominator |
-//! | `text work` | derived, `keystroke - config` | the split between the two costs, with no duplicated code |
 //!
-//! `text work` is derived rather than measured: a "text-only" harness helper
-//! would be a copy of `did_change`'s body, and a copy drifts from the code it
-//! is supposed to certify. Subtraction costs one assumption (the two are
-//! additive) and no duplication.
+//! The `config` row calls the same two functions `did_change` used to call
+//! before config resolution came off the keystroke path. It is kept because it
+//! is the only thing that would notice the cost coming back, and because a
+//! reload still pays it on every save and every watcher event.
 //!
 //! There is deliberately **no** no-op full-replace row. Its notification
 //! carries the whole document, so the timed region would be dominated by the
@@ -66,8 +65,10 @@
 //! # Results
 //!
 //! Median microseconds per iteration. AMD Ryzen 9 7900, rustc 1.94.1, release,
-//! `experimental.incrementalParsing` off. Baseline, before any of the fixes
-//! this bench exists to measure:
+//! `experimental.incrementalParsing` off.
+//!
+//! Baseline, when this bench was written --- `did_change` resolved config from
+//! disk on every keystroke:
 //!
 //! ```text
 //!                            small (756 B)   medium (29 KB)   large (293 KB)
@@ -75,19 +76,30 @@
 //! didChange, 1-char edit           54.47            73.69           282.27
 //! didChange, 4 changes             57.87           130.23           907.50
 //! didChange + parse               165.49           809.34        11 803.31
-//! text work (derived)               0.06            19.94           226.88
 //! ```
 //!
+//! The config load is a flat ~54 us whatever the document, so on a small one it
+//! *was* the write phase: 54.40 of 54.47 us, over 0.06 us of actual text work.
+//!
+//! After taking config resolution off the keystroke path:
+//!
+//! ```text
+//!                            small (756 B)   medium (29 KB)   large (293 KB)
+//! config load + intern             52.67            53.06            52.65
+//! didChange, 1-char edit            0.94            19.31           215.27
+//! didChange, 4 changes              3.03            73.48           902.05
+//! didChange + parse                84.68           697.55        10 606.75
+//! ```
+//!
+//! A keystroke in a small document costs 58x less than it did. What is left is
+//! the text work, and it is linear and not small: 215 us of copying and
+//! rescanning a 293 KB document, on the thread that has to accept the next
+//! keystroke, and 4x that for a four-change notification.
+//!
 //! Run-to-run spread on the large rows is wide (the `keystroke` row has been
-//! seen anywhere from 280 to 400 us on an otherwise idle machine), which is why
+//! seen anywhere from 215 to 400 us on an otherwise idle machine), which is why
 //! every check below is a ratio taken within one run rather than a comparison
 //! against a recorded number.
-//!
-//! Two things fall straight out of that table. The config load is a flat ~54 us
-//! whatever the document, so on a small one it *is* the write phase: 54.40 of
-//! 54.47 us, with 0.06 us of actual text work under it. And the text work that
-//! remains is linear and not small --- 227 us of copying and rescanning on a
-//! 293 KB document, on the thread that has to accept the next keystroke.
 //!
 //! # Known optimism
 //!
@@ -145,18 +157,19 @@ const CONFIG_SCALING_MAX: f64 = 1.5;
 /// the slack covers cache effects that make the large document worse than
 /// proportional.
 ///
-/// Deliberately *not* tightened to the 3.8x measured today. A fixed per-
-/// keystroke cost (the config load) currently dominates the medium row and
-/// compresses this ratio; removing it makes the row honestly linear and pushes
-/// the ratio up toward 11x. The ceiling states the invariant, so it holds on
-/// both sides of that change.
-const KEYSTROKE_SCALING_MAX: f64 = 15.0;
+/// Measured at ~14x against a 10x byte ratio: the per-byte cost degrades with
+/// size, because a full copy and a from-scratch `LineIndex` build (a hash entry
+/// per non-ASCII character) both fall out of cache on a 293 KB document. The
+/// ceiling therefore allows 2x superlinearity; ratchet it once the write phase
+/// splices once and patches its index instead.
+const KEYSTROKE_SCALING_MAX: f64 = 20.0;
 
 /// The write phase's ceiling as a share of the end-to-end keystroke. The write
 /// phase runs on the main loop and the parse does not, so this is the number
-/// that decides whether typing stays responsive. Measured at 33% / 9% / 2%
-/// (small / medium / large); ratchet as the costs come off the path.
-const KEYSTROKE_SHARE_MAX: f64 = 0.40;
+/// that decides whether typing stays responsive. Measured at 1.1% / 2.8% / 2.0%
+/// (small / medium / large); the headroom is wide because the denominator is a
+/// parse, and making the parser faster must not fail this gate.
+const KEYSTROKE_SHARE_MAX: f64 = 0.15;
 
 /// Four changes in one notification against one: `did_change` loops
 /// `apply_content_change` per change, so today each change pays its own full
@@ -723,16 +736,7 @@ fn main() {
             });
         }
 
-        if let (Some(config), Some(keystroke)) = (
-            median(&results, document.label, Row::Config),
-            median(&results, document.label, Row::Keystroke),
-        ) {
-            println!(
-                "{:<26}{:>10.2} us  (derived: keystroke - config)\n",
-                "text work",
-                keystroke - config
-            );
-        }
+        println!();
     }
 
     let mut failures = Vec::new();

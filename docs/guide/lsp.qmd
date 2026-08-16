@@ -408,6 +408,21 @@ The LSP automatically discovers configuration files from your workspace:
 2. Falls back to `~/.config/panache/config.toml`
 3. Uses built-in defaults if no config found
 
+### When Configuration Is Re-Read
+
+A document's configuration is resolved when it is opened and again when it is
+saved. Between those, the server re-reads it on:
+
+- a file-watcher event for a `panache.toml`, a `.panache.toml`, or any file
+  reached through an `extend` chain,
+- a `workspace/didChangeConfiguration` notification, and
+- a workspace-folder change.
+
+Editing a document does *not* re-read configuration --- the answer depends on
+the document's path, not its contents, so a keystroke cannot change it. If your
+editor does not report file changes to the server, a `panache.toml` edit is
+picked up on the next save of an open document, or when it is reopened.
+
 ### Workspace Root Detection
 
 The LSP determines the workspace root by looking for:

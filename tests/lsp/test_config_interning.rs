@@ -77,9 +77,9 @@ fn distinct_config_values_get_distinct_handles() {
     );
 }
 
-/// A text edit (`did_change`) with unchanged config keeps the document on its
-/// shared interned handle, so editing one project document does not fracture the
-/// cross-document memoization the interning establishes.
+/// A text edit (`did_change`) leaves the document on its shared interned handle
+/// --- it resolves no config at all --- so editing one project document does not
+/// fracture the cross-document memoization the interning establishes.
 #[test]
 fn text_edit_preserves_shared_config_handle() {
     let tmp = TempDir::new().unwrap();
