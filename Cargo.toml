@@ -204,3 +204,8 @@ harness = false
 name = "lsp_relint"
 harness = false
 required-features = ["lsp"]
+
+[[bench]]
+name = "lsp_write_phase"
+harness = false
+required-features = ["lsp"]

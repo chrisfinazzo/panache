@@ -75,13 +75,29 @@ tasks:
     cmds:
       - bash benches/compare_all.sh --json --out docs/guide/performance_data.json
 
+  bench:documents:
+    internal: true
+    desc: Fetch the gitignored benchmark corpus
+    cmds:
+      - bash benches/documents/download.sh
+
   bench:incremental-gate:
     desc: Run the LSP incremental bench with every case checked against its declared contract
+    deps: [bench:documents]
     cmds:
-      # The real-document cases are the ones carrying the strictest thresholds
-      # and their documents are gitignored, so fetch before measuring.
-      - bash benches/documents/download.sh
       - PANACHE_LSP_BENCH_ASSERT=1 cargo bench --bench lsp_incremental
+
+  bench:write-phase-gate:
+    desc: Run the LSP write-phase bench with every row checked against its declared contract
+    deps: [bench:documents]
+    cmds:
+      - PANACHE_LSP_WRITE_BENCH_ASSERT=1 cargo bench --bench lsp_write_phase
+
+  bench:lsp-gate:
+    desc: Run both LSP benchmark gates (incremental parse reuse + write phase)
+    cmds:
+      - task: bench:incremental-gate
+      - task: bench:write-phase-gate
 
   refresh-benchmarks:
     desc: Re-run benchmarks and rebuild the performance page (invalidates freeze cache)

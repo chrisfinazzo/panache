@@ -34,7 +34,9 @@
 //!
 //! Applying the client's changes to the text buffer is *not* timed: it happens
 //! on the LSP main thread and costs both strategies the same, so the step
-//! texts are precomputed and the timed region is parse work only.
+//! texts are precomputed and the timed region is parse work only. That phase is
+//! not therefore free --- `benches/lsp_write_phase.rs` times exactly the region
+//! this one excludes.
 //!
 //! # What the numbers mean
 //!

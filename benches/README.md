@@ -17,6 +17,12 @@ cargo bench --bench lsp_incremental
 # Same run, with every case checked against the contract it declares
 task bench:incremental-gate
 
+# Run LSP write-phase benchmarks (what a keystroke costs before any parse)
+cargo bench --bench lsp_write_phase
+
+# Same run, gated; `task bench:lsp-gate` runs both LSP gates
+task bench:write-phase-gate
+
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
 
@@ -55,6 +61,11 @@ PANACHE_BENCH_DOC=pandoc_manual.md PANACHE_BENCH_ITERATIONS=3 \
 # PANACHE_LSP_BENCH_ITERATIONS=80 (default)
 # PANACHE_LSP_BENCH_OUTPUT_JSON=benches/lsp_incremental_results.json
 # PANACHE_LSP_BENCH_ASSERT=1 (check thresholds; exit 1 on a violation)
+
+# LSP write-phase benchmark knobs
+# PANACHE_LSP_WRITE_BENCH_ITERATIONS=1.0 (scale factor on every row)
+# PANACHE_LSP_WRITE_BENCH_OUTPUT_JSON=benches/lsp_write_phase_results.json
+# PANACHE_LSP_WRITE_BENCH_ASSERT=1 (check thresholds; exit 1 on a violation)
 ```
 
 For more detailed profiling:

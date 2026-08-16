@@ -248,6 +248,16 @@ impl LspTester {
             },
             content_changes: changes,
         };
+        self.apply_did_change(params);
+    }
+
+    /// Bench helper: drive `textDocument/didChange` from pre-built params, so a
+    /// harness can hoist URI parsing and params construction out of its timed
+    /// region (the real server gets both from serde, off the write path this
+    /// measures). Same handler [`Self::edit_document`] calls, with nothing
+    /// added: `did_change` ends at `arm_settle`, which only stamps a deadline,
+    /// so this is exactly the write phase and no parse.
+    pub fn apply_did_change(&mut self, params: DidChangeTextDocumentParams) {
         documents::did_change(&mut self.gs, params);
     }
 
@@ -793,6 +803,17 @@ impl LspTester {
             return 0;
         };
         handlers::diagnostics::compute_publishes_with_dependents(&snap, &uri, false).len()
+    }
+
+    /// Bench helper: the two config calls `did_change` makes around its text
+    /// work --- `load_config_notifying` (an ancestor-directory walk plus a TOML
+    /// read and parse) and the `intern_config` linear scan over distinct
+    /// `Config` values. Timing this against a whole `didChange` attributes the
+    /// write phase between config work and text work without a harness copy of
+    /// either. Takes a parsed `Uri` so the parse stays out of the timed region.
+    pub fn reload_and_intern_config(&mut self, uri: &Uri) -> crate::salsa::FileConfig {
+        let config = self.gs.load_config_notifying(uri);
+        self.gs.intern_config(config)
     }
 
     // --- pull diagnostics ---
