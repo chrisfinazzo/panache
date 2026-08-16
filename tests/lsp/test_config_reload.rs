@@ -95,6 +95,7 @@ fn panache_toml_watcher_reloads_disk_config() {
     server.initialize(root_uri.as_str());
     server.open_document(doc_uri.as_str(), "# H1\n\n### H3 skip\n", "quarto");
     assert!(!has_heading_hierarchy(&server, doc_uri.as_str()));
+    let before = server.document_salsa_config(doc_uri.as_str());
 
     fs::write(&config_path, "[lint.rules]\nheading-hierarchy = true\n").unwrap();
     server.did_change_watched_files(vec![FileEvent {
@@ -105,6 +106,57 @@ fn panache_toml_watcher_reloads_disk_config() {
     assert!(
         has_heading_hierarchy(&server, doc_uri.as_str()),
         "a panache.toml watcher event should reload disk config"
+    );
+    // The handle itself must move, not just the value behind it: the reload is
+    // the only path that re-points a document at a new `FileConfig`, and the
+    // incremental reparse base is re-admitted under exactly that condition.
+    assert!(
+        before != server.document_salsa_config(doc_uri.as_str()),
+        "a reloaded config should re-point the document at a new interned handle"
+    );
+}
+
+/// A config reload re-points the document at a new `FileConfig` handle, and the
+/// incremental reparse base is recorded per `(file, config)` pair --- so the
+/// reload must re-admit under the new handle or the document silently
+/// full-parses every keystroke from then on.
+#[test]
+fn reloading_config_re_admits_the_reparse_base() {
+    if incremental_parsing_forced_off() {
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let config_path = root.join("panache.toml");
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = false\n").unwrap();
+
+    let doc_path = root.join("doc.qmd");
+    let doc_uri = Uri::from_file_path(&doc_path).expect("doc uri");
+    let root_uri = Uri::from_file_path(root).expect("root uri");
+
+    let mut server = TestLspServer::new();
+    server.initialize_with_options(
+        root_uri.as_str(),
+        Some(json!({
+            "settings": { "panache": { "experimental": { "incrementalParsing": true } } }
+        })),
+    );
+    server.open_document(doc_uri.as_str(), "# H1\n\n### H3 skip\n", "quarto");
+    assert!(
+        server.document_reparse_admitted(doc_uri.as_str()),
+        "did_open admits the document"
+    );
+
+    fs::write(&config_path, "[lint.rules]\nheading-hierarchy = true\n").unwrap();
+    server.did_change_watched_files(vec![FileEvent {
+        uri: Uri::from_file_path(&config_path).unwrap(),
+        typ: FileChangeType::CHANGED,
+    }]);
+
+    assert!(
+        server.document_reparse_admitted(doc_uri.as_str()),
+        "a config reload must re-admit the document under its new handle"
     );
 }
 

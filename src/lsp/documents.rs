@@ -91,13 +91,15 @@ pub(crate) fn reload_open_documents_referenced_files(gs: &mut GlobalState) {
 /// Re-read on-disk config for every open document and refresh its `FileConfig`
 /// salsa input.
 ///
-/// Config is normally re-read on each `did_open`/`did_change`, so an idle open
-/// document keeps stale config when `panache.toml` changes underneath it. This
-/// refreshes those documents on demand (config-file watcher event or a
-/// `workspace/didChangeConfiguration` notification). The set mirrors the
-/// unconditional `did_change` write (salsa only bumps the revision when the
-/// value actually differs); the caller arms the settle so the all-docs re-lint
-/// re-publishes diagnostics.
+/// Config is otherwise resolved only on `did_open`, so an open document keeps
+/// stale config when `panache.toml` changes underneath it. This refreshes those
+/// documents on demand (config-file watcher event, a
+/// `workspace/didChangeConfiguration` notification, or a workspace-folder
+/// change); the caller arms the settle so the all-docs re-lint re-publishes
+/// diagnostics.
+///
+/// A document whose handle moves is also re-admitted to the incremental side
+/// channel, because this is the only path that moves it.
 pub(crate) fn reload_open_documents_config(gs: &mut GlobalState) {
     let entries: Vec<(String, lsp_types::Uri)> = gs
         .document_map
@@ -110,8 +112,30 @@ pub(crate) fn reload_open_documents_config(gs: &mut GlobalState) {
         // config is unchanged, and a switch to the value's shared handle when it
         // changed (rather than mutating a handle other documents may share).
         let interned = gs.intern_config(new_config);
-        if let Some(state) = gs.document_map_mut().get_mut(&uri_str) {
-            state.salsa_config = interned;
+        let Some(previous) = gs
+            .document_map
+            .get(&uri_str)
+            .map(|state| state.salsa_config)
+        else {
+            continue;
+        };
+        if previous == interned {
+            // Nothing moved, so skip the write: `document_map_mut` is an
+            // `Arc::make_mut`, which clones the whole map while a worker holds a
+            // snapshot of it.
+            continue;
+        }
+        let Some(state) = gs.document_map_mut().get_mut(&uri_str) else {
+            continue;
+        };
+        state.salsa_config = interned;
+        let salsa_file = state.salsa_file;
+        // Re-admit under the handle the document now holds. The base recorded
+        // under the old handle can never be hit again, and nothing else admits
+        // after a reload -- so without this the document silently loses
+        // incremental parsing until it is closed and reopened.
+        if gs.runtime_settings.experimental_incremental_parsing {
+            gs.salsa.reparse_admit(salsa_file, interned);
         }
     }
 }

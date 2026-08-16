@@ -624,6 +624,24 @@ impl LspTester {
             .map(|state| state.salsa_config)
     }
 
+    /// Whether the incremental side channel has admitted `uri`'s document under
+    /// the `FileConfig` handle it currently holds. A document that is refused
+    /// still parses correctly --- it just full-parses every keystroke --- so
+    /// nothing else observes this, which is exactly why it is worth asserting:
+    /// a config reload that re-points the handle without re-admitting degrades
+    /// silently.
+    pub fn document_reparse_admitted(&self, uri: &str) -> bool {
+        let Some(state) = self.gs.document_map.get(uri) else {
+            return false;
+        };
+        matches!(
+            self.gs
+                .salsa
+                .reparse_base(state.salsa_file, state.salsa_config),
+            crate::incremental::ReparseAdmission::Admitted(_)
+        )
+    }
+
     pub fn get_cached_file_text(&self, path: &std::path::Path) -> Option<String> {
         let file = self.gs.salsa.file_text(path.to_path_buf())?;
         Some(file.content_or_empty(&self.gs.salsa).to_string())
