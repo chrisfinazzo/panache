@@ -2961,6 +2961,18 @@ impl SalsaDb {
         file
     }
 
+    /// Set the text of an already-registered input directly, for a document
+    /// with no backing path (an untitled buffer). Returns whether the input
+    /// actually moved. Writer-only.
+    pub fn update_input_text(
+        &mut self,
+        file: FileText,
+        text: impl Into<Arc<str>>,
+        durability: Durability,
+    ) -> bool {
+        self.set_text_if_changed(file, text.into(), durability)
+    }
+
     pub fn update_file_text_if_cached(&mut self, path: &Path, text: impl Into<Arc<str>>) -> bool {
         self.update_file_text_if_cached_with_durability(path, text, Durability::LOW)
     }

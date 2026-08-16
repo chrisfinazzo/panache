@@ -48,44 +48,42 @@ pub(crate) fn convert_diagnostic(diag: &linter::Diagnostic, index: &LineIndex) -
     }
 }
 
-/// Apply a single content change to text
-pub(crate) fn apply_content_change(text: &str, change: &TextDocumentContentChangeEvent) -> String {
-    match &change.range {
-        Some(range) => {
-            // Incremental edit with range. Build one index for the pre-change
-            // text and convert both endpoints from it.
-            let index = LineIndex::new(text);
-            // Both ends clamp to the document end when the line is past it. A
-            // client whose version has drifted can send a range beyond the text
-            // we hold; degrading to an append is recoverable, and the obvious
-            // alternative for the start -- falling back to 0 -- silently
-            // replaces the whole document.
-            let start_offset = position_to_offset(&index, range.start).unwrap_or(text.len());
-            let end_offset = position_to_offset(&index, range.end).unwrap_or(text.len());
-            // A reversed range would underflow the capacity computation below:
-            // a debug panic, and in release a near-`usize::MAX` allocation
-            // request. Normalize rather than trust the client.
-            let (start_offset, end_offset) =
-                (start_offset.min(end_offset), start_offset.max(end_offset));
-
-            let mut result =
-                String::with_capacity(text.len() - (end_offset - start_offset) + change.text.len());
-            result.push_str(&text[..start_offset]);
-            result.push_str(&change.text);
-            result.push_str(&text[end_offset..]);
-            result
-        }
-        None => {
-            // Full document update (fallback)
-            change.text.clone()
-        }
-    }
+/// Resolve a client-sent change range to a byte span of the text `index`
+/// describes.
+///
+/// Both ends clamp to the end of the document when the line is past it. A
+/// client whose version has drifted can send a range beyond the text the server
+/// holds; degrading to an append is recoverable, where the obvious alternative
+/// for the start -- falling back to 0 -- silently replaces the whole document.
+///
+/// A reversed range is normalized rather than trusted: left alone it underflows
+/// the length arithmetic downstream, which is a panic in debug and a
+/// `usize::MAX`-sized allocation request in release.
+pub(crate) fn content_change_span(index: &LineIndex, range: Range) -> std::ops::Range<usize> {
+    let start = position_to_offset(index, range.start).unwrap_or_else(|| index.len());
+    let end = position_to_offset(index, range.end).unwrap_or_else(|| index.len());
+    start.min(end)..start.max(end)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lsp::line_index::LineIndex;
+
+    /// Apply one content change the way `did_change` does: resolve its span
+    /// against the index, then patch the index in place. The full-replace case
+    /// rebuilds, having no span to resolve.
+    fn apply(text: &str, change: &TextDocumentContentChangeEvent) -> String {
+        let mut index = LineIndex::new(text);
+        match change.range {
+            Some(range) => {
+                let span = content_change_span(&index, range);
+                index.replace_range(span, &change.text);
+            }
+            None => index = LineIndex::new(&change.text),
+        }
+        index.text_arc().to_string()
+    }
 
     #[test]
     fn test_convert_diagnostic_basic() {
@@ -188,7 +186,7 @@ mod tests {
             text: "beautiful ".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "hello beautiful world");
+        assert_eq!(apply(text, &change), "hello beautiful world");
     }
 
     #[test]
@@ -209,7 +207,7 @@ mod tests {
             text: String::new(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "hello world");
+        assert_eq!(apply(text, &change), "hello world");
     }
 
     #[test]
@@ -230,7 +228,7 @@ mod tests {
             text: "goodbye".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "goodbye world");
+        assert_eq!(apply(text, &change), "goodbye world");
     }
 
     #[test]
@@ -242,7 +240,7 @@ mod tests {
             text: "new content".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "new content");
+        assert_eq!(apply(text, &change), "new content");
     }
 
     #[test]
@@ -263,7 +261,7 @@ mod tests {
             text: "NEW\nLINE".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "line1\nliNEW\nLINEne3");
+        assert_eq!(apply(text, &change), "line1\nliNEW\nLINEne3");
     }
 
     /// A client whose version has drifted can send a range past the end of the
@@ -288,7 +286,7 @@ mod tests {
             text: "x".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "line1\nx");
+        assert_eq!(apply(text, &change), "line1\nx");
     }
 
     /// A reversed range is normalized. Left alone it underflows the capacity
@@ -312,6 +310,6 @@ mod tests {
             text: "X".to_string(),
         };
 
-        assert_eq!(apply_content_change(text, &change), "abXef");
+        assert_eq!(apply(text, &change), "abXef");
     }
 }

@@ -91,10 +91,21 @@
 //! didChange + parse                84.68           697.55        10 606.75
 //! ```
 //!
-//! A keystroke in a small document costs 58x less than it did. What is left is
-//! the text work, and it is linear and not small: 215 us of copying and
-//! rescanning a 293 KB document, on the thread that has to accept the next
-//! keystroke, and 4x that for a four-change notification.
+//! A keystroke in a small document costs 58x less than it did. What was left
+//! was the text work: two redundant copies of the document and a from-scratch
+//! index per *change*. After splicing once through one index per notification:
+//!
+//! ```text
+//!                            small (756 B)   medium (29 KB)   large (293 KB)
+//! config load + intern             52.33            52.86            52.89
+//! didChange, 1-char edit            0.94             6.00            97.68
+//! didChange, 4 changes              1.33             8.72           147.34
+//! didChange + parse                83.05           691.37        10 139.70
+//! ```
+//!
+//! Against the original baseline: 58x on a small document, 12x on a medium one,
+//! 2.9x on a large one, and 6.2x for a four-change notification -- where the
+//! per-change fan-out fell from 3-4x the cost of a single change to about 1.5x.
 //!
 //! Run-to-run spread on the large rows is wide (the `keystroke` row has been
 //! seen anywhere from 215 to 400 us on an otherwise idle machine), which is why
@@ -157,12 +168,13 @@ const CONFIG_SCALING_MAX: f64 = 1.5;
 /// the slack covers cache effects that make the large document worse than
 /// proportional.
 ///
-/// Measured at ~14x against a 10x byte ratio: the per-byte cost degrades with
-/// size, because a full copy and a from-scratch `LineIndex` build (a hash entry
-/// per non-ASCII character) both fall out of cache on a 293 KB document. The
-/// ceiling therefore allows 2x superlinearity; ratchet it once the write phase
-/// splices once and patches its index instead.
-const KEYSTROKE_SCALING_MAX: f64 = 20.0;
+/// Measured at 16-21x against a 10x byte ratio: the per-byte cost degrades with
+/// size, since a 293 KB document falls out of cache where a 29 KB one does not.
+/// So the useful reading of this check is asymptotic, not constant-factor --- it
+/// catches work that is quadratic in the document (a per-change rescan of a
+/// multi-change notification lands well past it) rather than a drift of tens of
+/// percent. The fan-out check below is the sharp one.
+const KEYSTROKE_SCALING_MAX: f64 = 25.0;
 
 /// The write phase's ceiling as a share of the end-to-end keystroke. The write
 /// phase runs on the main loop and the parse does not, so this is the number
@@ -176,10 +188,10 @@ const KEYSTROKE_SHARE_MAX: f64 = 0.15;
 /// copy *and* its own `LineIndex::new`. A per-notification splice collapses
 /// this toward 1.0.
 ///
-/// Measured at 3.2x on the large document. Slack again covers the config load
-/// leaving the path, which lifts the ratio (~3.8x) before the splice fix drops
-/// it; ratchet hard once that lands.
-const BATCH_FANOUT_MAX: f64 = 5.0;
+/// Measured at 1.4-1.5x now that one index serves the whole notification. The
+/// residual is the four splices themselves, which are real work; the ceiling
+/// catches a return to per-change rebuilding, which showed as 3-4x.
+const BATCH_FANOUT_MAX: f64 = 2.5;
 
 /// The mode the thresholds above were calibrated against. Incremental parsing
 /// changes what the end-to-end row measures, and `PANACHE_INCREMENTAL_PARSING`

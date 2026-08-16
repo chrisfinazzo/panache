@@ -68,6 +68,12 @@ impl LineIndex {
         index
     }
 
+    /// The indexed text as a shared handle: an O(1) clone, for handing the
+    /// document to salsa or to a worker.
+    pub(crate) fn text_arc(&self) -> Arc<str> {
+        Arc::clone(&self.text)
+    }
+
     /// Total byte length of the indexed document.
     pub(crate) fn len(&self) -> usize {
         self.text.len()
@@ -191,6 +197,70 @@ impl LineIndex {
             byte += ch.len_utf8();
         }
         vis
+    }
+
+    /// Replace the bytes in `range` with `insert`, patching the tables rather
+    /// than rescanning the document.
+    ///
+    /// Line starts fall into three groups. Those at or before `range.start` are
+    /// untouched (a newline ending such a line sits before the replaced bytes);
+    /// those inside the replaced span are gone; those past `range.end` shift by
+    /// the edit's byte delta -- one add per line, not a scan per byte. The
+    /// wide-line flags splice alongside them, but the lines the edit *creates*
+    /// have to be re-derived from the new text: the joined line's contents come
+    /// from the surviving prefix, the insert, and the surviving suffix, so
+    /// `insert` alone cannot answer for it.
+    ///
+    /// The text itself is rebuilt around the splice. That is the one linear
+    /// pass an edit pays, and what buys the O(1) sharing everywhere else.
+    ///
+    /// Panics on a range that is out of bounds or not on a char boundary, as
+    /// [`String::replace_range`] does.
+    pub(crate) fn replace_range(&mut self, range: Range<usize>, insert: &str) {
+        let Range { start, end } = range;
+        assert!(start <= end, "reversed edit range {start}..{end}");
+
+        let first = self.line_starts.partition_point(|&at| at <= start);
+        let last = self.line_starts.partition_point(|&at| at <= end);
+        let delta = insert.len() as isize - (end - start) as isize;
+        if delta != 0 {
+            for at in &mut self.line_starts[last..] {
+                *at = at.wrapping_add_signed(delta);
+            }
+        }
+        let inserted: Vec<usize> = memchr::memchr_iter(b'\n', insert.as_bytes())
+            .map(|at| start + at + 1)
+            .collect();
+        let inserted_count = inserted.len();
+        self.line_starts.splice(first..last, inserted);
+
+        let old = &self.text;
+        let mut text = String::with_capacity(old.len() - (end - start) + insert.len());
+        text.push_str(&old[..start]);
+        text.push_str(insert);
+        text.push_str(&old[end..]);
+        self.text = Arc::from(text);
+
+        self.wide_lines
+            .splice(first..last, std::iter::repeat_n(false, inserted_count));
+        // `first` is at least 1 (line 0 starts at 0, which is `<= start`), so
+        // the edit's own line is `first - 1`, and the lines it created run from
+        // `first` through `first + inserted_count - 1`.
+        for line in (first - 1)..(first + inserted_count) {
+            self.wide_lines[line] = self.recompute_wide(line);
+        }
+        self.debug_assert_in_step();
+    }
+
+    /// The invariant the patch upholds: the tables are always exactly what a
+    /// rescan would produce. Debug-only --- it is linear in the document, which
+    /// is the cost [`replace_range`](Self::replace_range) exists to avoid. Every
+    /// LSP test in the suite therefore doubles as a patch oracle.
+    fn debug_assert_in_step(&self) {
+        debug_assert!(
+            *self == LineIndex::from_arc(Arc::clone(&self.text)),
+            "line index drifted from the text it indexes"
+        );
     }
 }
 
@@ -339,5 +409,86 @@ mod tests {
     fn position_column_past_line_clamps() {
         let idx = LineIndex::new("hi\nthere\n");
         assert_eq!(idx.position_to_offset(pos(0, 99)), Some(2));
+    }
+
+    // --- patching ---
+
+    /// Every replacement of every char-boundary range of a set of awkward texts
+    /// must leave the index exactly as a rescan would. This is the whole
+    /// correctness argument for patching instead of rebuilding, so it is
+    /// checked exhaustively rather than by example: a few thousand cases, and
+    /// the equality is over the whole struct, tables included.
+    #[test]
+    fn patching_matches_a_rescan() {
+        let texts = [
+            "",
+            "\n",
+            "\n\n",
+            "abc",
+            "ab\ncd\nef\n",
+            "a\r\nb\r\n",
+            "\u{1F600}\nx\n",
+            "café\r\nx",
+            "a\rb\n",
+            "ä",
+        ];
+        let inserts = [
+            "",
+            "z",
+            "\n",
+            "\n\n",
+            "x\ny\n",
+            "\r\n",
+            "\u{1F600}",
+            "é",
+            "\r",
+        ];
+
+        for text in texts {
+            for start in 0..=text.len() {
+                if !text.is_char_boundary(start) {
+                    continue;
+                }
+                for end in start..=text.len() {
+                    if !text.is_char_boundary(end) {
+                        continue;
+                    }
+                    for insert in inserts {
+                        let mut patched = LineIndex::new(text);
+                        patched.replace_range(start..end, insert);
+
+                        let mut edited = text.to_string();
+                        edited.replace_range(start..end, insert);
+
+                        assert_eq!(
+                            patched,
+                            LineIndex::new(&edited),
+                            "patching {text:?}[{start}..{end}] with {insert:?} \
+                             diverged from a rescan"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// An edit replaces the text allocation rather than mutating it, so a handle
+    /// taken before the edit still reads the text it was taken for --- which is
+    /// what lets salsa, a reparse base, and an in-flight read job hold the
+    /// document without copying it.
+    #[test]
+    fn an_edit_leaves_earlier_text_handles_alone() {
+        let mut index = LineIndex::new("ab\ncd");
+        let before = index.text_arc();
+        assert!(Arc::ptr_eq(&before, &index.text_arc()));
+
+        index.replace_range(2..2, "\nxy");
+
+        assert!(
+            !Arc::ptr_eq(&before, &index.text_arc()),
+            "an edit must not mutate a shared allocation"
+        );
+        assert_eq!(&*before, "ab\ncd");
+        assert_eq!(&*index.text_arc(), "ab\nxy\ncd");
     }
 }

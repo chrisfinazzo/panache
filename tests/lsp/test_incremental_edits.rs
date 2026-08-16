@@ -546,3 +546,118 @@ fn green_addr(node: &rowan::GreenNode) -> usize {
     let data: &rowan::GreenNodeData = node;
     data as *const rowan::GreenNodeData as usize
 }
+
+/// An insert *inside* a `\r\n` pair splits a line terminator, which is the case
+/// the visible-line-length rule (a trailing `\r` is stripped, a lone one is not)
+/// is most likely to get wrong.
+#[test]
+fn insert_inside_a_crlf_pair_matches_a_full_parse() {
+    let mut server = TestLspServer::new();
+    server.open_document("file:///crlf.qmd", "alpha\r\nbeta\r\n", "quarto");
+
+    // Column 5 is the end of the visible line, i.e. between `a` and `\r`.
+    server.edit_document(
+        "file:///crlf.qmd",
+        vec![incremental_change(0, 5, 0, 5, "X")],
+    );
+
+    let expected = "alphaX\r\nbeta\r\n";
+    assert_eq!(
+        server.get_document_content("file:///crlf.qmd"),
+        Some(expected.to_string())
+    );
+    let tree = server
+        .get_document_tree("file:///crlf.qmd")
+        .expect("tree after edit");
+    assert_eq!(tree.to_string(), panache::parse(expected, None).to_string());
+}
+
+/// An edit that both sits next to an astral character and adds a line: the
+/// wide-line flags shift *and* the joined lines must be re-derived, together.
+#[test]
+fn insert_beside_an_astral_char_that_also_adds_a_line() {
+    let mut server = TestLspServer::new();
+    server.open_document("file:///wide.qmd", "a😀b\nplain\n", "quarto");
+
+    // After `a😀` (one UTF-16 unit for `a`, two for the emoji).
+    server.edit_document(
+        "file:///wide.qmd",
+        vec![incremental_change(0, 3, 0, 3, "\nnew")],
+    );
+
+    let expected = "a😀\nnewb\nplain\n";
+    assert_eq!(
+        server.get_document_content("file:///wide.qmd"),
+        Some(expected.to_string())
+    );
+    // The positions below are only meaningful if the index shifted correctly.
+    server.edit_document(
+        "file:///wide.qmd",
+        vec![incremental_change(2, 0, 2, 5, "PLAIN")],
+    );
+    let expected = "a😀\nnewb\nPLAIN\n";
+    assert_eq!(
+        server.get_document_content("file:///wide.qmd"),
+        Some(expected.to_string())
+    );
+    let tree = server
+        .get_document_tree("file:///wide.qmd")
+        .expect("tree after edits");
+    assert_eq!(tree.to_string(), panache::parse(expected, None).to_string());
+}
+
+/// One notification whose first change creates lines the second change then
+/// targets. Each change resolves against the text its predecessors produced, so
+/// the index must be patched between them, not resolved from the text the
+/// notification arrived against.
+#[test]
+fn a_later_change_targets_lines_an_earlier_one_created() {
+    let mut server = TestLspServer::new();
+    server.open_document("file:///batch.qmd", "one\ntwo\n", "quarto");
+
+    server.edit_document(
+        "file:///batch.qmd",
+        vec![
+            incremental_change(0, 3, 0, 3, "\nAAA\nBBB"),
+            // Line 2 is `BBB`, which only exists because of the change above.
+            incremental_change(2, 0, 2, 3, "CCC"),
+        ],
+    );
+
+    let expected = "one\nAAA\nCCC\ntwo\n";
+    assert_eq!(
+        server.get_document_content("file:///batch.qmd"),
+        Some(expected.to_string())
+    );
+    let tree = server
+        .get_document_tree("file:///batch.qmd")
+        .expect("tree after batch");
+    assert_eq!(tree.to_string(), panache::parse(expected, None).to_string());
+}
+
+/// A whole-document replacement followed by a ranged change in the same
+/// notification: per the protocol the ranged change resolves against the
+/// replacement, not against the text the notification arrived against.
+#[test]
+fn full_replace_then_ranged_change_in_one_batch() {
+    let mut server = TestLspServer::new();
+    server.open_document("file:///mixed.qmd", "original\ncontent\n", "quarto");
+
+    server.edit_document(
+        "file:///mixed.qmd",
+        vec![
+            full_document_change("# Fresh\n\nbody text\n"),
+            incremental_change(2, 0, 2, 4, "BODY"),
+        ],
+    );
+
+    let expected = "# Fresh\n\nBODY text\n";
+    assert_eq!(
+        server.get_document_content("file:///mixed.qmd"),
+        Some(expected.to_string())
+    );
+    let tree = server
+        .get_document_tree("file:///mixed.qmd")
+        .expect("tree after mixed batch");
+    assert_eq!(tree.to_string(), panache::parse(expected, None).to_string());
+}

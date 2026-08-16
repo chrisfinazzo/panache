@@ -20,12 +20,12 @@ use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, MessageType,
 };
-use salsa::{Durability, Setter};
+use salsa::Durability;
 
-use super::conversions::apply_content_change;
 use super::global_state::GlobalState;
 use super::uri_ext::UriExt;
 use crate::lsp::DocumentState;
+use crate::lsp::line_index::LineIndex;
 
 /// Discover and load every file the project graph references for `root_path`,
 /// on the writer. Thin wrapper over [`crate::salsa::SalsaDb::load_referenced_files`]
@@ -233,19 +233,36 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     // sent them, each against the text its predecessors produced, which is what
     // the protocol specifies. Nothing here needs to derive an edit range --
     // `parsed_document` recovers the one it needs by diffing the whole texts.
-    let mut updated_text = salsa_file.content_or_empty(&gs.salsa).to_string();
+    //
+    // One index serves the whole notification and is patched per change rather
+    // than rebuilt. It comes from the salsa memo, which is already warm whenever
+    // a reader has run since the last keystroke; when it is not, building it
+    // costs what the old per-change rebuild cost once. `Arc::make_mut` clones
+    // the tables at most once per notification, never once per change.
+    let mut index = crate::lsp::line_index::line_index(&gs.salsa, salsa_file).clone();
     for change in params.content_changes.iter() {
-        updated_text = apply_content_change(&updated_text, change);
+        match change.range {
+            Some(range) => {
+                let index = std::sync::Arc::make_mut(&mut index);
+                let span = super::conversions::content_change_span(index, range);
+                index.replace_range(span, &change.text);
+            }
+            // A whole-document replacement has no span to resolve, and per the
+            // protocol a later ranged change in the same notification resolves
+            // against *this* text.
+            None => index = std::sync::Arc::new(LineIndex::new(&change.text)),
+        }
     }
 
+    // The index owns the very allocation salsa is about to hold, so handing the
+    // text over is a refcount bump rather than a third copy of the document.
+    let text = index.text_arc();
     let doc_path_for_salsa = uri.to_file_path().map(|p| p.into_owned());
     if let Some(path) = doc_path_for_salsa.as_ref() {
-        gs.salsa.update_file_text(path.clone(), updated_text);
+        gs.salsa.update_file_text(path.clone(), text);
     } else {
-        salsa_file
-            .set_text(&mut gs.salsa)
-            .with_durability(Durability::LOW)
-            .to(Some(std::sync::Arc::from(updated_text)));
+        gs.salsa
+            .update_input_text(salsa_file, text, Durability::LOW);
     }
 
     // Nothing else to write: `file_id`, `salsa_file` and `salsa_config` are all
