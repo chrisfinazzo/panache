@@ -145,6 +145,43 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Auto-fix capability per rule (infrastructure exists, rules need
   implementation)
 
+### Write-phase performance (fatou text-storage survey, 2026-08-16)
+
+Findings from fatou's `Arc<str>`-vs-rope investigation (2026-08-16, on its
+`experiment/arc-str` branch), checked against panache's code. Panache already
+has the `Arc<str>` end state fatou adopted (`FileText`, `PrevParse` sharing
+salsa's Arc), so the read side is fine; the costs are all in `did_change` — and
+nothing times them (see the bench entry).
+
+- [ ] **`did_change` copies the whole text three times per keystroke.**
+  `src/lsp/documents.rs:208` materializes the salsa text with `to_string`
+  (copy 1); `apply_content_change` (`src/lsp/conversions.rs:52-73`) splices
+  into a fresh `String` per change (copy 2) and rebuilds `LineIndex::new`
+  from scratch per change even though a salsa-cached `Arc<LineIndex>`
+  already exists (`src/lsp/line_index.rs`); then
+  `update_file_text_with_durability` (`src/salsa.rs:2902`) pays
+  `Arc::from(String)`, which reallocates (copy 3). Splice once into one
+  buffer, reuse or patch the cached index, and hand salsa the one final
+  `Arc`. For scale: fatou's whole write phase after the same cleanup is \~33
+  us at 1 MB.
+
+- [ ] **`did_change` reloads the config from disk on every keystroke.**
+  `src/lsp/documents.rs:194` calls `load_config_notifying`
+  (`src/lsp/global_state.rs:512`), an ancestor-walk directory scan plus TOML
+  parse, per keystroke. Cache it on the document (or invalidate from file
+  watching) — likely the cheapest fix with the largest payoff in this list.
+
+- [ ] **`lsp_incremental` deliberately excludes the write phase; add a bench
+  that covers it.** Its module doc says applying the client's changes is not
+  timed — which is exactly where every cost above lives. Port fatou's
+  `benches/salsa_keystroke.rs` shape (rows: no-op upsert, write phase
+  without a parse, end-to-end; alternating insert/delete so each iteration
+  is a real revision) and wire it into the existing mechanized gate. Note:
+  fatou's other pipeline finding — bypassing `diff_edit` for a single staged
+  edit — is already known to *not* pay here (`multi_change_large_8` profile:
+  `diff_edit` is 7.1 us against a \~1.9 ms parse); the write phase is the
+  panache-shaped cost.
+
 ## Parser
 
 ### Issues
