@@ -271,8 +271,11 @@ fn setting_the_text_back_to_the_base_returns_the_base_unchanged() {
     db.reparse_admit(file, config);
     let before = blocks_of(&db, file, config);
 
-    // Same bytes, new `Arc`: salsa sees a write, so the query re-executes and
-    // takes the unchanged-text fast path rather than reparsing.
+    // Same bytes, new `Arc`: the setter's content compare recognizes the write
+    // as a no-op and skips it, so the query is not even invalidated. It also
+    // holds when the write does land (an LRU eviction re-executes the query),
+    // because the unchanged-text fast path hands back the base's own tree
+    // rather than reparsing.
     db.update_file_text(doc_path("unchanged"), DOC.to_string());
     let after = blocks_of(&db, file, config);
 

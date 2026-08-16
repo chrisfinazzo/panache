@@ -215,10 +215,13 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
     // Salsa usually spares us the call entirely, so this is the cold path --
     // an LRU eviction, or a write that set the text back to what the base
     // holds. Nothing is stored; the base has not moved.
-    if let Some(prev) = prev
-        .as_ref()
-        .filter(|prev| prev.text == text && prev.config == *cfg && prev.refdefs == refdefs)
-    {
+    if let Some(prev) = prev.as_ref().filter(|prev| {
+        // The base stores the very `Arc` salsa holds, so an unmoved text proves
+        // itself by pointer rather than by walking the document.
+        (Arc::ptr_eq(&prev.text, &text) || prev.text == text)
+            && prev.config == *cfg
+            && prev.refdefs == refdefs
+    }) {
         return ParsedDocument {
             green: prev.green.clone(),
             errors: prev.errors.clone(),
@@ -2843,7 +2846,11 @@ impl SalsaDb {
     /// returning its [`FileText`] input. The buffer gets a real [`FileId`] with
     /// `path_of == None`, so it never collides with another untitled buffer and
     /// never needs the `<memory>` sentinel (audit §3.3 / G3). Writer-only.
-    pub fn create_in_memory_file(&mut self, text: String, durability: Durability) -> FileText {
+    pub fn create_in_memory_file(
+        &mut self,
+        text: impl Into<Arc<str>>,
+        durability: Durability,
+    ) -> FileText {
         let id = self.intern_file(None);
         let input = self
             .vfs
@@ -2852,8 +2859,43 @@ impl SalsaDb {
         input
             .set_text(self)
             .with_durability(durability)
-            .to(Some(Arc::from(text)));
+            .to(Some(text.into()));
         input
+    }
+
+    /// Set `file`'s text, skipping the write when it would store what is already
+    /// there. Returns whether the input actually moved.
+    ///
+    /// Salsa's setter stamps the current revision unconditionally --- it never
+    /// compares --- so without this an identical write invalidates every
+    /// dependent query, and `parsed_document` is `no_eq`, so nothing downstream
+    /// can backdate its way out. Identical writes are not hypothetical: a
+    /// watcher event re-reads a file whose bytes did not change on every atomic
+    /// save, every duplicate event, and every save of an already-synced file.
+    ///
+    /// A shared allocation proves equality without reading a byte, which is what
+    /// makes this cheap on the paths that hand over the `Arc` they were given.
+    ///
+    /// Note that skipping the write also skips the durability update. That is
+    /// deliberate: the durability of unchanged content is not a reason to
+    /// invalidate the world.
+    fn set_text_if_changed(
+        &mut self,
+        file: FileText,
+        text: Arc<str>,
+        durability: Durability,
+    ) -> bool {
+        let unchanged = match file.text(self) {
+            Some(current) => Arc::ptr_eq(current, &text) || **current == *text,
+            None => false,
+        };
+        if unchanged {
+            return false;
+        }
+        file.set_text(self)
+            .with_durability(durability)
+            .to(Some(text));
+        true
     }
 
     pub fn load_file_from_disk(&mut self, id: FileId) -> bool {
@@ -2889,47 +2931,53 @@ impl SalsaDb {
         true
     }
 
-    pub fn update_file_text(&mut self, path: PathBuf, text: String) -> FileText {
+    /// Set the text of the input for `path`, registering it if it is new.
+    ///
+    /// Takes anything that becomes an `Arc<str>`, so a caller that already holds
+    /// one (the LSP write phase does) hands it over with a refcount bump instead
+    /// of a copy, while a caller holding a `String` pays the same conversion it
+    /// always did.
+    pub fn update_file_text(&mut self, path: PathBuf, text: impl Into<Arc<str>>) -> FileText {
         self.update_file_text_with_durability(path, text, Durability::LOW)
     }
 
     pub fn update_file_text_with_durability(
         &mut self,
         path: PathBuf,
-        text: String,
+        text: impl Into<Arc<str>>,
         durability: Durability,
     ) -> FileText {
-        let text: Arc<str> = Arc::from(text);
+        let text = text.into();
         if let Some(file) = self.vfs.input_for_path(&path) {
-            file.set_text(self)
-                .with_durability(durability)
-                .to(Some(text));
+            self.set_text_if_changed(file, text, durability);
             return file;
         }
-        let file = FileText::new(self, Some(text.clone()));
-        file.set_text(self)
-            .with_durability(durability)
-            .to(Some(text));
+        // The builder carries the durability, so a new file is one write rather
+        // than a create followed by a set (which also forced a second `Arc`).
+        let file = FileText::builder(Some(text))
+            .text_durability(durability)
+            .new(self);
         self.register_new(Some(path), file);
         file
     }
 
-    pub fn update_file_text_if_cached(&mut self, path: &Path, text: String) -> bool {
+    pub fn update_file_text_if_cached(&mut self, path: &Path, text: impl Into<Arc<str>>) -> bool {
         self.update_file_text_if_cached_with_durability(path, text, Durability::LOW)
     }
 
+    /// Returns whether `path` was cached at all --- not whether the text moved.
+    /// Callers use this to decide "was this file one we track", and a watcher
+    /// event for a file whose bytes are unchanged still answers yes.
     pub fn update_file_text_if_cached_with_durability(
         &mut self,
         path: &Path,
-        text: String,
+        text: impl Into<Arc<str>>,
         durability: Durability,
     ) -> bool {
         let Some(file) = self.vfs.input_for_path(path) else {
             return false;
         };
-        file.set_text(self)
-            .with_durability(durability)
-            .to(Some(Arc::from(text)));
+        self.set_text_if_changed(file, text.into(), durability);
         true
     }
 
@@ -2958,13 +3006,7 @@ impl SalsaDb {
         let Ok(contents) = std::fs::read_to_string(path) else {
             return false;
         };
-        if file.text(self).as_deref() == Some(contents.as_str()) {
-            return false;
-        }
-        file.set_text(self)
-            .with_durability(durability)
-            .to(Some(Arc::from(contents)));
-        true
+        self.set_text_if_changed(file, Arc::from(contents), durability)
     }
 
     pub fn ensure_file_text_cached(&mut self, path: PathBuf) -> bool {
@@ -2982,11 +3024,9 @@ impl SalsaDb {
         let Ok(contents) = std::fs::read_to_string(&path) else {
             return false;
         };
-        let contents: Arc<str> = Arc::from(contents);
-        let file = FileText::new(self, Some(contents.clone()));
-        file.set_text(self)
-            .with_durability(durability)
-            .to(Some(contents));
+        let file = FileText::builder(Some(Arc::from(contents)))
+            .text_durability(durability)
+            .new(self);
         self.register_new(Some(path), file);
         true
     }
@@ -4383,6 +4423,63 @@ mod tests {
         );
         let config = FileConfig::new(&db, Config::default());
         (db, root_file, config, child_path, log, temp_dir)
+    }
+
+    /// Writing the bytes a file already holds must execute nothing. Salsa's
+    /// setter never compares, so the guard in `set_text_if_changed` is the only
+    /// thing standing between a redundant write and a full invalidation cascade
+    /// --- and redundant writes are routine: an atomic save, a duplicate watcher
+    /// event, a save of an already-synced file.
+    ///
+    /// Both routes must hold: the same allocation (the pointer fast path) and an
+    /// equal one from a fresh `String` (the content compare behind it).
+    #[test]
+    fn an_identical_write_executes_nothing() {
+        const DOC: &str = "# Root\n\nRoot body.\n";
+        let (mut db, root_file, config, _child_path, log, _temp_dir) = two_doc_project_logging();
+
+        parsed_document(&db, root_file, config);
+        refdef_set(&db, root_file, config);
+        crate::lsp::line_index::line_index(&db, root_file);
+        let id = db.file_id_for_input(root_file).expect("root is registered");
+        let path = Db::path_of_id(&db, id).expect("root has a path");
+        log.lock().unwrap().clear();
+
+        let shared = root_file.text(&db).clone().expect("root has text");
+        db.update_file_text(path.clone(), shared);
+        db.update_file_text(path, DOC.to_string());
+
+        parsed_document(&db, root_file, config);
+        refdef_set(&db, root_file, config);
+        crate::lsp::line_index::line_index(&db, root_file);
+
+        for query in ["parsed_document", "refdef_set", "line_index"] {
+            assert_eq!(
+                executed(&log, query),
+                0,
+                "an identical write must not re-execute {query}"
+            );
+        }
+    }
+
+    /// The guard must not swallow a real write.
+    #[test]
+    fn a_differing_write_still_invalidates() {
+        let (mut db, root_file, config, _child_path, log, _temp_dir) = two_doc_project_logging();
+
+        parsed_document(&db, root_file, config);
+        let id = db.file_id_for_input(root_file).expect("root is registered");
+        let path = Db::path_of_id(&db, id).expect("root has a path");
+        log.lock().unwrap().clear();
+
+        db.update_file_text(path, "# Root\n\nA different body.\n".to_string());
+        parsed_document(&db, root_file, config);
+
+        assert_eq!(
+            executed(&log, "parsed_document"),
+            1,
+            "a real change must still invalidate"
+        );
     }
 
     /// The cross-file firewall (audit §3.4 / G4): a paragraph-body edit in a
