@@ -1223,6 +1223,7 @@ dependencies = [
  "log",
  "lsp-server",
  "lsp-types",
+ "memchr",
  "num_cpus",
  "panache-formatter",
  "panache-parser",

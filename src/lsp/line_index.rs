@@ -6,122 +6,130 @@
 //! to O(n·m) per request on large documents.
 //!
 //! This mirrors rust-analyzer's approach: precompute line-start byte offsets
-//! plus a per-line wide-char table once, cache the result as a salsa query
-//! keyed on the text input ([`line_index`]), and answer each conversion with a
-//! binary search + a short bounded within-line walk. The index is
-//! self-contained (holds no text after construction), so conversions are pure
-//! arithmetic over the precomputed tables.
+//! once, cache the result as a salsa query keyed on the text input
+//! ([`line_index`]), and answer each conversion with a binary search plus a
+//! short bounded within-line walk.
+//!
+//! The index owns a shared handle to the text it indexes rather than a copy, so
+//! it is still `'static` and still cheap to clone. UTF-16 columns are answered
+//! by walking the one line concerned, guarded by a per-line "contains any
+//! non-ASCII byte" flag so an all-ASCII line -- which is nearly every line --
+//! stays pure arithmetic. Precomputing a wide-char table for the whole document
+//! instead (a hash entry per non-ASCII character) cost more to build than every
+//! conversion it ever answered.
 //!
 //! The conversion semantics match the previous byte-scanning helpers exactly
 //! (see the ported tests below): lines are `str::lines()`-style (a trailing
 //! `\r` before `\n` is stripped from the visible line), UTF-16 columns follow
 //! LSP, and out-of-bounds inputs clamp rather than panic.
 
-use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use lsp_types::Position;
-
-/// A non-ASCII character within a line, recorded so UTF-8 byte columns can be
-/// mapped to/from UTF-16 code-unit columns without re-reading the text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Utf16Char {
-    /// Byte offset of the char within its line (relative to the line start).
-    byte_start: usize,
-    /// UTF-8 byte length of the char.
-    utf8_len: usize,
-    /// UTF-16 code-unit length of the char (1 for the BMP, 2 for astral).
-    utf16_len: usize,
-}
 
 /// Precomputed line structure of a document, enabling O(log n) byte-offset
 /// <-> LSP position conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LineIndex {
+    /// The indexed text. An `Arc` so this is the same allocation salsa holds:
+    /// indexing a document costs a refcount bump, not a copy.
+    text: Arc<str>,
     /// Byte offset of the start of each line (line 0 starts at 0). One entry
     /// per line, including the empty trailing line when the text ends in `\n`.
     line_starts: Vec<usize>,
-    /// Visible byte length of each line, excluding its terminator (`\n` or
-    /// `\r\n`). Parallel to `line_starts`.
-    line_lengths: Vec<usize>,
-    /// Total byte length of the document, used for clamping.
-    len: usize,
-    /// Wide-char tables for the lines that contain non-ASCII characters, keyed
-    /// by line number. ASCII-only lines are absent (column == byte offset).
-    /// Each line's `Vec` is ordered by ascending `byte_start`.
-    utf16_lines: HashMap<u32, Vec<Utf16Char>>,
-    /// Whether an extra addressable line exists one past the last `line_starts`
-    /// entry, at byte offset `len`. True exactly when the text is non-empty and
-    /// does not end in `\n` (the unterminated final line has a virtual EOF line
-    /// after it, matching the old `str::lines()`-based numbering).
-    has_eof_line: bool,
+    /// Per line, whether it contains any non-ASCII byte. Parallel to
+    /// `line_starts`. A clear flag means the UTF-16 column equals the byte
+    /// column, which is the O(1) path this array exists to preserve: a
+    /// semantic-tokens request converts one position per token, and a Markdown
+    /// paragraph is routinely one very long line.
+    wide_lines: Vec<bool>,
 }
 
 impl LineIndex {
-    /// Build a line index for `text` in a single pass.
+    /// Build a line index for `text`.
     pub(crate) fn new(text: &str) -> LineIndex {
-        let bytes = text.as_bytes();
-        let len = text.len();
+        LineIndex::from_arc(Arc::from(text))
+    }
 
-        let mut line_starts = vec![0usize];
-        let mut line_lengths: Vec<usize> = Vec::new();
-        let mut utf16_lines: HashMap<u32, Vec<Utf16Char>> = HashMap::new();
-
-        let mut line_start = 0usize;
-        let mut cur_line: u32 = 0;
-
-        for (i, ch) in text.char_indices() {
-            if ch == '\n' {
-                // Visible length excludes the `\n`, and a preceding `\r`.
-                let mut vis = i - line_start;
-                if vis > 0 && bytes[i - 1] == b'\r' {
-                    vis -= 1;
-                }
-                line_lengths.push(vis);
-                line_starts.push(i + 1);
-                line_start = i + 1;
-                cur_line += 1;
-            } else if !ch.is_ascii() {
-                utf16_lines.entry(cur_line).or_default().push(Utf16Char {
-                    byte_start: i - line_start,
-                    utf8_len: ch.len_utf8(),
-                    utf16_len: ch.len_utf16(),
-                });
-            }
-        }
-
-        // The final segment after the last `\n` (or the whole text when there
-        // is no `\n`). A lone trailing `\r` stays visible, matching `lines()`.
-        line_lengths.push(len - line_start);
-
-        let has_eof_line = !text.is_empty() && bytes[len - 1] != b'\n';
-
-        LineIndex {
+    /// Build a line index that shares `text` rather than copying it.
+    pub(crate) fn from_arc(text: Arc<str>) -> LineIndex {
+        let mut line_starts = Vec::with_capacity(text.len() / 40 + 1);
+        line_starts.push(0usize);
+        line_starts.extend(memchr::memchr_iter(b'\n', text.as_bytes()).map(|at| at + 1));
+        let mut index = LineIndex {
+            text,
+            wide_lines: vec![false; line_starts.len()],
             line_starts,
-            line_lengths,
-            len,
-            utf16_lines,
-            has_eof_line,
+        };
+        for line in 0..index.line_starts.len() {
+            index.wide_lines[line] = index.recompute_wide(line);
         }
+        index
     }
 
     /// Total byte length of the indexed document.
     pub(crate) fn len(&self) -> usize {
-        self.len
+        self.text.len()
+    }
+
+    /// The byte range of `line` including its terminator.
+    fn line_span(&self, line: usize) -> Range<usize> {
+        let start = self.line_starts[line];
+        let end = self
+            .line_starts
+            .get(line + 1)
+            .copied()
+            .unwrap_or(self.text.len());
+        start..end
+    }
+
+    /// Whether `line` contains a non-ASCII byte, read from the text. The
+    /// terminator bytes are ASCII, so scanning the whole span is equivalent to
+    /// scanning the visible part.
+    fn recompute_wide(&self, line: usize) -> bool {
+        !self.text.as_bytes()[self.line_span(line)].is_ascii()
+    }
+
+    /// Visible byte length of `line`, excluding its terminator (`\n` or
+    /// `\r\n`). The final segment after the last `\n` (or the whole text when
+    /// there is none) has no terminator to strip, so a lone trailing `\r` stays
+    /// visible there --- matching `str::lines()`.
+    fn line_len(&self, line: usize) -> usize {
+        let Range { start, end } = self.line_span(line);
+        if line + 1 == self.line_starts.len() {
+            // Every entry after the first is one past a `\n`, so only the last
+            // line can lack a terminator -- and it always does.
+            return end - start;
+        }
+        // `end` is one past the `\n` that terminates this line.
+        let mut vis = end - 1 - start;
+        if vis > 0 && self.text.as_bytes()[end - 2] == b'\r' {
+            vis -= 1;
+        }
+        vis
+    }
+
+    /// Whether an extra addressable line exists one past the last `line_starts`
+    /// entry, at byte offset `len()`. True exactly when the text is non-empty
+    /// and does not end in `\n` (the unterminated final line has a virtual EOF
+    /// line after it, matching the old `str::lines()`-based numbering).
+    fn has_eof_line(&self) -> bool {
+        !self.text.is_empty() && !self.text.as_bytes().ends_with(b"\n")
     }
 
     /// Convert a byte offset into an LSP position (line + UTF-16 column).
     /// Offsets past the end clamp to the document end.
     pub(crate) fn offset_to_position(&self, offset: usize) -> Position {
-        let offset = offset.min(self.len);
+        let offset = offset.min(self.len());
         let line = match self.line_starts.binary_search(&offset) {
             Ok(i) => i,
             Err(i) => i - 1,
         };
-        let byte_col = (offset - self.line_starts[line]).min(self.line_lengths[line]);
+        let byte_col = (offset - self.line_starts[line]).min(self.line_len(line));
         Position {
             line: line as u32,
-            character: self.utf16_column(line as u32, byte_col) as u32,
+            character: self.utf16_column(line, byte_col) as u32,
         }
     }
 
@@ -131,65 +139,58 @@ impl LineIndex {
     pub(crate) fn position_to_offset(&self, position: Position) -> Option<usize> {
         let line = position.line as usize;
         let (line_start, vis) = if line < self.line_starts.len() {
-            (self.line_starts[line], self.line_lengths[line])
-        } else if self.has_eof_line && line == self.line_starts.len() {
-            (self.len, 0)
+            (self.line_starts[line], self.line_len(line))
+        } else if self.has_eof_line() && line == self.line_starts.len() {
+            (self.len(), 0)
         } else {
             return None;
         };
-        let byte_col = self.utf16_to_byte(line as u32, position.character as usize, vis);
+        let byte_col = self.utf16_to_byte(line, position.character as usize, vis);
         Some(line_start + byte_col)
     }
 
     /// UTF-8 byte column within a line -> UTF-16 column. Sums the UTF-16 length
-    /// of every char whose start lies before `byte_col` (matching the old
-    /// `take_while(byte_idx < line_offset)` accumulation).
-    fn utf16_column(&self, line: u32, byte_col: usize) -> usize {
-        match self.utf16_lines.get(&line) {
-            None => byte_col,
-            Some(wides) => {
-                let mut ascii = byte_col;
-                let mut utf16 = 0usize;
-                for c in wides {
-                    if c.byte_start >= byte_col {
-                        break;
-                    }
-                    utf16 += c.utf16_len;
-                    // Bytes of this char lying within [0, byte_col).
-                    let consumed = (c.byte_start + c.utf8_len).min(byte_col) - c.byte_start;
-                    ascii -= consumed;
-                }
-                ascii + utf16
-            }
+    /// of every char whose start lies before `byte_col`.
+    fn utf16_column(&self, line: usize, byte_col: usize) -> usize {
+        if !self.wide_lines[line] {
+            return byte_col;
         }
+        let start = self.line_starts[line];
+        let mut utf16 = 0usize;
+        let mut byte = 0usize;
+        for ch in self.text[start..].chars() {
+            if byte >= byte_col {
+                break;
+            }
+            utf16 += ch.len_utf16();
+            byte += ch.len_utf8();
+        }
+        utf16
     }
 
     /// UTF-16 column within a line -> UTF-8 byte column. Returns the byte offset
     /// of the first char boundary whose preceding UTF-16 count reaches
     /// `character`, clamped to the visible line length `vis`.
-    fn utf16_to_byte(&self, line: u32, character: usize, vis: usize) -> usize {
-        match self.utf16_lines.get(&line) {
-            None => character.min(vis),
-            Some(wides) => {
-                let mut u16_col = 0usize;
-                let mut byte = 0usize;
-                let mut wi = 0usize;
-                while byte < vis {
-                    if u16_col >= character {
-                        return byte;
-                    }
-                    if wi < wides.len() && wides[wi].byte_start == byte {
-                        u16_col += wides[wi].utf16_len;
-                        byte += wides[wi].utf8_len;
-                        wi += 1;
-                    } else {
-                        u16_col += 1;
-                        byte += 1;
-                    }
-                }
-                vis
-            }
+    fn utf16_to_byte(&self, line: usize, character: usize, vis: usize) -> usize {
+        // `line` can be the virtual EOF line, one past the table, which is
+        // empty and therefore never wide.
+        if !self.wide_lines.get(line).copied().unwrap_or(false) {
+            return character.min(vis);
         }
+        let start = self.line_starts[line];
+        let mut chars = self.text[start..start + vis].chars();
+        let mut u16_col = 0usize;
+        let mut byte = 0usize;
+        while byte < vis {
+            if u16_col >= character {
+                return byte;
+            }
+            // `byte < vis` guarantees another char inside the visible line.
+            let ch = chars.next().expect("visible line has a char at `byte`");
+            u16_col += ch.len_utf16();
+            byte += ch.len_utf8();
+        }
+        vis
     }
 }
 
@@ -201,7 +202,8 @@ pub(crate) fn line_index(
     db: &dyn crate::salsa::Db,
     file: crate::salsa::FileText,
 ) -> Arc<LineIndex> {
-    Arc::new(LineIndex::new(file.content_or_empty(db)))
+    let text = file.text(db).clone().unwrap_or_else(|| Arc::from(""));
+    Arc::new(LineIndex::from_arc(text))
 }
 
 #[cfg(test)]
