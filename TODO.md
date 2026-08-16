@@ -150,37 +150,51 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 Findings from fatou's `Arc<str>`-vs-rope investigation (2026-08-16, on its
 `experiment/arc-str` branch), checked against panache's code. Panache already
 has the `Arc<str>` end state fatou adopted (`FileText`, `PrevParse` sharing
-salsa's Arc), so the read side is fine; the costs are all in `did_change` — and
-nothing times them (see the bench entry).
+salsa's Arc), so the read side was fine; the costs were all in `did_change`.
 
-- [ ] **`did_change` copies the whole text three times per keystroke.**
-  `src/lsp/documents.rs:208` materializes the salsa text with `to_string`
-  (copy 1); `apply_content_change` (`src/lsp/conversions.rs:52-73`) splices
-  into a fresh `String` per change (copy 2) and rebuilds `LineIndex::new`
-  from scratch per change even though a salsa-cached `Arc<LineIndex>`
-  already exists (`src/lsp/line_index.rs`); then
-  `update_file_text_with_durability` (`src/salsa.rs:2902`) pays
-  `Arc::from(String)`, which reallocates (copy 3). Splice once into one
-  buffer, reuse or patch the cached index, and hand salsa the one final
-  `Arc`. For scale: fatou's whole write phase after the same cleanup is \~33
-  us at 1 MB.
+All three are done (2026-08-17). `benches/lsp_write_phase.rs` times the phase
+`lsp_incremental` excludes, gated by `task bench:write-phase-gate`; its module
+doc carries the full tables. Median write phase per keystroke:
 
-- [ ] **`did_change` reloads the config from disk on every keystroke.**
-  `src/lsp/documents.rs:194` calls `load_config_notifying`
-  (`src/lsp/global_state.rs:512`), an ancestor-walk directory scan plus TOML
-  parse, per keystroke. Cache it on the document (or invalidate from file
-  watching) — likely the cheapest fix with the largest payoff in this list.
+  |                | small (756 B) | medium (29 KB) | large (293 KB) |
+  | -------------- | ------------- | -------------- | -------------- |
+  | before         | 54.47 us      | 73.69 us       | 282.27 us      |
+  | after          | 0.94 us       | 6.00 us        | 97.68 us       |
+  | 4-change batch | 1.33 us       | 8.72 us        | 147.34 us      |
 
-- [ ] **`lsp_incremental` deliberately excludes the write phase; add a bench
-  that covers it.** Its module doc says applying the client's changes is not
-  timed — which is exactly where every cost above lives. Port fatou's
-  `benches/salsa_keystroke.rs` shape (rows: no-op upsert, write phase
-  without a parse, end-to-end; alternating insert/delete so each iteration
-  is a real revision) and wire it into the existing mechanized gate. Note:
-  fatou's other pipeline finding — bypassing `diff_edit` for a single staged
-  edit — is already known to *not* pay here (`multi_change_large_8` profile:
-  `diff_edit` is 7.1 us against a \~1.9 ms parse); the write phase is the
-  panache-shaped cost.
+- [x] **`did_change` copies the whole text three times per keystroke.** Now
+  splices once through one `LineIndex` per notification (patched per change,
+  not rebuilt) and hands salsa the `Arc<str>` that index owns. Two linear
+  passes remain --- build the spliced bytes, let `Arc` copy them --- which
+  is the floor for an `Arc<str>` input on stable.
+
+- [x] **`did_change` reloads the config from disk on every keystroke.** It was
+  not a missing cache: config resolution reads the document's *path*, never
+  its text, so a text edit cannot change the answer and
+  `DocumentState.salsa_config` already held it. Deleted rather than cached.
+  `did_save` re-resolves as a backstop for clients whose file watching does
+  not report every config file.
+
+- [x] **`lsp_incremental` deliberately excludes the write phase; add a bench
+  that covers it.** Landed as a sibling bench rather than new cases, since
+  `Expect` there is built from two-strategy parse concepts. fatou's other
+  pipeline finding --- bypassing `diff_edit` for a single staged edit --- is
+  still known to *not* pay here (`multi_change_large_8` profile: `diff_edit`
+  is 7.1 us against a \~1.9 ms parse).
+
+Unrelated but found while running the gates: `bench:incremental-gate` is
+marginal on at least one machine. `pandoc_manual_late_edit` and
+`pandoc_manual_typing_stream` declare `min_speedup(5.0)` and measure 4.9-5.3x
+run to run, so the gate fails intermittently --- on `main`, not only under a
+change. Either the threshold wants a little slack or those two cases want more
+iterations.
+
+Follow-up, not done: the remaining per-keystroke cost on a large document is two
+full scans (the index rebuild) plus the two splice passes. Maintaining an
+`Arc<LineIndex>` on `DocumentState`, validated against salsa's text by
+`Arc::ptr_eq` so a stale one is discarded rather than trusted, would remove the
+scans. The salsa `line_index` memo is warm only when a reader has run since the
+last keystroke, which during a typing burst it has not.
 
 ## Parser
 
