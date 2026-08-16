@@ -55,8 +55,18 @@ pub(crate) fn apply_content_change(text: &str, change: &TextDocumentContentChang
             // Incremental edit with range. Build one index for the pre-change
             // text and convert both endpoints from it.
             let index = LineIndex::new(text);
-            let start_offset = position_to_offset(&index, range.start).unwrap_or(0);
+            // Both ends clamp to the document end when the line is past it. A
+            // client whose version has drifted can send a range beyond the text
+            // we hold; degrading to an append is recoverable, and the obvious
+            // alternative for the start -- falling back to 0 -- silently
+            // replaces the whole document.
+            let start_offset = position_to_offset(&index, range.start).unwrap_or(text.len());
             let end_offset = position_to_offset(&index, range.end).unwrap_or(text.len());
+            // A reversed range would underflow the capacity computation below:
+            // a debug panic, and in release a near-`usize::MAX` allocation
+            // request. Normalize rather than trust the client.
+            let (start_offset, end_offset) =
+                (start_offset.min(end_offset), start_offset.max(end_offset));
 
             let mut result =
                 String::with_capacity(text.len() - (end_offset - start_offset) + change.text.len());
@@ -254,5 +264,54 @@ mod tests {
         };
 
         assert_eq!(apply_content_change(text, &change), "line1\nliNEW\nLINEne3");
+    }
+
+    /// A client whose version has drifted can send a range past the end of the
+    /// text the server holds. Both ends must clamp to the end of the document:
+    /// clamping the *start* to 0 instead (which is what an `unwrap_or(0)` does)
+    /// replaces the entire document with the change text.
+    #[test]
+    fn out_of_range_change_appends_rather_than_wiping_the_document() {
+        let text = "line1\n";
+        let change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 9,
+                    character: 0,
+                },
+                end: Position {
+                    line: 9,
+                    character: 0,
+                },
+            }),
+            range_length: None,
+            text: "x".to_string(),
+        };
+
+        assert_eq!(apply_content_change(text, &change), "line1\nx");
+    }
+
+    /// A reversed range is normalized. Left alone it underflows the capacity
+    /// computation: a panic in debug, and in release a `usize::MAX`-sized
+    /// allocation request.
+    #[test]
+    fn reversed_change_range_is_normalized() {
+        let text = "abcdef";
+        let change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 4,
+                },
+                end: Position {
+                    line: 0,
+                    character: 2,
+                },
+            }),
+            range_length: None,
+            text: "X".to_string(),
+        };
+
+        assert_eq!(apply_content_change(text, &change), "abXef");
     }
 }
