@@ -107,6 +107,28 @@
 //! 2.9x on a large one, and 6.2x for a four-change notification -- where the
 //! per-change fan-out fell from 3-4x the cost of a single change to about 1.5x.
 //!
+//! Every table above was measured with incremental parsing off, which was the
+//! default until it was flipped. Only `didChange + parse` moves with that flag
+//! --- the write-phase rows never parse --- so the contracts are recalibrated
+//! against the shipped mode. Same corpus, same run pair, median us:
+//!
+//! ```text
+//!                    small (756 B)   medium (24 KB)   large (297 KB)
+//! parse off                  83.59           824.01         10 200.03
+//! parse on                   23.24           968.15          3 210.55
+//! ```
+//!
+//! The two wins are the point of the feature. The medium row is not a fluke:
+//! across three run pairs it lands 13-17% *slower* with the flag on (824/863/898
+//! off against 968/992/974 on). `large_authoring.qmd` declines the window cutoff
+//! on every edit, so its keystroke is a full parse plus the host-side cost of
+//! preparing and rejecting a reuse --- and that cost is an order of magnitude
+//! above the `+11.6 us` that `benches/lsp_incremental.rs` models for the same
+//! document, which is a gap in the model rather than in this measurement.
+//!
+//! Note the direction of the share check below: a cheaper parse is a smaller
+//! denominator, so the write phase's share *rises* when the feature works.
+//!
 //! Run-to-run spread on the large rows is wide (the `keystroke` row has been
 //! seen anywhere from 215 to 400 us on an otherwise idle machine), which is why
 //! every check below is a ratio taken within one run rather than a comparison
@@ -178,8 +200,9 @@ const KEYSTROKE_SCALING_MAX: f64 = 25.0;
 
 /// The write phase's ceiling as a share of the end-to-end keystroke. The write
 /// phase runs on the main loop and the parse does not, so this is the number
-/// that decides whether typing stays responsive. Measured at 1.1% / 2.8% / 2.0%
-/// (small / medium / large); the headroom is wide because the denominator is a
+/// that decides whether typing stays responsive. Measured at 4.1% / 0.6% / 2.6%
+/// (small / medium / large) with incremental parsing on, against 1.1% / 2.8% /
+/// 2.0% before the flip; the headroom is wide because the denominator is a
 /// parse, and making the parser faster must not fail this gate.
 const KEYSTROKE_SHARE_MAX: f64 = 0.15;
 
@@ -193,11 +216,13 @@ const KEYSTROKE_SHARE_MAX: f64 = 0.15;
 /// catches a return to per-change rebuilding, which showed as 3-4x.
 const BATCH_FANOUT_MAX: f64 = 2.5;
 
-/// The mode the thresholds above were calibrated against. Incremental parsing
-/// changes what the end-to-end row measures, and `PANACHE_INCREMENTAL_PARSING`
-/// can flip it out from under a gate run, so assert mode refuses to compare
-/// against contracts calibrated for the other mode.
-const CALIBRATED_INCREMENTAL_PARSING: bool = false;
+/// The mode the thresholds above were calibrated against: the shipped default,
+/// which is on. Incremental parsing changes what the end-to-end row measures,
+/// and `PANACHE_INCREMENTAL_PARSING` can flip it out from under a gate run, so
+/// assert mode refuses to compare against contracts calibrated for the other
+/// mode. This constant is what caught the default flip; re-measure both modes
+/// before changing it again.
+const CALIBRATED_INCREMENTAL_PARSING: bool = true;
 
 /// Documents this bench needs, checked before anything runs. They are
 /// gitignored and fetched by `benches/documents/download.sh`; without this
