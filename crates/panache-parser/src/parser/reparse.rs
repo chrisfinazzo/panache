@@ -257,7 +257,16 @@ pub fn reparse_with_cost_guards(
         return None;
     }
 
-    if let Some(result) = reparse_ranges(
+    // Cheapest first. The region tier parses a bounded fragment plus two
+    // neighbours; the window tiers parse from their window start to EOF. So
+    // wherever both can answer, the region tier's answer is the cheaper one by
+    // a margin that grows with the document -- an edit at line 7600 of the
+    // 300 KB pandoc manual re-parses a 186-byte paragraph instead of 22 KB.
+    //
+    // The window tiers are what is left for the shapes a region cannot take:
+    // an edit whose region is too wide (scattered changes, one enormous block)
+    // but whose window is still under the cutoff.
+    if let Some(result) = reparse_region(
         new_text,
         &options,
         &prev_tree,
@@ -269,13 +278,7 @@ pub fn reparse_with_cost_guards(
         return Some(result);
     }
 
-    // The region tier, for now, is tried *after* the window tiers rather than
-    // ahead of them: it changes nothing that reuses today, while still answering
-    // everything the window-size cutoff declines -- which is the whole
-    // early-and-mid-document population the cutoff exists to refuse. Promoting
-    // it ahead of them is a later commit, so that the two thin section-window
-    // speedup floors move once, deliberately, and with the tier already proven.
-    reparse_region(
+    reparse_ranges(
         new_text,
         &options,
         &prev_tree,
@@ -322,6 +325,13 @@ pub fn reparse_with_cost_guards(
 ///
 /// Every check is a decline. `None` costs the caller the window tiers it would
 /// have tried anyway.
+/// `#[inline(never)]`, like every tier entry point here, so that the cost of
+/// the *cheapest* path cannot depend on which tiers sit below it. Inlined, a
+/// tier's locals land in the dispatcher's stack frame, which every early return
+/// pays for on the way out --- reordering the two window-class tiers alone cost
+/// this one 20% (43x -> 35x on `pandoc_manual_midline_edit`) with nothing on
+/// its own path changed.
+#[inline(never)]
 fn reparse_token(
     old_tree: &SyntaxNode,
     old_errors: &[SyntaxError],
@@ -665,6 +675,7 @@ fn merge_incremental_errors(
 ///
 /// Refusal-first: every guard returns [`None`] and leaves the full parse to the
 /// caller. Never returns a best-effort tree.
+#[inline(never)]
 fn reparse_ranges(
     input: &str,
     config: &ParserOptions,
@@ -1939,6 +1950,7 @@ fn merge_region_errors(
 /// Every check is a decline. `None` costs the caller the window tiers it would
 /// have tried anyway.
 #[allow(clippy::too_many_arguments)]
+#[inline(never)]
 fn reparse_region(
     input: &str,
     config: &ParserOptions,
@@ -2236,41 +2248,39 @@ mod tests {
         }
         let options = ParserOptions::default();
         let (old_tree, old_errors) = Parser::new(&input, &options).parse_with_errors();
-        let old_green = old_tree.green().to_owned();
 
+        // Driven through the window cascade directly. The subject is the
+        // window-size cutoff, and through the public entry point the region
+        // tier answers *both* of these edits before a window is consulted --
+        // which is the tier working, not the cutoff failing.
         let splice_at = |needle: &str| {
             let at = input.find(needle).expect("marker in test input");
             let updated = apply_edit(&input, (at, at + 4), "BODY");
-            let edit = diff_edit(&input, &updated);
-            reparse(&old_green, &old_errors, &edit, &updated, &options).map(|reparsed| {
+            reparse_ranges(
+                &updated,
+                &options,
+                &old_tree,
+                &old_errors,
+                (at, at + 4),
+                (at, at + 4),
+                CostGuards::Enforced,
+            )
+            .map(|reparsed| {
                 let full = super::super::parse(&updated, Some(options.clone()));
                 assert_eq!(
                     crate::parser::fingerprint(&SyntaxNode::new_root(reparsed.green.clone())),
                     crate::parser::fingerprint(&full),
                     "an accepted splice must match a full parse"
                 );
-                (reparsed.strategy, reparsed.reparse_range.0)
+                reparsed.reparse_range.0
             })
         };
 
-        // The cutoff is what this case is about, and it still declines: an edit
-        // leaving ~90% of the document downstream never reaches a *window*. What
-        // changed is that declining a window is no longer declining the reparse
-        // -- the region tier answers the same edit from behind the cutoff, which
-        // is the whole reason it exists.
-        let (early_strategy, early_start) = splice_at("body 02").expect("the region tier answers");
-        assert_eq!(early_strategy, ReparseStrategy::Region);
         assert!(
-            input.len() - early_start > input.len() * MAX_WINDOW_SHARE_PERCENT / 100,
-            "the early edit still leaves more downstream than any window may cover"
+            splice_at("body 02").is_none(),
+            "a window leaving ~90% of the document downstream must decline"
         );
-
-        let (late_strategy, late_start) = splice_at("body 16").expect("a late edit must splice");
-        assert_ne!(
-            late_strategy,
-            ReparseStrategy::Region,
-            "a late edit is claimed by a window tier, which is tried first"
-        );
+        let late_start = splice_at("body 16").expect("a late edit must still splice");
         assert!(
             input.len() - late_start < input.len() * MAX_WINDOW_SHARE_PERCENT / 100,
             "the accepted window must sit under the cutoff"
@@ -2291,10 +2301,10 @@ mod tests {
         }
         let at = input.find("paragraph 17").expect("marker in test input");
 
-        // A code span, not a bare letter: this test is about which *window* a
-        // late edit reaches, and a plain interior prose insert is answered by
-        // the token tier before either window is consulted.
-        let inc = insert_incrementally(&input, at + 10, "`x`", ParserOptions::default());
+        // Driven through the window cascade directly: the subject is which
+        // *window* a late edit reaches, and both the token and region tiers
+        // answer this shape before either window is consulted.
+        let inc = window_cascade_incrementally(&input, at + 10, "`x`", ParserOptions::default());
         assert_eq!(inc.strategy, "suffix_window");
         assert!(
             inc.reparse_range.0 > 0,
@@ -2416,6 +2426,42 @@ mod tests {
     }
 
     /// Apply `insert` at `at` (a pure insertion) and reparse incrementally.
+    /// Drive the *window* cascade directly, skipping the tiers above it.
+    ///
+    /// Some cases below are about which window a shape reaches and which guard
+    /// declines it. Routed through the public entry point they would measure
+    /// the token and region tiers instead, which answer most of those shapes
+    /// first -- and a test that quietly changed subject is worse than one that
+    /// fails, because it goes on passing.
+    fn window_cascade_incrementally(
+        input: &str,
+        at: usize,
+        insert: &str,
+        options: ParserOptions,
+    ) -> Spliced {
+        let mut options = options;
+        populate_refdef_labels(input, &mut options);
+        let (old_tree, old_errors) = Parser::new(input, &options).parse_with_errors();
+        let updated = apply_edit(input, (at, at), insert);
+        match reparse_ranges(
+            &updated,
+            &options,
+            &old_tree,
+            &old_errors,
+            (at, at),
+            (at, at + insert.len()),
+            CostGuards::Enforced,
+        ) {
+            Some(reparsed) => Spliced {
+                tree: SyntaxNode::new_root(reparsed.green),
+                errors: reparsed.errors,
+                reparse_range: reparsed.reparse_range,
+                strategy: reparsed.strategy.as_str(),
+            },
+            None => full_parse(&updated, &options),
+        }
+    }
+
     fn insert_incrementally(
         input: &str,
         at: usize,
@@ -3045,13 +3091,14 @@ mod tests {
         let at = input.find("body text").expect("marker in test input");
 
         // Without a dash partner in the window the section window is taken.
-        let accepted = insert_incrementally(&input, at, "edited ", ParserOptions::default());
+        let accepted =
+            window_cascade_incrementally(&input, at, "edited ", ParserOptions::default());
         assert_eq!(accepted.strategy, "section_window");
 
         // With one, the retained `---` could be re-read as a table's top rule,
         // so the strategy must decline rather than re-adopt the prefix.
         let declined =
-            insert_incrementally(&input, at, "a b\n---\n1 2\n", ParserOptions::default());
+            window_cascade_incrementally(&input, at, "a b\n---\n1 2\n", ParserOptions::default());
         assert_ne!(
             declined.strategy, "section_window",
             "a dash-rule partner in the window must decline the section splice"

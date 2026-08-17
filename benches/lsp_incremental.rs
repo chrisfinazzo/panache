@@ -975,67 +975,92 @@ impl SyntheticDoc {
     }
 }
 
-/// A document holding one enormous top-level block beside ordinary paragraphs,
-/// for bracketing the region tier's width bail.
+/// A document holding two enormous top-level blocks beside ordinary paragraphs,
+/// for bracketing both cost guards on one input.
 ///
-/// The bail declines a region covering more than `1 / REGION_MAX_FILE_DIVISOR`
-/// of the document, so bracketing it needs two edits into the *same* document
-/// whose enclosing top-level children sit on opposite sides of that fraction.
-/// A fenced code block is the cheapest way to build one deliberately: its whole
-/// body is a single child, so its size is chosen rather than emergent.
+/// Three edits into this document produce the three distinct outcomes the two
+/// guards can reach, and each *pair* of them isolates one guard:
+///
+/// * an ordinary paragraph --- narrow region, so the region tier answers;
+/// * a line in the **late** block --- region over the fraction so the tier
+///   declines, but the window from that block is under the share cutoff, so a
+///   window answers;
+/// * a line in the **early** block --- region over the fraction *and* window
+///   over the cutoff, so both decline and the caller full-parses.
+///
+/// Moving `REGION_MAX_FILE_DIVISOR` flips the second against the first; moving
+/// `MAX_WINDOW_SHARE_PERCENT` flips the third against the second. A fenced code
+/// block is the cheapest way to build an oversized top-level child
+/// deliberately: its whole body is one child, so its size is chosen rather than
+/// emergent.
 struct WideBlockDoc {
     text: String,
-    /// A line inside the oversized fenced block --- the region is that block,
-    /// which is over the fraction, so the tier declines.
-    block_line: u32,
-    /// A line in an ordinary paragraph well before it --- the region is one
-    /// paragraph, which is far under, so the tier answers.
+    /// A line in an ordinary paragraph, far from either block --- the region is
+    /// one paragraph, so the tier answers.
     paragraph_line: u32,
+    /// A line in the early oversized block: both guards decline.
+    early_block_line: u32,
+    /// A line in the late oversized block: the region bail declines, the window
+    /// cutoff does not.
+    late_block_line: u32,
 }
 
-/// Paragraphs between the edited paragraph and the oversized block, so the
-/// paragraph's *neighbours* are ordinary too. See [`WideBlockDoc::new`].
+/// Paragraphs between the edited paragraph and the first oversized block, so
+/// the paragraph's *neighbours* are ordinary too: the width bail charges a
+/// region's neighbours as well as itself, and a paragraph abutting the block
+/// would be declined for its neighbour's size and would bracket nothing.
 const SEPARATION_PARAGRAPHS: usize = 3;
 
 impl WideBlockDoc {
-    /// `block_paragraphs` of fence body against `tail_paragraphs` of prose. The
-    /// default proportions put the block at roughly a third of the document and
-    /// a paragraph at well under a hundredth.
-    fn new(block_paragraphs: usize, tail_paragraphs: usize) -> Self {
+    /// Each block is `block_paragraphs` lines of fence body; `gap_paragraphs`
+    /// of prose sit between the blocks and again after the second. The default
+    /// proportions put each block at about a third of the document, which is
+    /// over the region fraction, and start the late block near the middle,
+    /// which is under the window share cutoff.
+    fn new(block_paragraphs: usize, gap_paragraphs: usize) -> Self {
         let body = |index: usize| {
             format!("Paragraph {index:03} alpha beta gamma delta epsilon zeta eta theta.\n")
         };
-
         let mut text = String::from("# Wide Block Document\n\n");
+        let mut line = 2u32;
 
-        // The paragraph comes first, so neither line number moves when the
-        // block is resized to sit on the other side of the fraction. It is
-        // also kept *away* from the fence by a few filler paragraphs, because
-        // the width bail charges a region's neighbours as well as itself: a
-        // paragraph abutting the oversized block would be declined for its
-        // neighbour's size and would bracket nothing.
-        let paragraph_line = 2;
-        for index in 0..SEPARATION_PARAGRAPHS {
+        let paragraph_line = line;
+        for index in 0..=SEPARATION_PARAGRAPHS {
             text.push_str(&body(index));
             text.push('\n');
+            line += 2;
         }
 
-        text.push_str("```\n");
-        let block_line = 2 + 2 * SEPARATION_PARAGRAPHS as u32 + 1;
-        for index in 0..block_paragraphs {
+        let push_block = |text: &mut String, line: &mut u32| {
+            text.push_str("```\n");
+            *line += 1;
+            let first_body_line = *line;
+            for index in 0..block_paragraphs {
+                text.push_str(&body(index));
+                *line += 1;
+            }
+            text.push_str("```\n\n");
+            *line += 2;
+            first_body_line
+        };
+
+        let early_block_line = push_block(&mut text, &mut line);
+        for index in 0..gap_paragraphs {
             text.push_str(&body(index));
+            text.push('\n');
+            line += 2;
         }
-        text.push_str("```\n\n");
-
-        for index in 0..tail_paragraphs {
+        let late_block_line = push_block(&mut text, &mut line);
+        for index in 0..gap_paragraphs {
             text.push_str(&body(index));
             text.push('\n');
         }
 
         Self {
             text,
-            block_line,
             paragraph_line,
+            early_block_line,
+            late_block_line,
         }
     }
 }
@@ -1082,7 +1107,7 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
     let small = SyntheticDoc::new(25);
     let medium = SyntheticDoc::new(250);
     let large = SyntheticDoc::new(1200);
-    let wide_block = WideBlockDoc::new(120, 200);
+    let wide_block = WideBlockDoc::new(120, 58);
     let utf16_doc = "# UTF16\n\nemoji: 😀 rocket: 🚀\nRésumé café\nmath αβγ\nclosing line\n";
     let refdefs = refdef_document();
 
@@ -1214,52 +1239,29 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             // recorded in `TODO.md` as what the *displaced* tier delivered.
             expect: Expect::reuses().strategy("token").min_speedup(27.0),
         },
-        // The window-size cutoff, one case per side. The same document and the
-        // same single-word edit; only how far into the document it lands
-        // differs, and with it the share of the document left downstream of the
-        // window. `accepted` sits at ~80%, `declined` at ~88%, bracketing the
-        // 85% threshold. The pair is what stops a threshold change from being
-        // invisible: move it and exactly one of these two flips its fallback
-        // rate between 0% and 100%.
+        // Both cost guards, bracketed on one document by three edits.
         //
-        // Both replacements carry a backtick, and that is load-bearing rather
-        // than incidental: a plain word swap here is an interior edit in a
-        // prose token, so the **token tier** would take both and neither would
-        // reach the cutoff at all -- leaving a pair that brackets nothing while
-        // still passing its own declarations. A code span puts a banned byte in
-        // the token, the tier declines, and the pair goes on measuring the
-        // window cutoff and only that.
-        BenchCase {
-            id: "window_cutoff_accepted".to_owned(),
-            steps: vec![vec![word_change(medium.line(50), ALPHA, "`ALPHA`")]],
-            input: medium.text.clone(),
-            iterations: default_iterations / 2,
-            expect: Expect::reuses().strategy("section_window"),
-        },
-        // The far side of the cutoff, and no longer a decline: the window is
-        // still refused at 87.8%, but the region tier answers what the refusal
-        // leaves behind. That is the whole shape of the phase in one row --
-        // the pair still brackets the *window* cutoff (move it and this row's
-        // strategy flips between `region` and `section_window`), and the
-        // outcome on the far side went from a full parse to a 4.5x splice.
+        // Promoting the region tier broke the pair that used to live here: it
+        // was two single-word edits either side of the 85% window share, and
+        // once a region answers before any window is consulted, *both* sides
+        // became region splices at 9.1x. A pair that agrees on every input
+        // brackets nothing while still passing its own declarations, which is
+        // the failure mode the token tier already hit once.
         //
-        // Floor ~5% under the lowest of three runs (8.9x, 9.0x, 8.8x).
-        BenchCase {
-            id: "window_cutoff_declined".to_owned(),
-            steps: vec![vec![word_change(medium.line(30), ALPHA, "`ALPHA`")]],
-            input: medium.text.clone(),
-            iterations: default_iterations / 2,
-            expect: Expect::reuses().strategy("region").min_speedup(8.3),
-        },
-        // The region width bail's own bracketing pair, the analogue of the two
-        // rows above for the other cost guard. Both edit the same document with
-        // the same one-word replacement; they differ only in how much of it the
-        // enclosing top-level child covers, which is what the bail measures.
+        // The replacement uses the three outcomes the two guards can produce
+        // (see `WideBlockDoc`), so each guard is isolated by a pair sharing a
+        // case:
         //
-        // `region_width_declined` edits inside one enormous block, so the region
-        // is that block and is over a quarter of the document; `..._accepted`
-        // edits an ordinary paragraph beside it. Move `REGION_MAX_FILE_DIVISOR`
-        // and exactly one of them flips.
+        //   region_width_accepted   ordinary paragraph  -> region
+        //   region_width_declined   late block          -> a window
+        //   window_cutoff_declined  early block         -> full parse
+        //
+        // Move `REGION_MAX_FILE_DIVISOR` and the middle row flips against the
+        // first; move `MAX_WINDOW_SHARE_PERCENT` and the last flips against the
+        // middle. Every replacement carries a backtick, which is load-bearing
+        // rather than incidental: a plain word swap is an interior prose edit,
+        // so the *token* tier would take it and none of these rows would reach
+        // the guard it names.
         BenchCase {
             id: "region_width_accepted".to_owned(),
             steps: vec![vec![word_change(
@@ -1269,11 +1271,26 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             )]],
             input: wide_block.text.clone(),
             iterations: default_iterations / 2,
-            expect: Expect::reuses().strategy("region").min_speedup(7.1),
+            expect: Expect::reuses().strategy("region").min_speedup(4.8),
         },
         BenchCase {
             id: "region_width_declined".to_owned(),
-            steps: vec![vec![word_change(wide_block.block_line, ALPHA, "`ALPHA`")]],
+            steps: vec![vec![word_change(
+                wide_block.late_block_line,
+                ALPHA,
+                "`ALPHA`",
+            )]],
+            input: wide_block.text.clone(),
+            iterations: default_iterations / 2,
+            expect: Expect::reuses().strategy("suffix_window"),
+        },
+        BenchCase {
+            id: "window_cutoff_declined".to_owned(),
+            steps: vec![vec![word_change(
+                wide_block.early_block_line,
+                ALPHA,
+                "`ALPHA`",
+            )]],
             input: wide_block.text,
             iterations: default_iterations / 2,
             expect: Expect::declines(),
@@ -1327,22 +1344,25 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             iterations,
             expect: Expect::declines(),
         });
-        // Both floors were 5.0, the roadmap's number, then 4.5 after upstream
-        // grew `pandoc_manual.md` and slid line 7600 from a 7.0% window to a
-        // 7.5% one. The corpus is pinned now, and these are 7.2 and 7.4:
-        // ~5% under the lowest of three runs (7.65x, 7.8x, 7.7x and 7.85x,
-        // 7.8x, 7.8x).
+        // These two carry the roadmap's oldest thin margin, and it is now
+        // retired twice over. The floors were 5.0, then 4.5 after upstream grew
+        // `pandoc_manual.md` and slid line 7600 from a 7.0% window to a 7.5%
+        // one, at which point they measured 4.53x on one of six runs.
         //
-        // The jump from ~4.8x is not the region tier --- these two are still
-        // section-window cases and the tier does not touch them. It is the
-        // refdef proximity guard, which used to read its old-text window out of
-        // the tree and so walked every token in it, ~800 us per attempt on a
-        // 300 KB document. That guard runs on the path of *every* reparse, so
-        // removing it moved every row in the table.
+        // Two changes moved them, neither a threshold. Removing the refdef
+        // guard's whole-tree read took them to ~7.7x --- that guard walked every
+        // token in a 1 KB window, ~800 us per attempt at this size, on the path
+        // of every reparse. Promoting the region tier then took them to ~8.2x
+        // and changed *which* tier answers: the region here is the 186-byte
+        // paragraph at line 7600, where the section window re-parsed the 22 KB
+        // from the previous heading to EOF.
         //
-        // The thin margin the roadmap flagged here (4.53x against a 4.5x floor
-        // on one of six runs) is therefore retired rather than lowered again:
-        // the numbers moved up, not the threshold down.
+        // What is left is not the parse. At 0.1% of the document re-parsed, a
+        // keystroke costs ~1.16 ms against a 9.5 ms full parse, and that
+        // residue is the `splice_children` root rebuild over 2662 top-level
+        // children plus the whole-text refdef scan --- both `O(document)`, and
+        // both recorded in `TODO.md` as what a further phase would have to
+        // attack.
         //
         // Both edits sit at **column 0**, which is what keeps them on the
         // section window now that the token tier exists: the tier refuses an
@@ -1354,14 +1374,14 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             input: doc.clone(),
             steps: vec![vec![insert_change(7600, 0, "NOTE: ")]],
             iterations,
-            expect: Expect::reuses().strategy("section_window").min_speedup(7.2),
+            expect: Expect::reuses().strategy("region").min_speedup(7.6),
         });
         cases.push(BenchCase {
             id: "pandoc_manual_typing_stream".to_owned(),
             input: doc.clone(),
             steps: typing_stream(7600, 0, "NOTE: typing"),
             iterations,
-            expect: Expect::reuses().strategy("section_window").min_speedup(7.4),
+            expect: Expect::reuses().strategy("region").min_speedup(7.6),
         });
         // The pair above, moved one column inward -- and that is the whole
         // token tier.

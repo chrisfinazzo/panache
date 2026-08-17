@@ -1086,15 +1086,16 @@ fn prose_placed_chained_edits() {
 /// downstream --- the population the tier exists for --- while the region itself
 /// stays well under the always-try floor.
 ///
-/// The floor is 16% against a measured 17.2-17.8%, stable across 1x, 4x, and
+/// The floor is 68% against a measured 71.9-72.3%, stable across 1x, 4x, and
 /// 10x iterations --- 5% under the lowest observed run, the same margin
-/// convention the bench floors use. It is deliberately not higher, and the
-/// reason is the ordering rather than the tier: children are sampled uniformly
-/// across the document, and only an edit in roughly the first sixth leaves
-/// enough downstream for a window to be declined, so the other five sixths are
-/// claimed by a window before this tier is offered them. **Promoting the region
-/// tier ahead of the window tiers should move this number sharply**, and this
-/// floor should be re-measured when it does.
+/// convention the bench floors use.
+///
+/// It was 16% while the tier was tried *behind* the window tiers, because only
+/// an edit in roughly the first sixth of a document left enough downstream for
+/// a window to be declined and the tier to be offered the rest. Promoting it
+/// took the same corpus and the same seeds from 17.5% to 72.1%, which is the
+/// clearest single statement of what the promotion did: on multi-block
+/// documents a region is what answers an edit, and a window is the exception.
 ///
 /// The floor is not a rate to hold at a decimal. It is there to catch a guard
 /// that turns the tier off, which nothing else in the suite would notice,
@@ -1117,7 +1118,7 @@ fn region_placed_chained_edits() {
         }
     }
     stats.assert_exercised_the_splice("region-placed edits");
-    stats.assert_exercised_the_region_tier("region-placed edits", 0.16);
+    stats.assert_exercised_the_region_tier("region-placed edits", 0.68);
 }
 
 /// Multi-block documents for the region tier, a few KB each.
