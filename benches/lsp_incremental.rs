@@ -55,15 +55,28 @@
 //! * **bail cost** --- mean wall time of a `reparse` call that returned
 //!   `None`, and that time as a fraction of a full parse. This is the guard
 //!   cascade's price, paid on top of the full parse the caller then runs.
-//! * **window vs spliced bytes** --- *both* strategies parse their window to
-//!   EOF (list-item buffering needs unbounded lookahead), so `window %` is the
-//!   share of the document actually re-parsed and is what predicts the
-//!   speedup. `spliced %` is the smaller region whose green children were
-//!   replaced; a section window's win over a suffix window is `Arc` identity
-//!   for the retained tail, not parse time. Reading `spliced %` as work done
-//!   is what made "7% reparsed, 0.98x speedup" look like a paradox.
+//! * **window vs spliced bytes** --- the two *window* strategies parse their
+//!   window to EOF (list-item buffering needs unbounded lookahead), so
+//!   `window %` is the share of the document actually re-parsed and is what
+//!   predicts their speedup. `spliced %` is the smaller region whose green
+//!   children were replaced; a section window's win over a suffix window is
+//!   `Arc` identity for the retained tail, not parse time. Reading `spliced %`
+//!   as work done is what made "7% reparsed, 0.98x speedup" look like a
+//!   paradox. The **token** tier parses no window at all, so its `window %` is
+//!   reported as the spliced token's own length --- a fraction of a percent
+//!   rather than the share left downstream, which measuring it the window way
+//!   would have shown.
 //!
 //! # Results
+//!
+//! **This table predates the token tier (roadmap Phase 7) and has not been
+//! re-measured since.** Every row below was produced when the cheapest
+//! available strategy was the section window, so the cases that now take the
+//! token tier --- `single_change_small`, `multi_change_medium_clustered_4`,
+//! `typing_stream_medium`, and the two `pandoc_manual_*_midline` cases, which
+//! did not exist --- are not represented. The `window_cutoff_*` pair's edits
+//! also changed shape (a code span, so the token tier declines and the pair
+//! goes on measuring the *window* cutoff). Read a fresh run.
 //!
 //! `PANACHE_LSP_BENCH_ITERATIONS=80 cargo bench --bench lsp_incremental`, on an
 //! AMD Ryzen 9 7900, rustc 1.94.1, `Config::default()` (pandoc flavor).
@@ -71,12 +84,13 @@
 //! window-size cutoff live (roadmap Phase 5b), which is why every case with a
 //! window over 85% now reports a 100% fallback rate and no `window %`.
 //!
-//! The `bytes` column dates this table. `benches/documents/download.sh` fetches
-//! the corpus from upstream `main` with no revision pinned, so the documents
-//! move under the cases: `pandoc_manual.md` has since grown from 300 856 to
-//! 304 665 bytes, which slid the two `late_edit` cases from a 7.0% window to a
-//! 7.5% one and their speedup from 5.7x to ~4.8x. Read a fresh run, not this
-//! table, and see the note on those cases' floors.
+//! The `bytes` column dates this table for a second reason, since fixed:
+//! `download.sh` used to fetch the corpus from upstream `main` with no revision
+//! pinned, so the documents moved under the cases. `pandoc_manual.md` grew from
+//! 300 856 to 304 665 bytes, which slid the two `late_edit` cases from a 7.0%
+//! window to a 7.5% one and their speedup from 5.7x to ~4.8x. The corpus is
+//! pinned to fixed revisions now, so a re-measured table will stay valid until
+//! someone bumps them deliberately.
 //!
 //! ```text
 //! case                               bytes  steps    full    incr  speedup  fallback   bail%  window%
@@ -102,14 +116,22 @@
 //!
 //! What the table says:
 //!
-//! * **The speedup is a function of `window %` and nothing else.** Every case
-//!   below ~25% wins outright; the ones that used to sit at or above ~90% no
-//!   longer appear in that column at all, because the cutoff declines them
-//!   before the window parse. `tables_single_edit` is the shape that made the
-//!   point: it edits line 40 of a 25 KB document, used to re-parse 98% of it
-//!   for 1.0x, and reported a 7.5% *spliced* share --- the number the old
-//!   harness printed, and the reason "7% reparsed, 0.98x speedup" used to look
-//!   like a paradox.
+//! * **For the window tiers, the speedup is a function of `window %` and
+//!   nothing else.** Every case below ~25% wins outright; the ones that used to
+//!   sit at or above ~90% no longer appear in that column at all, because the
+//!   cutoff declines them before the window parse. `tables_single_edit` is the
+//!   shape that made the point: it edits line 40 of a 25 KB document, used to
+//!   re-parse 98% of it for 1.0x, and reported a 7.5% *spliced* share --- the
+//!   number the old harness printed, and the reason "7% reparsed, 0.98x
+//!   speedup" used to look like a paradox.
+//!
+//!   **The token tier breaks this relation, which is the point of it.** Its
+//!   cost is the length of one token plus a green root rebuild, so it does not
+//!   scale with the document at all --- and the way to read that off the table
+//!   is the `pandoc_manual_typing_stream` / `..._midline` pair: same document,
+//!   same line, same keystrokes, one column apart, and only the tier differs.
+//!   A speedup that moves with window share on one row and not the other is
+//!   what "step change, not improvement" means here.
 //! * **A wide reparse loses to a full parse even when it succeeds**, which is
 //!   what the cutoff is for. Before it, `pandoc_manual_early_edit` accepted,
 //!   re-parsed 97%, and paid 0.9x for the guard cascade and splice on top;
