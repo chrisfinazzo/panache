@@ -975,6 +975,71 @@ impl SyntheticDoc {
     }
 }
 
+/// A document holding one enormous top-level block beside ordinary paragraphs,
+/// for bracketing the region tier's width bail.
+///
+/// The bail declines a region covering more than `1 / REGION_MAX_FILE_DIVISOR`
+/// of the document, so bracketing it needs two edits into the *same* document
+/// whose enclosing top-level children sit on opposite sides of that fraction.
+/// A fenced code block is the cheapest way to build one deliberately: its whole
+/// body is a single child, so its size is chosen rather than emergent.
+struct WideBlockDoc {
+    text: String,
+    /// A line inside the oversized fenced block --- the region is that block,
+    /// which is over the fraction, so the tier declines.
+    block_line: u32,
+    /// A line in an ordinary paragraph well before it --- the region is one
+    /// paragraph, which is far under, so the tier answers.
+    paragraph_line: u32,
+}
+
+/// Paragraphs between the edited paragraph and the oversized block, so the
+/// paragraph's *neighbours* are ordinary too. See [`WideBlockDoc::new`].
+const SEPARATION_PARAGRAPHS: usize = 3;
+
+impl WideBlockDoc {
+    /// `block_paragraphs` of fence body against `tail_paragraphs` of prose. The
+    /// default proportions put the block at roughly a third of the document and
+    /// a paragraph at well under a hundredth.
+    fn new(block_paragraphs: usize, tail_paragraphs: usize) -> Self {
+        let body = |index: usize| {
+            format!("Paragraph {index:03} alpha beta gamma delta epsilon zeta eta theta.\n")
+        };
+
+        let mut text = String::from("# Wide Block Document\n\n");
+
+        // The paragraph comes first, so neither line number moves when the
+        // block is resized to sit on the other side of the fraction. It is
+        // also kept *away* from the fence by a few filler paragraphs, because
+        // the width bail charges a region's neighbours as well as itself: a
+        // paragraph abutting the oversized block would be declined for its
+        // neighbour's size and would bracket nothing.
+        let paragraph_line = 2;
+        for index in 0..SEPARATION_PARAGRAPHS {
+            text.push_str(&body(index));
+            text.push('\n');
+        }
+
+        text.push_str("```\n");
+        let block_line = 2 + 2 * SEPARATION_PARAGRAPHS as u32 + 1;
+        for index in 0..block_paragraphs {
+            text.push_str(&body(index));
+        }
+        text.push_str("```\n\n");
+
+        for index in 0..tail_paragraphs {
+            text.push_str(&body(index));
+            text.push('\n');
+        }
+
+        Self {
+            text,
+            block_line,
+            paragraph_line,
+        }
+    }
+}
+
 /// Columns of the words in a generated paragraph line, so a case can say
 /// "replace `beta`" without counting characters.
 const ALPHA: (u32, u32) = (14, 19);
@@ -1017,6 +1082,7 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
     let small = SyntheticDoc::new(25);
     let medium = SyntheticDoc::new(250);
     let large = SyntheticDoc::new(1200);
+    let wide_block = WideBlockDoc::new(120, 200);
     let utf16_doc = "# UTF16\n\nemoji: 😀 rocket: 🚀\nRésumé café\nmath αβγ\nclosing line\n";
     let refdefs = refdef_document();
 
@@ -1042,7 +1108,10 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: small.text.clone(),
             iterations: default_iterations,
-            expect: Expect::reuses(),
+            // Scattered over 20 lines, so `diff_edit` spans most of a small
+            // document and the suffix window answers it. Pinned because "which
+            // tier" is what silently changes when a cascade is reordered.
+            expect: Expect::reuses().strategy("suffix_window"),
         },
         BenchCase {
             id: "multi_change_medium_4".to_owned(),
@@ -1054,7 +1123,9 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: medium.text.clone(),
             iterations: default_iterations / 2,
-            expect: Expect::reuses(),
+            // 76% window: under the cutoff, so a window still answers, and the
+            // collapsed span is far too wide for a region.
+            expect: Expect::reuses().strategy("suffix_window"),
         },
         // Multi-cursor inside one paragraph: the same change count as the
         // scattered case, but `diff_edit` spans one line instead of 150. The
@@ -1165,10 +1236,45 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             iterations: default_iterations / 2,
             expect: Expect::reuses().strategy("section_window"),
         },
+        // The far side of the cutoff, and no longer a decline: the window is
+        // still refused at 87.8%, but the region tier answers what the refusal
+        // leaves behind. That is the whole shape of the phase in one row --
+        // the pair still brackets the *window* cutoff (move it and this row's
+        // strategy flips between `region` and `section_window`), and the
+        // outcome on the far side went from a full parse to a 4.5x splice.
+        //
+        // Floor ~5% under the lowest of three runs (8.9x, 9.0x, 8.8x).
         BenchCase {
             id: "window_cutoff_declined".to_owned(),
             steps: vec![vec![word_change(medium.line(30), ALPHA, "`ALPHA`")]],
             input: medium.text.clone(),
+            iterations: default_iterations / 2,
+            expect: Expect::reuses().strategy("region").min_speedup(8.3),
+        },
+        // The region width bail's own bracketing pair, the analogue of the two
+        // rows above for the other cost guard. Both edit the same document with
+        // the same one-word replacement; they differ only in how much of it the
+        // enclosing top-level child covers, which is what the bail measures.
+        //
+        // `region_width_declined` edits inside one enormous block, so the region
+        // is that block and is over a quarter of the document; `..._accepted`
+        // edits an ordinary paragraph beside it. Move `REGION_MAX_FILE_DIVISOR`
+        // and exactly one of them flips.
+        BenchCase {
+            id: "region_width_accepted".to_owned(),
+            steps: vec![vec![word_change(
+                wide_block.paragraph_line,
+                ALPHA,
+                "`ALPHA`",
+            )]],
+            input: wide_block.text.clone(),
+            iterations: default_iterations / 2,
+            expect: Expect::reuses().strategy("region").min_speedup(7.1),
+        },
+        BenchCase {
+            id: "region_width_declined".to_owned(),
+            steps: vec![vec![word_change(wide_block.block_line, ALPHA, "`ALPHA`")]],
+            input: wide_block.text,
             iterations: default_iterations / 2,
             expect: Expect::declines(),
         },
@@ -1193,12 +1299,22 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         // Prose deep inside a definition-list item, a third of the way in:
         // the worst shape for a suffix window at scale, since almost the whole
         // document is still downstream of the seam.
+        //
+        // The roadmap predicted this one would keep declining, on the grounds
+        // that the edit is inside a nested container and nested-container
+        // regions are an explicit non-goal. It flips anyway, and the reason is
+        // worth keeping: the region is not the definition-list *item*, it is
+        // the whole top-level `DEFINITION_LIST` that contains it --- 10 576
+        // bytes of 304 665, or 3.5%. The non-goal bites when a region would
+        // have to start inside a container, not when an edit does.
+        //
+        // Floor ~5% under the lowest of three runs (3.1x, 3.1x, 3.2x).
         cases.push(BenchCase {
             id: "pandoc_manual_early_edit".to_owned(),
             input: doc.clone(),
             steps: vec![vec![range_change(292, 4, 292, 13, "APPENDING")]],
             iterations,
-            expect: Expect::declines(),
+            expect: Expect::reuses().strategy("region").min_speedup(2.9),
         });
         // Line 200 is `[`setspace`]: ...`, and the replacement rewrites the
         // *label*. The host's set comparison declines before the parser is
@@ -1211,21 +1327,22 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             iterations,
             expect: Expect::declines(),
         });
-        // Both floors were 5.0, the roadmap's number, calibrated when
-        // `pandoc_manual.md` was 300 856 bytes and line 7600 chose a 7.0%
-        // window. They measure 4.76-4.89x today, and the cause is the corpus
-        // rather than the code: `download.sh` fetches the document from
-        // `refs/heads/main`, upstream has grown it to 304 665 bytes, and line
-        // 7600 now sits deeper in a longer document -- a 7.5% window. Speedup
-        // is a function of window share and nothing else (see the table at the
-        // top of this file), so a floor this tight was pinned to a document
-        // nobody in this repository controls.
+        // Both floors were 5.0, the roadmap's number, then 4.5 after upstream
+        // grew `pandoc_manual.md` and slid line 7600 from a 7.0% window to a
+        // 7.5% one. The corpus is pinned now, and these are 7.2 and 7.4:
+        // ~5% under the lowest of three runs (7.65x, 7.8x, 7.7x and 7.85x,
+        // 7.8x, 7.8x).
         //
-        // Lowered to 4.5x: about 5% under the lowest of five observed runs,
-        // which keeps the margin visible on every run without failing on the
-        // next upstream commit to a Markdown file. The durable fix is pinning
-        // the corpus to a revision in `download.sh`; until that happens no
-        // floor here can be tighter than upstream's drift.
+        // The jump from ~4.8x is not the region tier --- these two are still
+        // section-window cases and the tier does not touch them. It is the
+        // refdef proximity guard, which used to read its old-text window out of
+        // the tree and so walked every token in it, ~800 us per attempt on a
+        // 300 KB document. That guard runs on the path of *every* reparse, so
+        // removing it moved every row in the table.
+        //
+        // The thin margin the roadmap flagged here (4.53x against a 4.5x floor
+        // on one of six runs) is therefore retired rather than lowered again:
+        // the numbers moved up, not the threshold down.
         //
         // Both edits sit at **column 0**, which is what keeps them on the
         // section window now that the token tier exists: the tier refuses an
@@ -1237,14 +1354,14 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             input: doc.clone(),
             steps: vec![vec![insert_change(7600, 0, "NOTE: ")]],
             iterations,
-            expect: Expect::reuses().strategy("section_window").min_speedup(4.5),
+            expect: Expect::reuses().strategy("section_window").min_speedup(7.2),
         });
         cases.push(BenchCase {
             id: "pandoc_manual_typing_stream".to_owned(),
             input: doc.clone(),
             steps: typing_stream(7600, 0, "NOTE: typing"),
             iterations,
-            expect: Expect::reuses().strategy("section_window").min_speedup(4.5),
+            expect: Expect::reuses().strategy("section_window").min_speedup(7.4),
         });
         // The pair above, moved one column inward -- and that is the whole
         // token tier.
@@ -1281,7 +1398,40 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         });
     }
 
-    let smaller: [(&str, &str, u32, u32, u32, u32, &str); 3] = [
+    // All three edit near the top of their document, so the nearest top-level
+    // heading is close to byte 0 and the window the section strategy would
+    // choose is over the cutoff. Before the region tier they were the shape
+    // that paid one sub-microsecond decline and nothing else; they are the
+    // three cases that tier was built for, and the enclosing top-level child is
+    // what decides how much it wins:
+    //
+    //   large_authoring.qmd  GRID_TABLE  1569 B of 25 477   6.2%
+    //   tables.qmd           FENCED_DIV   512 B of 25 179   2.0%
+    //   math.qmd             PIPE_TABLE  1497 B of 30 112   5.0%
+    //
+    // `large_authoring.qmd` is the one to watch: it is the document that
+    // carried the 13-17% end-to-end regression recorded in the roadmap, where
+    // every keystroke declined the window cutoff and paid a full parse plus a
+    // rejected reuse.
+    //
+    // Floors are ~5% under the lowest of three runs (4.0x, 4.0x, 3.2x). They
+    // are an order of magnitude below the token tier's because these edits land
+    // in tables and divs, not prose: the region is a whole block, so the win is
+    // the block-to-document ratio rather than a token's.
+    /// A real-document case: id, file, the edit's start/end line and column,
+    /// its replacement, and the speedup floor it claims.
+    type SmallerCase = (
+        &'static str,
+        &'static str,
+        u32,
+        u32,
+        u32,
+        u32,
+        &'static str,
+        f64,
+    );
+
+    let smaller: [SmallerCase; 3] = [
         (
             "large_authoring_single_edit",
             "large_authoring.qmd",
@@ -1290,24 +1440,29 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             60,
             10,
             "AUTHORING",
+            3.8,
         ),
-        ("tables_single_edit", "tables.qmd", 40, 4, 40, 8, "TABLES"),
-        ("math_single_edit", "math.qmd", 25, 3, 25, 8, "MATH"),
+        (
+            "tables_single_edit",
+            "tables.qmd",
+            40,
+            4,
+            40,
+            8,
+            "TABLES",
+            3.8,
+        ),
+        ("math_single_edit", "math.qmd", 25, 3, 25, 8, "MATH", 3.0),
     ];
 
-    // All three edit near the top of their document, so the nearest top-level
-    // heading is close to byte 0 and the window the section strategy would
-    // choose is over the cutoff. The region tier (roadmap Phase 8) is what
-    // turns these into reuse; until then they are the shape that pays one
-    // sub-microsecond decline and nothing else.
-    for (id, file, sl, sc, el, ec, replacement) in smaller {
+    for (id, file, sl, sc, el, ec, replacement, floor) in smaller {
         if let Some(doc) = load_document(file) {
             cases.push(BenchCase {
                 id: id.to_owned(),
                 input: doc,
                 steps: vec![vec![range_change(sl, sc, el, ec, replacement)]],
                 iterations: (default_iterations / 2).max(8),
-                expect: Expect::declines(),
+                expect: Expect::reuses().strategy("region").min_speedup(floor),
             });
         }
     }
