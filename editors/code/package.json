@@ -189,8 +189,8 @@
         },
         "panache.experimental.incrementalParsing": {
           "type": "boolean",
-          "default": false,
-          "description": "Enable experimental incremental parsing in the Panache language server. This may improve didChange performance but can be unstable."
+          "default": true,
+          "description": "Reuse the previous syntax tree when a document changes, instead of reparsing it from scratch. On by default; set to false to rule the incremental path out while diagnosing a problem. A successful reuse is required to be identical to a full parse, so this affects speed rather than results."
         },
         "panache.symbols.document.enable": {
           "type": "boolean",

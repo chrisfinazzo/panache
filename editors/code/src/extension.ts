@@ -227,7 +227,7 @@ async function startClient(
   );
   const experimentalIncrementalParsing = config.get<boolean>(
     "experimental.incrementalParsing",
-    false,
+    true,
   );
 
   const serverOptions: ServerOptions = {
