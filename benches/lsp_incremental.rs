@@ -673,8 +673,16 @@ fn incremental_step(
                 // window way would report a 40-byte splice on a 300 KB
                 // document as a 99% window, which is the opposite of what
                 // happened.
+                //
+                // The region tier is bounded like the token tier, so it is
+                // measured the same way. That *under*-reports it: its two
+                // boundary parses carry a neighbour each and are real work
+                // that no range on `Reparsed` records. Read `window%` on a
+                // region row as the spliced region, not as everything parsed.
                 window_bytes: match reparsed.strategy {
-                    ReparseStrategy::Token => reparsed.reparse_range.1 - reparsed.reparse_range.0,
+                    ReparseStrategy::Token | ReparseStrategy::Region => {
+                        reparsed.reparse_range.1 - reparsed.reparse_range.0
+                    }
                     ReparseStrategy::SectionWindow | ReparseStrategy::SuffixWindow => {
                         new_text.len().saturating_sub(reparsed.reparse_range.0)
                     }

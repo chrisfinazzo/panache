@@ -97,17 +97,25 @@ pub fn diff_edit(old: &str, new: &str) -> Edit {
 
 /// Which window a successful reparse re-derived.
 ///
-/// [`ReparseStrategy::Token`] is the odd one out and the cheapest: it re-derives
-/// no window at all, replacing a single green `TEXT` token in place. The other
-/// two both parse their window to EOF -- list-item buffering depends on
-/// unbounded lookahead, so a bounded standalone window parse is untrustworthy.
-/// The section window differs from the suffix window in that it re-adopts the
-/// old suffix children when they come back structurally equal, preserving their
-/// `Arc` identity; when they don't, it degrades to the wholesale suffix splice
-/// and reports itself as [`ReparseStrategy::SuffixWindow`].
+/// [`ReparseStrategy::Token`] is the cheapest and re-derives no window at all,
+/// replacing a single green `TEXT` token in place.
+///
+/// [`ReparseStrategy::Region`] parses a *bounded* fragment -- one run of
+/// top-level `DOCUMENT` children -- and proves the seams with neighbour-sized
+/// boundary parses. Its cost is a function of the region, not of where the
+/// region sits in the document.
+///
+/// The two window strategies both parse their window to EOF, so their cost is a
+/// function of window share and nothing else. They are the fallback for what the
+/// region tier declines. The section window differs from the suffix window in
+/// that it re-adopts the old suffix children when they come back structurally
+/// equal, preserving their `Arc` identity; when they don't, it degrades to the
+/// wholesale suffix splice and reports itself as
+/// [`ReparseStrategy::SuffixWindow`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReparseStrategy {
     Token,
+    Region,
     SectionWindow,
     SuffixWindow,
 }
@@ -117,6 +125,7 @@ impl ReparseStrategy {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Token => "token",
+            Self::Region => "region",
             Self::SectionWindow => "section_window",
             Self::SuffixWindow => "suffix_window",
         }
@@ -213,12 +222,31 @@ pub fn reparse_with_cost_guards(
         return Some(result);
     }
 
-    reparse_ranges(
+    let old_edit = (edit.range.start, edit.range.end);
+    if let Some(result) = reparse_ranges(
         new_text,
         &options,
         &prev_tree,
         prev_errors,
-        (edit.range.start, edit.range.end),
+        old_edit,
+        edit.new_range(),
+        cost_guards,
+    ) {
+        return Some(result);
+    }
+
+    // The region tier, for now, is tried *after* the window tiers rather than
+    // ahead of them: it changes nothing that reuses today, while still answering
+    // everything the window-size cutoff declines -- which is the whole
+    // early-and-mid-document population the cutoff exists to refuse. Promoting
+    // it ahead of them is a later commit, so that the two thin section-window
+    // speedup floors move once, deliberately, and with the tier already proven.
+    reparse_region(
+        new_text,
+        &options,
+        &prev_tree,
+        prev_errors,
+        old_edit,
         edit.new_range(),
         cost_guards,
     )
@@ -1472,6 +1500,491 @@ fn reparse_section_window(
     })
 }
 
+// ---------------------------------------------------------------------------
+// The region tier
+// ---------------------------------------------------------------------------
+
+/// One green child of `DOCUMENT`, owned.
+type GreenChild = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
+
+/// Below this a region is always attempted, whatever share of the file it is:
+/// on a small document every parse in play is small, and the fraction test
+/// alone would refuse the ordinary case of a document with one or two blocks.
+const REGION_ALWAYS_TRY_BYTES: usize = 4 * 1024;
+
+/// A region wider than `1 / REGION_MAX_FILE_DIVISOR` of the document costs more
+/// to answer than the full parse it is avoiding. A divisor rather than a
+/// fraction, so `4` here means a quarter.
+const REGION_MAX_FILE_DIVISOR: usize = 4;
+
+/// Whether a region is too wide to be worth attempting.
+///
+/// Measured over the region **plus its two neighbours**, not the region alone,
+/// which is where this departs from fatou's version. The tier answers a region
+/// with a fragment parse of it plus up to two boundary parses that each carry a
+/// whole neighbour, and a panache neighbour can be a 19 KB grid table where a
+/// fatou one is a single statement. Charging only the region would let a narrow
+/// region between two enormous blocks cost more than the full parse.
+///
+/// Evaluated from `TextRange`s before any parse runs, so a decline costs the
+/// tree walk that found the region and nothing more.
+///
+/// A performance guard only: like every other bail here it returns the caller to
+/// a full parse, so it cannot affect what a reparse yields. [`CostGuards`] turns
+/// it off for the fuzz harness, whose snippets are tens of bytes long and would
+/// otherwise never reach this tier at all.
+fn region_is_too_wide(cost_guards: CostGuards, parsed_len: usize, text_len: usize) -> bool {
+    if cost_guards == CostGuards::Ignored {
+        return false;
+    }
+    parsed_len > REGION_ALWAYS_TRY_BYTES && parsed_len > text_len / REGION_MAX_FILE_DIVISOR
+}
+
+/// A contiguous run of top-level `DOCUMENT` children, in old-text coordinates.
+///
+/// `first`/`last` are inclusive indices into `old_tree.children()`; `prev`/`next`
+/// are the nearest non-`BLANK_LINE` children outside the run, which the boundary
+/// parses use as context. The bytes between a neighbour and the region are all
+/// blank lines, and are passed to the boundary parses verbatim as gap text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Region {
+    start: usize,
+    end: usize,
+    prev: Option<(usize, usize)>,
+    next: Option<(usize, usize)>,
+}
+
+/// Select the run of top-level children the edit touches, widened to blank-line
+/// boundaries.
+///
+/// Closed-interval touch (fatou's rule) makes a boundary insertion extend into
+/// the neighbour it abuts; deleting the blank line between two paragraphs pulls
+/// in both. The run is then widened outward until a `BLANK_LINE` child sits on
+/// each side, which is panache's substitute for fatou's four textual
+/// newline-decoupling scans: `BLANK_LINE` is a top-level *child* here, so
+/// "blank-line separated" is a kind test on the tree rather than a scan of two
+/// texts. Anchoring there is what makes the fragment's entry context canonical
+/// (`has_blank_before` is already true at its byte 0) and what kills the whole
+/// lazy-continuation and setext-reaching-back class by construction.
+///
+/// `None` when the run covers every child, which is a degeneracy check rather
+/// than a cost one -- there is nothing outside the region to splice against, the
+/// fragment parse *is* the full parse, and admitting it would have the oracle
+/// compare a full parse to itself while the splice counter reported a hit. It
+/// therefore stays unconditional even under [`CostGuards::Ignored`].
+fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Region> {
+    let children: Vec<SyntaxNode> = old_tree.children().collect();
+    if children.is_empty() {
+        return None;
+    }
+
+    let touches = |child: &SyntaxNode| {
+        let range = child.text_range();
+        usize::from(range.start()) <= old_edit.1 && usize::from(range.end()) >= old_edit.0
+    };
+    let mut first = children.iter().position(touches)?;
+    let mut last = children.len() - 1 - children.iter().rev().position(touches)?;
+
+    let is_blank = |index: usize| children[index].kind() == SyntaxKind::BLANK_LINE;
+    while first > 0 && !is_blank(first - 1) {
+        first -= 1;
+    }
+    while last + 1 < children.len() && !is_blank(last + 1) {
+        last += 1;
+    }
+
+    if first == 0 && last == children.len() - 1 {
+        return None;
+    }
+
+    // A region of nothing but blank lines has no content to reparse, and the
+    // two neighbours then sit next to each other across it in a way neither
+    // one-sided boundary parse can see. Widening above makes this unreachable
+    // for any edit that touches a blank line -- it pulls in the non-blank
+    // neighbours -- so declining costs nothing and is simpler than fatou's
+    // extra cross-region parse.
+    if (first..=last).all(is_blank) {
+        return None;
+    }
+
+    let prev = children[..first]
+        .iter()
+        .rfind(|child| child.kind() != SyntaxKind::BLANK_LINE)
+        .map(|child| {
+            (
+                usize::from(child.text_range().start()),
+                usize::from(child.text_range().end()),
+            )
+        });
+    let next = children[last + 1..]
+        .iter()
+        .find(|child| child.kind() != SyntaxKind::BLANK_LINE)
+        .map(|child| {
+            (
+                usize::from(child.text_range().start()),
+                usize::from(child.text_range().end()),
+            )
+        });
+
+    Some(Region {
+        start: usize::from(children[first].text_range().start()),
+        end: usize::from(children[last].text_range().end()),
+        prev,
+        next,
+    })
+}
+
+/// Whether no top-level child of `tree` straddles `seam`.
+///
+/// `DOCUMENT` children tile the text, so no-straddle is exactly "a child
+/// boundary exists at `seam`", i.e. the two sides parsed independently. A
+/// straddling child is a construct that reached across the seam: a fence or div
+/// that swallowed its neighbour, a setext underline that promoted the paragraph
+/// above it, a table that claimed a rule on the far side.
+fn no_straddle(tree: &SyntaxNode, seam: usize) -> bool {
+    let seam = rowan::TextSize::new(seam as u32);
+    tree.children_with_tokens()
+        .all(|child| !(child.text_range().start() < seam && seam < child.text_range().end()))
+}
+
+/// The top-level children of `tree`, split at `seam` -- `None` when
+/// [`no_straddle`] fails, so every caller gets the seam check for free.
+fn split_children_at(tree: &SyntaxNode, seam: usize) -> Option<(Vec<GreenChild>, Vec<GreenChild>)> {
+    if !no_straddle(tree, seam) {
+        return None;
+    }
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    let mut offset = 0usize;
+    for child in tree.green().children() {
+        let len = usize::from(child.text_len());
+        if offset + len <= seam {
+            before.push(child.to_owned());
+        } else {
+            after.push(child.to_owned());
+        }
+        offset += len;
+    }
+    Some((before, after))
+}
+
+/// The top-level children of `tree`, owned.
+fn green_children(tree: &SyntaxNode) -> Vec<GreenChild> {
+    tree.green()
+        .children()
+        .map(|child| child.to_owned())
+        .collect()
+}
+
+/// Parse `text` as a fragment lifted from `offset` in a larger document, or as a
+/// document when `offset` is 0 (where it really is one).
+fn parse_fragment_at(
+    text: &str,
+    offset: usize,
+    config: &ParserOptions,
+) -> (SyntaxNode, Vec<SyntaxError>) {
+    if offset == 0 {
+        Parser::new(text, config).parse_with_errors()
+    } else {
+        Parser::new_fragment(text, config).parse_with_errors()
+    }
+}
+
+/// Lines whose reading can pair with a partner *arbitrarily far away* in the
+/// document, in document order and verbatim.
+///
+/// This is the tier's answer to the one hazard class no bounded boundary parse
+/// can catch. Absorptive constructs -- an unclosed `:::`, a matched-pair HTML
+/// block -- swallow forward greedily, so whatever the fragment leaves open eats
+/// its immediate next sibling and the forward boundary parse sees it. But two
+/// families only *form* when a partner is found at unbounded distance, and
+/// without the partner they degrade to something perfectly innocent-looking:
+///
+/// * Fence pairing. Under the pandoc dialect an unclosed ` ``` ` is literal
+///   paragraph text, not a code block, so a paragraph three siblings back can be
+///   a live opener while looking inert. Appending a closing fence inside the
+///   region collapses every child between them into one `CODE_BLOCK`, and no
+///   parse of the region plus one neighbour contains both delimiters.
+/// * Multiline-table borders. A `----` run pairs with a closing run across
+///   arbitrarily many blank-line-separated blocks, swallowing everything
+///   between; without the closer it is a thematic break.
+///
+/// The guard is a *comparison*, not a ban: when the region's old and new text
+/// carry the same pairing lines, the whole document's sequence of them is
+/// unchanged (the prefix and suffix are byte-identical), so every pairing
+/// anywhere resolves exactly as it did. That admits the common case -- editing
+/// prose, or a table cell, or a line inside a code block -- and declines only an
+/// edit that actually adds, removes, or alters a delimiter. It costs O(region)
+/// and, unlike the prefix scan it replaces, nothing at all in the document's
+/// size, which is what keeps a keystroke's cost independent of where it lands.
+fn long_range_pairing_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| {
+            let trimmed = line.trim_start_matches([' ', '\t']);
+            if line.len() - trimmed.len() <= 3
+                && (trimmed.starts_with("```")
+                    || trimmed.starts_with("~~~")
+                    || trimmed.starts_with(":::")
+                    || trimmed.starts_with("$$"))
+            {
+                return true;
+            }
+            if line.contains("<!--") || line.contains("-->") {
+                return true;
+            }
+            // Rule-shaped lines: thematic breaks, setext underlines, and the
+            // borders and separator rows of every table dialect. Cheap and
+            // deliberately over-eager -- a false positive costs one decline.
+            let body = trimmed.trim_end();
+            !body.is_empty()
+                && body
+                    .chars()
+                    .all(|c| matches!(c, '-' | '=' | '+' | '|' | ':' | ' ' | '\t'))
+                && body.chars().any(|c| matches!(c, '-' | '=' | '+' | '|'))
+        })
+        .collect()
+}
+
+/// Merge the previous errors with a bounded region reparse's own.
+///
+/// This is the **third bucket** [`merge_incremental_errors`] does not have and
+/// its doc comment promised to the region tier: a bounded region leaves a live
+/// suffix whose errors survive and must move by the edit delta.
+///
+/// * Before the region: kept verbatim. Region selection guarantees
+///   `region.start <= edit.start`, so those offsets did not move.
+/// * Inside the region: dropped; the fragment parse re-derives them.
+/// * After the region: shifted by `delta`.
+///
+/// `SyntaxErrorSource::Yaml` is the only error source and both emit sites lie
+/// strictly inside their owning top-level child, so an error cannot straddle a
+/// region boundary. That stays a `debug_assert!` plus a bail rather than a
+/// guess, exactly as the seam merge treats its own impossible case.
+fn merge_region_errors(
+    old_errors: &[SyntaxError],
+    region: (usize, usize),
+    frag_errors: Vec<SyntaxError>,
+    delta: isize,
+) -> Option<Vec<SyntaxError>> {
+    let shift = |offset: rowan::TextSize, by: isize| -> Option<rowan::TextSize> {
+        let shifted = usize::from(offset) as isize + by;
+        (shifted >= 0).then(|| rowan::TextSize::new(shifted as u32))
+    };
+    let region_start = rowan::TextSize::new(region.0 as u32);
+    let region_end = rowan::TextSize::new(region.1 as u32);
+
+    let mut merged = Vec::with_capacity(old_errors.len() + frag_errors.len());
+    for error in old_errors {
+        if error.range.end() <= region_start {
+            merged.push(error.clone());
+        }
+    }
+    for error in frag_errors {
+        merged.push(SyntaxError {
+            range: rowan::TextRange::new(
+                error.range.start() + region_start,
+                error.range.end() + region_start,
+            ),
+            ..error
+        });
+    }
+    for error in old_errors {
+        if error.range.start() >= region_end {
+            merged.push(SyntaxError {
+                range: rowan::TextRange::new(
+                    shift(error.range.start(), delta)?,
+                    shift(error.range.end(), delta)?,
+                ),
+                ..error.clone()
+            });
+        } else if error.range.end() <= region_start {
+            // Already carried by the "before" pass above.
+        } else if error.range.start() < region_start || error.range.end() > region_end {
+            debug_assert!(
+                false,
+                "syntax error {:?} straddles region {region:?}",
+                error.range
+            );
+            return None;
+        }
+        // Otherwise the error lies inside the region and the fragment parse
+        // re-derived it.
+    }
+
+    debug_assert!(
+        merged
+            .windows(2)
+            .all(|w| w[0].range.start() <= w[1].range.start()),
+        "merged syntax errors are out of document order: {merged:?}"
+    );
+    Some(merged)
+}
+
+/// The region tier: reparse one run of top-level `DOCUMENT` children as a
+/// bounded fragment and splice it in place.
+///
+/// The other window strategies re-parse from a window start to EOF, so their
+/// cost is a function of where the edit sits. This one parses the region, plus
+/// up to two neighbour-sized boundary parses, and nothing else.
+///
+/// The correctness argument has three parts, and the first is what makes the
+/// other two finite:
+///
+/// * **Everything outside the region is byte-identical, and a region is a run of
+///   whole children.** So every construct in the old parse is entirely inside
+///   the region or entirely outside it, the container stack and fence state are
+///   empty at both seams (that is what being top-level children *means*), and
+///   the only hazards left are couplings the edit newly creates.
+/// * **Absorptive lookahead is caught by the boundary parses.** Anything the
+///   fragment leaves open swallows greedily, so it eats the immediate neighbour
+///   first and cannot hide: the neighbour then straddles the seam or fails to
+///   come back byte-identical.
+/// * **Terminator-seeking lookahead is caught by
+///   [`long_range_pairing_lines`],** which is the only class that reaches past
+///   one neighbour.
+///
+/// Every check is a decline. `None` costs the caller the window tiers it would
+/// have tried anyway.
+#[allow(clippy::too_many_arguments)]
+fn reparse_region(
+    input: &str,
+    config: &ParserOptions,
+    old_tree: &SyntaxNode,
+    old_errors: &[SyntaxError],
+    old_edit: (usize, usize),
+    new_edit: (usize, usize),
+    cost_guards: CostGuards,
+) -> Option<Reparsed> {
+    if old_tree.kind() != SyntaxKind::DOCUMENT {
+        return None;
+    }
+    if old_edit.1 > usize::from(old_tree.text_range().end()) {
+        return None;
+    }
+
+    let region = select_region(old_tree, old_edit)?;
+
+    // The retained prefix is the old bytes before the region, so a region
+    // starting past the edit would keep stale pre-edit bytes and drop the edit
+    // from the spliced tree. Closed-interval touch gives this, and widening
+    // only moves the start left, so it is an invariant rather than a guard --
+    // but it is load-bearing for the error merge's "before" bucket, which keeps
+    // offsets verbatim on exactly this ground.
+    debug_assert!(region.start <= old_edit.0, "region starts past the edit");
+    if region.start > old_edit.0 {
+        return None;
+    }
+
+    let delta = new_edit.1 as isize - old_edit.1 as isize;
+    let new_region_end = (region.end as isize + delta) as usize;
+    if new_region_end > input.len()
+        || !input.is_char_boundary(region.start)
+        || !input.is_char_boundary(new_region_end)
+    {
+        return None;
+    }
+
+    // Cost, before any parse: the region plus whatever the boundary parses will
+    // carry with it.
+    let context_len = region.prev.map_or(0, |(s, e)| e - s) + region.next.map_or(0, |(s, e)| e - s);
+    if region_is_too_wide(
+        cost_guards,
+        (new_region_end - region.start) + context_len,
+        input.len(),
+    ) {
+        return None;
+    }
+
+    // Reference definitions and footnote definitions are document-scoped:
+    // retained children keep the resolution they were parsed with, so an edit
+    // that can add, remove, or alter one invalidates them at a distance. The
+    // window tiers run this and so must this one.
+    if edit_may_touch_refdefs(old_tree, old_edit, input, new_edit) {
+        return None;
+    }
+
+    let old_text = old_tree.text().to_string();
+    let fragment = &input[region.start..new_region_end];
+    if long_range_pairing_lines(&old_text[region.start..region.end])
+        != long_range_pairing_lines(fragment)
+    {
+        return None;
+    }
+
+    let (frag_tree, frag_errors) = parse_fragment_at(fragment, region.start, config);
+    let frag_children = green_children(&frag_tree);
+    let old_children = green_children(old_tree);
+
+    // Backward boundary parse: the previous child, the blank lines between it
+    // and the region, and the fragment. Three things must hold. Nothing may
+    // straddle the seam; the fragment must reparse in context exactly as it did
+    // alone; and `prev` must come back byte-identical -- that last one is not in
+    // fatou, and Markdown needs it, because the backward reach here rewrites the
+    // previous node *in place* without crossing the seam: a `:`/`~` line
+    // promotes a paragraph to a definition `TERM`, a `===` line to a setext
+    // heading, and a dash run turns one into a table rule.
+    if let Some((prev_start, prev_end)) = region.prev {
+        let guard = format!("{}{}", &old_text[prev_start..region.start], fragment);
+        let seam = region.start - prev_start;
+        let (parsed, _) = parse_fragment_at(&guard, prev_start, config);
+        let (before, after) = split_children_at(&parsed, seam)?;
+        if after != frag_children {
+            return None;
+        }
+        if before != children_covering(old_tree, &old_children, prev_start, region.start) {
+            return None;
+        }
+        debug_assert!(prev_end <= region.start);
+    }
+
+    // Forward boundary parse: the fragment, the blank lines after it, and the
+    // next child -- or the whole remaining tail when no child follows, since an
+    // EOF-adjacent construct can read differently once text follows it.
+    let tail_end = region.next.map_or(old_text.len(), |(_, end)| end);
+    if tail_end > region.end {
+        let guard = format!("{}{}", fragment, &old_text[region.end..tail_end]);
+        let seam = fragment.len();
+        let (parsed, _) = parse_fragment_at(&guard, region.start, config);
+        let (before, after) = split_children_at(&parsed, seam)?;
+        if before != frag_children {
+            return None;
+        }
+        if after != children_covering(old_tree, &old_children, region.end, tail_end) {
+            return None;
+        }
+    }
+
+    let errors = merge_region_errors(old_errors, (region.start, region.end), frag_errors, delta)?;
+
+    let old_green = old_tree.green();
+    let start_idx = first_child_ending_after(old_green, region.start);
+    let end_idx = first_child_starting_at_or_after(old_green, region.end);
+    let new_green = old_green.splice_children(start_idx..end_idx, frag_children);
+
+    let result = Reparsed {
+        green: new_green,
+        errors,
+        reparse_range: (region.start, new_region_end),
+        strategy: ReparseStrategy::Region,
+    };
+    assert_matches_full_parse(&result, input, config);
+    Some(result)
+}
+
+/// The slice of `children` covering exactly `[start, end)` in `tree`'s
+/// coordinates.
+fn children_covering(
+    tree: &SyntaxNode,
+    children: &[GreenChild],
+    start: usize,
+    end: usize,
+) -> Vec<GreenChild> {
+    let green = tree.green();
+    let from = first_child_ending_after(green, start);
+    let to = first_child_starting_at_or_after(green, end);
+    children[from.min(children.len())..to.min(children.len())].to_vec()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1636,15 +2149,28 @@ mod tests {
                     crate::parser::fingerprint(&full),
                     "an accepted splice must match a full parse"
                 );
-                reparsed.reparse_range.0
+                (reparsed.strategy, reparsed.reparse_range.0)
             })
         };
 
+        // The cutoff is what this case is about, and it still declines: an edit
+        // leaving ~90% of the document downstream never reaches a *window*. What
+        // changed is that declining a window is no longer declining the reparse
+        // -- the region tier answers the same edit from behind the cutoff, which
+        // is the whole reason it exists.
+        let (early_strategy, early_start) = splice_at("body 02").expect("the region tier answers");
+        assert_eq!(early_strategy, ReparseStrategy::Region);
         assert!(
-            splice_at("body 02").is_none(),
-            "a window leaving ~90% of the document downstream must decline"
+            input.len() - early_start > input.len() * MAX_WINDOW_SHARE_PERCENT / 100,
+            "the early edit still leaves more downstream than any window may cover"
         );
-        let late_start = splice_at("body 16").expect("a late edit must still splice");
+
+        let (late_strategy, late_start) = splice_at("body 16").expect("a late edit must splice");
+        assert_ne!(
+            late_strategy,
+            ReparseStrategy::Region,
+            "a late edit is claimed by a window tier, which is tried first"
+        );
         assert!(
             input.len() - late_start < input.len() * MAX_WINDOW_SHARE_PERCENT / 100,
             "the accepted window must sit under the cutoff"
@@ -1934,8 +2460,16 @@ mod tests {
         assert_eq!(inc.strategy, "full_reparse");
     }
 
+    /// A mid-document reparse must not read `% Title` as a pandoc title block,
+    /// which is a document-start-only construct.
+    ///
+    /// The suffix window could only decline this, via a textual guard on the
+    /// window's first line. The region tier *answers* it, because its fragment
+    /// parse is a `ParseOrigin::Fragment` and so has no document start to offer.
+    /// The debug oracle checks the result against a full parse on every splice,
+    /// so "region" here is a correctness claim, not just a routing one.
     #[test]
-    fn suffix_window_must_not_manufacture_a_pandoc_title_block() {
+    fn a_mid_document_reparse_must_not_manufacture_a_pandoc_title_block() {
         let input = "intro para\n\n Title\n% Author\n\ntail para\n";
         let at = input.find(" Title").unwrap();
         let inc = insert_incrementally(
@@ -1944,7 +2478,7 @@ mod tests {
             "%",
             flavor_options(crate::options::Flavor::Pandoc),
         );
-        assert_eq!(inc.strategy, "full_reparse");
+        assert_eq!(inc.strategy, "region");
     }
 
     #[test]
@@ -1957,8 +2491,11 @@ mod tests {
         assert_eq!(inc.strategy, "full_reparse");
     }
 
+    /// The MultiMarkdown twin of the pandoc case above, and the one the textual
+    /// guard was most over-eager about: it declined any window whose first line
+    /// merely contained a colon.
     #[test]
-    fn suffix_window_must_not_manufacture_an_mmd_title_block() {
+    fn a_mid_document_reparse_must_not_manufacture_an_mmd_title_block() {
         let input = "intro para\n\nKey value\nOther: thing\n\ntail para\n";
         let at = input.find("Key value").unwrap() + 3;
         let inc = insert_incrementally(
@@ -1967,7 +2504,7 @@ mod tests {
             ":",
             flavor_options(crate::options::Flavor::MultiMarkdown),
         );
-        assert_eq!(inc.strategy, "full_reparse");
+        assert_eq!(inc.strategy, "region");
     }
 
     #[test]
@@ -2798,5 +3335,324 @@ mod tests {
             text = apply_edit(&text, (at, at), &insert);
             at += insert.len();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // The region tier
+    // -----------------------------------------------------------------------
+
+    /// A document whose top-level children are easy to name, so a region can be
+    /// stated as a byte range rather than counted.
+    ///
+    /// Children: `HEADING`, `BLANK_LINE`, `PARAGRAPH`(alpha), `BLANK_LINE`,
+    /// `LIST`, `BLANK_LINE`, `PARAGRAPH`(gamma), `BLANK_LINE`,
+    /// `PARAGRAPH`(delta).
+    const REGION_DOC: &str =
+        "# Title\n\nAlpha para.\n\n- one\n- two\n\nGamma para.\n\nDelta para.\n";
+
+    fn region_of(input: &str, old_edit: (usize, usize)) -> Option<Region> {
+        let options = ParserOptions::default();
+        let tree = Parser::new(input, &options).parse();
+        select_region(&tree, old_edit)
+    }
+
+    /// The edit's own top-level child, and nothing else, when the edit is
+    /// strictly inside one and blank lines separate it from both neighbours.
+    #[test]
+    fn select_region_takes_the_edited_child_alone() {
+        let at = REGION_DOC.find("Gamma").expect("marker") + 2;
+        let region = region_of(REGION_DOC, (at, at)).expect("a region");
+        assert_eq!(
+            &REGION_DOC[region.start..region.end],
+            "Gamma para.\n",
+            "the region is exactly the edited paragraph"
+        );
+        assert_eq!(
+            region.prev.map(|(s, e)| &REGION_DOC[s..e]),
+            Some("- one\n- two\n"),
+            "prev skips the blank line to the nearest real child"
+        );
+        assert_eq!(
+            region.next.map(|(s, e)| &REGION_DOC[s..e]),
+            Some("Delta para.\n")
+        );
+    }
+
+    /// An insertion exactly on a child boundary could attach to either side, so
+    /// closed-interval touch takes both -- and widening then pulls in the real
+    /// child behind the blank line. Getting this wrong is how a splice loses an
+    /// edit that a full parse attaches to the neighbour.
+    #[test]
+    fn select_region_widens_at_a_child_boundary() {
+        let at = REGION_DOC.find("Gamma").expect("marker");
+        let region = region_of(REGION_DOC, (at, at)).expect("a region");
+        assert_eq!(
+            &REGION_DOC[region.start..region.end],
+            "- one\n- two\n\nGamma para.\n",
+            "an insertion abutting the blank line takes the child on each side of it"
+        );
+    }
+
+    /// Deleting the blank line between two blocks must select *both*, or the
+    /// splice would keep two children where a full parse has one. Closed-interval
+    /// touch is what gives this.
+    #[test]
+    fn select_region_spans_a_deleted_blank_line() {
+        let blank = REGION_DOC.find("\n\nGamma").expect("marker") + 1;
+        let region = region_of(REGION_DOC, (blank, blank + 1)).expect("a region");
+        assert_eq!(
+            &REGION_DOC[region.start..region.end],
+            "- one\n- two\n\nGamma para.\n",
+            "both neighbours and the blank line between them are in the region"
+        );
+    }
+
+    /// A region covering every child has nothing to splice against: the
+    /// "fragment" parse would be the full parse, and admitting it would have the
+    /// oracle compare a full parse to itself.
+    #[test]
+    fn select_region_declines_when_it_would_cover_the_whole_document() {
+        let input = "Only para.\n";
+        assert_eq!(region_of(input, (0, input.len())), None);
+        assert_eq!(region_of(REGION_DOC, (0, REGION_DOC.len())), None);
+        // An empty document has no children at all.
+        assert_eq!(region_of("", (0, 0)), None);
+    }
+
+    /// The region always starts at or before the edit, which is what lets the
+    /// error merge keep its "before" bucket's offsets verbatim.
+    #[test]
+    fn select_region_never_starts_past_the_edit() {
+        let options = ParserOptions::default();
+        let tree = Parser::new(REGION_DOC, &options).parse();
+        for at in 0..=REGION_DOC.len() {
+            if let Some(region) = select_region(&tree, (at, at)) {
+                assert!(
+                    region.start <= at,
+                    "region {region:?} starts past an edit at {at}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_straddle_finds_a_boundary_or_says_there_is_none() {
+        let options = ParserOptions::default();
+        // `Para one.\n` is 10 bytes, then a blank line, then `Para two.\n`.
+        let tree = Parser::new("Para one.\n\nPara two.\n", &options).parse();
+        assert!(no_straddle(&tree, 0), "the document start is a boundary");
+        assert!(no_straddle(&tree, 10), "a child boundary");
+        assert!(no_straddle(&tree, 21), "EOF is a boundary");
+        assert!(!no_straddle(&tree, 5), "mid-paragraph is not");
+
+        // A setext underline makes the two lines one child, so the boundary
+        // between them is gone.
+        let fused = Parser::new("Para one.\n=========\n", &options).parse();
+        assert!(!no_straddle(&fused, 10), "a setext heading spans the seam");
+    }
+
+    #[test]
+    fn region_width_bail_charges_the_neighbours_too() {
+        assert_eq!(REGION_ALWAYS_TRY_BYTES, 4 * 1024);
+        assert_eq!(REGION_MAX_FILE_DIVISOR, 4);
+        let enforced = |parsed, len| region_is_too_wide(CostGuards::Enforced, parsed, len);
+        assert!(
+            !enforced(4096, 4096),
+            "under the always-try floor, whatever the share"
+        );
+        assert!(
+            !enforced(5000, 100_000),
+            "over the floor but a twentieth of the file"
+        );
+        assert!(
+            enforced(30_000, 100_000),
+            "over the floor and over a quarter of the file"
+        );
+        // The test-only opt-out, without which the fuzz snippets -- tens of
+        // bytes, so every region is most of the document -- never reach the tier.
+        assert!(!region_is_too_wide(CostGuards::Ignored, 30_000, 100_000));
+        // Degenerate inputs must not panic or divide by zero.
+        assert!(!enforced(0, 0));
+    }
+
+    /// The guard is a *comparison*: an edit that leaves the region's pairing
+    /// lines alone is admitted, and one that adds, removes, or alters a
+    /// delimiter is not.
+    #[test]
+    fn long_range_pairing_lines_ignore_prose_and_catch_delimiters() {
+        assert_eq!(
+            long_range_pairing_lines("just prose\nmore prose\n"),
+            Vec::<&str>::new()
+        );
+        assert_eq!(long_range_pairing_lines("a\n```\nb\n"), vec!["```"]);
+        assert_eq!(long_range_pairing_lines("a\n::: note\n"), vec!["::: note"]);
+        assert_eq!(long_range_pairing_lines("a\n----\n"), vec!["----"]);
+        assert_eq!(
+            long_range_pairing_lines("a\n| - | - |\n"),
+            vec!["| - | - |"]
+        );
+        assert_eq!(
+            long_range_pairing_lines("a\n<!-- c -->\n"),
+            vec!["<!-- c -->"]
+        );
+        // Editing a code block's *body* leaves the fences alone, which is what
+        // keeps the common case on the tier.
+        assert_eq!(
+            long_range_pairing_lines("```\nlet x = 1;\n```\n"),
+            long_range_pairing_lines("```\nlet x = 12;\n```\n")
+        );
+        // Typing a fence does not.
+        assert_ne!(
+            long_range_pairing_lines("prose\n"),
+            long_range_pairing_lines("```\n")
+        );
+    }
+
+    #[test]
+    fn merge_region_errors_keeps_before_drops_inside_and_shifts_after() {
+        let err = |start: u32, end: u32| SyntaxError {
+            range: rowan::TextRange::new(start.into(), end.into()),
+            message: "boom".to_owned(),
+            source: SyntaxErrorSource::Yaml,
+        };
+        let old = vec![err(2, 4), err(20, 24), err(60, 64)];
+        let merged = merge_region_errors(&old, (10, 50), vec![err(1, 3)], 5).expect("a merge");
+        assert_eq!(
+            merged,
+            vec![err(2, 4), err(11, 13), err(65, 69)],
+            "before kept verbatim, inside dropped, fragment shifted to the region, after shifted by the delta"
+        );
+    }
+
+    #[test]
+    fn merge_region_errors_shifts_a_trailing_error_backwards_on_a_deletion() {
+        let err = |start: u32, end: u32| SyntaxError {
+            range: rowan::TextRange::new(start.into(), end.into()),
+            message: "boom".to_owned(),
+            source: SyntaxErrorSource::Yaml,
+        };
+        let merged =
+            merge_region_errors(&[err(60, 64)], (10, 50), Vec::new(), -7).expect("a merge");
+        assert_eq!(merged, vec![err(53, 57)]);
+    }
+
+    fn assert_region_tier(input: &str, old_edit: (usize, usize), insert: &str) -> Spliced {
+        let new_text = apply_edit(input, old_edit, insert);
+        let options = ParserOptions::default();
+        let (old_tree, old_errors) = Parser::new(input, &options).parse_with_errors();
+        let spliced = reparse_or_full(
+            &new_text,
+            Some(options),
+            &old_tree,
+            &old_errors,
+            old_edit,
+            (old_edit.0, old_edit.0 + insert.len()),
+        );
+        assert_eq!(
+            spliced.strategy, "region",
+            "expected the region tier for {insert:?} at {old_edit:?} in {input:?}"
+        );
+        spliced
+    }
+
+    /// The tier's reason for existing: an edit near the top of a document that
+    /// the window-size cutoff refuses outright.
+    #[test]
+    fn region_tier_answers_an_early_edit_the_window_cutoff_declines() {
+        let input = long_document_with_early_paragraph();
+        let at = input.find("Alpha").expect("marker") + 2;
+        let spliced = assert_region_tier(&input, (at, at), "X");
+        assert!(
+            spliced.reparse_range.1 - spliced.reparse_range.0 < 32,
+            "the region is one short paragraph, not a window to EOF: {:?}",
+            spliced.reparse_range
+        );
+    }
+
+    /// A fence typed into the region can pair with an opener several siblings
+    /// back, which no one-neighbour boundary parse can see. Verified against the
+    /// full parser: appending a closing fence to the last paragraph of
+    /// `` ```\naaa\n\nbbb\n\nccc\n `` collapses all five children into one
+    /// `CODE_BLOCK`.
+    #[test]
+    fn region_tier_declines_a_fence_that_pairs_beyond_the_neighbour() {
+        let input = "```\naaa\n\nbbb\n\nccc\n\nddd\n";
+        let at = input.find("ccc").expect("marker") + 3;
+        let new_text = apply_edit(input, (at, at), "\n```");
+        let options = ParserOptions::default();
+        let (old_tree, old_errors) = Parser::new(input, &options).parse_with_errors();
+        let spliced = reparse_or_full(
+            &new_text,
+            Some(options),
+            &old_tree,
+            &old_errors,
+            (at, at),
+            (at, at + 4),
+        );
+        assert_ne!(
+            spliced.strategy, "region",
+            "a new fence delimiter must not reach the region tier"
+        );
+    }
+
+    /// The mirror image: a multiline-table border pairs across arbitrarily many
+    /// blank-line-separated blocks. Verified against pandoc --
+    /// `----\nx\nfoo\n\nbar\n\n----\n` is one table.
+    #[test]
+    fn region_tier_declines_a_table_border_that_pairs_beyond_the_neighbour() {
+        let input = "intro\n\nx\nfoo\n\nbar\n\n----\n\ntail\n";
+        let at = input.find("intro").expect("marker");
+        let new_text = apply_edit(input, (at, at + 5), "----");
+        let options = ParserOptions::default();
+        let (old_tree, old_errors) = Parser::new(input, &options).parse_with_errors();
+        let spliced = reparse_or_full(
+            &new_text,
+            Some(options),
+            &old_tree,
+            &old_errors,
+            (at, at + 5),
+            (at, at + 4),
+        );
+        assert_ne!(
+            spliced.strategy, "region",
+            "a new table border must not reach the region tier"
+        );
+    }
+
+    /// Typing into an early paragraph, keystroke by keystroke, chaining each
+    /// splice onto the previous one. A tier that works once and then splices
+    /// against its own stale output fails here and nowhere else.
+    ///
+    /// The document has to be long enough that the window tiers decline every
+    /// keystroke, because the region tier is tried behind them: on a short
+    /// document a window would answer first and this would pin the wrong tier.
+    #[test]
+    fn typing_into_a_region_stays_correct_across_keystrokes() {
+        let mut text = long_document_with_early_paragraph();
+        let mut at = text.find("Alpha").expect("marker") + 2;
+        for ch in "increment".chars() {
+            let insert = ch.to_string();
+            let spliced = assert_region_tier(&text, (at, at), &insert);
+            let updated = apply_edit(&text, (at, at), &insert);
+            let full = full_parse(&updated, &ParserOptions::default());
+            assert_eq!(
+                crate::parser::fingerprint(&spliced.tree),
+                crate::parser::fingerprint(&full.tree),
+                "keystroke {ch:?} diverged from a full parse"
+            );
+            text = updated;
+            at += insert.len();
+        }
+    }
+
+    /// Long enough that every window this cascade could choose is over
+    /// [`MAX_WINDOW_SHARE_PERCENT`], so an edit in `Alpha` reaches the region
+    /// tier rather than a window.
+    fn long_document_with_early_paragraph() -> String {
+        let mut input = String::from("# Title\n\nAlpha para.\n\n");
+        for index in 0..400 {
+            input.push_str(&format!("Filler paragraph number {index}.\n\n"));
+        }
+        input
     }
 }
