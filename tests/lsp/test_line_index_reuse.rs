@@ -11,6 +11,12 @@
 //! while it still names the text allocation salsa holds, so any other writer of
 //! the text discards it. `a_text_write_outside_did_change_discards_the_cached_index`
 //! is the test that fails loudly when that guard goes.
+//!
+//! The last two tests pin what the write phase's cache does *not* cover: the
+//! reader. They are the measurement `TODO.md`'s reader-side item asks for, in
+//! counter form --- how *often* a reader rebuilds, the half no bench answers
+//! (`benches/lsp_write_phase.rs` times the write phase only). They assert the
+//! status quo, so unifying the two caches will invert them, deliberately.
 
 use super::helpers::{TestLspServer, UriExt, full_document_change, incremental_change};
 use lsp_types::{FileChangeType, FileEvent, Uri};
@@ -217,5 +223,68 @@ fn an_untitled_buffer_reuses_its_line_index() {
     assert_eq!(
         server.get_document_content(uri),
         Some("# Draft\n\nSix\n".to_string())
+    );
+}
+
+/// Reads at one revision share one index: the salsa memo does its job as long as
+/// the text is not moving. Establishes that the gap the next test measures is
+/// specifically *per revision*, not per read --- so it is the keystroke that
+/// costs a rebuild, and a cursor sitting still costs nothing.
+#[test]
+fn repeated_reads_at_one_revision_build_one_index() {
+    let mut server = TestLspServer::new();
+    let uri = "file:///still.qmd";
+    server.open_document(uri, "# Title\n\nalpha beta gamma\n", "quarto");
+
+    let before = server.line_index_read_rebuilds();
+    for character in 0..5 {
+        server.document_highlight(uri, 2, character);
+    }
+
+    assert_eq!(
+        server.line_index_read_rebuilds() - before,
+        1,
+        "five reads at one revision must share one index"
+    );
+}
+
+/// The reader-side gap, measured. An editor issues a request per typed character
+/// (completion, highlight, semantic tokens), and each lands on a revision the
+/// keystroke before it just invalidated --- so every one re-executes the
+/// `line_index` memo over the whole document, on a pool thread, while
+/// `GlobalState::line_index_cache` is holding an index for those very bytes.
+///
+/// One rebuild per keystroke is therefore the number, and it is what makes the
+/// per-rebuild cost worth paying attention to rather than amortized away: on the
+/// 297 KB fixture a rebuild is the ~100 us that commit `56beaf52` took off the
+/// write phase and left here.
+///
+/// When the two caches are unified this must become 0, and the assertion below
+/// is written to be inverted rather than deleted.
+#[test]
+fn every_keystroke_costs_a_reader_one_rebuild() {
+    let mut server = TestLspServer::new();
+    let uri = "file:///burst_with_reads.qmd";
+    server.open_document(uri, "# Title\n\nabcde\n", "quarto");
+
+    let keystrokes = ["v", "w", "x", "y", "z"];
+    let before = server.line_index_read_rebuilds();
+    for (index, letter) in keystrokes.iter().enumerate() {
+        let at = index as u32;
+        server.edit_document(uri, vec![incremental_change(2, at, 2, at + 1, letter)]);
+        // What a real client does between keystrokes, and the only thing that
+        // matters about it here: it resolves a position, so it needs the index.
+        server.document_highlight(uri, 2, at);
+    }
+
+    assert_eq!(
+        server.line_index_read_rebuilds() - before,
+        keystrokes.len() as u64,
+        "each keystroke invalidates the memo, so each following read rebuilds; \
+         a shared cache would make this 0"
+    );
+    assert_eq!(
+        server.get_document_content(uri),
+        Some("# Title\n\nvwxyz\n".to_string())
     );
 }

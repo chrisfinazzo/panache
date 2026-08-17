@@ -279,11 +279,19 @@ impl LineIndex {
 /// Salsa-cached line index for `file`, keyed on the text input only (line
 /// structure is config-independent, so this is shared across configs). Returns
 /// an `Arc` so worker helpers can thread the index around cheaply.
+///
+/// Every keystroke writes the text input, so this memo is invalidated per
+/// revision and the first reader at each revision re-executes it --- two linear
+/// passes over the document, on a pool thread, while the write phase's own cache
+/// (`GlobalState::line_index_cache`) holds an index for the very same bytes.
+/// [`crate::salsa::Db::note_line_index_build`] counts those rebuilds so the size
+/// of that gap can be measured rather than argued about; see `TODO.md`.
 #[salsa::tracked(lru = 512)]
 pub(crate) fn line_index(
     db: &dyn crate::salsa::Db,
     file: crate::salsa::FileText,
 ) -> Arc<LineIndex> {
+    db.note_line_index_build();
     let text = file.text(db).clone().unwrap_or_else(|| Arc::from(""));
     Arc::new(LineIndex::from_arc(text))
 }

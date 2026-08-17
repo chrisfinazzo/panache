@@ -318,6 +318,7 @@ const DOCUMENT_DEPTH: usize = 3;
 enum Row {
     Config,
     Keystroke,
+    ReadAfterKeystroke,
     Batch4,
     EndToEnd,
 }
@@ -325,7 +326,21 @@ enum Row {
 /// Every row in measurement order. Adding a variant without adding it here is
 /// a compile error at [`Row::contract`]'s exhaustive match, which is the point:
 /// a row cannot exist without saying what it claims.
-const ROWS: [Row; 4] = [Row::Config, Row::Keystroke, Row::Batch4, Row::EndToEnd];
+/// `ReadAfterKeystroke` is deliberately **last**. It is the only row that reads
+/// the line index, and a read leaves the salsa memo holding an `Arc` clone of it
+/// --- which makes the *next* row's `Arc::make_mut` in `did_change` copy the
+/// index tables instead of patching them in place. Measured from this bench:
+/// running it before `batch4` put that row's large-document fan-out at 16.73x
+/// against 3.19x on medium, and `reset()` does not clear it because the memo is
+/// keyed on the text, not on the fixture. Last means no row measures another
+/// row's leftovers.
+const ROWS: [Row; 5] = [
+    Row::Config,
+    Row::Keystroke,
+    Row::Batch4,
+    Row::EndToEnd,
+    Row::ReadAfterKeystroke,
+];
 
 struct Contract {
     /// Ceiling on the growth from the medium to the large document (a 10x byte
@@ -340,6 +355,7 @@ impl Row {
         match self {
             Row::Config => "config load + intern",
             Row::Keystroke => "didChange, 1-char edit",
+            Row::ReadAfterKeystroke => "didChange + line index read",
             Row::Batch4 => "didChange, 4 changes",
             Row::EndToEnd => "didChange + parse",
         }
@@ -349,6 +365,7 @@ impl Row {
         match self {
             Row::Config => "config",
             Row::Keystroke => "keystroke",
+            Row::ReadAfterKeystroke => "read_after_keystroke",
             Row::Batch4 => "batch4",
             Row::EndToEnd => "end_to_end",
         }
@@ -371,6 +388,23 @@ impl Row {
             Row::Keystroke => Contract {
                 max_scaling: Some(KEYSTROKE_SCALING_MAX),
                 max_share_of_end_to_end: Some(KEYSTROKE_SHARE_MAX),
+            },
+            // A measurement row, and deliberately not yet a contract. It exists
+            // to price the *reader's* line-index rebuild: the write phase's cache
+            // is main-thread-only, so the first read at each new revision
+            // re-executes the `line_index` memo over the whole document. Its
+            // delta against `keystroke` is that rebuild, reported below as
+            // `reader rebuild`.
+            //
+            // No ceiling because the number it would bound is the open question
+            // (see `TODO.md`, "The *reader* still rebuilds the index once per
+            // revision"): a ceiling calibrated now would enshrine the cost this
+            // row exists to decide whether to remove. Give it one once that is
+            // settled -- after a shared cache it should collapse onto
+            // `keystroke`, which is a sharp claim worth gating.
+            Row::ReadAfterKeystroke => Contract {
+                max_scaling: None,
+                max_share_of_end_to_end: None,
             },
             // Same, under its own ceiling, plus the per-change fan-out checked
             // separately against `keystroke` (see `BATCH_FANOUT_MAX`).
@@ -628,6 +662,25 @@ impl Fixture {
                     self.tester.apply_did_change(params_for(&uri, changes));
                 })
             }
+            // The keystroke plus what an editor does right after one: a request
+            // that resolves a position, and so needs the line index. It reads
+            // through a `StateSnapshot`, i.e. the salsa memo the keystroke just
+            // invalidated -- the reader's path, not the write phase's cache.
+            Row::ReadAfterKeystroke => {
+                let (uri, uri_string, insert, delete) = (
+                    self.uri.clone(),
+                    self.uri_string.clone(),
+                    self.insert.clone(),
+                    self.delete.clone(),
+                );
+                let mut flip = false;
+                time_blocks(iterations, || {
+                    flip = !flip;
+                    let changes = if flip { insert.clone() } else { delete.clone() };
+                    self.tester.apply_did_change(params_for(&uri, changes));
+                    black_box(self.tester.snapshot_line_index_len(&uri_string));
+                })
+            }
             Row::Batch4 => {
                 let (uri, insert, delete) = (
                     self.uri.clone(),
@@ -770,6 +823,36 @@ fn check_expectations(results: &[RowResult]) -> Vec<String> {
     failures
 }
 
+/// Price the reader's line-index rebuild: `read_after_keystroke` minus
+/// `keystroke` is the memo execution the write phase's cache cannot serve,
+/// because it lives on `GlobalState` and the reader is on a pool thread.
+///
+/// Reported, never asserted. It is the evidence for the decision in `TODO.md`
+/// ("worth it only once a profile shows the reader-side rebuild mattering"), and
+/// its share of the end-to-end keystroke is what says whether one shared cache
+/// would be felt or merely tidy.
+fn report_reader_rebuild(results: &[RowResult]) {
+    println!("\nReader-side line-index rebuild");
+    println!("==============================");
+    for document in DOCUMENTS {
+        let (Some(with_read), Some(keystroke), Some(end_to_end)) = (
+            median(results, document.label, Row::ReadAfterKeystroke),
+            median(results, document.label, Row::Keystroke),
+            median(results, document.label, Row::EndToEnd),
+        ) else {
+            continue;
+        };
+        let rebuild = with_read - keystroke;
+        println!(
+            "  {:<7} {rebuild:>9.2} us  ({:.1}% of the end-to-end keystroke, \
+             {:.1}x the write phase)",
+            document.label,
+            rebuild / end_to_end * 100.0,
+            rebuild / keystroke,
+        );
+    }
+}
+
 /// Fail before measuring anything if a document the gate depends on is absent:
 /// `build_fixture` skips a missing one silently, and a gate that measures one
 /// size passes by not looking.
@@ -855,6 +938,10 @@ fn main() {
 
         println!();
     }
+
+    // Printed in both modes: it is a measurement, not a threshold, and it is the
+    // number the reader-side decision in `TODO.md` turns on.
+    report_reader_rebuild(&results);
 
     let mut failures = Vec::new();
     if assert_mode {
