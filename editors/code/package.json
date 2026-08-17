@@ -190,7 +190,8 @@
         "panache.experimental.incrementalParsing": {
           "type": "boolean",
           "default": true,
-          "description": "Reuse the previous syntax tree when a document changes, instead of reparsing it from scratch. On by default; set to false to rule the incremental path out while diagnosing a problem. A successful reuse is required to be identical to a full parse, so this affects speed rather than results."
+          "markdownDeprecationMessage": "Deprecated: incremental parsing is on by default and is no longer experimental. To switch it off while diagnosing a problem, set `PANACHE_INCREMENTAL_PARSING` to `0` in `panache.serverEnv`. This setting is still honored but will be removed in a future release.",
+          "markdownDescription": "Reuse the previous syntax tree when a document changes, instead of reparsing it from scratch. A successful reuse is required to be identical to a full parse, so this affects speed rather than results."
         },
         "panache.symbols.document.enable": {
           "type": "boolean",

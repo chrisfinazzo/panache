@@ -138,9 +138,11 @@ Panache registers itself as the default formatter for `[quarto]` and
   (`off`, `error`, `warn`, `info`, `debug`, `trace`; unset by default).
   `panache.serverEnv.RUST_LOG` overrides this if both are set.
 - `panache.trace.server`: LSP trace level (`off`, `messages`, `verbose`)
-- `panache.experimental.incrementalParsing`: reuse the previous syntax tree when
-  a document changes, instead of reparsing it from scratch (default: `true`).
-  Set to `false` to rule the incremental path out while diagnosing a problem.
+- `panache.experimental.incrementalParsing` *(deprecated)*: reuse the previous
+  syntax tree when a document changes, instead of reparsing it from scratch
+  (default: `true`). Still honored, but slated for removal; to switch the
+  incremental path off while diagnosing a problem, set
+  `panache.serverEnv.PANACHE_INCREMENTAL_PARSING` to `0` instead.
 - `panache.symbols.document.enable`: publish document symbols (the outline
   panel, breadcrumbs, and `Go to Symbol in File`) from the Panache language
   server (default: `true`). Set to `false` when another extension (such as

@@ -56,6 +56,21 @@ function isExecutableStrategyExplicitlyConfigured(
   );
 }
 
+/**
+ * The value a user actually set for `section`, or `undefined` when the only
+ * value is this extension's own `package.json` default. Same three scopes as
+ * the `is*ExplicitlyConfigured` checks above, most specific first.
+ */
+function explicitSetting<T>(
+  config: vscode.WorkspaceConfiguration,
+  section: string,
+): T | undefined {
+  const value = config.inspect<T>(section);
+  return (
+    value?.workspaceFolderValue ?? value?.workspaceValue ?? value?.globalValue
+  );
+}
+
 type ExecutableStrategy = "bundled" | "environment" | "path";
 
 async function findBundledBinary(
@@ -225,10 +240,22 @@ async function startClient(
     "trace.server",
     "off",
   );
-  const experimentalIncrementalParsing = config.get<boolean>(
+  // Deprecated, and forwarded only when the user actually set it. Sending the
+  // package.json default instead would let this extension, rather than the
+  // server, decide what an untouched configuration means. That is what made
+  // flipping the default a three-place change.
+  const incrementalParsing = explicitSetting<boolean>(
+    config,
     "experimental.incrementalParsing",
-    true,
   );
+  if (incrementalParsing !== undefined) {
+    outputChannel.warn(
+      "panache.experimental.incrementalParsing is deprecated and will be " +
+        "removed in a future release. Incremental parsing is on by default; " +
+        "to switch it off, set PANACHE_INCREMENTAL_PARSING=0 in " +
+        "panache.serverEnv.",
+    );
+  }
 
   const serverOptions: ServerOptions = {
     command: commandPath,
@@ -266,15 +293,14 @@ async function startClient(
     synchronize: {
       configurationSection: "panache",
     },
-    initializationOptions: {
-      settings: {
-        panache: {
-          experimental: {
-            incrementalParsing: experimentalIncrementalParsing,
+    initializationOptions:
+      incrementalParsing === undefined
+        ? {}
+        : {
+            settings: {
+              panache: { experimental: { incrementalParsing } },
+            },
           },
-        },
-      },
-    },
     middleware: {
       provideDocumentSymbols: async (document, token, next) => {
         const enabled = vscode.workspace
