@@ -175,20 +175,6 @@ prompted the bench are all fixed, taking a keystroke on a 293 KB document from
 
 Note any known parser issues here.
 
-- [ ] **Two full-parser bugs the incremental fuzzer found**, each pinned as an
-  `#[ignore]`d reproducer in
-  `crates/panache-parser/tests/incremental_regressions.rs`. In both the
-  *splice* matched pandoc and the full parse did not, which is how they
-  surfaced at all:
-  - setext-after-setext breaks the open-paragraph contract;
-  - a trailing `:`/`~` line promotes a preceding list item's lazy continuation
-    into a definition term.
-
-  The second is worked around in the reparse cascade by
-  `first_block_has_trailing_definition_marker`, whose only job is to keep the
-  splice matching the buggy full parse. Delete that guard with the fix, and
-  un-ignore both reproducers.
-
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
   and the refs/heading-id reparse helpers) re-tokenize source the CST should
@@ -290,14 +276,6 @@ no reason.
   the *old tree* whether a candidate line actually parsed as a delimiter,
   which is the check `prefix_fence_state_is_stable`'s parity heuristic also
   wants.
-
-#### Correctness debt
-
-- [ ] The two full-parser bugs the incremental fuzzer found are tracked under
-  **Parser -> Issues** above, because that is where the fix belongs. One of
-  them keeps a guard alive in the reparse cascade
-  (`first_block_has_trailing_definition_marker`) that should be deleted with
-  it.
 
 #### Infrastructure
 

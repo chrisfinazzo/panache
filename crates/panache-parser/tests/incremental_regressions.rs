@@ -3,11 +3,12 @@
 //! fuzz case that found it; a red test here is `#[ignore]`d only until its
 //! fix lands (see the "Incremental Parsing" roadmap in `TODO.md`).
 //!
-//! Three of the finds turned out to be **full-parser bugs**, not incremental
+//! Five of the finds turned out to be **full-parser bugs**, not incremental
 //! ones: the spliced tree faithfully matched the full parse (the debug
-//! oracle passed) and the full parse itself reordered bytes or panicked.
-//! They are pinned here because this harness found them, but they were
-//! fixed in the block parser, not in the incremental machinery.
+//! oracle passed) and the full parse itself reordered bytes, panicked, or
+//! diverged from pandoc. They are pinned here because this harness found
+//! them, but they were fixed in the block parser, not in the incremental
+//! machinery.
 
 use panache_parser::parser::{fingerprint, parse, parse_with_errors};
 
@@ -69,23 +70,25 @@ fn full_parse_lossless_thematic_break_after_blockquote() {
 
 // Fuzz finds: snippets mid_document_yaml / hashpipe / fenced_code, pandoc and
 // quarto tiers (minimized). A setext underline directly after a setext
-// heading takes the `follows_setext_heading` escape in
-// `SetextHeadingParser::detect_prepared` and returns `Yes` while the next
-// paragraph is still buffered, which breaks the block-dispatch contract at
+// heading took the `follows_setext_heading` escape in
+// `SetextHeadingParser::detect_prepared` and returned `Yes` while the next
+// paragraph was still buffered, which breaks the block-dispatch contract at
 // `core.rs`: the heading is emitted *before* the buffered bytes, reordering
-// the CST. Debug builds trip the contract's `debug_assert!`; release builds
-// silently produce the reordering, so both shapes are pinned as losslessness
-// failures. Pandoc-dialect only -- CommonMark folds the open paragraph into
-// the heading instead. Not an incremental bug; needs the detector to return
-// `YesCanInterrupt` (which flushes the buffers) or to gate itself.
+// the CST. Debug builds tripped the contract's `debug_assert!`; release
+// builds silently produced the reordering, so both shapes are pinned as
+// losslessness failures. Pandoc-dialect only -- CommonMark folds the open
+// paragraph into the heading instead. Fixed by
+// `fix(parser): gate the setext-after-setext escape`, which suppresses the
+// escape while a paragraph or a list item's content is open. Gating rather
+// than returning `YesCanInterrupt` is what the fix had to be: the core's
+// `Yes`-with-open-paragraph arm is load-bearing for CommonMark's multi-line
+// setext fold, and interrupting would flush the paragraph out from under it.
 #[test]
-#[ignore = "known full-parser bug: setext-after-setext breaks the open-paragraph contract"]
 fn full_parse_lossless_setext_underline_after_setext_heading() {
     assert_full_parse_lossless("a\nb\n---\nc\n---\n");
 }
 
 #[test]
-#[ignore = "known full-parser bug: setext-after-setext breaks the open-paragraph contract"]
 fn full_parse_lossless_setext_pair_after_unterminated_fence() {
     assert_full_parse_lossless("```\nx\n---\ny\n---\n");
 }
@@ -260,38 +263,62 @@ fn section_window_divergence_on_mangled_div_in_callout() {
 // The splice was **right** and the full parse wrong -- pandoc reads the input
 // as `BulletList [[Plain [item one, SoftBreak, continuat]]]` followed by
 // `Para [em, Space, :]` -- but the governing invariant measures the splice
-// against the full parse, so the guard declines the shape until the parser bug
-// below is fixed. The find is not CRLF-specific: it reproduces byte for byte
-// on LF, and predates the line-ending fix that reshuffled the corpus onto it.
+// against the full parse, so a guard declined the shape outright until the
+// parser bug below was fixed. Now that it is, the splice is admitted and
+// agrees with the full parse on pandoc's answer. The find is not CRLF-specific:
+// it reproduces byte for byte on LF, and predates the line-ending fix that
+// reshuffled the corpus onto it.
+//
+// All three name their strategy: under the retired guard these fell back to a
+// full parse, at which point the oracle compared a full parse against itself
+// and the cases passed without exercising a splice at all.
 #[test]
 fn trailing_definition_marker_window_after_a_retained_lazy_list() {
-    check_incremental("- item one\ncontinuat\n\nem two\n", (25, 28), ":");
+    check_incremental_strategy(
+        "- item one\ncontinuat\n\nem two\n",
+        (25, 28),
+        ":",
+        "suffix_window",
+    );
 }
 
 // The `~` spelling, and the CRLF twin of the case as the fuzzer found it.
 #[test]
 fn trailing_tilde_marker_window_after_a_retained_lazy_list() {
-    check_incremental("- item one\ncontinuat\n\nem two\n", (25, 28), "~");
+    check_incremental_strategy(
+        "- item one\ncontinuat\n\nem two\n",
+        (25, 28),
+        "~",
+        "suffix_window",
+    );
 }
 
 #[test]
 fn trailing_definition_marker_window_under_crlf() {
-    check_incremental("- item one\ncontinuat\r\n\r\nem two\n", (27, 30), ":");
+    check_incremental_strategy(
+        "- item one\ncontinuat\r\n\r\nem two\n",
+        (27, 30),
+        ":",
+        "suffix_window",
+    );
 }
 
-// The full-parser bug the guard above works around. Not an incremental bug and
-// not a losslessness failure (the tree round-trips), which is why the fuzz
-// harness's lossy-or-panic skip does not catch it: it is a *divergence from
-// pandoc*, so the harness sees a well-formed oracle and demands the splice
-// match it. Pandoc:
+// The full-parser bug the three cases above used to work around. Not an
+// incremental bug and not a losslessness failure (the tree round-trips), which
+// is why the fuzz harness's lossy-or-panic skip did not catch it: it was a
+// *divergence from pandoc*, so the harness saw a well-formed oracle and
+// demanded the splice match it. Pandoc:
 //
 //   [ BulletList [[Plain [Str "a", SoftBreak, Str "b"]]]
 //   , Para [Str "c", Space, Str ":"] ]
 //
-// Fixing it belongs on `main` with the other block-parser finds; when it lands,
-// delete `first_block_has_trailing_definition_marker` and its two guards.
+// Fixed by `fix(parser): gate definition term lookahead on real indent`: the
+// container-indent strip was slicing content bytes off an under-indented lazy
+// continuation, manufacturing a bare `:` marker out of `c :`, and the term
+// lookahead read that as one. It now declines a `FrameVerdict::FakedIndent`
+// line. That retired `first_block_has_trailing_definition_marker` in the
+// reparse cascade, whose only job was to keep the splice matching this parse.
 #[test]
-#[ignore = "known full-parser bug: a trailing `:` line promotes a preceding lazy list continuation to a definition term"]
 fn full_parse_definition_list_from_trailing_colon_after_lazy_list_item() {
     let tree = parse("- a\nb\n\nc :\n", None);
     assert!(

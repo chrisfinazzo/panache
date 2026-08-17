@@ -629,7 +629,9 @@ fn test_losslessness_setext_underline_in_nested_quoted_list_item() {
 
 #[test]
 fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
-    // The live use of the `follows_setext_heading` escape: inside a list item
+    // One of the live uses of the `follows_setext_heading` escape (see also
+    // `test_consecutive_top_level_setext_headings_still_form_headings` and the
+    // `setext_headings` fixture's metadata-lookalike tail): inside a list item
     // `has_blank_before` is false even once the item's buffer has been flushed,
     // so without the escape the second heading would not form. pandoc gives
     // `BulletList [[Header 2 "a", Header 2 "c"]]`.
