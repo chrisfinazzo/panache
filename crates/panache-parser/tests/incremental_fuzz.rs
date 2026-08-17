@@ -47,6 +47,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use panache_parser::parser::{CostGuards, SyntaxError, fingerprint, parse_with_errors};
+use panache_parser::syntax::SyntaxKind;
 use panache_parser::{Dialect, Extensions, Flavor, ParserOptions};
 
 mod common;
@@ -354,6 +355,10 @@ struct FuzzStats {
     spliced: usize,
     /// Edits it declined, which cost a full parse and prove nothing.
     declined: usize,
+    /// Splices the token tier took, counted separately because it is the only
+    /// tier a uniformly-placed edit almost never reaches --- so a run that
+    /// splices heavily can still be leaving it entirely untested.
+    token_tier: usize,
     /// Corpus documents that were not on disk. Counted rather than only
     /// printed: the corpus is gitignored, so a run on a clean checkout skips
     /// the strictest tier entirely and would otherwise report a full pass.
@@ -392,6 +397,41 @@ impl FuzzStats {
             self.splice_rate() * 100.0
         );
     }
+
+    /// Report the token tier's share and fail if it is untested.
+    ///
+    /// Distinct from [`Self::assert_exercised_the_splice`] because the two fail
+    /// for different reasons: that one catches a harness judging full parses
+    /// against full parses, this one catches a *guard* that silently turned the
+    /// token tier off. A tightened guard leaves every other test green --- the
+    /// tier declining is always sound --- so without a floor here the phase
+    /// could regress to a no-op and nothing would say so.
+    ///
+    /// The floor is 10% against a measured 14.0% on the prose snippets. It is
+    /// low because it should be: a third of [`PROSE_INSERTS`] is deliberately
+    /// hazardous and declines correctly, the snippets are short enough that the
+    /// line-marker-zone guard refuses many placements outright, and several
+    /// prose snippets are near-misses whose whole job is to be declined. The
+    /// number to watch is a *collapse*, not a few points of drift.
+    fn assert_exercised_the_token_tier(&self, what: &str) {
+        let judged = self.spliced + self.declined;
+        let rate = if judged == 0 {
+            0.0
+        } else {
+            self.token_tier as f64 / judged as f64
+        };
+        eprintln!(
+            "{what}: {} of {judged} judged edits took the token tier ({:.1}%)",
+            self.token_tier,
+            rate * 100.0
+        );
+        assert!(
+            rate >= 0.10,
+            "{what}: only {:.1}% of edits took the token tier; a guard has \
+             turned it off and every other assertion would still pass",
+            rate * 100.0
+        );
+    }
 }
 
 /// What a driver holds constant across the edits it generates.
@@ -408,6 +448,94 @@ fn random_edit(rng: &mut Lcg, text: &str) -> ((usize, usize), &'static str) {
     let end = clamp_to_char_boundary(text, start + rng.below(max_delete + 1)).max(start);
     let insert = INSERTS[rng.below(INSERTS.len())];
     ((start, end), insert)
+}
+
+/// Inserts biased toward ordinary prose, for the token-tier driver.
+///
+/// Two thirds of the alphabet is text the tier should accept and one third is
+/// deliberately hazardous, because a prose-bias mode that only ever inserts
+/// safe bytes tests the happy path and calls it coverage. The hazardous share
+/// is what makes the driver check that the tier *declines* correctly from
+/// inside a token, which the uniform driver almost never reaches.
+const PROSE_INSERTS: &[&str] = &[
+    "a",
+    "e",
+    "x",
+    " ",
+    "word",
+    " and ",
+    "ing",
+    ".",
+    ",",
+    "'",
+    "\"",
+    "?",
+    ";",
+    "0",
+    "42",
+    "(",
+    ")",
+    "/",
+    "&",
+    "\t",
+    "é",
+    "中",
+    "😀",
+    "",
+    // Hazards reachable only from inside a token.
+    "*",
+    "_",
+    "`",
+    "[",
+    "]",
+    "|",
+    "$",
+    "~",
+    "^",
+    "@",
+    "\\",
+    ":",
+    "-",
+    "=",
+    "#",
+    ">",
+    "!",
+    "%",
+    "\n",
+    "  ",
+    "http://x.com",
+    "www.example.com",
+];
+
+/// A pseudo-random edit landing *inside* a `TEXT` token of `base`.
+///
+/// The uniform generator picks an offset anywhere in the document, which on
+/// these snippets almost never lands strictly inside a prose token -- so it
+/// exercises the window tiers and leaves the token tier nearly untouched. This
+/// one samples a `TEXT` token first, then an offset within it, which is the
+/// only way the token tier's guards get hit in anger.
+///
+/// Returns `None` when the tree holds no `TEXT` token at all.
+fn prose_edit(rng: &mut Lcg, base: &Base) -> Option<((usize, usize), &'static str)> {
+    let tokens: Vec<_> = base
+        .tree
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::TEXT && !token.text().is_empty())
+        .collect();
+    let token = tokens.get(rng.below(tokens.len().max(1)))?;
+
+    let range = token.text_range();
+    let (t0, t1) = (usize::from(range.start()), usize::from(range.end()));
+    let text = token.text();
+
+    let start = clamp_to_char_boundary(text, rng.below(text.len() + 1));
+    let max_delete = (text.len() - start).min(6);
+    let end = clamp_to_char_boundary(text, start + rng.below(max_delete + 1)).max(start);
+    debug_assert!(t0 + end <= t1);
+
+    let insert = PROSE_INSERTS[rng.below(PROSE_INSERTS.len())];
+    Some(((t0 + start, t0 + end), insert))
 }
 
 /// The parse a splice builds on: the previous tree and the syntax errors that
@@ -508,6 +636,9 @@ fn check_edit(
         run.stats.declined += 1;
     } else {
         run.stats.spliced += 1;
+        if inc.strategy == "token" {
+            run.stats.token_tier += 1;
+        }
     }
 
     assert_eq!(
@@ -621,6 +752,59 @@ fn fuzz_chained_edits(
     }
 }
 
+/// Chain prose-placed edits, re-sampling a `TEXT` token from the *spliced*
+/// tree at every step.
+///
+/// Chaining is what makes this driver worth having over single edits: the tier
+/// splices a token in place, so step *n+1* samples a token out of a tree step
+/// *n* produced. A splice that silently corrupted a token's text or range would
+/// show up as the next step editing at an offset that no longer means what the
+/// tree says it means.
+fn fuzz_prose_edits(
+    tier: &Tier,
+    name: &str,
+    text: &str,
+    batches: usize,
+    seed: u64,
+    cost_guards: CostGuards,
+    stats: &mut FuzzStats,
+) {
+    let mut rng = Lcg(seed);
+    let options = tier.options();
+    let mut run = Run {
+        options: &options,
+        cost_guards,
+        stats,
+    };
+    for batch in 0..batches {
+        let mut current = text.to_string();
+        let Some(mut base) = Base::parse(&current, run.options) else {
+            eprintln!(
+                "base parse is lossy (known-bug class, skipped): snippet {name}, tier {}",
+                tier.name
+            );
+            run.stats.skipped_lossy += 1;
+            break;
+        };
+        let chain_len = 3 + rng.below(6);
+        for step in 0..chain_len {
+            let Some((old_edit, insert)) = prose_edit(&mut rng, &base) else {
+                break;
+            };
+            let context = format!(
+                "snippet {name}, tier {}, seed {seed}, prose batch #{batch}, step #{step}",
+                tier.name
+            );
+            let Some(next) = check_edit(&context, &current, &mut run, &base, old_edit, insert)
+            else {
+                break;
+            };
+            base = next;
+            current = apply_edit(&current, old_edit, insert);
+        }
+    }
+}
+
 /// Per-tier seed: the tier index must participate, or every tier would
 /// replay the identical edit sequence and the extra work would buy nothing.
 fn seed(base: u64, snippet_index: usize, tier_index: usize) -> u64 {
@@ -708,3 +892,103 @@ fn real_documents_random_edits() {
     }
     stats.assert_exercised_the_splice("real documents");
 }
+
+/// The token tier's own driver: every edit lands inside a `TEXT` token, which
+/// is the only placement that reaches it.
+///
+/// Runs with [`CostGuards::Ignored`] like the other snippet drivers, though it
+/// makes no difference here --- the token tier has no window and consults no
+/// cost guard. Kept the same so the snippets behave identically across drivers.
+/// The hit-rate floor is asserted over [`PROSE_SNIPPETS`] only, and the two
+/// corpora are tallied separately on purpose. [`HAZARD_SNIPPETS`] is
+/// construct-heavy by design --- most of its `TEXT` tokens sit in code blocks,
+/// attributes, and table cells, which the tier declines *correctly* --- so a
+/// floor over the union would measure the corpus mix rather than the tier, and
+/// would move every time a snippet is added. Both corpora are still *walked*,
+/// because declining correctly is the half of the tier that has to stay sound.
+#[test]
+fn prose_placed_chained_edits() {
+    let mut hazard = FuzzStats::default();
+    let mut prose = FuzzStats::default();
+
+    for (tier_index, tier) in TIERS.iter().enumerate() {
+        let batches = iterations(tier.batches);
+        for (index, (name, text)) in HAZARD_SNIPPETS.iter().enumerate() {
+            fuzz_prose_edits(
+                tier,
+                name,
+                text,
+                batches,
+                seed(0x5EED_1DEA, index, tier_index),
+                CostGuards::Ignored,
+                &mut hazard,
+            );
+        }
+        for (index, (name, text)) in PROSE_SNIPPETS.iter().enumerate() {
+            fuzz_prose_edits(
+                tier,
+                name,
+                text,
+                batches,
+                seed(0x9BADF00D, index, tier_index),
+                CostGuards::Ignored,
+                &mut prose,
+            );
+        }
+    }
+
+    hazard.assert_exercised_the_splice("prose-placed edits on hazard snippets");
+    prose.assert_exercised_the_splice("prose-placed edits on prose snippets");
+    prose.assert_exercised_the_token_tier("prose-placed edits on prose snippets");
+}
+
+/// Prose-shaped snippets, for the token tier.
+///
+/// [`HAZARD_SNIPPETS`] is built to break the *window* tiers, so it is almost
+/// all construct: fences, markers, delimiters. Very little of it is the plain
+/// multi-word prose the token tier is for, and a driver that only walks those
+/// snippets would spend its time watching the tier decline. These add the
+/// shapes that make it accept -- and the near-misses that make it decline for
+/// the right reason.
+const PROSE_SNIPPETS: &[(&str, &str)] = &[
+    (
+        "plain_paragraphs",
+        "Some ordinary prose in a paragraph.\n\nA second paragraph of ordinary prose.\n",
+    ),
+    (
+        "prose_with_punctuation",
+        "Words, clauses; and more -- with 'quotes' and \"doubles\" and (parens).\n",
+    ),
+    (
+        "ordered_marker_near_miss",
+        "12 apples in a basket here\n\n12.apples in a basket\n",
+    ),
+    (
+        "unmatched_delimiters_in_prose",
+        "a*b c*d and more words\n\nx_y_z with underscores\n",
+    ),
+    (
+        "trailing_whitespace_lines",
+        "a line with one trailing space \nand a continuation line\n",
+    ),
+    (
+        "pipe_above_a_delimiter_row",
+        "foo bar and more\n--- | ---\n",
+    ),
+    (
+        "indented_paragraph_beside_a_list",
+        "- item\n\n foo bar and more prose\n",
+    ),
+    (
+        "prose_around_a_refdef",
+        "See the docs for more detail.\n\n[docs]: https://example.com/docs\n",
+    ),
+    (
+        "multiline_paragraph",
+        "The first line of a paragraph\nthe second line of the same one\nand a third line here\n",
+    ),
+    (
+        "prose_in_containers",
+        "> quoted prose with several words\n\n- list prose with several words\n",
+    ),
+];
