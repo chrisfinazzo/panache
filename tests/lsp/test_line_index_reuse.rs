@@ -248,28 +248,29 @@ fn repeated_reads_at_one_revision_build_one_index() {
     );
 }
 
-/// The reader-side gap, measured. An editor issues a request per typed character
-/// (completion, highlight, semantic tokens), and each lands on a revision the
-/// keystroke before it just invalidated --- so every one re-executes the
-/// `line_index` memo over the whole document, on a pool thread, while
-/// `GlobalState::line_index_cache` is holding an index for those very bytes.
+/// The reader costs nothing extra. An editor issues a request per typed
+/// character (completion, highlight, semantic tokens), and each one needs to
+/// resolve a position against a document the keystroke before it just changed.
+/// Sharing one cache between the phases means it finds the index that keystroke
+/// already patched.
 ///
-/// One rebuild per keystroke is therefore the number, and it is what makes the
-/// per-rebuild cost worth paying attention to rather than amortized away: on the
-/// 297 KB fixture a rebuild is the ~100 us that commit `56beaf52` took off the
-/// write phase and left here.
-///
-/// When the two caches are unified this must become 0, and the assertion below
-/// is written to be inverted rather than deleted.
+/// This is the test that inverted when the two caches became one. It asserted 5
+/// --- one rebuild per keystroke, because the reader went through a salsa memo
+/// every keystroke invalidated --- and each of those rebuilds was 68.6 us on the
+/// 297 KB fixture, 5.5% of an end-to-end keystroke
+/// (`benches/lsp_write_phase.rs`, the `read_after_keystroke` row).
 #[test]
-fn every_keystroke_costs_a_reader_one_rebuild() {
+fn reads_between_keystrokes_cost_no_rebuilds() {
     let mut server = TestLspServer::new();
     let uri = "file:///burst_with_reads.qmd";
     server.open_document(uri, "# Title\n\nabcde\n", "quarto");
 
-    let keystrokes = ["v", "w", "x", "y", "z"];
+    // Take the baseline after one read, so the document's first index -- which
+    // nothing has built yet at this point -- is not charged to the burst.
+    server.document_highlight(uri, 2, 0);
     let before = server.line_index_read_rebuilds();
-    for (index, letter) in keystrokes.iter().enumerate() {
+
+    for (index, letter) in ["v", "w", "x", "y", "z"].iter().enumerate() {
         let at = index as u32;
         server.edit_document(uri, vec![incremental_change(2, at, 2, at + 1, letter)]);
         // What a real client does between keystrokes, and the only thing that
@@ -279,12 +280,53 @@ fn every_keystroke_costs_a_reader_one_rebuild() {
 
     assert_eq!(
         server.line_index_read_rebuilds() - before,
-        keystrokes.len() as u64,
-        "each keystroke invalidates the memo, so each following read rebuilds; \
-         a shared cache would make this 0"
+        0,
+        "each read must find the index the keystroke before it patched"
     );
     assert_eq!(
         server.get_document_content(uri),
         Some("# Title\n\nvwxyz\n".to_string())
+    );
+}
+
+/// The reader's correctness pin, and the counterpart to
+/// `a_text_write_outside_did_change_discards_the_cached_index`: the cache is not
+/// part of the salsa revision, so nothing invalidates it on a write except the
+/// identity check. A reader must therefore rebuild after a text write it did not
+/// see, rather than answer positions against the bytes that write replaced.
+#[test]
+fn a_read_after_a_watcher_write_rebuilds() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    let path = root.join("watched.qmd");
+    fs::write(&path, "# Title\n\nOne\n").unwrap();
+
+    let mut server = TestLspServer::new();
+    server.initialize(&Uri::from_file_path(root).unwrap().to_string());
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
+    server.open_document(&uri, "# Title\n\nOne\n", "quarto");
+
+    server.document_highlight(&uri, 2, 0);
+    let after_first_read = server.line_index_read_rebuilds();
+
+    // A longer document on disk, so a stale index would resolve line 3 to
+    // nothing and the length below would be the old one.
+    fs::write(&path, "# Title\n\nAlpha\nBeta\nGamma\n").unwrap();
+    server.did_change_watched_files(vec![FileEvent {
+        uri: Uri::from_file_path(&path).unwrap(),
+        typ: FileChangeType::CHANGED,
+    }]);
+
+    server.document_highlight(&uri, 3, 0);
+
+    assert_eq!(
+        server.line_index_read_rebuilds() - after_first_read,
+        1,
+        "a write the reader did not see must invalidate its index"
+    );
+    assert_eq!(
+        server.snapshot_line_index_len(&uri),
+        Some("# Title\n\nAlpha\nBeta\nGamma\n".len()),
+        "the reader must index the text salsa holds, not the text it cached"
     );
 }

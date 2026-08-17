@@ -6,9 +6,16 @@
 //! to O(n·m) per request on large documents.
 //!
 //! This mirrors rust-analyzer's approach: precompute line-start byte offsets
-//! once, cache the result as a salsa query keyed on the text input
-//! ([`line_index`]), and answer each conversion with a binary search plus a
-//! short bounded within-line walk.
+//! once, cache the result per document ([`LineIndexCache`], keyed on the text
+//! input), and answer each conversion with a binary search plus a short bounded
+//! within-line walk.
+//!
+//! One index serves both phases. The write phase takes it out to patch
+//! ([`take_for_write`]) and hands it back ([`store_from_write`]); a reader asks
+//! for it by [`line_index`]. That was two caches until they were merged --- a
+//! main-thread-only one for the writer and a salsa memo for readers, which every
+//! keystroke invalidated. See [`LineIndexCache`] for what the merge is worth and
+//! why an entry is safe to share.
 //!
 //! The index owns a shared handle to the text it indexes rather than a copy, so
 //! it is still `'static` and still cheap to clone. UTF-16 columns are answered
@@ -23,8 +30,9 @@
 //! `\r` before `\n` is stripped from the visible line), UTF-16 columns follow
 //! LSP, and out-of-bounds inputs clamp rather than panic.
 
+use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lsp_types::Position;
 
@@ -276,24 +284,238 @@ impl LineIndex {
     }
 }
 
-/// Salsa-cached line index for `file`, keyed on the text input only (line
-/// structure is config-independent, so this is shared across configs). Returns
-/// an `Arc` so worker helpers can thread the index around cheaply.
+/// How many documents keep a line index. Every caller resolves through the
+/// document map, so the live population is the open-document count and this is a
+/// backstop against a client that opens without ever closing --- not a working
+/// limit. Deliberately above the 64 [`crate::incremental::ReparseCache`] uses:
+/// `benches/lsp_relint.rs` treats 100 open documents as realistic, and an index
+/// is two vectors, far cheaper to hold than a parse.
+const MAX_LINE_INDEXES: usize = 256;
+
+/// One [`LineIndex`] per open document, serving the write phase and worker reads
+/// from the same entry.
 ///
-/// Every keystroke writes the text input, so this memo is invalidated per
-/// revision and the first reader at each revision re-executes it --- two linear
-/// passes over the document, on a pool thread, while the write phase's own cache
-/// (`GlobalState::line_index_cache`) holds an index for the very same bytes.
-/// [`crate::salsa::Db::note_line_index_build`] counts those rebuilds so the size
-/// of that gap can be measured rather than argued about; see `TODO.md`.
-#[salsa::tracked(lru = 512)]
+/// This replaced a salsa `line_index` memo. The memo was invalidated by every
+/// keystroke, so the first reader at each new revision rebuilt the index while
+/// the write phase's own cache held one for the very same bytes --- measured at
+/// 68.6 us per keystroke on a 297 KB document, 5.5% of the end-to-end keystroke
+/// (`benches/lsp_write_phase.rs`, the `read_after_keystroke` row). Nothing read
+/// the memo from inside a tracked query, so it bought memoization and never
+/// dependency tracking, and a plain cache does that job without salsa.
+///
+/// **An entry is never trusted.** [`Self::get`] and [`Self::take`] hand one out
+/// only while it still shares the text allocation salsa holds
+/// ([`LineIndex::indexes`], an `Arc::ptr_eq`), so a hit is bit-identical to what
+/// a rebuild would produce and every other writer of the text (a watcher event,
+/// a disk resync, a reopen) invalidates it without knowing this cache exists. A
+/// reader can therefore only ever *miss*, never observe a wrong index.
+///
+/// Strict identity is the right test here, unlike
+/// [`crate::salsa::parsed_document`]'s base check, which falls back to comparing
+/// contents: a stale reparse base only widens the next diff, whereas a stale
+/// line index would be a wrong answer.
+///
+/// Eviction is least-recently-used, approximated by a monotone counter stamped
+/// on each entry as it is read or written --- the shape
+/// [`crate::incremental::ReparseCache`] uses, and for the same reason: dropping
+/// an entry only costs a rebuild, so the policy needs no more precision.
+#[derive(Default)]
+pub(crate) struct LineIndexCache {
+    files: HashMap<crate::salsa::FileText, Entry>,
+    clock: u64,
+    /// Indexes the write phase built because reuse broke, and indexes a reader
+    /// built. Counted apart because they mean opposite things: a write rebuild is
+    /// a missed splice, a read rebuild is the cost this cache exists to remove.
+    /// Reuse changes nothing observable, so without counters a regression to
+    /// rebuilding per keystroke would leave the whole suite green.
+    write_rebuilds: u64,
+    read_rebuilds: u64,
+}
+
+struct Entry {
+    index: Arc<LineIndex>,
+    /// When this entry was last touched, for eviction.
+    used: u64,
+}
+
+impl LineIndexCache {
+    /// Stamp `file`'s entry as just used.
+    fn touch(&mut self, file: crate::salsa::FileText) -> Option<&mut Entry> {
+        self.clock += 1;
+        let clock = self.clock;
+        let entry = self.files.get_mut(&file)?;
+        entry.used = clock;
+        Some(entry)
+    }
+
+    /// `file`'s index if it still describes `text`, cloned. A stale entry is
+    /// dropped rather than kept: it pins a text allocation nothing else
+    /// references.
+    fn get(&mut self, file: crate::salsa::FileText, text: &Arc<str>) -> Option<Arc<LineIndex>> {
+        match self.touch(file) {
+            Some(entry) if entry.index.indexes(text) => Some(Arc::clone(&entry.index)),
+            Some(_) => {
+                self.files.remove(&file);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// `file`'s index if it still describes `text`, **removed** from the cache.
+    ///
+    /// Taking rather than cloning is what lets the write phase's `Arc::make_mut`
+    /// mutate the tables in place: with the cache's reference gone it usually
+    /// holds the only one. The entry goes whether or not it validated, for the
+    /// same pinning reason as [`Self::get`].
+    fn take(&mut self, file: crate::salsa::FileText, text: &Arc<str>) -> Option<Arc<LineIndex>> {
+        self.files
+            .remove(&file)
+            .filter(|entry| entry.index.indexes(text))
+            .map(|entry| entry.index)
+    }
+
+    /// Keep `index` as `file`'s. The caller has already established that it
+    /// describes the text salsa holds.
+    fn insert(&mut self, file: crate::salsa::FileText, index: Arc<LineIndex>) {
+        self.clock += 1;
+        let used = self.clock;
+        self.files.insert(file, Entry { index, used });
+        self.evict_over_budget();
+    }
+
+    /// Forget `file`'s index, when its document closes.
+    fn remove(&mut self, file: crate::salsa::FileText) {
+        self.files.remove(&file);
+    }
+
+    fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Drop the least recently used entries until the cache is within budget.
+    /// Stamps are unique -- every touch bumps a monotone clock -- so "everything
+    /// at or below the `n`th smallest" drops exactly `n` entries.
+    fn evict_over_budget(&mut self) {
+        if self.files.len() <= MAX_LINE_INDEXES {
+            return;
+        }
+        let over = self.files.len() - MAX_LINE_INDEXES;
+        let mut stamps: Vec<u64> = self.files.values().map(|entry| entry.used).collect();
+        stamps.select_nth_unstable(over - 1);
+        let threshold = stamps[over - 1];
+        self.files.retain(|_, entry| entry.used > threshold);
+    }
+}
+
+/// The cache handle, shared between the writer and every worker snapshot the way
+/// [`crate::salsa::SalsaDb`] shares its own side channels.
+pub(crate) type SharedLineIndexCache = Arc<Mutex<LineIndexCache>>;
+
+/// Lock the cache, recovering from poisoning rather than propagating the panic:
+/// losing the cache costs a rebuild, never a wrong answer.
+///
+/// Callers must never hold this guard across a salsa call. The lock order is
+/// strictly salsa -> cache, the same rule
+/// [`crate::salsa::SalsaDb::reparse_state`] documents, so a `salsa::Cancelled`
+/// unwind can never pass through a held lock and no deadlock is reachable.
+fn lock(cache: &Mutex<LineIndexCache>) -> MutexGuard<'_, LineIndexCache> {
+    cache.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// `file`'s line index, for a reader.
+///
+/// Keyed on the text input only -- line structure is config-independent, so this
+/// is shared across configs. Returns an `Arc` so worker helpers can thread the
+/// index around cheaply.
 pub(crate) fn line_index(
+    cache: &Mutex<LineIndexCache>,
     db: &dyn crate::salsa::Db,
     file: crate::salsa::FileText,
 ) -> Arc<LineIndex> {
-    db.note_line_index_build();
-    let text = file.text(db).clone().unwrap_or_else(|| Arc::from(""));
-    Arc::new(LineIndex::from_arc(text))
+    // Salsa first, and the clone ends that borrow before the lock is taken.
+    let Some(text) = file.text(db).clone() else {
+        // Referenced but not loaded: there is no allocation to key identity on,
+        // so there is nothing worth caching. Unreachable from the handlers, which
+        // all resolve through the document map.
+        return Arc::new(LineIndex::from_arc(Arc::from("")));
+    };
+    if let Some(hit) = lock(cache).get(file, &text) {
+        return hit;
+    }
+    // Built with the lock released: it is two linear passes over the document,
+    // and holding the mutex across them would stall the main loop's write phase
+    // behind a worker.
+    let built = Arc::new(LineIndex::from_arc(Arc::clone(&text)));
+    let mut guard = lock(cache);
+    guard.read_rebuilds += 1;
+    // Last writer wins. A racing reader can only have inserted an index for this
+    // same text or a newer one, and either way the loser costs one later rebuild
+    // rather than a wrong answer -- every hand-out re-checks identity anyway.
+    guard.insert(file, Arc::clone(&built));
+    built
+}
+
+/// `file`'s line index for the write phase to patch, taken out of the cache.
+///
+/// Taken rather than cloned so the caller's `Arc::make_mut` mutates the tables in
+/// place instead of copying them. A caller that does not hand it back (an early
+/// return, a panic) merely leaves the next read to rebuild, since the entry is
+/// already gone.
+pub(crate) fn take_for_write(
+    cache: &Mutex<LineIndexCache>,
+    file: crate::salsa::FileText,
+    text: &Arc<str>,
+) -> Arc<LineIndex> {
+    let mut guard = lock(cache);
+    if let Some(taken) = guard.take(file, text) {
+        return taken;
+    }
+    guard.write_rebuilds += 1;
+    drop(guard);
+    // Built directly rather than through [`line_index`], and deliberately not
+    // inserted: the caller patches this index and stores the result, so an insert
+    // here would be overwritten a moment later. Built with the lock released, for
+    // the same reason as in [`line_index`].
+    Arc::new(LineIndex::from_arc(Arc::clone(text)))
+}
+
+/// Keep `index` as `file`'s, for the next edit and for the next read.
+///
+/// Stored only when salsa really does hold the text `index` was built for, so the
+/// cache never carries a claim that is already false. It can be false: an edit
+/// that reproduces the current bytes is skipped by `set_text_if_changed`, which
+/// leaves the older, equal allocation in place.
+pub(crate) fn store_from_write(
+    cache: &Mutex<LineIndexCache>,
+    file: crate::salsa::FileText,
+    current: Option<&Arc<str>>,
+    index: Arc<LineIndex>,
+) {
+    let mut guard = lock(cache);
+    match current {
+        Some(current) if index.indexes(current) => guard.insert(file, index),
+        _ => guard.remove(file),
+    }
+}
+
+/// Forget `file`'s line index, when its document closes.
+pub(crate) fn retire(cache: &Mutex<LineIndexCache>, file: crate::salsa::FileText) {
+    lock(cache).remove(file);
+}
+
+/// How many documents currently hold an index. Pins the "bounded by the
+/// open-document count" claim.
+pub(crate) fn cached_count(cache: &Mutex<LineIndexCache>) -> usize {
+    lock(cache).len()
+}
+
+pub(crate) fn write_rebuilds(cache: &Mutex<LineIndexCache>) -> u64 {
+    lock(cache).write_rebuilds
+}
+
+pub(crate) fn read_rebuilds(cache: &Mutex<LineIndexCache>) -> u64 {
+    lock(cache).read_rebuilds
 }
 
 #[cfg(test)]
@@ -508,6 +730,194 @@ mod tests {
         index.replace_range(2..2, "x");
         assert!(!index.indexes(&text));
         assert!(index.indexes(&index.text_arc()));
+    }
+
+    // --- the shared cache ---
+
+    mod cache {
+        use super::super::*;
+        use crate::salsa::{FileText, SalsaDb};
+
+        /// A `FileText` input and the `Arc<str>` salsa holds for it.
+        fn file(db: &SalsaDb, text: &str) -> (FileText, Arc<str>) {
+            let file = FileText::from_str(db, text);
+            let held = file.text(db).clone().expect("just set");
+            (file, held)
+        }
+
+        fn cache() -> SharedLineIndexCache {
+            SharedLineIndexCache::default()
+        }
+
+        /// The reader's contract: build once, then hit. This is the whole reason
+        /// the cache replaced a salsa memo, so it is the first thing to break if
+        /// the identity check is wrong in the *pessimistic* direction.
+        #[test]
+        fn a_reader_builds_once_and_then_hits() {
+            let db = SalsaDb::default();
+            let (file, _held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+
+            let first = line_index(&cache, &db, file);
+            let second = line_index(&cache, &db, file);
+
+            assert!(Arc::ptr_eq(&first, &second), "the second read must hit");
+            assert_eq!(read_rebuilds(&cache), 1);
+            assert_eq!(cached_count(&cache), 1);
+        }
+
+        /// An index is handed out only for the allocation it was built for. Equal
+        /// bytes in a second allocation are exactly the case where reuse would be
+        /// a guess, and a stale entry is dropped rather than kept --- it pins a
+        /// text allocation nothing else references.
+        #[test]
+        fn an_equal_but_distinct_allocation_misses_and_evicts() {
+            let db = SalsaDb::default();
+            let (file, held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+            lock(&cache).insert(file, Arc::new(LineIndex::from_arc(Arc::clone(&held))));
+
+            let twin: Arc<str> = Arc::from("ab\ncd\n");
+            assert_eq!(&*twin, &*held);
+
+            assert!(lock(&cache).get(file, &twin).is_none());
+            assert_eq!(
+                cached_count(&cache),
+                0,
+                "a stale entry must be dropped, not kept"
+            );
+        }
+
+        /// The write phase takes rather than clones, so its `Arc::make_mut`
+        /// patches the tables in place. A take must therefore leave nothing
+        /// behind, and must leave the caller holding the only reference.
+        #[test]
+        fn a_take_removes_the_entry_and_yields_a_unique_handle() {
+            let db = SalsaDb::default();
+            let (file, held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+            store_from_write(
+                &cache,
+                file,
+                Some(&held),
+                Arc::new(LineIndex::from_arc(Arc::clone(&held))),
+            );
+
+            let mut taken = take_for_write(&cache, file, &held);
+
+            assert_eq!(cached_count(&cache), 0);
+            assert_eq!(
+                write_rebuilds(&cache),
+                0,
+                "a validating entry is not a rebuild"
+            );
+            assert_eq!(
+                Arc::strong_count(&taken),
+                1,
+                "the write phase must hold the only reference, or `make_mut` copies"
+            );
+            // The property that uniqueness buys: an in-place patch.
+            let before = Arc::as_ptr(&taken);
+            Arc::make_mut(&mut taken).replace_range(2..2, "x");
+            assert_eq!(Arc::as_ptr(&taken), before);
+        }
+
+        /// A take with no entry to take is a rebuild, and stores nothing: the
+        /// caller patches what it gets back and stores that instead.
+        #[test]
+        fn a_take_that_misses_counts_a_rebuild_and_caches_nothing() {
+            let db = SalsaDb::default();
+            let (file, held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+
+            let taken = take_for_write(&cache, file, &held);
+
+            assert!(taken.indexes(&held));
+            assert_eq!(write_rebuilds(&cache), 1);
+            assert_eq!(cached_count(&cache), 0);
+        }
+
+        /// The store-side freshness check. An edit that reproduces the current
+        /// bytes is skipped by `set_text_if_changed`, leaving salsa on the older
+        /// equal allocation while the write phase holds an index for the new one:
+        /// caching that would be a claim already false.
+        #[test]
+        fn a_store_whose_text_salsa_does_not_hold_caches_nothing() {
+            let db = SalsaDb::default();
+            let (file, held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+            let orphan: Arc<str> = Arc::from("ab\ncd\n");
+
+            store_from_write(
+                &cache,
+                file,
+                Some(&held),
+                Arc::new(LineIndex::from_arc(orphan)),
+            );
+
+            assert_eq!(cached_count(&cache), 0);
+        }
+
+        #[test]
+        fn retiring_forgets_the_document() {
+            let db = SalsaDb::default();
+            let (file, held) = file(&db, "ab\ncd\n");
+            let cache = cache();
+            store_from_write(
+                &cache,
+                file,
+                Some(&held),
+                Arc::new(LineIndex::from_arc(Arc::clone(&held))),
+            );
+            assert_eq!(cached_count(&cache), 1);
+
+            retire(&cache, file);
+
+            assert_eq!(cached_count(&cache), 0);
+        }
+
+        /// The cap is a backstop against a client that opens without closing.
+        /// Eviction is least-recently-used, so the document being typed in must
+        /// survive a flood of others.
+        #[test]
+        fn eviction_keeps_the_budget_and_spares_the_most_recently_used() {
+            let db = SalsaDb::default();
+            let cache = cache();
+            let files: Vec<(FileText, Arc<str>)> = (0..MAX_LINE_INDEXES + 8)
+                .map(|index| file(&db, &format!("# {index}\n")))
+                .collect();
+
+            for (file, held) in &files {
+                store_from_write(
+                    &cache,
+                    *file,
+                    Some(held),
+                    Arc::new(LineIndex::from_arc(Arc::clone(held))),
+                );
+            }
+
+            assert_eq!(cached_count(&cache), MAX_LINE_INDEXES);
+            let (hot, hot_text) = files.last().unwrap();
+            assert!(
+                lock(&cache).get(*hot, hot_text).is_some(),
+                "the most recently stored document must survive"
+            );
+        }
+
+        /// A file salsa has referenced but not loaded has no allocation to key
+        /// identity on, so it is answered but never cached.
+        #[test]
+        fn an_unloaded_file_is_answered_without_being_cached() {
+            let db = SalsaDb::default();
+            let file = FileText::new(&db, None);
+            let cache = cache();
+
+            let index = line_index(&cache, &db, file);
+
+            assert_eq!(index.len(), 0);
+            assert_eq!(cached_count(&cache), 0);
+            assert_eq!(read_rebuilds(&cache), 0);
+        }
     }
 
     /// An edit replaces the text allocation rather than mutating it, so a handle

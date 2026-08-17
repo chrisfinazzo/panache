@@ -602,8 +602,8 @@ impl LspTester {
     }
 
     /// Resolve `uri`'s line index the way a worker read does --- through a
-    /// [`StateSnapshot`](super::global_state::StateSnapshot), i.e. the salsa memo
-    /// --- and return the document length it reports.
+    /// [`StateSnapshot`](super::global_state::StateSnapshot) --- and return the
+    /// document length it reports.
     ///
     /// The index type is crate-private, so this hands back a cheap scalar
     /// derived from it. That is enough for both callers: a bench wants the read
@@ -660,30 +660,21 @@ impl LspTester {
     /// nothing observable, so a regression to always-rebuilding would pass every
     /// other test in the suite.
     pub fn line_index_rebuilds(&self) -> u64 {
-        self.gs.line_index_rebuilds
+        self.gs.line_index_write_rebuilds()
     }
 
-    /// How many documents currently hold a cached write-phase line index. Pins
-    /// the "bounded by the open-document count" claim.
+    /// How many documents currently hold a cached line index. Pins the "bounded
+    /// by the open-document count" claim.
     pub fn cached_line_indexes(&self) -> usize {
         self.gs.cached_line_index_count()
     }
 
-    /// Total executions of the salsa `line_index` memo, across both phases.
-    pub fn line_index_builds(&self) -> u64 {
-        self.gs.salsa.line_index_builds()
-    }
-
     /// Line indexes built to serve a *reader*, as opposed to the write phase.
     ///
-    /// Every write-phase rebuild falls back to the memo and so is one of the
-    /// builds [`Self::line_index_builds`] counts; the remainder are the ones a
-    /// worker read paid for. That difference is the cost `TODO.md`'s reader-side
-    /// item is about, and the number that decides whether closing the gap is
-    /// worth a shared cache.
+    /// Zero for a document the write phase has already indexed at the revision
+    /// being read, which is the whole point of the two phases sharing one cache.
     pub fn line_index_read_rebuilds(&self) -> u64 {
-        self.line_index_builds()
-            .saturating_sub(self.line_index_rebuilds())
+        self.gs.line_index_read_rebuilds()
     }
 
     pub fn get_cached_file_text(&self, path: &std::path::Path) -> Option<String> {

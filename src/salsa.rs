@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::config::Config;
@@ -2733,16 +2732,6 @@ pub trait Db: salsa::Database {
     /// Record `prev` as the reparse base for `(file, config)`. No-op by
     /// default, and no-op in [`SalsaDb`] for a pair that was never admitted.
     fn reparse_store(&self, _file: FileText, _config: FileConfig, _prev: PrevParse) {}
-
-    /// Count one reader-side line-index build.
-    ///
-    /// Measurement scaffolding for `TODO.md`'s "the reader still rebuilds the
-    /// index once per revision": the write phase already counts its own rebuilds
-    /// on `GlobalState`, but the `line_index` memo body holds only a `&dyn Db`,
-    /// so this is the one place a reader can report from. It records nothing that
-    /// affects an answer, which is why the default is a no-op and why only
-    /// [`SalsaDb`] bothers.
-    fn note_line_index_build(&self) {}
 }
 
 #[salsa::db]
@@ -2756,10 +2745,6 @@ pub struct SalsaDb {
     /// same way [`Vfs`] is, so a worker's snapshot splices against the same
     /// bases the writer records. See [`crate::incremental`].
     reparse: Arc<Mutex<ReparseCache>>,
-    /// Reader-side line-index builds, shared across cloned handles so a worker's
-    /// count reaches the writer that reads it. Observability only --- see
-    /// [`Db::note_line_index_build`].
-    line_index_builds: Arc<AtomicU64>,
 }
 
 impl Default for SalsaDb {
@@ -2768,7 +2753,6 @@ impl Default for SalsaDb {
             storage: salsa::Storage::default(),
             vfs: Vfs::default(),
             reparse: Arc::default(),
-            line_index_builds: Arc::default(),
         };
         // Mint the `FileSet` input now (on the constructing thread) so the VFS's
         // `OnceLock` is populated before any cloned worker handle reads it.
@@ -2805,12 +2789,6 @@ impl SalsaDb {
     /// switched off at runtime.
     pub fn reparse_clear(&mut self) {
         self.reparse_state().clear();
-    }
-
-    /// How many line indexes readers have built from scratch. Counts across every
-    /// clone of this handle, so a worker's build is visible to the writer.
-    pub fn line_index_builds(&self) -> u64 {
-        self.line_index_builds.load(Ordering::Relaxed)
     }
 
     pub fn file_text_if_cached(&self, path: &Path) -> Option<FileText> {
@@ -3205,10 +3183,6 @@ impl Db for SalsaDb {
 
     fn reparse_store(&self, file: FileText, config: FileConfig, prev: PrevParse) {
         self.reparse_state().store((file, config), prev);
-    }
-
-    fn note_line_index_build(&self) {
-        self.line_index_builds.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -4415,7 +4389,6 @@ mod tests {
             storage,
             vfs: Vfs::default(),
             reparse: Arc::default(),
-            line_index_builds: Arc::default(),
         };
         db.file_set();
         (db, log)
@@ -4479,7 +4452,6 @@ mod tests {
 
         parsed_document(&db, root_file, config);
         refdef_set(&db, root_file, config);
-        crate::lsp::line_index::line_index(&db, root_file);
         let id = db.file_id_for_input(root_file).expect("root is registered");
         let path = Db::path_of_id(&db, id).expect("root has a path");
         log.lock().unwrap().clear();
@@ -4490,9 +4462,13 @@ mod tests {
 
         parsed_document(&db, root_file, config);
         refdef_set(&db, root_file, config);
-        crate::lsp::line_index::line_index(&db, root_file);
 
-        for query in ["parsed_document", "refdef_set", "line_index"] {
+        // `line_index` was a third witness here until it stopped being a tracked
+        // query (it is now `crate::lsp::line_index::LineIndexCache`, which salsa
+        // does not know about). Its half of this claim is asserted directly, and
+        // more sharply, by `an_identical_write_leaves_no_stale_index` in
+        // `tests/lsp/test_line_index_reuse.rs`.
+        for query in ["parsed_document", "refdef_set"] {
             assert_eq!(
                 executed(&log, query),
                 0,

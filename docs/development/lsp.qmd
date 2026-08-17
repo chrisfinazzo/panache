@@ -29,6 +29,36 @@ consumer (request handlers, the linter, diagnostics) reads the tree from the
 revision and no way for a handler to see a tree that disagrees with the text it
 was handed.
 
+### One Line Index, Shared by Both Phases
+
+Positions are converted through a `LineIndex` (`src/lsp/line_index.rs`): line
+start offsets plus a per-line "has any non-ASCII byte" flag, so a conversion is
+a binary search and, on the all-ASCII lines that are nearly all of them, plain
+arithmetic.
+
+There is one index per open document, in a `LineIndexCache` shared by handle
+between the writer and every worker snapshot. `did_change` *takes* it out,
+patches it (`replace_range` shifts the line table rather than rescanning) and
+puts it back; a request handler asks for the same entry. Both phases therefore
+see the index the last keystroke produced.
+
+This is deliberately not a salsa query. A keystroke writes the text input, so a
+memo keyed on it is invalidated per revision --- which meant every request an
+editor issued between keystrokes rebuilt the index over the whole document while
+the writer held one for those very bytes. It also meant two live `Arc`s to the
+index, which turned the write phase's in-place patch into a table copy.
+
+What makes sharing safe is that **an entry is never trusted**. It is handed out
+only while it still shares the text allocation salsa holds, compared by
+`Arc::ptr_eq`. An `Arc<str>` is immutable and an edit *replaces* the handle
+rather than writing through it, so a shared allocation proves the tables
+describe those bytes without reading one --- and any other writer of the text (a
+watcher event, a disk resync, a reopen) invalidates the entry without knowing
+the cache exists. A reader can therefore only ever miss and rebuild, never
+answer against stale bytes. Strict identity is the right test here, unlike the
+reparse base below, which also accepts equal contents: a stale base only widens
+the next diff, whereas a stale line index would be a wrong answer.
+
 `parsed_document` splices that tree off the previous parse instead of reparsing
 from scratch, which is the default; `PANACHE_INCREMENTAL_PARSING=0` turns it off
 for debugging, as does the deprecated `experimental.incrementalParsing = false`

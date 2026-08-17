@@ -270,7 +270,8 @@ pub(crate) fn compute_publishes(
         panache_diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
     }
 
-    let line_index = crate::lsp::line_index::line_index(snap.db(), doc_state.salsa_file).clone();
+    let line_index =
+        crate::lsp::line_index::line_index(&snap.line_index_cache, snap.db(), doc_state.salsa_file);
     let own_diagnostics: Vec<Diagnostic> = panache_diagnostics
         .iter()
         .map(|d| convert_diagnostic(d, &line_index))

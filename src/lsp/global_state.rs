@@ -221,6 +221,12 @@ pub(crate) struct StateSnapshot {
     /// Client capabilities the pull handler needs, copied so it runs off-thread.
     pub(crate) supports_pull_diagnostics: bool,
     pub(crate) supports_related_documents: bool,
+    /// The same line-index cache the writer patches, shared by handle. This is
+    /// what lets a worker read find the index the last keystroke left behind
+    /// instead of rebuilding it: the cache is not part of the salsa revision, so
+    /// a text write does not invalidate it -- identity does
+    /// ([`crate::lsp::line_index::LineIndexCache`]).
+    pub(crate) line_index_cache: crate::lsp::line_index::SharedLineIndexCache,
 }
 
 impl StateSnapshot {
@@ -240,10 +246,11 @@ impl StateSnapshot {
         Some(state.salsa_file.content_or_empty(self.db()).to_string())
     }
 
-    /// The salsa-cached [`LineIndex`] for `uri`, for O(log n) position <->
-    /// offset conversion. Keyed on the text input only, so it is shared across
-    /// configs and revisions with unchanged text. Returns `None` if the
-    /// document isn't open.
+    /// The cached [`LineIndex`] for `uri`, for O(log n) position <-> offset
+    /// conversion. Keyed on the text input only, so it is shared across configs
+    /// and revisions with unchanged text -- and, since the write phase reads the
+    /// same cache, across the two phases. Returns `None` if the document isn't
+    /// open.
     ///
     /// [`LineIndex`]: crate::lsp::line_index::LineIndex
     pub(crate) fn line_index(
@@ -251,7 +258,11 @@ impl StateSnapshot {
         uri: &Uri,
     ) -> Option<std::sync::Arc<crate::lsp::line_index::LineIndex>> {
         let state = self.document_map.get(&uri.to_string())?;
-        Some(crate::lsp::line_index::line_index(self.db(), state.salsa_file).clone())
+        Some(crate::lsp::line_index::line_index(
+            &self.line_index_cache,
+            self.db(),
+            state.salsa_file,
+        ))
     }
 
     /// The salsa-cached syntax tree for `uri`, freshly rooted.
@@ -431,32 +442,18 @@ pub(crate) struct GlobalState {
     /// configs at most, so the linear scan is cheap.
     config_intern: Vec<(crate::Config, crate::salsa::FileConfig)>,
 
-    /// The line index the write phase last left behind, per open document.
+    /// The one line index per open document, shared with every worker snapshot.
     ///
-    /// [`crate::lsp::documents::did_change`] patches an index rather than
-    /// rebuilding one, and the salsa `line_index` memo cannot supply the one to
-    /// patch: every keystroke invalidates it, and inside a typing burst no
-    /// reader re-runs it, so it is cold exactly when the write phase needs it.
-    /// This is the warm copy.
+    /// Both phases read it. [`crate::lsp::documents::did_change`] patches the
+    /// index the previous edit left behind rather than rebuilding one, and a
+    /// worker read at the resulting revision finds that same patched index
+    /// instead of rebuilding it a second time. See
+    /// [`crate::lsp::line_index::LineIndexCache`] for why an entry is never
+    /// trusted and what the sharing is worth.
     ///
-    /// An entry is never *trusted*: [`Self::take_line_index`] uses it only while
-    /// it still shares the text allocation salsa holds, which makes this a pure
-    /// memo of `line_index(db, file)` --- a hit returns bit-identical tables,
-    /// and every other writer of the text (a watcher event, a disk resync, a
-    /// reopen) invalidates it without knowing this cache exists.
-    ///
-    /// Bounded by the open-document count: only the write phase inserts, only
-    /// for a document already in [`Self::document_map`], and `did_close`
-    /// retires.
-    line_index_cache: HashMap<crate::salsa::FileText, Arc<crate::lsp::line_index::LineIndex>>,
-
-    /// How many times the write phase has had to build a line index from
-    /// scratch instead of patching the one the previous edit left behind.
-    ///
-    /// Reuse changes nothing observable, so without a counter a regression to
-    /// rebuilding on every keystroke would leave the whole suite green. Read by
-    /// the test harness only.
-    pub(crate) line_index_rebuilds: u64,
+    /// Bounded by the open-document count: every inserter resolves through
+    /// [`Self::document_map`], and `did_close` retires.
+    line_index_cache: crate::lsp::line_index::SharedLineIndexCache,
 
     pub(crate) pool: TaskPool<Task>,
     /// Dedicated single-thread pool for formatting requests. Matches
@@ -528,8 +525,7 @@ impl GlobalState {
             diagnostics: DiagnosticCollection::default(),
             salsa: crate::salsa::SalsaDb::default(),
             config_intern: Vec::new(),
-            line_index_cache: HashMap::new(),
-            line_index_rebuilds: 0,
+            line_index_cache: crate::lsp::line_index::SharedLineIndexCache::default(),
             pool,
             fmt_pool,
             task_receiver,
@@ -615,19 +611,10 @@ impl GlobalState {
         file: crate::salsa::FileText,
     ) -> Arc<crate::lsp::line_index::LineIndex> {
         // Cloned out of salsa (a refcount bump) so the immutable borrow of the
-        // database ends before the cache is mutated.
+        // database ends before the cache is locked.
         let current = file.text(&self.salsa).clone();
-        // The entry is removed whether or not it validates: a stale one is
-        // dropped rather than kept, since it pins a text allocation nothing else
-        // references.
-        if let Some(current) = current.as_ref()
-            && let Some(cached) = self.line_index_cache.remove(&file)
-            && cached.indexes(current)
-        {
-            return cached;
-        }
-        self.line_index_rebuilds += 1;
-        crate::lsp::line_index::line_index(&self.salsa, file).clone()
+        let text = current.unwrap_or_else(|| Arc::from(""));
+        crate::lsp::line_index::take_for_write(&self.line_index_cache, file, &text)
     }
 
     /// Keep `index` as `file`'s line index for the next edit.
@@ -642,25 +629,36 @@ impl GlobalState {
         index: Arc<crate::lsp::line_index::LineIndex>,
     ) {
         let current = file.text(&self.salsa).clone();
-        match current.as_ref() {
-            Some(current) if index.indexes(current) => {
-                self.line_index_cache.insert(file, index);
-            }
-            _ => {
-                self.line_index_cache.remove(&file);
-            }
-        }
+        crate::lsp::line_index::store_from_write(
+            &self.line_index_cache,
+            file,
+            current.as_ref(),
+            index,
+        );
     }
 
     /// Forget `file`'s line index, when its document closes.
     pub(crate) fn retire_line_index(&mut self, file: crate::salsa::FileText) {
-        self.line_index_cache.remove(&file);
+        crate::lsp::line_index::retire(&self.line_index_cache, file);
     }
 
-    /// How many documents currently hold a cached write-phase line index
-    /// (test-only: nothing in production asks).
+    /// How many line indexes the write phase has built from scratch rather than
+    /// patching the one the previous edit left behind.
+    pub(crate) fn line_index_write_rebuilds(&self) -> u64 {
+        crate::lsp::line_index::write_rebuilds(&self.line_index_cache)
+    }
+
+    /// How many line indexes a *reader* has built. Zero once the write phase has
+    /// an index for the revision being read, which is the point of sharing one
+    /// cache between the phases.
+    pub(crate) fn line_index_read_rebuilds(&self) -> u64 {
+        crate::lsp::line_index::read_rebuilds(&self.line_index_cache)
+    }
+
+    /// How many documents currently hold a cached line index (test-only: nothing
+    /// in production asks).
     pub(crate) fn cached_line_index_count(&self) -> usize {
-        self.line_index_cache.len()
+        crate::lsp::line_index::cached_count(&self.line_index_cache)
     }
 
     /// A cheap read snapshot for a worker thread.
@@ -668,6 +666,7 @@ impl GlobalState {
         StateSnapshot {
             analysis: crate::salsa::Analysis::new(self.salsa.clone()),
             document_map: Arc::clone(&self.document_map),
+            line_index_cache: Arc::clone(&self.line_index_cache),
             workspace_folders: self.workspace_folders.clone(),
             diagnostics: self.diagnostics.shared(),
             supports_pull_diagnostics: self.supports_pull_diagnostics,

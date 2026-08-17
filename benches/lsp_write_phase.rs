@@ -16,9 +16,9 @@
 //! `documents::did_change` (`src/lsp/documents.rs`), in order:
 //!
 //! 1. `take_line_index` --- the index the previous edit left behind, taken out
-//!    of `GlobalState` so the caller holds the only reference. Falls back to
-//!    the salsa `line_index` memo (a full rebuild) only on a first edit or when
-//!    another writer has moved the text underneath.
+//!    of the shared line-index cache so the caller holds the only reference.
+//!    Rebuilds only on a first edit or when another writer has moved the text
+//!    underneath.
 //! 2. `content_change_span` + `LineIndex::replace_range` per change
 //!    (`src/lsp/conversions.rs`, `src/lsp/line_index.rs`) --- a binary search,
 //!    an in-place table patch, and the two copies that splicing an `Arc<str>`
@@ -39,6 +39,7 @@
 //! | --- | --------- | -------------- |
 //! | `config` | one config resolution + intern | that resolving config stays **size-independent**, and how much a keystroke would pay if it were ever put back on this path |
 //! | `keystroke` | a whole `didChange`, one 1-char ranged edit | the headline: what a keystroke costs the main loop |
+//! | `read_after_keystroke` | `keystroke` plus the position-resolving read an editor issues after one | that a reader reuses the index the keystroke patched instead of rebuilding it |
 //! | `batch4` | a whole `didChange`, four scattered 1-char edits | the per-change fan-out --- N copies **and** N index builds |
 //! | `end_to_end` | `keystroke` plus the parse it schedules | the machine-relative denominator |
 //!
@@ -181,6 +182,34 @@
 //! Note the direction of the share check below: a cheaper parse is a smaller
 //! denominator, so the write phase's share *rises* when the feature works.
 //!
+//! Then the *reader* stopped rebuilding it too. The cache above lived on
+//! `GlobalState`, which is main-thread-only, so a worker read still went through
+//! the salsa memo --- and a keystroke invalidates it, so every request an editor
+//! issues between keystrokes re-scanned the whole document while the write phase
+//! held an index for those very bytes. The `read_after_keystroke` row is what
+//! priced that, and one shared cache
+//! (`crate::lsp::line_index::LineIndexCache`) is what removed it. Same machine,
+//! medians of three runs, large document:
+//!
+//! ```text
+//!                                   before    after
+//! didChange, 1-char edit              9.47     9.33
+//! didChange, 4 changes               37.15    37.61
+//! didChange + line index read        81.94     9.51
+//! ```
+//!
+//! 8.6x on the read row, which now sits *on* the keystroke it follows: the read
+//! adds 0.2 us at every document size, i.e. a lock, a hash lookup and a refcount
+//! bump. The two write-phase rows do not move, which is the other half of the
+//! claim --- the reader's index is the writer's index, not a second one.
+//!
+//! It also removed a coupling that had nothing to do with reading. While the memo
+//! existed, a read left a *second* live `Arc` to the index, so the next
+//! keystroke's `Arc::make_mut` copied the tables instead of patching them: with
+//! this row placed before `batch4`, that row went 34.24 -> 143.71 us on the large
+//! document (fan-out 16.73x against 3.19x on medium). One holder, one index, and
+//! the row order stops mattering --- see [`ROWS`].
+//!
 //! Run-to-run spread on the large rows is wide (the `keystroke` row has been
 //! seen anywhere from 215 to 400 us on an otherwise idle machine), which is why
 //! every check below is a ratio taken within one run rather than a comparison
@@ -296,6 +325,25 @@ const KEYSTROKE_SHARE_MAX: f64 = 0.05;
 /// above the four-splice floor, and far below anything quadratic.
 const BATCH_FANOUT_MAX: f64 = 5.0;
 
+/// A read straight after a keystroke, against the keystroke alone. This is the
+/// gate on the two phases sharing one line index: a reader that rebuilds instead
+/// of reusing pays a full document scan here, and nothing else in the suite
+/// notices (reuse changes no answer, only how long it takes to give it).
+///
+/// Measured at 0.99x / 1.19x / 1.47x (large / medium / small), against 8.6x on
+/// the large document while readers went through a salsa memo every keystroke
+/// invalidated.
+///
+/// In practice this gates the large document alone: the other two sit under
+/// [`MIN_ABSOLUTE_US`] and are waived, which is the right outcome rather than a
+/// gap. A read costs a lock, a hash lookup and a refcount bump, and that fixed
+/// cost is half again a 0.37 us keystroke while being nothing at all next to a
+/// 9.4 us one -- so a ratio is only meaningful where the document is big enough
+/// for a rebuild to dwarf it, and that is exactly where a rebuild would show. The
+/// 2.5 ceiling leaves the large row ~2.5x headroom over its 0.99x and still sits
+/// far below the 8.6x a returning rebuild puts there.
+const READ_REUSE_MAX: f64 = 2.5;
+
 /// The mode the thresholds above were calibrated against: the shipped default,
 /// which is on. Incremental parsing changes what the end-to-end row measures,
 /// and `PANACHE_INCREMENTAL_PARSING` can flip it out from under a gate run, so
@@ -326,20 +374,23 @@ enum Row {
 /// Every row in measurement order. Adding a variant without adding it here is
 /// a compile error at [`Row::contract`]'s exhaustive match, which is the point:
 /// a row cannot exist without saying what it claims.
-/// `ReadAfterKeystroke` is deliberately **last**. It is the only row that reads
-/// the line index, and a read leaves the salsa memo holding an `Arc` clone of it
-/// --- which makes the *next* row's `Arc::make_mut` in `did_change` copy the
-/// index tables instead of patching them in place. Measured from this bench:
-/// running it before `batch4` put that row's large-document fan-out at 16.73x
-/// against 3.19x on medium, and `reset()` does not clear it because the memo is
-/// keyed on the text, not on the fixture. Last means no row measures another
-/// row's leftovers.
+/// `ReadAfterKeystroke` sits next to the `Keystroke` row it is compared against.
+///
+/// That ordering was briefly impossible. While readers went through a salsa memo,
+/// a read left *two* live `Arc`s to the index -- the memo's and the cache's --- so
+/// the next row's `Arc::make_mut` in `did_change` copied the index tables instead
+/// of patching them in place, and `reset()` could not clear it because the memo
+/// was keyed on the text rather than on the fixture. Measured from this bench:
+/// putting this row before `batch4` took that row's large-document fan-out to
+/// 16.73x against 3.19x on medium (34.24 -> 143.71 us). With one shared cache the
+/// write phase takes the only reference again, so a read no longer perturbs the
+/// row after it.
 const ROWS: [Row; 5] = [
     Row::Config,
     Row::Keystroke,
+    Row::ReadAfterKeystroke,
     Row::Batch4,
     Row::EndToEnd,
-    Row::ReadAfterKeystroke,
 ];
 
 struct Contract {
@@ -389,22 +440,18 @@ impl Row {
                 max_scaling: Some(KEYSTROKE_SCALING_MAX),
                 max_share_of_end_to_end: Some(KEYSTROKE_SHARE_MAX),
             },
-            // A measurement row, and deliberately not yet a contract. It exists
-            // to price the *reader's* line-index rebuild: the write phase's cache
-            // is main-thread-only, so the first read at each new revision
-            // re-executes the `line_index` memo over the whole document. Its
-            // delta against `keystroke` is that rebuild, reported below as
-            // `reader rebuild`.
+            // The keystroke plus the read an editor issues right after it. Both
+            // phases share one line index, so the read finds the index the
+            // keystroke just patched and this row sits on top of `keystroke`:
+            // measured at 9.51 us against 9.33 on the large document. Its own
+            // scaling is therefore the keystroke's, under the same ceiling.
             //
-            // No ceiling because the number it would bound is the open question
-            // (see `TODO.md`, "The *reader* still rebuilds the index once per
-            // revision"): a ceiling calibrated now would enshrine the cost this
-            // row exists to decide whether to remove. Give it one once that is
-            // settled -- after a shared cache it should collapse onto
-            // `keystroke`, which is a sharp claim worth gating.
+            // The claim that matters is the ratio, checked against `keystroke`
+            // separately (see `READ_REUSE_MAX`); a rebuilding reader shows there
+            // long before it shows here.
             Row::ReadAfterKeystroke => Contract {
-                max_scaling: None,
-                max_share_of_end_to_end: None,
+                max_scaling: Some(KEYSTROKE_SCALING_MAX),
+                max_share_of_end_to_end: Some(KEYSTROKE_SHARE_MAX),
             },
             // Same, under its own ceiling, plus the per-change fan-out checked
             // separately against `keystroke` (see `BATCH_FANOUT_MAX`).
@@ -795,6 +842,25 @@ fn check_expectations(results: &[RowResult]) -> Vec<String> {
         }
     }
 
+    // Cross-row: a read straight after a keystroke against the keystroke alone.
+    for document in DOCUMENTS {
+        let (Some(with_read), Some(keystroke)) = (
+            median(results, document.label, Row::ReadAfterKeystroke),
+            median(results, document.label, Row::Keystroke),
+        ) else {
+            continue;
+        };
+        let reuse = with_read / keystroke;
+        checks.push((
+            reuse <= READ_REUSE_MAX || with_read <= MIN_ABSOLUTE_US,
+            format!(
+                "{}/read_after_keystroke: {reuse:.2}x the keystroke alone \
+                 <= {READ_REUSE_MAX:.2}x",
+                document.label
+            ),
+        ));
+    }
+
     // Cross-row: four changes in one notification against one change.
     for document in DOCUMENTS {
         let (Some(batch), Some(keystroke)) = (
@@ -823,17 +889,17 @@ fn check_expectations(results: &[RowResult]) -> Vec<String> {
     failures
 }
 
-/// Price the reader's line-index rebuild: `read_after_keystroke` minus
-/// `keystroke` is the memo execution the write phase's cache cannot serve,
-/// because it lives on `GlobalState` and the reader is on a pool thread.
+/// What a reader adds to a keystroke: `read_after_keystroke` minus `keystroke`.
 ///
-/// Reported, never asserted. It is the evidence for the decision in `TODO.md`
-/// ("worth it only once a profile shows the reader-side rebuild mattering"), and
-/// its share of the end-to-end keystroke is what says whether one shared cache
-/// would be felt or merely tidy.
+/// This was a whole-document rebuild, because the write phase's cache lived on
+/// `GlobalState` and the reader went through a salsa memo every keystroke
+/// invalidated -- 68.6 us on the large document, 5.5% of an end-to-end keystroke.
+/// Sharing one cache took it to ~0, and this is the line that says so in
+/// microseconds rather than as a ratio. Reported, never asserted;
+/// [`READ_REUSE_MAX`] is the gate.
 fn report_reader_rebuild(results: &[RowResult]) {
-    println!("\nReader-side line-index rebuild");
-    println!("==============================");
+    println!("\nWhat a read adds to a keystroke");
+    println!("===============================");
     for document in DOCUMENTS {
         let (Some(with_read), Some(keystroke), Some(end_to_end)) = (
             median(results, document.label, Row::ReadAfterKeystroke),

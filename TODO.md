@@ -157,21 +157,22 @@ that survived them --- taking a keystroke on a 297 KB document from 282 us to
 `Arc<str>` input on stable, so that row is now memory bandwidth and nothing
 else.
 
-- [ ] **The *reader* still rebuilds the index once per revision.** The write
-  phase keeps its own on `GlobalState`, which is main-thread-only, so the
-  first worker read after a keystroke re-executes the `line_index` memo over
-  the whole document. Moving the cache into a `SalsaDb` side channel keyed
-  on `FileText` (the shape `src/incremental.rs` already uses, validated the
-  same way by `Arc::ptr_eq`) would let one index serve both sides. Costs a
-  lock on the read path and a purity argument for reading it from a tracked
-  query; worth it only once a profile shows the reader-side rebuild
-  mattering.
+The reader-side half of that rebuild is fixed too. It was measured first, as the
+item asked: one rebuild per keystroke (`tests/lsp/test_line_index_reuse.rs`
+counts them), each 68.6 us on a 297 KB document, 5.5% of an end-to-end
+keystroke. The two caches --- a main-thread-only one for the writer, a salsa
+memo for readers --- are now one `LineIndexCache`, and the
+`read_after_keystroke` row sits on the keystroke it follows (81.94 -> 9.51 us),
+with the write-phase rows unmoved. Retiring the memo also removed a second live
+`Arc` to the index that had been turning the write phase's in-place patch into a
+table copy whenever a reader had run: with a read placed before it, `batch4` on
+the large document was 34.24 -> 143.71 us.
 
-- [ ] **`handlers/diagnostics.rs` builds the index twice per publish** --- the
-  `line_index` memo at the top, then a fresh `LineIndex::new` over the same
+- [ ] **`handlers/diagnostics.rs` builds an index twice per publish** --- the
+  shared cache at the top, then a fresh `LineIndex::new` over the same
   document further down (which also copies the text into a `String` to do
   it). Settle path, not the keystroke path, so it is off every bench this
-  repo has; thread the memo's `Arc` through instead.
+  repo has; thread the cached `Arc` through instead.
 
 - [ ] **`set_text_if_changed`'s content compare is *not* a second scan and does
   not need bypassing.** Established by reading it, not by the clock: its
