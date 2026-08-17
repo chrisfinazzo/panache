@@ -38,6 +38,28 @@ config value and the document's reference-definition set are unchanged ---
 retained blocks keep the resolution and options they were parsed with, so either
 changing invalidates them at a distance.
 
+The splice is attempted in three tiers, cheapest first, and the first one that
+succeeds wins:
+
+- **Token.** An edit strictly inside one plain-prose `TEXT` token of a top-level
+  paragraph replaces that one green token. It costs the token's length plus a
+  green root rebuild, so unlike the two below it does not scale with the
+  document --- which is what makes a keystroke in a 300 KB file cost what a
+  keystroke in a small one does. It is tried before the cost guard below, so an
+  accepted edit also skips the price of deciding not to reuse. The guards are
+  strict: the edit must not touch either end of the token's non-whitespace core,
+  every byte of the token must be inert prose, the token must still read as one
+  `TEXT` on its own, and the edit must sit past its line's first word so no
+  block marker can be manufactured.
+- **Section window.** Re-parses from the previous top-level heading, and
+  re-adopts the old tail by `Arc` identity when it comes back structurally
+  equal.
+- **Suffix window.** Re-parses from the enclosing block.
+
+Both window tiers parse to the end of the document, because list-item buffering
+depends on unbounded lookahead and a bounded standalone window parse is
+therefore untrustworthy.
+
 Four properties make reading and writing that channel from inside an otherwise
 pure query sound:
 
@@ -52,7 +74,7 @@ pure query sound:
   writes the user's file.
 - Every guard declines to `None` rather than guessing, so the query's fallback
   is an ordinary full parse.
-- One guard declines for cost rather than correctness. Both reparse strategies
+- One guard declines for cost rather than correctness. Both *window* strategies
   parse their window to the end of the document, so a window that starts near
   the top of the file re-derives nearly all of it and then pays a splice on top:
   measured, that is a 5-10% loss against simply parsing the file again. The

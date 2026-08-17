@@ -262,18 +262,24 @@ Phase 6b's gate is met on all four items: oracle-clean fuzz at 10x, the
 workspace and LSP suites green with the flag forced both ways, both bench gates
 green, and the week of oracle-live dogfooding done with zero panics.
 
-Next step is Phase 7 (token tier).
+Phase 7 (token tier) is **implemented but not signed off**: the code, guards,
+honesty tests, and fuzz driver have landed and the workspace is green with the
+fuzzer clean at 30x, but `task bench:incremental-gate` has not been run, and
+that gate *is* the phase's exit criterion. Next step is a gate run on an idle
+machine, then calibrating the two placeholder floors it will report. Details and
+the full list of what is unverified are under the phase's own entry below.
 
 The two 5x floors that failed were **lowered to 4.5x, and the cause was the
-corpus rather than the code**. `benches/documents/download.sh` fetches
+corpus rather than the code**. `benches/documents/download.sh` used to fetch
 `pandoc_manual.md` from `refs/heads/main` with no revision pinned; upstream grew
 it from 300 856 to 304 665 bytes, so the fixed edit at line 7600 now chooses a
-7.5% window where it chose 7.0%. Speedup is a function of window share and
-nothing else, which is why a floor calibrated against one revision of somebody
-else's Markdown file could not hold. **Pinning the corpus to a revision is the
-real fix and is not done** --- until it is, no floor here can be tighter than
-upstream's drift, and every gate run also rewrites the tracked
-`benches/documents/pandoc_testsuite.md` as a side effect.
+7.5% window where it chose 7.0%. Speedup is a function of window share for the
+window tiers, which is why a floor calibrated against one revision of somebody
+else's Markdown file could not hold. **The corpus is pinned now**, to fixed
+`jgm/pandoc` and `quarto-dev/quarto-web` revisions recorded at the top of
+`download.sh`, which also stops a gate run rewriting the tracked
+`benches/documents/pandoc_testsuite.md` and dirtying the working tree. Floors
+recorded from here on hold until someone bumps a revision deliberately.
 
 `incremental_regressions.rs` carries no ignored *incremental* tests; the three
 `#[ignore]`d tests there pin two full-parser bugs (setext-after-setext, and a
@@ -712,6 +718,78 @@ reproducers are synthetic and pin their strategy instead.
     overhead too, not only the block parse --- `full_replace` puts a \~10 us
     floor on a 1.6 KB document for machinery that ultimately parsed 27 bytes
     (materializing the root from green, walking the cascade).
+  - **The tier is implemented and correctness-complete; the box stays unchecked
+    because the exit criterion is bench-measured and the gate has not been
+    run.** Exact next step: `task bench:incremental-gate` on an idle machine,
+    then set the two `pandoc_manual_*_midline` floors from the measured run
+    (they currently carry placeholder 4.5x copied from their controls) and
+    re-record the results table in `benches/lsp_incremental.rs`, which is marked
+    stale rather than hand-adjusted. Also unverified: whether
+    `large_authoring_single_edit`, `tables_single_edit`, `math_single_edit`, and
+    `pandoc_manual_early_edit` still decline --- reasoned, not observed.
+  - What landed: `ReparseStrategy::Token` and `reparse_token` in
+    `crates/panache-parser/src/parser/reparse.rs`, tried ahead of
+    `reparse_ranges` so it skips the window cutoff and the whole cascade.
+    Eligibility is a `TEXT` token under a **top-level** `PARAGRAPH`; `PLAIN`
+    (tight list items), heading content, code bodies, and nested containers are
+    deferred.
+  - The proof is strict interiority plus four guards, and interiority is the
+    load-bearing one: requiring the edit inside the token's *non-whitespace
+    core* fixes the bytes adjacent to both neighbouring tokens, which is what
+    stops emphasis flanking, bare-URI left boundaries, and hard-break trailing
+    runs from moving --- no join probes needed. The cost is that typing at a
+    line end falls back to the window tiers; widening it with probes is a
+    follow-up.
+  - **The byte alphabet is an allowlist, not a ban list, and that direction is
+    the finding.** A ban list derived from `structural_byte_mask` extends itself
+    for a new *inline* construct but silently admits a new *block* one, because
+    the inline mask has no reason to carry a line-leading byte. The seed is
+    hand-vetted and then narrowed by the mask, so a byte must be both vetted
+    inert and non-structural. `structural_byte_mask` was split so the bare-URI
+    scheme alphabet (every ASCII letter under GFM and Quarto) is excluded and
+    answered by an isolated relex instead --- banning letters would reject all
+    prose on exactly the flavors that matter.
+  - Two counterexamples decided that shape, both reproduced against the parser
+    before being pinned. `foo bar` above a `--- | ---` line is a paragraph that
+    one `|` turns into a `PIPE_TABLE`, and `structural_byte_mask` never sets `|`
+    under any configuration. Widening a top-level paragraph's line indent moves
+    the whole block inside a neighbouring list item. Neither is visible to any
+    token-local or line-local check.
+  - `.` and `)` stay in the alphabet, because banning them would reject most
+    English prose. The ordered-list hazard they carry (`12 apples` plus an
+    interior `.` is a list; so is `12.apples` plus an interior space) is closed
+    positionally instead: the edit must sit past its line's first word, so the
+    bytes that decide the line are all before it and interiority leaves them
+    alone.
+  - Errors reduced to nothing, and that is a finding rather than a shortcut.
+    `SyntaxErrorSource::Yaml` is the only source, so no error can originate in a
+    paragraph's prose; the seam-based `merge_incremental_errors` does not apply
+    and the token path shifts instead of merging.
+  - The fuzzer gained a prose-placed driver, because the uniform one almost
+    never lands inside a prose token --- it exercised the window tiers
+    thoroughly and this tier barely at all, so the tier could have regressed to
+    a no-op with the whole suite green. Its hit-rate floor is asserted over
+    prose snippets only: over the union it would measure the corpus mix, since
+    the hazard snippets are construct-heavy by design and decline *correctly*.
+    Measured 14.0% against a 10% floor. Clean at 30x iterations.
+  - The `window_cutoff_accepted`/`window_cutoff_declined` pair needed rescuing
+    and this is the phase's easiest thing to break silently. Its replacements
+    were bare words, i.e. interior prose edits, so the token tier would have
+    taken both sides and the pair would have kept passing while bracketing
+    nothing. Both now insert a code span. `Expect::strategy` was added so a case
+    declares *which* tier it claims, since a tier regression fails nothing else ---
+    declining is always sound.
+  - **`replace_with` is O(top-level arity), not O(1)**, so the tier is O(token)
+    + O(document children): rowan rebuilds each ancestor's whole child vector.
+      That term is already paid by `splice_children` on the window paths, so the
+      tier is strictly cheaper than the one it displaces, but "O(token)" as the
+      roadmap phrases it overstates it. Removing that floor needs a
+      structural-sharing splice rowan does not offer.
+  - Deferred out of this phase: boundary-touching edits with join probes;
+    `PLAIN`, heading-content and code-body parents; nested-container paragraphs;
+    and the host-side `O(document)` costs per keystroke that no tier touches
+    (`diff_edit` re-deriving an edit the LSP already knows, and `refdef_set`
+    re-scanning the whole document).
 
 - [ ] Phase 8: region tier over top-level `DOCUMENT` children replacing
   section/suffix windows --- symmetric newline-decoupling scans in old and
