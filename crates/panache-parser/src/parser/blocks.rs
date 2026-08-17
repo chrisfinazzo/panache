@@ -61,6 +61,8 @@ pub mod tests {
     pub mod figures;
     #[path = "footnote_marker_line.rs"]
     pub mod footnote_marker_line;
+    #[path = "fragment_context.rs"]
+    pub mod fragment_context;
     #[path = "frame_pinning.rs"]
     pub mod frame_pinning;
     #[path = "headings.rs"]

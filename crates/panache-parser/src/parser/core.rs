@@ -211,10 +211,58 @@ pub struct Parser<'a> {
     /// hashpipe YAML). Threaded to the validation sites via `BlockContext`;
     /// drained by [`Parser::parse_with_errors`]. Empty for pure Markdown.
     diagnostics: Diagnostics,
+    /// Whether this text is a whole document or a slice of one. Gates
+    /// `at_document_start`; see [`ParseOrigin`].
+    origin: ParseOrigin,
+}
+
+/// Whether a parse covers a whole document or a fragment lifted out of one.
+///
+/// `at_document_start` is derived from `self.pos == 0`, which is a lie for a
+/// fragment that begins at a non-zero offset in some larger text. Three
+/// constructs read that flag with no `|| has_blank_before` escape --- the
+/// pandoc `%` title block, the MultiMarkdown title block, and (under the
+/// CommonMark dialect, where the readers recognize YAML only as frontmatter) a
+/// YAML metadata block. A fragment parse that claimed to be at a document start
+/// would manufacture those out of ordinary prose.
+///
+/// Every *other* consumer of the flag is `||`-ed with `has_blank_before`, which
+/// is already `true` at `pos == 0`, so this changes nothing for them --- pinned
+/// by `fragment_agrees_with_document_on_everything_else`.
+///
+/// This is the degenerate, top-level-only case of the context-parameterized
+/// fragment entry point that nested-container regions would need. It carries no
+/// container stack, no open fence, and no refdef scope, because the incremental
+/// region tier only ever lifts whole top-level children, where all three are
+/// empty by construction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParseOrigin {
+    /// The text is a whole document: byte 0 is the document start.
+    #[default]
+    Document,
+    /// The text was lifted out of a larger document and does not begin at its
+    /// byte 0, so no document-start-only construct may be recognized.
+    Fragment,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str, config: &'a ParserOptions) -> Self {
+        Self::with_origin(input, config, ParseOrigin::Document)
+    }
+
+    /// Parse `input` as a slice lifted out of a larger document rather than as
+    /// a document of its own.
+    ///
+    /// The only difference is [`ParseOrigin`]: no document-start-only construct
+    /// is recognized, because byte 0 of the fragment is not byte 0 of anything.
+    /// The incremental region tier is the caller — it parses one run of
+    /// top-level children in isolation and would otherwise manufacture a title
+    /// block out of prose that merely happens to contain a colon.
+    pub fn new_fragment(input: &'a str, config: &'a ParserOptions) -> Self {
+        Self::with_origin(input, config, ParseOrigin::Fragment)
+    }
+
+    fn with_origin(input: &'a str, config: &'a ParserOptions, origin: ParseOrigin) -> Self {
         // Use split_lines_inclusive to preserve line endings (both LF and CRLF)
         let lines = split_lines_inclusive(input);
         Self {
@@ -228,7 +276,16 @@ impl<'a> Parser<'a> {
             at_note_body_start: false,
             dispatch_list_marker_consumed: false,
             diagnostics: Diagnostics::new(),
+            origin,
         }
+    }
+
+    /// Whether `pos == 0` really is the start of a document.
+    ///
+    /// Every `at_document_start` in this file goes through here, so a fragment
+    /// parse cannot recognize a document-start-only construct by accident.
+    fn origin_allows_document_start(&self) -> bool {
+        self.origin == ParseOrigin::Document
     }
 
     pub fn parse(self) -> SyntaxNode {
@@ -3362,7 +3419,13 @@ impl<'a> Parser<'a> {
                 || !self.previous_block_requires_blank_before_heading()
         };
 
-        let at_document_start = self.pos == 0 && bq_depth == 0;
+        // Two facts that coincide for a document and part ways for a fragment,
+        // which is the split `at_document_start` used to conflate: `at_line_zero`
+        // says the first line has nothing before it, and `at_document_start` says
+        // that nothing is the start of a *document*. A blank-line-anchored
+        // fragment satisfies the first and not the second.
+        let at_line_zero = self.pos == 0 && bq_depth == 0;
+        let at_document_start = self.origin_allows_document_start() && at_line_zero;
         let prev_line_blank = self.pos > 0 && {
             let prev_line = self.lines[self.pos - 1];
             let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);
@@ -3371,7 +3434,7 @@ impl<'a> Parser<'a> {
 
         BlockContext {
             has_blank_before,
-            has_blank_before_strict: at_document_start || prev_line_blank,
+            has_blank_before_strict: at_line_zero || prev_line_blank,
             at_document_start,
             in_fenced_div: self.in_fenced_div(),
             fenced_div_open_indent: self.innermost_fenced_div_open_indent(),
@@ -6135,8 +6198,13 @@ impl<'a> Parser<'a> {
         };
 
         // For indented code blocks, we need a stricter condition - only actual blank lines count
-        // Being at document start (pos == 0) is OK only if we're not inside a blockquote
-        let at_document_start = self.pos == 0 && current_bq_depth == 0;
+        // Being at document start (pos == 0) is OK only if we're not inside a blockquote.
+        // `at_line_zero` is that positional fact; `at_document_start` additionally
+        // requires the text to *be* a document, which a fragment is not (see
+        // [`ParseOrigin`]). Indented code wants the former -- a fragment's first
+        // line does have a blank line before it in the document it came from.
+        let at_line_zero = self.pos == 0 && current_bq_depth == 0;
+        let at_document_start = self.origin_allows_document_start() && at_line_zero;
 
         let prev_line_blank = if self.pos > 0 {
             let prev_line = self.lines[self.pos - 1];
@@ -6145,7 +6213,7 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
-        let has_blank_before_strict = at_document_start || prev_line_blank || at_note_body_start;
+        let has_blank_before_strict = at_line_zero || prev_line_blank || at_note_body_start;
 
         dispatcher_ctx.has_blank_before = has_blank_before;
         dispatcher_ctx.has_blank_before_strict = has_blank_before_strict;
