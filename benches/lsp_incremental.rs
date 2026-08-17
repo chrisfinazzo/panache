@@ -69,49 +69,43 @@
 //!
 //! # Results
 //!
-//! **This table predates the token tier (roadmap Phase 7) and has not been
-//! re-measured since.** Every row below was produced when the cheapest
-//! available strategy was the section window, so the cases that now take the
-//! token tier --- `single_change_small`, `multi_change_medium_clustered_4`,
-//! `typing_stream_medium`, and the two `pandoc_manual_*_midline` cases, which
-//! did not exist --- are not represented. The `window_cutoff_*` pair's edits
-//! also changed shape (a code span, so the token tier declines and the pair
-//! goes on measuring the *window* cutoff). Read a fresh run.
-//!
-//! `PANACHE_LSP_BENCH_ITERATIONS=80 cargo bench --bench lsp_incremental`, on an
+//! `cargo bench --bench lsp_incremental` at the default iteration count, on an
 //! AMD Ryzen 9 7900, rustc 1.94.1, `Config::default()` (pandoc flavor).
 //! Microseconds per step; `full` and `incr` are means. Measured with the
 //! window-size cutoff live (roadmap Phase 5b), which is why every case with a
-//! window over 85% now reports a 100% fallback rate and no `window %`.
+//! window over 85% reports a 100% fallback rate and no `window %`, and with the
+//! token tier live (Phase 7).
 //!
-//! The `bytes` column dates this table for a second reason, since fixed:
-//! `download.sh` used to fetch the corpus from upstream `main` with no revision
+//! The `bytes` column used to date this table, and no longer does:
+//! `download.sh` fetched the corpus from upstream `main` with no revision
 //! pinned, so the documents moved under the cases. `pandoc_manual.md` grew from
 //! 300 856 to 304 665 bytes, which slid the two `late_edit` cases from a 7.0%
 //! window to a 7.5% one and their speedup from 5.7x to ~4.8x. The corpus is
-//! pinned to fixed revisions now, so a re-measured table will stay valid until
-//! someone bumps them deliberately.
+//! pinned to fixed revisions now, so these numbers hold until someone bumps
+//! them deliberately.
 //!
 //! ```text
 //! case                               bytes  steps    full    incr  speedup  fallback   bail%  window%
-//! single_change_small                 1620      1    41.8    31.7     1.3x      0.0%       -    59.4%
-//! multi_change_small_4                1620      1    41.8    41.9     1.0x      0.0%       -    78.5%
-//! multi_change_medium_4              15922      1   397.9   367.3     1.1x      0.0%       -    75.8%
-//! multi_change_medium_clustered_4    15922      1   393.6   123.7     3.2x      0.0%       -    16.0%
-//! multi_change_large_8               76542      1  1878.5  1945.5     1.0x    100.0%    0.0%        -
-//! multi_change_utf16_4                  74      1     3.6     5.8     0.6x    100.0%   57.8%        -
-//! full_replace                        1620      1     2.1     2.4     0.9x    100.0%    4.0%        -
-//! typing_stream_medium               15922     14   394.6   139.2     2.8x      0.0%       -    20.0%
-//! window_cutoff_accepted             15922      1   397.0   365.9     1.1x      0.0%       -    79.9%
-//! window_cutoff_declined             15922      1   401.2   395.9     1.0x    100.0%    0.0%        -
-//! bail_refdef_edit                    2687      1    93.1   108.2     0.9x    100.0%   15.4%        -
-//! pandoc_manual_early_edit          300856      1 10148.5 10220.1     1.0x    100.0%    0.0%        -
-//! pandoc_manual_refdef_label_edit   300856      1 10263.2 10221.8     1.0x    100.0%       -        -
-//! pandoc_manual_late_edit           300856      1 10378.2  1831.8     5.7x      0.0%       -     7.0%
-//! pandoc_manual_typing_stream       300856     12 10291.1  1801.9     5.7x      0.0%       -     7.0%
-//! large_authoring_single_edit        29858      1   606.8   617.8     1.0x    100.0%    0.1%        -
-//! tables_single_edit                 25101      1   737.8   725.1     1.0x    100.0%    0.0%        -
-//! math_single_edit                   30112      1   547.7   544.2     1.0x    100.0%    0.1%        -
+//! single_change_small                 1620      1    53.1     1.8    29.1x      0.0%       -     3.7%
+//! multi_change_small_4                1620      1    54.6    54.4     1.0x      0.0%       -    78.5%
+//! multi_change_medium_4              15922      1   521.8   483.0     1.1x      0.0%       -    75.8%
+//! multi_change_medium_clustered_4    15922      1   525.4    12.3    42.7x      0.0%       -     0.4%
+//! multi_change_large_8               76542      1  2466.8  2623.5     0.9x    100.0%    0.0%        -
+//! multi_change_utf16_4                  74      1     5.3     7.4     0.7x    100.0%   40.2%        -
+//! full_replace                        1620      1     2.8     3.3     0.9x    100.0%    4.0%        -
+//! typing_stream_medium               15922     14   451.7    15.5    29.1x      0.0%       -     0.4%
+//! window_cutoff_accepted             15922      1   415.5   381.8     1.1x      0.0%       -    79.9%
+//! window_cutoff_declined             15922      1   415.6   414.0     1.0x    100.0%    0.1%        -
+//! bail_refdef_edit                    2687      1    95.6   110.8     0.9x    100.0%   15.9%        -
+//! pandoc_manual_early_edit          304665      1  9412.7  9491.8     1.0x    100.0%    0.0%        -
+//! pandoc_manual_refdef_label_edit   304665      1  9390.2  9339.2     1.0x    100.0%       -        -
+//! pandoc_manual_late_edit           304665      1  9715.3  2007.3     4.8x      0.0%       -     7.5%
+//! pandoc_manual_typing_stream       304665     12  9575.6  2002.1     4.8x      0.0%       -     7.5%
+//! pandoc_manual_midline_edit        304665      1  9458.2   221.2    42.8x      0.0%       -     0.0%
+//! pandoc_manual_typing_stream_midline 304665    11  9616.3   220.7    43.6x      0.0%       -     0.0%
+//! large_authoring_single_edit        25477      1   757.6   769.0     1.0x    100.0%    0.1%        -
+//! tables_single_edit                 25179      1   799.5   786.1     1.0x    100.0%    0.1%        -
+//! math_single_edit                   30112      1   553.2   549.5     1.0x    100.0%    0.1%        -
 //! ```
 //!
 //! What the table says:
@@ -127,11 +121,22 @@
 //!
 //!   **The token tier breaks this relation, which is the point of it.** Its
 //!   cost is the length of one token plus a green root rebuild, so it does not
-//!   scale with the document at all --- and the way to read that off the table
-//!   is the `pandoc_manual_typing_stream` / `..._midline` pair: same document,
-//!   same line, same keystrokes, one column apart, and only the tier differs.
-//!   A speedup that moves with window share on one row and not the other is
-//!   what "step change, not improvement" means here.
+//!   scale with the document at all. The way to read that off the table is the
+//!   `pandoc_manual_typing_stream` / `..._midline` pair: same document, same
+//!   line, same keystrokes, one column apart, and only the tier differs.
+//!   Column 0 re-parses 7.5% of a 300 KB file for 4.8x; column 40 re-parses
+//!   0.0% of it for 43.6x, taking a keystroke from 2002 us to 221 us. That is
+//!   the step change --- 9x over the tier it displaces, from a change in what is
+//!   parsed rather than how much.
+//! * **The tier's remaining cost is not the token.** 221 us to splice a ~70-byte
+//!   token is not O(token); it is `rowan`'s `replace_with` rebuilding each
+//!   ancestor's whole child vector, which at the root of a 300 KB document is a
+//!   few thousand `Arc` clones. The window tiers pay that same term through
+//!   `splice_children`, so the tier is strictly cheaper than what it replaces,
+//!   but the floor it leaves is what a future phase would have to attack to go
+//!   further. Compare `typing_stream_medium` (15 KB, 15.5 us) against
+//!   `..._midline` (300 KB, 221 us): the tokens are the same size and the times
+//!   are not.
 //! * **A wide reparse loses to a full parse even when it succeeds**, which is
 //!   what the cutoff is for. Before it, `pandoc_manual_early_edit` accepted,
 //!   re-parsed 97%, and paid 0.9x for the guard cascade and splice on top;
@@ -1062,7 +1067,11 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: medium.text.clone(),
             iterations: default_iterations / 2,
-            expect: Expect::reuses().strategy("token"),
+            // ~5% under the lowest of five runs (42.97x). Worth a floor where
+            // its scattered twin has none, because the pair's whole argument is
+            // that clustering and not change count is what matters, and this is
+            // the side that carries the number.
+            expect: Expect::reuses().strategy("token").min_speedup(40.0),
         },
         BenchCase {
             id: "multi_change_large_8".to_owned(),
@@ -1117,11 +1126,14 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             input: medium.text.clone(),
             iterations: default_iterations / 2,
             // The workload the feature exists for: every keystroke must splice.
-            // Column 14 is inside the line's prose token, so the token tier
-            // takes the whole stream; the 2.0x floor is the section window's
-            // and is left where it is deliberately, as a floor the displaced
-            // tier could already clear. Raise it only from a measured run.
-            expect: Expect::reuses().strategy("token").min_speedup(2.0),
+            //
+            // The floor was the roadmap's 2.0x, calibrated against the section
+            // window. Column 14 is inside the line's prose token, so the token
+            // tier now takes the whole stream at 28.7-30.9x over five runs, and
+            // a 2.0x declaration would gate nothing at a 14x margin. Raised to
+            // 27.0x, ~5% under the lowest observed run. The roadmap's number is
+            // recorded in `TODO.md` as what the *displaced* tier delivered.
+            expect: Expect::reuses().strategy("token").min_speedup(27.0),
         },
         // The window-size cutoff, one case per side. The same document and the
         // same single-word edit; only how far into the document it lands
@@ -1240,19 +1252,24 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         // following file` -- prose with no construct byte in it, which is what
         // makes it eligible. The two lines around it in the same paragraph do
         // carry constructs, but they are separate `TEXT` tokens.
+        // The floors are ~5% under the lowest of five observed runs (40.30x and
+        // 42.79x), the same margin convention the `late_edit` floors use. They
+        // are an order of magnitude above their column-0 controls on purpose: a
+        // floor the section window could also clear would not distinguish the
+        // tiers, and distinguishing them is the entire claim.
         cases.push(BenchCase {
             id: "pandoc_manual_midline_edit".to_owned(),
             input: doc.clone(),
             steps: vec![vec![insert_change(7600, 40, "NOTE ")]],
             iterations,
-            expect: Expect::reuses().strategy("token").min_speedup(4.5),
+            expect: Expect::reuses().strategy("token").min_speedup(38.0),
         });
         cases.push(BenchCase {
             id: "pandoc_manual_typing_stream_midline".to_owned(),
             input: doc,
             steps: typing_stream(7600, 40, "NOTE typing"),
             iterations,
-            expect: Expect::reuses().strategy("token").min_speedup(4.5),
+            expect: Expect::reuses().strategy("token").min_speedup(40.0),
         });
     }
 
