@@ -116,13 +116,18 @@ fn test_os_error_is_not_debug_formatted() {
     let temp_dir = TempDir::new().unwrap();
     let missing = temp_dir.path().join("nope.md");
 
+    // The wording of "file not found" belongs to the platform, not to us, so
+    // take it from the same read the binary performs instead of hardcoding the
+    // Unix phrasing.
+    let not_found = fs::read_to_string(&missing).unwrap_err();
+
     cargo_bin_cmd!("panache")
         .arg("parse")
         .arg(&missing)
         .assert()
         .code(1)
         .stderr(predicate::str::contains(format!(
-            "Error: {}: No such file or directory",
+            "Error: {}: {not_found}",
             missing.display()
         )))
         .stderr(predicate::str::contains("Os {").not());
