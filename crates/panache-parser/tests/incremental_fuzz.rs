@@ -359,6 +359,11 @@ struct FuzzStats {
     /// tier a uniformly-placed edit almost never reaches --- so a run that
     /// splices heavily can still be leaving it entirely untested.
     token_tier: usize,
+    /// Splices the region tier took. Counted for the same reason as
+    /// [`Self::token_tier`], and needed for the same reason: a tier that
+    /// declines everything is *sound*, so nothing else in the suite fails when
+    /// a guard silently turns this one off.
+    region_tier: usize,
     /// Corpus documents that were not on disk. Counted rather than only
     /// printed: the corpus is gitignored, so a run on a clean checkout skips
     /// the strictest tier entirely and would otherwise report a full pass.
@@ -430,6 +435,37 @@ impl FuzzStats {
             "{what}: only {:.1}% of edits took the token tier; a guard has \
              turned it off and every other assertion would still pass",
             rate * 100.0
+        );
+    }
+
+    /// Report the region tier's share and fail if it is untested.
+    ///
+    /// The token tier's floor exists because a uniformly-placed edit rarely
+    /// lands inside prose. This one exists for a different reason: the region
+    /// tier is tried *behind* the window tiers, so it only ever answers what a
+    /// window declined. A driver that measured it on short documents would
+    /// measure the window tiers instead, which is why
+    /// [`region_snippets`] are kilobytes rather than the tens of bytes the
+    /// hazard corpus uses, and why this driver runs with the cost guards
+    /// *enforced*.
+    fn assert_exercised_the_region_tier(&self, what: &str, floor: f64) {
+        let judged = self.spliced + self.declined;
+        let rate = if judged == 0 {
+            0.0
+        } else {
+            self.region_tier as f64 / judged as f64
+        };
+        eprintln!(
+            "{what}: {} of {judged} judged edits took the region tier ({:.1}%)",
+            self.region_tier,
+            rate * 100.0
+        );
+        assert!(
+            rate >= floor,
+            "{what}: only {:.1}% of edits took the region tier (floor {:.1}%); a \
+             guard has turned it off and every other assertion would still pass",
+            rate * 100.0,
+            floor * 100.0
         );
     }
 }
@@ -538,6 +574,92 @@ fn prose_edit(rng: &mut Lcg, base: &Base) -> Option<((usize, usize), &'static st
     Some(((t0 + start, t0 + end), insert))
 }
 
+/// A pseudo-random edit landing inside one top-level `DOCUMENT` child of
+/// `base` -- the placement the region tier is defined over.
+///
+/// The uniform generator lands anywhere, including on the blank lines between
+/// children, where the region widens to swallow both neighbours. That is a
+/// shape worth fuzzing, but it is not the *common* one, and a driver made of it
+/// would spend its time on the widened case. This one picks a real child first,
+/// then an offset inside it, which is what an editor's keystroke looks like.
+///
+/// Uses the hazard-biased [`INSERTS`] rather than prose, because the region
+/// tier's interesting guards are the ones that fire on delimiters: a fence, a
+/// `:::`, a dash rule, a pipe row. Those must decline, and declining for the
+/// right reason is half of what this driver checks.
+///
+/// Returns `None` when the tree has no non-blank child.
+fn region_edit(rng: &mut Lcg, base: &Base) -> Option<((usize, usize), &'static str)> {
+    let text = base.tree.text().to_string();
+    let children: Vec<_> = base
+        .tree
+        .children()
+        .filter(|child| child.kind() != SyntaxKind::BLANK_LINE && !child.text_range().is_empty())
+        .collect();
+    let child = children.get(rng.below(children.len().max(1)))?;
+
+    let range = child.text_range();
+    let (c0, c1) = (usize::from(range.start()), usize::from(range.end()));
+    let start = clamp_to_char_boundary(&text, c0 + rng.below(c1 - c0));
+    let max_delete = (c1 - start).min(8);
+    let end = clamp_to_char_boundary(&text, start + rng.below(max_delete + 1)).max(start);
+
+    Some(((start, end), INSERTS[rng.below(INSERTS.len())]))
+}
+
+/// Chain region-placed edits, re-sampling a child from the *spliced* tree at
+/// every step.
+///
+/// Chaining is what makes this driver worth having: the tier replaces a run of
+/// green children, so step *n+1* samples a child out of a tree step *n*
+/// produced. A splice that put the wrong children in, or put them at the wrong
+/// offsets, shows up as the next step editing at an offset the tree no longer
+/// means -- which no single-edit driver can see.
+fn fuzz_region_edits(
+    tier: &Tier,
+    name: &str,
+    text: &str,
+    batches: usize,
+    seed: u64,
+    cost_guards: CostGuards,
+    stats: &mut FuzzStats,
+) {
+    let mut rng = Lcg(seed);
+    let options = tier.options();
+    let mut run = Run {
+        options: &options,
+        cost_guards,
+        stats,
+    };
+    for batch in 0..batches {
+        let mut current = text.to_string();
+        let Some(mut base) = Base::parse(&current, run.options) else {
+            eprintln!(
+                "base parse is lossy (known-bug class, skipped): snippet {name}, tier {}",
+                tier.name
+            );
+            run.stats.skipped_lossy += 1;
+            break;
+        };
+        let chain_len = 3 + rng.below(6);
+        for step in 0..chain_len {
+            let Some((old_edit, insert)) = region_edit(&mut rng, &base) else {
+                break;
+            };
+            let context = format!(
+                "snippet {name}, tier {}, seed {seed}, region batch #{batch}, step #{step}",
+                tier.name
+            );
+            let Some(next) = check_edit(&context, &current, &mut run, &base, old_edit, insert)
+            else {
+                break;
+            };
+            base = next;
+            current = apply_edit(&current, old_edit, insert);
+        }
+    }
+}
+
 /// The parse a splice builds on: the previous tree and the syntax errors that
 /// go with it. Chains carry both forward, because both are spliced.
 struct Base {
@@ -638,6 +760,9 @@ fn check_edit(
         run.stats.spliced += 1;
         if inc.strategy == "token" {
             run.stats.token_tier += 1;
+        }
+        if inc.strategy == "region" {
+            run.stats.region_tier += 1;
         }
     }
 
@@ -940,6 +1065,122 @@ fn prose_placed_chained_edits() {
     hazard.assert_exercised_the_splice("prose-placed edits on hazard snippets");
     prose.assert_exercised_the_splice("prose-placed edits on prose snippets");
     prose.assert_exercised_the_token_tier("prose-placed edits on prose snippets");
+}
+
+/// The region tier's own driver: every edit lands inside a top-level child of a
+/// document long enough that the window tiers decline it.
+///
+/// Two things separate this from every other driver here, and both follow from
+/// the tier being tried *behind* the window tiers.
+///
+/// It runs with [`CostGuards::Enforced`], not `Ignored`. The other snippet
+/// drivers turn the cost guards off because their inputs are tens of bytes, so
+/// every window covers most of the document and the cutoff would decline
+/// everything before a correctness guard ran. Here the cutoff is exactly what
+/// *routes* work to this tier: with it off, a window would answer first and this
+/// driver would measure the window tiers under a region name.
+///
+/// And its corpus is kilobytes rather than tens of bytes, for the same reason.
+/// [`region_snippets`] are built from many small blocks so that an edit in the
+/// first fifth leaves more than the reparse cascade's window-share cutoff of the document
+/// downstream --- the population the tier exists for --- while the region itself
+/// stays well under the always-try floor.
+///
+/// The floor is 16% against a measured 17.2-17.8%, stable across 1x, 4x, and
+/// 10x iterations --- 5% under the lowest observed run, the same margin
+/// convention the bench floors use. It is deliberately not higher, and the
+/// reason is the ordering rather than the tier: children are sampled uniformly
+/// across the document, and only an edit in roughly the first sixth leaves
+/// enough downstream for a window to be declined, so the other five sixths are
+/// claimed by a window before this tier is offered them. **Promoting the region
+/// tier ahead of the window tiers should move this number sharply**, and this
+/// floor should be re-measured when it does.
+///
+/// The floor is not a rate to hold at a decimal. It is there to catch a guard
+/// that turns the tier off, which nothing else in the suite would notice,
+/// because declining is always sound.
+#[test]
+fn region_placed_chained_edits() {
+    let mut stats = FuzzStats::default();
+    for (tier_index, tier) in TIERS.iter().enumerate() {
+        let batches = iterations(tier.batches);
+        for (index, (name, text)) in region_snippets().iter().enumerate() {
+            fuzz_region_edits(
+                tier,
+                name,
+                text,
+                batches,
+                seed(0x3E9_1015, index, tier_index),
+                CostGuards::Enforced,
+                &mut stats,
+            );
+        }
+    }
+    stats.assert_exercised_the_splice("region-placed edits");
+    stats.assert_exercised_the_region_tier("region-placed edits", 0.16);
+}
+
+/// Multi-block documents for the region tier, a few KB each.
+///
+/// Generated rather than written out because the size is the point: the tier
+/// only answers what a window declines, and a window is declined by leaving
+/// more than the cascade's 85% window-share cutoff of the document downstream.
+/// A tens-of-bytes snippet cannot express that.
+///
+/// Each shape puts a different construct at top level, because the region is a
+/// run of top-level children and what those children *are* decides which
+/// boundary-parse guard has to fire: a fenced div and a table can absorb their
+/// neighbour, a list can continue across a blank line, a setext-able paragraph
+/// can be promoted from below.
+fn region_snippets() -> Vec<(String, String)> {
+    let mut snippets = Vec::new();
+
+    let mut paragraphs = String::new();
+    for i in 0..120 {
+        paragraphs.push_str(&format!(
+            "Paragraph number {i} with several words in it.\n\n"
+        ));
+    }
+    snippets.push(("many_paragraphs".to_owned(), paragraphs.clone()));
+
+    let mut mixed = String::new();
+    for i in 0..60 {
+        mixed.push_str(&format!(
+            "## Section {i}\n\nBody prose for section {i}.\n\n"
+        ));
+        mixed.push_str(&format!("- item {i} one\n- item {i} two\n\n"));
+    }
+    snippets.push(("headings_prose_and_lists".to_owned(), mixed));
+
+    let mut divs = String::new();
+    for i in 0..50 {
+        divs.push_str(&format!("Prose before div {i}.\n\n"));
+        divs.push_str(&format!("::: note\nDiv body {i} here.\n:::\n\n"));
+    }
+    snippets.push(("fenced_divs_between_paragraphs".to_owned(), divs));
+
+    let mut tables = String::new();
+    for i in 0..40 {
+        tables.push_str(&format!("Prose before table {i}.\n\n"));
+        tables.push_str("| a | b |\n|---|---|\n| 1 | 2 |\n\n");
+    }
+    snippets.push(("tables_between_paragraphs".to_owned(), tables));
+
+    let mut fences = String::new();
+    for i in 0..50 {
+        fences.push_str(&format!("Prose before block {i}.\n\n"));
+        fences.push_str(&format!("```rust\nlet x = {i};\n```\n\n"));
+    }
+    snippets.push(("code_blocks_between_paragraphs".to_owned(), fences));
+
+    // Every seam test in the cascade is textual, so a CRLF twin is the only
+    // thing that keeps the line-ending handling measured rather than assumed.
+    snippets.push((
+        "many_paragraphs_crlf".to_owned(),
+        paragraphs.replace('\n', "\r\n"),
+    ));
+
+    snippets
 }
 
 /// Prose-shaped snippets, for the token tier.
