@@ -262,12 +262,19 @@ Phase 6b's gate is met on all four items: oracle-clean fuzz at 10x, the
 workspace and LSP suites green with the flag forced both ways, both bench gates
 green, and the week of oracle-live dogfooding done with zero panics.
 
-Phase 7 (token tier) is **implemented but not signed off**: the code, guards,
-honesty tests, and fuzz driver have landed and the workspace is green with the
-fuzzer clean at 30x, but `task bench:incremental-gate` has not been run, and
-that gate *is* the phase's exit criterion. Next step is a gate run on an idle
-machine, then calibrating the two placeholder floors it will report. Details and
-the full list of what is unverified are under the phase's own entry below.
+Phase 7 (token tier) is **done**. An edit strictly inside one plain-prose `TEXT`
+token of a top-level paragraph now replaces that single green token, ahead of
+the cost guard and the rest of the cascade. Both bench gates are green over
+three consecutive runs, the fuzzer is clean at 30x with a new prose-placed
+driver, and the step change the phase demanded is measurable as a pair: the same
+keystrokes into the same line of `pandoc_manual.md`, one column apart, cost 2002
+us on the section window and 221 us on the token tier.
+
+Next step is Phase 8 (region tier). Phase 7 leaves it two things it did not have
+before: the `replace_with` root-rebuild floor is now the dominant cost of a
+cheap splice and is measured, and `Expect::strategy` exists so a bench case can
+pin *which* tier answers it --- worth extending to the cases that still only
+declare reuse or decline.
 
 The two 5x floors that failed were **lowered to 4.5x, and the cause was the
 corpus rather than the code**. `benches/documents/download.sh` used to fetch
@@ -702,7 +709,7 @@ reproducers are synthetic and pin their strategy instead.
     and at whether the incremental bench should drive the LSP path end to end
     for at least one case.
 
-- [ ] Phase 7: token tier --- edit inside plain `TEXT`; newline ban,
+- [x] Phase 7: token tier --- edit inside plain `TEXT`; newline ban,
   construct-character ban list kept honest by a grammar-grepping test, relex
   kind stability, join probes, error non-touch; char-by-char typing test.
   (The module extraction this phase also carried landed early, in Phase 4's
@@ -718,15 +725,37 @@ reproducers are synthetic and pin their strategy instead.
     overhead too, not only the block parse --- `full_replace` puts a \~10 us
     floor on a 1.6 KB document for machinery that ultimately parsed 27 bytes
     (materializing the root from green, walking the cascade).
-  - **The tier is implemented and correctness-complete; the box stays unchecked
-    because the exit criterion is bench-measured and the gate has not been
-    run.** Exact next step: `task bench:incremental-gate` on an idle machine,
-    then set the two `pandoc_manual_*_midline` floors from the measured run
-    (they currently carry placeholder 4.5x copied from their controls) and
-    re-record the results table in `benches/lsp_incremental.rs`, which is marked
-    stale rather than hand-adjusted. Also unverified: whether
-    `large_authoring_single_edit`, `tables_single_edit`, `math_single_edit`, and
-    `pandoc_manual_early_edit` still decline --- reasoned, not observed.
+  - **Exit criterion met, and it is a step change rather than an improvement.**
+    The demonstration is a pair that holds everything but the tier constant:
+    `pandoc_manual_typing_stream` and `..._typing_stream_midline` type the same
+    keystrokes into the same line of the same 300 KB document, one column apart.
+    Column 0 reaches the section window, re-parses 7.5% of the file, and costs
+    2002 us per keystroke; column 40 reaches the token tier, re-parses 0.0%, and
+    costs 221 us --- 4.8x against 43.6x. `typing_stream_medium` went 2.8x -> 29x
+    and `multi_change_medium_clustered_4` 3.2x -> 43x. Both gates green over
+    three consecutive runs, and every `strategy` declaration held, so those
+    cases are claiming the tier rather than a lucky window.
+  - The tier also skips the fixed overhead, as the phase required: it runs ahead
+    of the cost guard, so `single_change_small` went 1.3x -> 29x on a 1.6 KB
+    document (53.1 us -> 1.8 us) where the old floor was the cascade's.
+  - **The 221 us is not the token, and that is the finding to carry forward.**
+    Splicing a \~70-byte token on a 300 KB document costs 221 us while the same
+    edit on a 15 KB one costs 15.5 us --- so the cost scales with the document
+    after all, through `replace_with` rebuilding every ancestor's child vector.
+    The window tiers pay the same term via `splice_children`, so this is
+    strictly cheaper than what it replaces, but it is the floor a further phase
+    would have to attack, and rowan offers no structural-sharing splice to
+    attack it with.
+  - Every case predicted to keep declining does: `pandoc_manual_early_edit`
+    (`PLAIN` inside a definition-list item), `large_authoring_single_edit` and
+    `tables_single_edit` (table cells), `math_single_edit`, `bail_refdef_edit`
+    (refdef URL), `full_replace`, and the scattered `multi_change_*` cases whose
+    collapsed span crosses newlines and yields a node rather than a token.
+  - **The `large_authoring.qmd` end-to-end regression Phase 6b recorded is
+    untouched.** Its edit lands on a fence info string (`CODE_LANGUAGE`), not a
+    `TEXT` token, so the tier declines and the keystroke is still a full parse
+    plus a rejected reuse. Widening the tier to non-`TEXT` leaf kinds is what
+    would fix it; that is deferred below.
   - What landed: `ReparseStrategy::Token` and `reparse_token` in
     `crates/panache-parser/src/parser/reparse.rs`, tried ahead of
     `reparse_ranges` so it skips the window cutoff and the whole cascade.
@@ -786,10 +815,17 @@ reproducers are synthetic and pin their strategy instead.
       roadmap phrases it overstates it. Removing that floor needs a
       structural-sharing splice rowan does not offer.
   - Deferred out of this phase: boundary-touching edits with join probes;
-    `PLAIN`, heading-content and code-body parents; nested-container paragraphs;
-    and the host-side `O(document)` costs per keystroke that no tier touches
-    (`diff_edit` re-deriving an edit the LSP already knows, and `refdef_set`
-    re-scanning the whole document).
+    `PLAIN`, heading-content and code-body parents; non-`TEXT` leaf kinds (which
+    is what the `large_authoring.qmd` regression needs); nested-container
+    paragraphs; the `replace_with` root-rebuild floor; and the host-side
+    `O(document)` costs per keystroke that no tier touches (`diff_edit`
+    re-deriving an edit the LSP already knows, and `refdef_set` re-scanning the
+    whole document).
+  - One pre-existing thin margin worth watching, not caused by this phase:
+    `pandoc_manual_late_edit` measured 4.53x against its 4.5x floor on one of
+    six runs. That is the section-window floor the corpus drift already forced
+    down once. Now that the corpus is pinned it should stop moving, but the
+    margin is a few percent and the next real change to that tier will trip it.
 
 - [ ] Phase 8: region tier over top-level `DOCUMENT` children replacing
   section/suffix windows --- symmetric newline-decoupling scans in old and
