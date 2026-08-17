@@ -118,7 +118,7 @@
 //! parse on                   20.70           977.26          1 392.49
 //! ```
 //!
-//! Re-measured after the region tier (roadmap Phase 8). The medium row used to
+//! Re-measured after the region tier landed. The medium row used to
 //! be the embarrassing one: `large_authoring.qmd` declined the window cutoff on
 //! every edit, so its keystroke was a full parse *plus* the cost of preparing
 //! and rejecting a reuse, and across three run pairs it landed 13-17% **slower**

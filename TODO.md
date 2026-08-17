@@ -145,62 +145,49 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Auto-fix capability per rule (infrastructure exists, rules need
   implementation)
 
-### Write-phase performance (fatou text-storage survey, 2026-08-16)
+### Write-phase performance
 
-Findings from fatou's `Arc<str>`-vs-rope investigation (2026-08-16, on its
-`experiment/arc-str` branch), checked against panache's code. Panache already
-has the `Arc<str>` end state fatou adopted (`FileText`, `PrevParse` sharing
-salsa's Arc), so the read side was fine; the costs were all in `did_change`.
+The write phase is what `did_change` does before any parse: splice the text,
+update the line index, hand salsa a new input. `benches/lsp_write_phase.rs`
+times it (`task bench:write-phase-gate`) and its module doc carries the tables;
+the three findings from fatou's 2026-08-16 `Arc<str>`-vs-rope survey that
+prompted the bench are all fixed, taking a keystroke on a 293 KB document from
+282 us to 98 us.
 
-All three are done (2026-08-17). `benches/lsp_write_phase.rs` times the phase
-`lsp_incremental` excludes, gated by `task bench:write-phase-gate`; its module
-doc carries the full tables. Median write phase per keystroke:
+- [ ] **Two full scans per keystroke remain on a large document** --- the line
+  index is rebuilt, on top of the two splice passes that are the floor for
+  an `Arc<str>` input on stable. Maintaining an `Arc<LineIndex>` on
+  `DocumentState`, validated against salsa's text by `Arc::ptr_eq` so a
+  stale one is discarded rather than trusted, would remove them. The salsa
+  `line_index` memo does not help: it is warm only when a reader has run
+  since the last keystroke, which during a typing burst it has not.
 
-  |                | small (756 B) | medium (29 KB) | large (293 KB) |
-  | -------------- | ------------- | -------------- | -------------- |
-  | before         | 54.47 us      | 73.69 us       | 282.27 us      |
-  | after          | 0.94 us       | 6.00 us        | 97.68 us       |
-  | 4-change batch | 1.33 us       | 8.72 us        | 147.34 us      |
-
-- [x] **`did_change` copies the whole text three times per keystroke.** Now
-  splices once through one `LineIndex` per notification (patched per change,
-  not rebuilt) and hands salsa the `Arc<str>` that index owns. Two linear
-  passes remain --- build the spliced bytes, let `Arc` copy them --- which
-  is the floor for an `Arc<str>` input on stable.
-
-- [x] **`did_change` reloads the config from disk on every keystroke.** It was
-  not a missing cache: config resolution reads the document's *path*, never
-  its text, so a text edit cannot change the answer and
-  `DocumentState.salsa_config` already held it. Deleted rather than cached.
-  `did_save` re-resolves as a backstop for clients whose file watching does
-  not report every config file.
-
-- [x] **`lsp_incremental` deliberately excludes the write phase; add a bench
-  that covers it.** Landed as a sibling bench rather than new cases, since
-  `Expect` there is built from two-strategy parse concepts. fatou's other
-  pipeline finding --- bypassing `diff_edit` for a single staged edit --- is
-  still known to *not* pay here (`multi_change_large_8` profile: `diff_edit`
-  is 7.1 us against a \~1.9 ms parse).
-
-Unrelated but found while running the gates: `bench:incremental-gate` is
-marginal on at least one machine. `pandoc_manual_late_edit` and
-`pandoc_manual_typing_stream` declare `min_speedup(5.0)` and measure 4.9-5.3x
-run to run, so the gate fails intermittently --- on `main`, not only under a
-change. Either the threshold wants a little slack or those two cases want more
-iterations.
-
-Follow-up, not done: the remaining per-keystroke cost on a large document is two
-full scans (the index rebuild) plus the two splice passes. Maintaining an
-`Arc<LineIndex>` on `DocumentState`, validated against salsa's text by
-`Arc::ptr_eq` so a stale one is discarded rather than trusted, would remove the
-scans. The salsa `line_index` memo is warm only when a reader has run since the
-last keystroke, which during a typing burst it has not.
+- [ ] **Bypassing `diff_edit` for a single staged edit is fatou's remaining
+  pipeline idea and does *not* pay here** --- measured, `diff_edit` is 7.1
+  us against a \~1.9 ms parse (`multi_change_large_8`). Recorded so it is
+  not re-derived; revisit only if the parse gets cheap enough for 7 us to
+  matter, which the incremental tier ladder is steadily making more
+  plausible.
 
 ## Parser
 
 ### Issues
 
 Note any known parser issues here.
+
+- [ ] **Two full-parser bugs the incremental fuzzer found**, each pinned as an
+  `#[ignore]`d reproducer in
+  `crates/panache-parser/tests/incremental_regressions.rs`. In both the
+  *splice* matched pandoc and the full parse did not, which is how they
+  surfaced at all:
+  - setext-after-setext breaks the open-paragraph contract;
+  - a trailing `:`/`~` line promotes a preceding list item's lazy continuation
+    into a definition term.
+
+  The second is worked around in the reparse cascade by
+  `first_block_has_trailing_definition_marker`, whose only job is to keep the
+  splice matching the buggy full parse. Delete that guard with the fix, and
+  un-ignore both reproducers.
 
 - [ ] Stop letting `pandoc_ast.rs` drift into a second-stage parser. Load-
   bearing byte-walkers (`split_html_block_by_tags`, `parse_pandoc_blocks`
@@ -225,749 +212,121 @@ Note any known parser issues here.
 
 ### Incremental Parsing
 
-Multi-session effort to harden, unify, and graduate incremental reparsing to
-default-on, then add token/region tiers. Reference implementations audited for
-this plan: rust-analyzer (`reparsing.rs`), `../arity`
-(`crates/arity-parser/src/parser/reparse.rs`), and `../fatou`
-(`crates/fatou-parser/src/parser/reparse.rs`, `src/incremental.rs`) --- fatou is
-the primary model and both siblings are on disk for re-reading.
+The LSP splices its tree off the previous parse through a four-tier ladder ---
+token, region, section window, suffix window --- in
+`crates/panache-parser/src/parser/reparse.rs`. The architecture and the reason
+behind every guard live with the code: that module's doc carries the ladder and
+the guard catalogue, `docs/development/lsp.qmd` the host side, and
+`benches/lsp_incremental.rs` the measurements. The multi-session roadmap that
+built it is finished; what follows is only what it left open.
 
-**Governing invariant** (fatou "Tenet 4 strong form"): a successful incremental
-reparse must yield a green tree and syntax-error vector byte-identical to a full
-parse of the edited text, enforced by a `#[cfg(debug_assertions)]` oracle on
-every reparse. Every guard failure bails to full parse --- never an error.
+**Governing invariant:** a successful reparse yields a green tree and
+syntax-error vector byte-identical to a full parse of the edited text, enforced
+by a `cfg(debug_assertions)` oracle on every reparse. Every guard failure bails
+to a full parse --- never an error, never a best effort. A divergence is fixed
+by adding a bail, never by relaxing an oracle assert.
 
-Work happens directly on `main` in atomic conventional commits; the
-`feat/incremental-parsing-graduation` branch the earlier phases named is gone,
-and Phases 6b onward landed as individual commits. Full design detail (phase
-entry/exit criteria, the salsa-unification design, flip acceptance criteria)
-lives in the plan document at
-`~/.claude/plans/i-want-to-promote-splendid-stardust.md`.
+**Gates before touching any of this:** `task bench:lsp-gate` (both bench gates,
+release, default iteration count --- a shortened run measures sampling noise),
+`PANACHE_FUZZ_ITERS=20 cargo test -p panache-parser --test incremental_fuzz`,
+and the workspace suite with `PANACHE_INCREMENTAL_PARSING` forced both ways.
+Speedup floors are calibrated \~5% under the lowest of three runs on an idle
+machine; a floor set against a loaded one produces a gate that fails later for
+no reason.
 
-**Handover protocol:** a fresh session reads this section, picks the first
-unchecked phase, verifies its entry criteria (previous phase's boxes checked,
-workspace green on the branch), and works TDD with atomic conventional commits.
-On completion it checks the phase box, updates the status line below, and
-records any deviation or discovered follow-up as an indented bullet under the
-phase. Never leave a phase half-landed: partial work is noted in the status line
-with the exact next step.
+#### Cost ceilings
 
-**Current status / next step:** Phases 1--6b done. There is one authoritative
-tree, the reparse lives inside salsa's `parsed_document`, the window-size cutoff
-keeps a losing shape from ever being slower than a full parse, the bench
-thresholds are machine-checked (`task bench:incremental-gate`), and
-**incremental parsing is on by default**. The setting that used to gate it,
-`experimental.incrementalParsing`, is deprecated toward removal in favour of
-`PANACHE_INCREMENTAL_PARSING`.
+- [ ] **`splice_children` and `replace_with` rebuild every ancestor's child
+  vector**, so both are `O(top-level arity)` --- about 220 us on the pandoc
+  manual's 2662 children. Now that the region and token tiers have removed
+  the parse from a cheap splice, this is what is left of one: it is the
+  floor under every tier, and the reason a 186-byte region on a 300 KB
+  document still costs \~1.1 ms. Attacking it needs either a
+  structural-sharing splice rowan does not offer, or a nested `DOCUMENT`
+  shape --- and that shape is visible to every consumer that walks top-level
+  children, so it is not a local change.
 
-Phase 6b's gate is met on all four items: oracle-clean fuzz at 10x, the
-workspace and LSP suites green with the flag forced both ways, both bench gates
-green, and the week of oracle-live dogfooding done with zero panics.
+- [ ] **`refdef_set` re-scans the whole document on every revision**
+  (`src/salsa.rs`), which is `O(document)` per keystroke and is paid whether
+  or not a reparse is attempted. The parser side is fine --- the host passes
+  the cached set through `reparse_with_refdefs`, so `populate_refdef_labels`
+  short-circuits --- so the work to do is incrementalizing the *set*, not
+  the scan's caller. `diff_edit` re-deriving an edit the LSP already knows
+  is the same shape of waste and is cheaper to fix.
 
-Phase 7 (token tier) is **done**. An edit strictly inside one plain-prose `TEXT`
-token of a top-level paragraph now replaces that single green token, ahead of
-the cost guard and the rest of the cascade. Both bench gates are green over
-three consecutive runs, the fuzzer is clean at 30x with a new prose-placed
-driver, and the step change the phase demanded is measurable as a pair: the same
-keystrokes into the same line of `pandoc_manual.md`, one column apart, cost 2002
-us on the section window and 221 us on the token tier.
+- [ ] **`Parser::new` builds a `BlockParserRegistry` per parse.** That fixed
+  cost is why three small parses lose to one on a 74-byte document, which is
+  in turn why the region tier carries no small-document exemption where
+  fatou's equivalent does. A shared or lazily-built registry would let that
+  exemption exist and would speed up every boundary parse.
 
-Phase 8 (region tier) is **done**. A contiguous run of top-level `DOCUMENT`
-children touching the edit is now re-parsed as a *bounded* fragment, with each
-seam proved by a neighbour-sized boundary parse, and it is tried ahead of both
-window tiers. Every real-document bench case it was built for went from 1.0x
-with a 100% fallback rate to a splice; the fuzzer's region hit rate on
-multi-block documents is 72%.
+- [ ] **The write-phase medium row is only break-even.** `large_authoring.qmd`
+  measures 1.05x end to end (`benches/lsp_write_phase.rs`) where
+  `benches/lsp_incremental.rs` splices the same document at 4.0x. The two
+  edit different positions --- 4/5 of the way through against line 60 --- so
+  the gap is either a shape the region tier declines at that position or
+  host-side work only the end-to-end bench includes. Worth finding out
+  which, because the end-to-end number is the one a user feels.
 
-Next step is Phase 9 (closeout).
+#### Tier coverage
 
-The two 5x floors that failed were **lowered to 4.5x, and the cause was the
-corpus rather than the code**. `benches/documents/download.sh` used to fetch
-`pandoc_manual.md` from `refs/heads/main` with no revision pinned; upstream grew
-it from 300 856 to 304 665 bytes, so the fixed edit at line 7600 now chooses a
-7.5% window where it chose 7.0%. Speedup is a function of window share for the
-window tiers, which is why a floor calibrated against one revision of somebody
-else's Markdown file could not hold. **The corpus is pinned now**, to fixed
-`jgm/pandoc` and `quarto-dev/quarto-web` revisions recorded at the top of
-`download.sh`, which also stops a gate run rewriting the tracked
-`benches/documents/pandoc_testsuite.md` and dirtying the working tree. Floors
-recorded from here on hold until someone bumps a revision deliberately.
+- [ ] **Widen the token tier.** It answers only an edit strictly inside a plain
+  `TEXT` token of a top-level `PARAGRAPH`. Deferred and still open: edits
+  that touch a token boundary (needs join probes), non-`TEXT` leaf kinds,
+  and `PLAIN` / heading-content / code-body parents. Each is a decline today
+  that a keystroke could have.
 
-`incremental_regressions.rs` carries no ignored *incremental* tests; the three
-`#[ignore]`d tests there pin two full-parser bugs (setext-after-setext, and a
-trailing-`:` line promoting a list item's lazy continuation to a definition
-term), both tracked on `main` under "Parser bugs found by the incremental
-fuzzer" like the five the fuzzer found earlier. Neither fix has landed on `main`
-yet --- the branch is rebased onto it and they are still ignored --- so they
-stay ignored until they do.
+- [ ] **Nested-container regions.** Regions are restricted to top-level
+  `DOCUMENT` children, because a fragment lifted out of a list item or a div
+  needs a fragment entry point carrying container stack, open fences, and
+  refdef scope --- fatou records the same lesson. `ParseOrigin` is the
+  degenerate top-level case of exactly that entry point, so the shape to
+  generalize already exists.
 
-Hardening applied after the phases above, from a review of the branch:
+- [ ] **The long-range pairing guard is coarse.** `long_range_pairing_lines`
+  declines whenever the region's fence, div, math, comment, or bare `-`/`=`
+  rule lines differ before and after the edit --- sound, but it refuses
+  every edit that so much as retypes a fence. A precise version would ask
+  the *old tree* whether a candidate line actually parsed as a delimiter,
+  which is the check `prefix_fence_state_is_stable`'s parity heuristic also
+  wants.
 
-- Line endings. Every seam test in the cascade is textual, and the blank-line
-  check was a `"\n\n"` suffix test, so a CRLF document (blank line `"\r\n\r\n"`)
-  was refused at the first guard and never spliced at all --- safe, and a total
-  loss of the feature for anything authored on Windows. `ends_with_blank_line`
-  now strips one terminator and looks for another, which is line-ending
-  agnostic. The fuzz corpus grew two CRLF snippets and two CRLF insert-alphabet
-  entries, so the gap is measured rather than accidental.
-- Guard parity. `reparse_section_window` ran a strictly weaker guard set than
-  the suffix path. Two of the missing three cannot fire while the window is
-  anchored at a top-level `HEADING`, but the thematic-break/dash-rule one can,
-  and "the window starts at a heading" is a property of how the window is
-  *chosen* --- which Phase 8 changes. All are applied on both paths now.
-- Release-build safety. Both oracles are `cfg(debug_assertions)` (the host one
-  also wants `PANACHE_REPARSE_ORACLE=1`), so a release build checked nothing,
-  while `parsed_document` now feeds LSP formatting, which writes the user's
-  file. `splice_length_agrees` in `src/salsa.rs` checks the one part of the
-  invariant that is `O(1)` --- the spliced tree spans exactly its text --- in
-  every build, and *falls back* to the full parse rather than panicking.
-- The reshuffled corpus found one more full-parser bug: a trailing `:`/`~` line
-  promoting a preceding list item's lazy continuation into a definition term,
-  where the *splice* matched pandoc and the full parse did not. Declined by
-  `first_block_has_trailing_definition_marker` so the splice keeps matching the
-  full parse, pinned `#[ignore]`d in `incremental_regressions.rs`, and tracked
-  on `main` under "Parser bugs found by the incremental fuzzer" (the entry says
-  to delete the guard with the fix). It is not CRLF-specific --- the CRLF
-  inserts only reshuffled the draws onto it --- and reproduces on LF.
+#### Correctness debt
 
-No test in this section may read a document from `benches/documents/`: the
-corpus is gitignored, and `download.sh` does not even produce every name the
-repo still references (`medium_quarto.qmd` is gone). A corpus-reading test fails
-on every clean checkout, and a corpus-*skipping* one never runs in CI at all, so
-reproducers are synthetic and pin their strategy instead.
+- [ ] The two full-parser bugs the incremental fuzzer found are tracked under
+  **Parser -> Issues** above, because that is where the fix belongs. One of
+  them keeps a guard alive in the reparse cascade
+  (`first_block_has_trailing_definition_marker`) that should be deleted with
+  it.
 
-- [x] Phase 1: oracle --- `pub fn fingerprint` + debug
-  `assert_matches_full_parse` on every non-fallback reparse; RA-style
-  `do_check` structural tests (full `{:#?}` equality, pinned strategy +
-  reparse-range length); delete the dead `src/range_utils.rs` copy of
-  `find_incremental_restart_offset`.
-  - Oracle lives in `crates/panache-parser/src/parser/verify.rs`; the existing
-    suite (parser + LSP integration) already runs clean under it, so no
-    divergence surfaced from the current strategies' happy paths.
+#### Infrastructure
 
-- [x] Phase 2: seeded fuzz harness
-  (`crates/panache-parser/tests/incremental_fuzz.rs`) with hazard-biased
-  alphabet (setext, lazy continuation, fences, `:::` divs, list markers,
-  table pipes, refdefs, YAML delimiters, HTML blocks, `$$`, footnotes) +
-  commented hazard snippets + `benches/documents/` corpus;
-  `PANACHE_FUZZ_ITERS` scaling. The known refdef-reuse bug is expected to
-  surface here; capture divergences as minimized `#[ignore]`d red tests.
-  - Delivered with deviations. The harness skips (and counts) inputs where the
-    *full parser* itself is lossy or panics --- with a broken oracle the splice
-    cannot be judged; every skip prints its reproducer, and the minimized cases
-    are pinned in `crates/panache-parser/tests/incremental_regressions.rs` and
-    tracked under "Parser bugs found by the incremental fuzzer" in the Parser
-    section below.
-  - Several incremental divergences the harness found were fixed in-session
-    instead of parked (Phase 3 work pulled forward): restart-past-edit guard,
-    textual + structural seam decoupling, fence-pairing parity over the prefix
-    (heuristic; precise old-tree check deferred to Phase 8), list/blockquote
-    continuation guard, and a refdef-proximity guard (`edit_may_touch_refdefs`,
-    textual; the precise set comparison lands with the host layer in Phase 4).
-    The section-window strategy was redesigned: it parses from the window start
-    to EOF (list-item buffering depends on unbounded lookahead, so a bounded
-    standalone window parse is untrustworthy) and re-adopts the old suffix
-    children only on structural equality, else degrades to a suffix splice.
+- [ ] **Neither bench gate runs in CI.** Both need
+  `benches/documents/download.sh` and a release build, and a timing assert
+  on shared runners would land flaky. The corpus is pinned and the gates are
+  one task target each, so wiring them is a small job whenever someone
+  decides flakiness is acceptable --- or when the gates grow a non-timing
+  mode.
 
-- [x] Phase 3: refdef-set-change guard (cheap bail to full parse); error
-  carrying in the incremental result + three-bucket merge (RA recipe);
-  oracle/fuzz extended to error equality; un-ignore red tests; error-matrix
-  tests {unchanged/fixed/introduced} x strategy.
-  - The merge has **two** buckets, not RA's three, as predicted when the phase
-    was scoped: both strategies parse their window to EOF and both window starts
-    are `<= edit.0`, where `map_old_offset_to_new` is the identity, so the seam
-    sits at the same offset in the old and new text and nothing can straddle it.
-    That case is a `debug_assert!` plus a bail. The real third bucket waits for
-    the bounded region tier in Phase 8; the module doc says so.
-  - `parse_incremental_suffix[_with_refdefs]` gained an `old_errors` parameter
-    (the shape Phase 4's `reparse` already wanted), and `DocumentState` carries
-    the errors beside its tree so `did_change` can feed the prefix's share to
-    the next reparse. Both retire with `DocumentState.tree` in Phase 4. The LSP
-    still serves diagnostics from salsa's independent full parse, so this is
-    plumbing for the oracle, not a behavior change.
-  - The **document-start-only construct guard** landed as a cheap textual bail
-    on the window's first line (pandoc `%` title block, MultiMarkdown title
-    block, CommonMark-dialect `---`). Splitting "byte 0 of the document" from
-    "blank-line separated fragment start" in `BlockContext` is the principled
-    fix and belongs with Phase 8 --- every other `at_document_start` consumer is
-    `||`-ed with `has_blank_before`, which the seam guard already guarantees.
-  - The fuzz harness runs four option tiers (pandoc, gfm, quarto,
-    multimarkdown), chosen for reach: plain `commonmark` leaves
-    `yaml_metadata_block` off and cannot reach the mid-document-YAML hazard at
-    all, so `gfm` carries it. Budgets **split** the old pandoc-only counts
-    rather than multiplying them, so a default `cargo test` costs about what it
-    did before; `PANACHE_FUZZ_ITERS` scales every tier together.
-  - The tiers found four more splice bugs, all fixed with regression tests:
-    definition-marker and table-caption lines reaching back across the seam, a
-    retained thematic break re-read as a multiline-table rule, a refdef-guard
-    slice landing inside a multi-byte token, and an `old_edit` past the old
-    tree's end. The last two were rowan panics, not divergences. The harness now
-    also checks that the *base* parse round-trips, not only the parse of the
-    edited text.
-  - Nothing to un-ignore: the earlier red tests were fixed on `main` before the
-    phase started. The tiers did surface one *new* full-parser bug
-    (setext-after-setext), pinned `#[ignore]`d here and tracked on `main` under
-    "Parser bugs found by the incremental fuzzer", where the fix belongs; it is
-    not an incremental bug.
+- [ ] **A gate run dirties the working tree.** `benches/documents/download.sh`
+  rewrites `pandoc_testsuite.md`, which is tracked in git, on every run.
 
-- [x] Phase 4: salsa unification --- reparse moves into `parsed_document` with a
-  side-channel reparse base (fatou model, no staged edit chain: whole-text
-  `diff_edit` recovers the single combined edit); base keyed on config +
-  refdef set; admission-gated by the runtime flag; delete
-  `DocumentState.tree` and the edit-range coalescing helpers; new
-  `tests/salsa_incremental.rs`. Staged commits S1-S4, each green.
-  - The design doc's three-bucket section-window error splice was already
-    obsolete: Phase 3 shipped `merge_incremental_errors` with **two** buckets
-    (both strategies parse to EOF), so S2 reused it unchanged.
-  - `ReparseCache` has no admitted-set beside its map: presence *is* admission,
-    so the two cannot drift apart. Fatou's hot/cold eviction classes are
-    unnecessary here for the same reason --- a sweep or a sibling-config parse
-    never enters the cache at all, so plain LRU over admitted entries suffices.
-  - The parser's textual `edit_may_touch_refdefs` guard stays even though the
-    host now compares the sets exactly: it is cheap, and it is the only refdef
-    protection the parser-crate entry point has (it holds no refdef history).
-  - The host oracle is gated on `cfg(debug_assertions)` +
-    `PANACHE_REPARSE_ORACLE=1`, not `cfg(test)` as designed --- integration
-    tests link the library built *without* `cfg(test)`, so a `cfg(test)` gate
-    would have excluded exactly the suites (`tests/lsp.rs`,
-    `tests/salsa_incremental.rs`) it exists to cover.
-  - New: `PANACHE_INCREMENTAL_PARSING=1|0` overrides the client setting for the
-    whole server process. Phase 6 wanted an escape hatch anyway, and it is what
-    lets the suite run green with the feature forced on *and* forced off (the
-    handful of tests that assert the setting's own plumbing skip under it).
-  - Phase 7's `parser/incremental.rs` extraction was pulled forward into S4 as
-    `parser/reparse.rs`, since S4 was already moving the surrounding code. The
-    retired `parse_incremental_suffix*` fallback policy now lives with the
-    callers that want it: `crates/panache-parser/tests/common/mod.rs` for the
-    suites, a `#[cfg(test)]` shim in `reparse.rs` for the in-crate tests, and
-    `try_reparse` in `benches/lsp_incremental.rs`.
+- [ ] **`experimental.incrementalParsing` is deprecated toward removal.** It is
+  still honored and still warns once at `initialize`;
+  `PANACHE_INCREMENTAL_PARSING` does the one job it has left. Remove it a
+  release after the deprecation shipped, along with the internal
+  `runtime_settings.experimental_incremental_parsing` name, which has no
+  wire impact and can be renamed freely.
 
-- [x] Phase 5: benchmark repair --- fix `benches/lsp_incremental.rs`
-  multi-change path (currently degenerates to full reparse), add
-  fallback-rate + bail-cost accounting, commit results table in module doc.
-  - The multi-change path is fixed by *mirroring* `parsed_document` rather than
-    approximating it: whole-text `diff_edit` per notification, a base chained
-    from step to step, and the host's refdef-set comparison ahead of the
-    parser's textual guard. A case is now a *stream* of notifications, which is
-    what makes a fallback rate mean anything --- the old per-case rate was 0 or
-    1 by construction.
-  - Three cases were measuring nothing. `synthetic_document` emitted adjacent
-    lines, so every "paragraph" was one giant paragraph with no blank line for
-    the seam guard to decouple at, and every synthetic edit got a window
-    starting at byte 0; it now separates paragraphs and emits a `##` heading
-    every ten, so the section-window strategy has something to find.
-    `pandoc_manual_single_edit` edited line 200, which is ``[`setspace`]: ...``,
-    and rewrote the *label* --- it is kept, renamed to
-    `pandoc_manual_refdef_label_edit`, as the host-side-decline case, and a
-    genuine early-prose edit was added beside it. `fallback_invalid_range` was
-    dropped: the server validates client ranges before touching its buffer, so
-    it modelled nothing, and with `diff_edit` it merely duplicated
-    `full_replace`.
-  - The accounting distinguishes **window** bytes (window start to EOF, what
-    both strategies actually re-parse) from **spliced** bytes (green children
-    replaced). Only the former predicts the speedup; printing the latter is what
-    made `tables_single_edit` look like "7% reparsed, 0.98x". The bench also
-    reports a per-strategy histogram and a fallback-reason histogram, and
-    verifies the governing invariant at every step of every case before timing
-    anything.
-  - Headline: speedup is a function of window share and nothing else --- 5.6x on
-    a late edit or a typing stream in the pandoc manual (7% window), 1.0x where
-    the window is \~98%. A *successful* wide reparse is 5-10% slower than a full
-    parse (`pandoc_manual_early_edit` at 0.9x, `full_replace` at 0.2x).
-    Guard-cascade bail cost is 15.7% of a full parse; a host-side decline costs
-    one refdef scan.
-  - Three consequences for the phases below, folded into them: the window-size
-    cutoff is promoted out of Phase 8 into its own phase *ahead of the flip*
-    (5b), Phase 6's gate grows a regression ceiling and names its cases, and
-    Phase 7's exit criterion is restated in the harness's terms.
+- [ ] **`panache-parser`'s `pub mod range_utils` has no consumer outside the
+  crate**, and the host keeps its own copy of `expand_byte_range_to_blocks`
+  in `src/range_utils.rs`. Narrowing the module is semver-visible on a
+  published crate, so it is a decision rather than a cleanup --- but the
+  duplication is real and one of the two copies should win.
 
-- [x] Phase 5b: window-size cutoff --- decline in `reparse_ranges` when the
-  window start leaves more than a threshold share of the document
-  downstream, before the guard cascade and the window parse run. Threshold
-  picked from the bench (the crossover is around 85-90% window, where the
-  5-10% splice surcharge stops being repaid); a bench case per side of it.
-  - Promoted out of Phase 8 and ahead of Phase 6 because the flip is what makes
-    the losing shapes the *default*. Today a whole-document replace measures
-    0.2x and an early edit in the pandoc manual 0.9x; the cutoff turns both into
-    a clean \~1.0x fallback, so the flip ships something that is never worse
-    than the status quo. `full_replace` is not an exotic shape: a client that
-    answers format-on-save with a whole-document replace takes that path on
-    every save.
-  - Independent of the region tier --- it compares `reparse_range.0` against a
-    fraction of the document length and returns `None`, which is the existing
-    refusal-first contract. Phase 8 keeps the cutoff and re-tunes the threshold
-    once regions change what a window costs.
-  - Landed as `MAX_WINDOW_SHARE_PERCENT = 85` and **two** checks, not one. The
-    cheap one runs before the old tree is touched at all: every window this
-    entry point can choose starts at or before the edit, so the edit offset is a
-    sound upper bound on the window start, and a whole-document replace declines
-    there for a tenth of a microsecond (0.2x -> 0.9x). The precise one runs
-    after the restart is known, because a single top-level block spanning most
-    of the document puts the restart arbitrarily far ahead of the edit.
-  - A too-wide *section* window declines the strategy, not the reparse: the
-    section anchor is the previous top-level heading, which can sit far earlier
-    than the edited block, so the suffix window below it is often narrower and
-    still admissible.
-  - Bench, before -> after: `full_replace` 0.2x -> 0.9x,
-    `pandoc_manual_early_edit` 0.9x -> 1.0x, `multi_change_large_8` 0.9x -> 0.9x
-    (see below), `tables_single_edit` / `math_single_edit` /
-    `large_authoring_single_edit` 1.0-1.1x -> 1.0x. Nothing that won lost: the
-    typing streams and `pandoc_manual_late_edit` are unchanged at 2.8x and 5.4x.
-    New cases `window_cutoff_accepted` (79.9% window) and
-    `window_cutoff_declined` (87.8%) bracket the threshold on one document.
-  - **Phase 6's 0.95x ceiling is not met by three cases, and none of them is a
-    wide-window splice.** `bail_refdef_edit` (0.9x) exists to price a decline,
-    which is definitionally slower than the full parse it wraps --- the ceiling
-    needs the same explicit exemption the fallback-rate threshold already gives
-    it. `multi_change_utf16_4` (0.7x) is a 74-byte document against a 1.8 us
-    fixed attempt cost; it lost at 0.8x *while splicing successfully* before
-    this phase, so it is Phase 7's fixed-overhead problem, not a threshold
-    problem. `multi_change_large_8` (0.9x) declines in under a microsecond and
-    still costs \~100 us more than a full parse of its 76 KB: that residual is
-    host-side per-step work (whole-text `diff_edit` plus the 67 KB `insert` it
-    allocates, the refdef-set clone, the base text copy), it is unattributed
-    between those, and it wants a profile in Phase 6 rather than a threshold.
-  - A document-size floor was tried for the 74-byte case and reverted: it would
-    also refuse small documents with *narrow* windows, which do win
-    (`single_change_small`, 1.6 KB, 1.3x), and it made every reuse assertion in
-    the suite untestable through the production entry point.
-  - The cutoff cost the fuzz harness two thirds of its coverage --- its hazard
-    snippets are tens of bytes, so nearly every window is a wide one, and the
-    share of edits reaching a splice fell from 78% to 23% while every assertion
-    still passed. `CostGuards::{Enforced,Ignored}` on a new
-    `reparse_with_cost_guards` is the opt-out: the snippets fuzz with the cost
-    guard off (the seams they encode occur mid-document in real files, where the
-    cutoff admits them), the real-document corpus keeps the production setting,
-    and each driver now asserts a floor on its splice rate so a future guard
-    cannot silently empty the harness again.
-
-- [x] Phase 6a: mechanize the gate --- the thresholds Phase 6b is gated on were
-  printed but never checked, so "the gate passed" was an eyeball judgement.
-  `PANACHE_LSP_BENCH_ASSERT=1` now checks every case and exits non-zero on a
-  violation; `task bench:incremental-gate` fetches the corpus and runs it.
-  - **The fallback-rate criterion was stale and had to be replaced, not
-    implemented.** It read "< 20% on every case except the two that price a
-    decline", which was written before Phase 5b: the window-size cutoff makes a
-    decline the *correct* outcome for a wide-window edit, and ten of the
-    eighteen cases now fall back on every step by design. A global rate rule
-    cannot express that. Each case instead declares an `Expect` (`Reuse::Always`
-    or `Reuse::Never`, plus an optional speedup floor), so the old exemption
-    list is gone: the exempted cases are simply the ones that declare `Never`,
-    and a new case cannot be added without saying what it is for.
-  - Every ratio rule carries an absolute-microsecond escape
-    (`MAX_ABSOLUTE_OVERHEAD_US = 20`), because a ratio on a 2 us baseline is
-    noise. That retires the by-name exemptions Phase 5b recorded for
-    `full_replace` (+0.3 us) and `multi_change_utf16_4` (+1.7 us, 44% bail on a
-    3.7 us parse) and puts them on a stated principle, and it lets
-    `bail_refdef_edit` (+15.8 us) pass the ceiling without the carve-out the
-    roadmap reserved for it. Presence is checked too: the real-document corpus
-    is gitignored and `load_document` skips silently, so without it a gate run
-    on a fresh checkout passes by not measuring exactly the strictest cases.
-  - **`multi_change_large_8`'s \~95 us is profiled, and Phase 5b's guess at it
-    was wrong.** It is not host-side per-step work: measured directly on the
-    case, `diff_edit` is 7.1 us, the config clone 0.1 us, and the declined
-    attempt 0.2 us --- under 8 us of the \~95, and the base text copy the guess
-    also named was never inside the timed region at all. The rest is the
-    *fallback full parse itself* running \~5% slower on the incremental path
-    (1861 us vs 1963 us for the same call on the same text), with the previous
-    green tree and the 64 KB edit buffer resident across it. That residual sits
-    inside the run-to-run spread of the same parse, which is why the case
-    straddles 0.95x rather than failing outright; it carries a documented 0.90
-    ceiling naming the profile, and the printed reason keeps the exemption
-    visible on every run.
-    - A real mis-attribution *was* found and fixed on the way, but it is not
-      this one. The bench modelled `refdef_set` as a bare scan and then compared
-      whole `RefdefMap`s on the incremental path only, while in production the
-      comparison happens inside the query, is charged to both paths, and hands
-      back the same `Arc` when the set is unchanged --- which is what makes
-      `parsed_document`'s check a pointer compare. `refdef_query` now models the
-      backdating. It moves this case by nothing measurable (its synthetic
-      document has no reference definitions, so the sets are empty and the
-      comparison was free); it matters for refdef-carrying documents, and for
-      the harness continuing to mirror the query it claims to mirror.
-  - Deferred deliberately: no CI workflow yet. The gate needs
-    `benches/documents/download.sh` and a release build, and a timing-assert job
-    on shared runners would land flaky next to the flip. The mode and the task
-    target are what make wiring it a later one-liner.
-
-- [x] Phase 6b: default flip --- incremental parsing is **always on**, with no
-  new setting. `panache.experimental.incrementalParsing` stays exactly where
-  it is and keeps working, but inverts its meaning: absent means on, and the
-  only reason to write it is `false`, which turns the side channel off for
-  debugging. No `panache.incrementalParsing` key, no alias, no
-  `deprecationMessage`, no setting migration --- a second key buys nothing
-  when the only value anyone would set is the one the existing key already
-  accepts.
-  - Work: default the setting to on where it is read
-    (`experimental_incremental_parsing_from_initialize` in
-    `src/lsp/dispatch.rs`, and the `workspace/configuration` pull and
-    `didChangeConfiguration` paths in `src/lsp/handlers/configuration.rs`, which
-    share `runtime_incremental_parsing_from_value`); flip the VS Code
-    `package.json` default to `true` and reword its description, which currently
-    sells it as an unstable experiment rather than a debug switch; update
-    `docs/guide/lsp.qmd` (opt-in -> opt-out), `docs/development/lsp.qmd`, and
-    the AGENTS.md admission sentence; flip the LSP tests that assert the default
-    is off (`tests/lsp/test_incremental_edits.rs`,
-    `tests/lsp/test_config_pull.rs`, `tests/lsp/test_config_reload.rs`).
-    `PANACHE_INCREMENTAL_PARSING=1|0` keeps overriding the setting in both
-    directions and needs no change.
-  - The server-side default is only *one* of three:
-    `editors/code/src/extension.ts` passes its own hard-coded `false` fallback
-    into `initializationOptions`, and `editors/code/README.md` documents
-    `default: false`. Both need flipping with `package.json`, or VS Code keeps
-    sending an explicit `false` and the server default never governs that client
-    at all.
-  - `apply_runtime_settings` in `src/lsp/handlers/configuration.rs` applies no
-    default: an absent key keeps the current value rather than resetting. That
-    is correct and stays, but it means the flip cannot be made there --- only
-    the initialize path decides the default.
-  - The `experimental.` prefix becomes a misnomer the day this lands. Renaming
-    it is deliberately declined: a rename needs precisely the alias and
-    migration this phase drops, and the cost of a stale prefix on a debug-only
-    switch is lower than the cost of carrying two keys forever. The *internal*
-    name (`runtime_settings.experimental_incremental_parsing`) has no wire
-    impact and can be renamed freely --- Phase 9 material.
-    - **Resolved a third way: deprecated toward removal, with no replacement
-      key.** A rename was the wrong question --- the setting has no successor
-      worth naming, because `PANACHE_INCREMENTAL_PARSING` already does the one
-      job it has left. So the key is marked deprecated (VS Code
-      `markdownDeprecationMessage`, docs, README) and still honored, the server
-      warns once at `initialize` when a client sends it, and it goes away in a
-      future release. That is the alias-and-migration cost avoided *and* the
-      misnomer retired, at the price of one release cycle's notice.
-    - The warning fires only on the initialize path, not on
-      `didChangeConfiguration`. Clients that mirror a whole settings section ---
-      VS Code among them --- push the key on every configuration change whether
-      the user set it or not, so warning there would report a problem nobody
-      has.
-    - The VS Code extension now forwards the setting **only when a user actually
-      set it** (`explicitSetting` via `config.inspect`), instead of passing its
-      own `package.json` default down. An untouched configuration therefore has
-      the server's default govern it, which is what this phase wanted in the
-      first place: the flip needed changing in three places precisely because
-      the extension was speaking for users who had said nothing.
-  - Gate: oracle-clean fuzz at 10x iterations; workspace + LSP suite green with
-    the flag forced on and off; 1 week oracle-live dogfooding with zero panics;
-    and `task bench:incremental-gate` green. **All four met.** The dogfooding
-    week was run by the maintainer on their own editing, which is the only way
-    that item was ever going to be satisfied --- it is wall-clock use, not a
-    command anyone can run on demand.
-  - **The bench thresholds are no longer restated here.** Phase 6a moved them
-    into the cases themselves (`Expect` in `benches/lsp_incremental.rs`), which
-    is the only copy: a number in this file could not be checked and drifted
-    from the harness within one phase. The floors the roadmap named survive
-    verbatim as declarations --- `typing_stream_medium` >= 2x,
-    `pandoc_manual_late_edit` and `pandoc_manual_typing_stream` >= 5x --- as
-    does the 0.95x regression ceiling and the 20%-of-a-full-parse bail budget.
-    Read the gate's output, not this bullet.
-    - Both 5x floors measure 5.4-5.7x, run to run. That is a thin margin by
-      design: the floors are the roadmap's, and the margin printed on every run
-      is what makes drift visible before it fails.
-    - Run the gate at the default iteration count. `multi_change_large_8` fails
-      at 4 iterations and passes at 80 --- its margin is a few percent on a 1.9
-      ms parse, so a shortened run measures the sampling noise, not the feature.
-  - **Landed, minus the gate.** The default is on in all three places (the
-    initialize path, `LspRuntimeSettings::default()`, and the VS Code
-    `package.json` + `extension.ts` fallback + README), the docs read opt-*out*,
-    and the tests that pinned the old default now pin the new one. Two tests
-    changed shape rather than polarity, because after the flip the old
-    assertions could no longer fail: `..._setting_can_be_enabled` became
-    `..._can_be_disabled`, and `empty_configuration_reply_is_noop` now moves the
-    flag off the default first, so "the reply was ignored" and "the reply
-    re-applied the default" stop being the same observation.
-  - **`task bench:incremental-gate` went red, and the flip did not cause it.**
-    `pandoc_manual_late_edit` and `pandoc_manual_typing_stream` measured
-    4.76--4.89x against their 5x floors, over five runs, where Phase 6a recorded
-    5.4--5.7x. Stashing the flip and re-running at HEAD reproduced it (4.76x /
-    4.89x), so it was drift on `main` --- the thin margin doing exactly what the
-    phase said it was for.
-    - **The drift is the corpus, not the parser.** `download.sh` pins no
-      revision, and upstream grew `pandoc_manual.md` from 300 856 to 304 665
-      bytes, so the fixed edit at line 7600 slid from a 7.0% window to a 7.5%
-      one. The bench's own headline finding is that speedup is a function of
-      window share and nothing else, so the floors were reading a document
-      nobody here controls. Lowered to 4.5x --- about 5% under the lowest
-      observed run --- with the reason recorded at the declaration, and green
-      over three consecutive runs.
-    - **Pinning the corpus is the real fix and is still open.** A revision in
-      `download.sh` would make these floors mean something again; without it,
-      any number here decays with upstream. The same script also rewrites the
-      *tracked* `benches/documents/pandoc_testsuite.md` on every gate run, which
-      makes a gate run dirty the working tree.
-  - **The write-phase gate was collateral the phase did not name.**
-    `benches/lsp_write_phase.rs` pins `CALIBRATED_INCREMENTAL_PARSING`, and its
-    whole point is to refuse a comparison across a mode change --- so the flip
-    tripped it. Recalibrated to the shipped mode and green there, with every
-    contract passing on its own terms (shares 4.0% / 0.7% / 2.6% against a 15%
-    ceiling). Only `end_to_end` moves with the flag; the write-phase rows never
-    parse.
-  - **A 13-17% end-to-end regression on `large_authoring.qmd` came out of that
-    recalibration**, and no existing gate catches it. Same corpus, three run
-    pairs, median `didChange + parse`: 824/863/898 us off against 968/992/974 us
-    on, while `small` and `large` win 3.5x and 3.2x. Every edit in that document
-    declines the window cutoff, so the keystroke is a full parse plus the cost
-    of preparing and rejecting a reuse. `benches/lsp_incremental.rs` models that
-    same document at `+11.6 us` (0.99x, `large_authoring_single_edit`), an order
-    of magnitude under what the host path actually pays --- so the gap is in the
-    model, which measures the strategies directly rather than through salsa and
-    the side channel. Worth a Phase 7 or 8 look at the fixed cost of a decline,
-    and at whether the incremental bench should drive the LSP path end to end
-    for at least one case.
-
-- [x] Phase 7: token tier --- edit inside plain `TEXT`; newline ban,
-  construct-character ban list kept honest by a grammar-grepping test, relex
-  kind stability, join probes, error non-touch; char-by-char typing test.
-  (The module extraction this phase also carried landed early, in Phase 4's
-  S4: `crates/panache-parser/src/parser/reparse.rs`.)
-  - Phase 5's typing-stream numbers *raise* this phase's value rather than
-    lowering it. The section window already gets streams to 2.7x/5.6x, but
-    `pandoc_manual_typing_stream` still costs 1.9 ms per keystroke, because a 7%
-    window on a 300 KB document is still 21 KB re-parsed for a one-character
-    insert. This tier is O(token) instead of O(document tail) and is the only
-    thing that removes that.
-  - Exit criterion in the harness's terms: the typing-stream cases must show a
-    step change, not an improvement. And the tier has to skip the *fixed*
-    overhead too, not only the block parse --- `full_replace` puts a \~10 us
-    floor on a 1.6 KB document for machinery that ultimately parsed 27 bytes
-    (materializing the root from green, walking the cascade).
-  - **Exit criterion met, and it is a step change rather than an improvement.**
-    The demonstration is a pair that holds everything but the tier constant:
-    `pandoc_manual_typing_stream` and `..._typing_stream_midline` type the same
-    keystrokes into the same line of the same 300 KB document, one column apart.
-    Column 0 reaches the section window, re-parses 7.5% of the file, and costs
-    2002 us per keystroke; column 40 reaches the token tier, re-parses 0.0%, and
-    costs 221 us --- 4.8x against 43.6x. `typing_stream_medium` went 2.8x -> 29x
-    and `multi_change_medium_clustered_4` 3.2x -> 43x. Both gates green over
-    three consecutive runs, and every `strategy` declaration held, so those
-    cases are claiming the tier rather than a lucky window.
-  - The tier also skips the fixed overhead, as the phase required: it runs ahead
-    of the cost guard, so `single_change_small` went 1.3x -> 29x on a 1.6 KB
-    document (53.1 us -> 1.8 us) where the old floor was the cascade's.
-  - **The 221 us is not the token, and that is the finding to carry forward.**
-    Splicing a \~70-byte token on a 300 KB document costs 221 us while the same
-    edit on a 15 KB one costs 15.5 us --- so the cost scales with the document
-    after all, through `replace_with` rebuilding every ancestor's child vector.
-    The window tiers pay the same term via `splice_children`, so this is
-    strictly cheaper than what it replaces, but it is the floor a further phase
-    would have to attack, and rowan offers no structural-sharing splice to
-    attack it with.
-  - Every case predicted to keep declining does: `pandoc_manual_early_edit`
-    (`PLAIN` inside a definition-list item), `large_authoring_single_edit` and
-    `tables_single_edit` (table cells), `math_single_edit`, `bail_refdef_edit`
-    (refdef URL), `full_replace`, and the scattered `multi_change_*` cases whose
-    collapsed span crosses newlines and yields a node rather than a token.
-  - **The `large_authoring.qmd` end-to-end regression Phase 6b recorded is
-    untouched.** Its edit lands on a fence info string (`CODE_LANGUAGE`), not a
-    `TEXT` token, so the tier declines and the keystroke is still a full parse
-    plus a rejected reuse. Widening the tier to non-`TEXT` leaf kinds is what
-    would fix it; that is deferred below.
-  - What landed: `ReparseStrategy::Token` and `reparse_token` in
-    `crates/panache-parser/src/parser/reparse.rs`, tried ahead of
-    `reparse_ranges` so it skips the window cutoff and the whole cascade.
-    Eligibility is a `TEXT` token under a **top-level** `PARAGRAPH`; `PLAIN`
-    (tight list items), heading content, code bodies, and nested containers are
-    deferred.
-  - The proof is strict interiority plus four guards, and interiority is the
-    load-bearing one: requiring the edit inside the token's *non-whitespace
-    core* fixes the bytes adjacent to both neighbouring tokens, which is what
-    stops emphasis flanking, bare-URI left boundaries, and hard-break trailing
-    runs from moving --- no join probes needed. The cost is that typing at a
-    line end falls back to the window tiers; widening it with probes is a
-    follow-up.
-  - **The byte alphabet is an allowlist, not a ban list, and that direction is
-    the finding.** A ban list derived from `structural_byte_mask` extends itself
-    for a new *inline* construct but silently admits a new *block* one, because
-    the inline mask has no reason to carry a line-leading byte. The seed is
-    hand-vetted and then narrowed by the mask, so a byte must be both vetted
-    inert and non-structural. `structural_byte_mask` was split so the bare-URI
-    scheme alphabet (every ASCII letter under GFM and Quarto) is excluded and
-    answered by an isolated relex instead --- banning letters would reject all
-    prose on exactly the flavors that matter.
-  - Two counterexamples decided that shape, both reproduced against the parser
-    before being pinned. `foo bar` above a `--- | ---` line is a paragraph that
-    one `|` turns into a `PIPE_TABLE`, and `structural_byte_mask` never sets `|`
-    under any configuration. Widening a top-level paragraph's line indent moves
-    the whole block inside a neighbouring list item. Neither is visible to any
-    token-local or line-local check.
-  - `.` and `)` stay in the alphabet, because banning them would reject most
-    English prose. The ordered-list hazard they carry (`12 apples` plus an
-    interior `.` is a list; so is `12.apples` plus an interior space) is closed
-    positionally instead: the edit must sit past its line's first word, so the
-    bytes that decide the line are all before it and interiority leaves them
-    alone.
-  - Errors reduced to nothing, and that is a finding rather than a shortcut.
-    `SyntaxErrorSource::Yaml` is the only source, so no error can originate in a
-    paragraph's prose; the seam-based `merge_incremental_errors` does not apply
-    and the token path shifts instead of merging.
-  - The fuzzer gained a prose-placed driver, because the uniform one almost
-    never lands inside a prose token --- it exercised the window tiers
-    thoroughly and this tier barely at all, so the tier could have regressed to
-    a no-op with the whole suite green. Its hit-rate floor is asserted over
-    prose snippets only: over the union it would measure the corpus mix, since
-    the hazard snippets are construct-heavy by design and decline *correctly*.
-    Measured 14.0% against a 10% floor. Clean at 30x iterations.
-  - The `window_cutoff_accepted`/`window_cutoff_declined` pair needed rescuing
-    and this is the phase's easiest thing to break silently. Its replacements
-    were bare words, i.e. interior prose edits, so the token tier would have
-    taken both sides and the pair would have kept passing while bracketing
-    nothing. Both now insert a code span. `Expect::strategy` was added so a case
-    declares *which* tier it claims, since a tier regression fails nothing else ---
-    declining is always sound.
-  - **`replace_with` is O(top-level arity), not O(1)**, so the tier is O(token)
-    + O(document children): rowan rebuilds each ancestor's whole child vector.
-      That term is already paid by `splice_children` on the window paths, so the
-      tier is strictly cheaper than the one it displaces, but "O(token)" as the
-      roadmap phrases it overstates it. Removing that floor needs a
-      structural-sharing splice rowan does not offer.
-  - Deferred out of this phase: boundary-touching edits with join probes;
-    `PLAIN`, heading-content and code-body parents; non-`TEXT` leaf kinds (which
-    is what the `large_authoring.qmd` regression needs); nested-container
-    paragraphs; the `replace_with` root-rebuild floor; and the host-side
-    `O(document)` costs per keystroke that no tier touches (`diff_edit`
-    re-deriving an edit the LSP already knows, and `refdef_set` re-scanning the
-    whole document).
-  - One pre-existing thin margin worth watching, not caused by this phase:
-    `pandoc_manual_late_edit` measured 4.53x against its 4.5x floor on one of
-    six runs. That is the section-window floor the corpus drift already forced
-    down once. Now that the corpus is pinned it should stop moving, but the
-    margin is a few percent and the next real change to that tier will trip it.
-
-- [x] Phase 8: region tier over top-level `DOCUMENT` children --- bounded
-  fragment parse, `no_straddle` seam primitive, neighbour-sized boundary
-  parses, a long-range delimiter-pairing guard, and a region width bail.
-  Fixes the suffix-window reparse-to-EOF gap. (The too-wide bail this phase
-  used to carry is Phase 5b; it keeps its threshold and the region tier got
-  its own.)
-  - Phase 5 confirms the premise: window share is the only lever on speedup, and
-    the current tier gets 92-98% windows on all three real documents, so it wins
-    nothing on early or mid-document edits in real files.
-  - The payoff depends on top-level *child* granularity, not on headings.
-    `tables_single_edit` edits line 40, the section window fires, and the window
-    still starts \~450 bytes in, because that is where the nearest top-level
-    heading sits. More headings would not help; regions over `DOCUMENT` children
-    are what does.
-  - **The premise measured before implementing.** Top-level children over the
-    pinned corpus: median 1-17 bytes, p90 219-297, max 1.2-19.4 KB, across 229
-    to 2662 children per document. The child enclosing each bench edit is 512 B -
-    10.6 KB, i.e. 0.06-6.2% of its document against the 92-98% windows those
-    same edits chose. That ratio is the whole phase.
-  - Bench, before -> after: `tables_single_edit` 1.0x -> 4.1x,
-    `large_authoring_single_edit` 1.0x -> 4.0x, `math_single_edit` 1.0x -> 3.2x,
-    `pandoc_manual_early_edit` 1.0x -> 3.1x (all four were 100% fallback),
-    `pandoc_manual_late_edit` and `..._typing_stream` 4.8x -> 8.4x. The fuzzer's
-    region hit rate on multi-block documents is 72%.
-  - **`pandoc_manual_early_edit` flips, against this roadmap's own prediction
-    and the bench comment that carried it.** Its edit is inside a nested
-    container, but the *region* is the whole top-level `DEFINITION_LIST` that
-    contains it --- 10 576 bytes of 304 665. The nested-container non-goal below
-    bites when a region would have to *start* inside a container, not when an
-    edit does.
-  - **The reparse-to-EOF objection is retired by cross-checking, not by proving
-    bounded parsing safe.** A fragment parsed alone is still untrustworthy. It
-    is never trusted alone: each seam is re-parsed with the one neighbour on
-    that side, requiring no straddle, the fragment's children and errors
-    identical to what it produced in isolation, and the neighbour
-    byte-identical. Absorptive constructs swallow greedily, so anything left
-    open eats that neighbour first and cannot hide.
-  - **Two constructs reach past any neighbour, and both were reproduced against
-    the parser before being guarded.** Appending a closing fence three siblings
-    below an opener collapses five top-level children into one `CODE_BLOCK` ---
-    under the Pandoc dialect an *unclosed* fence is paragraph text, so the
-    opener looks inert. And `----\nx\nfoo\n\nbar\n\n----\n` is one
-    `MULTILINE_TABLE`, matching pandoc. The guard compares the region's
-    delimiter lines before and after the edit: unchanged means the document's
-    whole sequence of them is unchanged, so no pairing anywhere can move. It
-    costs O(region) rather than the O(prefix) scan it stands in for.
-  - Grid-table borders and pipe rows are deliberately *not* treated as
-    long-range. Those constructs are blank-line terminated, so they cannot pair
-    past their own block, and including them declined every edit to a grid
-    table's border --- which is exactly what `large_authoring.qmd` puts on the
-    bench.
-  - **`prev` must come back byte-identical, which fatou does not need.**
-    Markdown's backward reach rewrites the previous node *in place* without
-    crossing the seam: a `:`/`~` line promotes a paragraph to a definition
-    `TERM`, a `===` line to a setext heading.
-  - The third error bucket landed as `merge_region_errors` (before kept, inside
-    dropped, after shifted by the delta), closing the deferral
-    `merge_incremental_errors` recorded. `SyntaxErrorSource::Yaml` being the
-    only source, and both emit sites lying strictly inside their owning child,
-    is what makes a straddle unreachable rather than merely unlikely.
-  - `Parser::new_fragment` / `ParseOrigin` closes the other deferral: splitting
-    "byte 0 of the document" from "blank-line separated fragment start". It also
-    forced the split it was conflating --- `at_document_start` fed
-    `has_blank_before_strict`, which indented code reads, so that now comes from
-    a positional `at_line_zero`. A mid-document reparse can no longer
-    manufacture a pandoc or MultiMarkdown title block, so the textual
-    over-approximation is no longer what refuses it.
-  - **No always-try floor for small documents, unlike fatou.** Three parses of a
-    74-byte document lose to one, because `Parser::new` builds a
-    `BlockParserRegistry` per parse (`multi_change_utf16_4`: 10.2 us against a
-    4.3 us full parse). The width fraction is charged on every document instead.
-  - **A pre-existing `O(document)` term was found on the path of every reparse
-    and removed.** The refdef proximity guard read its old-text window out of
-    the CST, and `SyntaxText::slice(..).to_string()` is not a windowed read ---
-    rowan builds it from `descendants_with_tokens()` over the whole node. \~800
-    us per attempt on the 300 KB manual. Only the new text needs windowing:
-    outside the edit the texts are byte-identical, so the old window's flanks
-    are bytes the new scan already covers, and only the *deleted* span (plus one
-    byte each side) has no image in the new text. This moved every row of the
-    bench and is what took the two `pandoc_manual` floors from \~4.8x to \~7.7x,
-    retiring the thin margin Phase 6b flagged --- the numbers moved up, not the
-    threshold down.
-  - **Tier order changes what the cheapest tier costs, through inlining.**
-    Reordering the two window-class tiers cost the token tier 20% (43x -> 35x on
-    `pandoc_manual_midline_edit`) with nothing on its own path changed: inlined,
-    a tier's locals land in the dispatcher's frame and every early return pays
-    for it. All three tier entry points are `#[inline(never)]` now, which is a
-    property a "cheapest first, return early" ladder should have had from the
-    start.
-  - **Neither window tier is retired, and that is a measurement rather than
-    caution.** The roadmap said this phase would replace them. Over the
-    real-document corpus at 20x, of 1457 splices the region tier takes 1120, the
-    *section* window 225, the suffix window 79, the token tier 33 --- a seventh
-    of real splices go to the tier that was to be deleted, and it beats the
-    suffix window there three to one. On heading-less hazard snippets the
-    balance inverts (suffix 47 126 against section 121). `FuzzStats` now prints
-    the tier histogram on every driver so this stays measured.
-  - The `window_cutoff_*` bracketing pair had to be rebuilt, the same trap Phase
-    7 hit: promotion made both sides region splices at 9.1x, so the pair agreed
-    on every input while still passing. `WideBlockDoc` now carries two oversized
-    blocks, giving the three outcomes the two cost guards can produce, and each
-    guard is isolated by a pair sharing a case.
-  - Three unit tests moved onto a `window_cascade_incrementally` helper that
-    drives `reparse_ranges` directly. Their subject is which window a shape
-    reaches; through the public entry point they would have measured the region
-    tier instead, and a test that quietly changes subject goes on passing.
-  - **The `large_authoring.qmd` end-to-end regression Phase 6b recorded is
-    fixed**, and the write-phase tables are re-measured. Median
-    `didChange + parse`, off against on: small 105.05 -> 20.70 us, medium
-    1024.89 -> 977.26, large 10 132.03 -> 1392.49. The medium row was 13-17%
-    *slower* with the flag on; it is now marginally faster. The large document
-    went 3.2x -> 7.3x.
-  - Still open, and worth chasing rather than accepting: the medium row is only
-    break-even (1.05x) where `benches/lsp_incremental.rs` splices the same
-    document at 4.0x. The two edit in different places --- the write-phase bench
-    types at 4/5 of the way through, the incremental one at line 60 --- so the
-    gap is either a shape the region tier declines at that position or host-side
-    work only the write-phase bench includes. Phase 9 should find out which.
-  - Deferred out of this phase: the `splice_children` root rebuild, which is
-    `O(top-level arity)` and is now the dominant cost of a cheap region splice
-    just as `replace_with` is for the token tier (2662 children on the pandoc
-    manual, \~220 us); `populate_refdef_labels` re-scanning the whole document
-    on every attempt; and the fixed `BlockParserRegistry` construction per
-    parse, which is what makes three small parses lose to one on a tiny
-    document.
-
-- [ ] Phase 9: closeout --- architecture docs, dead-path pruning, record
-  deferrals.
-
-**Deferred (explicit non-goals):** nested-container regions (inside list items,
-blockquotes, divs) are unsound without a context-parameterized fragment-parser
-entry point carrying container stack, open fences, and refdef scope --- fatou's
-recorded lesson (fatou `TODO.md`, "Incremental" section). Regions stay
-restricted to top-level `DOCUMENT` children until that exists. NodePtr
-re-anchoring across edits (arity's `map_range_through_edits`) is only needed if
-panache starts caching NodePtrs across edits.
+**Explicit non-goal:** NodePtr re-anchoring across edits (arity's
+`map_range_through_edits`) is only needed if panache starts caching NodePtrs
+across edits. It does not.
 
 ### Coverage
 

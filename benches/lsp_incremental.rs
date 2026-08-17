@@ -72,9 +72,8 @@
 //! `cargo bench --bench lsp_incremental` at the default iteration count, on an
 //! AMD Ryzen 9 7900, rustc 1.94.1, `Config::default()` (pandoc flavor).
 //! Microseconds per step; `full` and `incr` are means. Measured with the
-//! window-size cutoff live (roadmap Phase 5b), which is why every case with a
-//! window over 85% reports a 100% fallback rate and no `window %`, and with the
-//! token tier live (Phase 7).
+//! all four tiers live, which is why a case whose region and window are both
+//! over their cost guards reports a 100% fallback rate and no `window %`.
 //!
 //! The `bytes` column used to date this table, and no longer does:
 //! `download.sh` fetched the corpus from upstream `main` with no revision

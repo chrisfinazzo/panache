@@ -9,18 +9,55 @@
 //! `parsed_document` on the host side) treat the reparse as a pure
 //! optimization.
 //!
-//! One guard declines for *cost* rather than for soundness: the window-size
-//! cutoff ([`MAX_WINDOW_SHARE_PERCENT`]) refuses a window covering nearly
-//! the whole document, because a splice that re-parses 95% of a file is a
-//! slower way to reach the tree a full parse produces. It shares the refusal
-//! contract with the correctness guards, so the caller cannot tell them apart
-//! and does not need to.
+//! # The tier ladder
+//!
+//! Four strategies, cheapest first, first success wins ([`ReparseStrategy`]):
+//!
+//! | tier | re-parses | scales with |
+//! | --- | --- | --- |
+//! | `reparse_token` | nothing --- one green `TEXT` token is replaced | the token |
+//! | `reparse_region` | a bounded run of top-level children, plus its two neighbours | the region |
+//! | `reparse_section_window` | the previous top-level heading to EOF | the document tail |
+//! | the suffix path of `reparse_ranges` | the enclosing block to EOF | the document tail |
+//!
+//! Each tier entry point is `#[inline(never)]` on purpose, so the cost of the
+//! cheapest path cannot depend on which tiers sit below it: inlined, a tier's
+//! locals land in the dispatcher's frame and every early return pays for it.
+//!
+//! # The guards
+//!
+//! Two decline for *cost* rather than soundness --- one per tier that has a cost
+//! worth guarding, and both evaluated before any parse runs:
+//!
+//! * `MAX_WINDOW_SHARE_PERCENT` refuses a window covering nearly the whole
+//!   document, because re-parsing 95% of a file and then splicing is a slower
+//!   way to reach the tree a full parse produces.
+//! * `REGION_MAX_FILE_DIVISOR` refuses a region (plus its neighbours) over a
+//!   quarter of the document, because answering one costs roughly three
+//!   region-sized parses.
+//!
+//! The rest decline for soundness, and they fall into three kinds. The
+//! *structural* ones ask the old tree what it already proved --- a region is a
+//! run of whole children, so nothing can be half-inside it. The *boundary
+//! parses* re-parse a fragment against one neighbour and require the seam to
+//! survive; that is what catches every construct which reaches forward
+//! greedily. And a small number of *long-range* guards
+//! (`long_range_pairing_lines`, `prefix_fence_state_is_stable`,
+//! `edit_may_touch_refdefs`) exist because a few constructs pair at unbounded
+//! distance and no bounded parse can see them. Each carries its counterexample
+//! in its own doc comment, reproduced against the parser before it was written.
+//!
+//! # Edits
 //!
 //! [`Edit`] is the currency the caller speaks. Conversion from LSP `didChange`
 //! content changes lives host-side; this crate only ever sees byte ranges.
 //! [`diff_edit`] recovers a single contiguous edit from two whole texts, which
 //! is how a caller with no edit information at all (a disk revert, a coalesced
 //! `didChange` batch) still gets an incremental attempt.
+//!
+//! The oracle that enforces the invariant lives in
+//! `crate::parser::verify`; `docs/development/lsp.qmd` covers how the host
+//! stores and admits reparse bases.
 
 use std::ops::Range;
 
@@ -645,8 +682,8 @@ fn edit_is_past_line_marker_zone(text: &str, offset: usize) -> bool {
 /// text and no error can straddle it. The straddling case is a
 /// `debug_assert!` plus a `None` (which the caller turns into a bail) rather
 /// than a guess. A real third bucket only appears once a *bounded* window
-/// leaves a live suffix to shift by the edit delta, which is the region tier in
-/// roadmap Phase 8.
+/// leaves a live suffix to shift by the edit delta; that is `merge_region_errors`,
+/// which the region tier uses instead of this one.
 ///
 /// Old errors that start at or after the seam are dropped: the window parse
 /// re-derives them.
@@ -901,8 +938,10 @@ fn normalize_range(range: (usize, usize)) -> Option<(usize, usize)> {
 ///
 /// Declining here is the ordinary refusal-first contract: the caller full-
 /// parses, which is exactly what it would have done before the feature existed.
-/// The region tier (roadmap Phase 8) changes what a window costs and will want
-/// this re-tuned, not removed.
+/// The region tier has its own bail (`REGION_MAX_FILE_DIVISOR`) rather than
+/// sharing this one, because the two measure different work: this is the share
+/// of the document left downstream of a window, that is the fraction of it a
+/// region plus its neighbours covers.
 const MAX_WINDOW_SHARE_PERCENT: usize = 85;
 
 /// Whether a window starting at `window_start` leaves more than
@@ -1063,8 +1102,10 @@ fn floor_char_boundary(text: &str, mut pos: usize) -> usize {
 /// partner — not a proof; delimiter-looking lines in prose (e.g. docs
 /// about Markdown) can fool it in both directions. The debug oracle
 /// backstops false negatives; false positives only cost a full reparse.
-/// The precise check (asking the old tree whether each candidate line is a
-/// closed fence delimiter) is roadmap Phase 8 material.
+/// The precise check --- asking the old tree whether each candidate line actually
+/// parsed as a closed fence delimiter --- is still unwritten; `TODO.md` tracks it
+/// under "Incremental Parsing -> Tier coverage", together with the same
+/// coarseness in `long_range_pairing_lines`.
 fn prefix_fence_state_is_stable(prefix: &str) -> bool {
     let mut backtick = 0usize;
     let mut tilde = 0usize;
@@ -1180,7 +1221,8 @@ fn last_retained_block_absorbs_trailing_colon(kind: SyntaxKind) -> bool {
 /// wrong. Delete it together with the parser bug, which is pinned as the
 /// `#[ignore]`d `full_parse_definition_list_from_trailing_colon_after_lazy_list_item`
 /// in `tests/incremental_regressions.rs` and tracked in `TODO.md` under
-/// "Parser bugs found by the incremental fuzzer".
+/// "Parser -> Issues", which is where the fix belongs. Delete this guard with
+/// it.
 ///
 /// Scoped to the first block because that is exactly how far the promotion
 /// reaches: an intervening paragraph, heading, or fence in the window stops it.
@@ -1272,9 +1314,10 @@ fn first_nonblank_line_is_container_marker(text: &str) -> bool {
 /// Every other `at_document_start` consumer is `||`-ed with `has_blank_before`,
 /// which the seam guard already guarantees, so they agree either way. Textual
 /// and deliberately over-eager: a false positive costs one full parse. The
-/// principled fix is to separate "byte 0 of the document" from "blank-line
-/// separated fragment start" in `BlockContext`, which belongs with the region
-/// tier in roadmap Phase 8.
+/// The principled fix --- separating "byte 0 of the document" from "blank-line
+/// separated fragment start" --- landed as `ParseOrigin`, which is what lets the
+/// region tier answer these shapes instead of refusing them. This guard remains
+/// because the *window* tiers have no fragment context to parse with.
 fn window_start_manufactures_document_start_construct(
     window: &str,
     config: &ParserOptions,
@@ -1506,7 +1549,7 @@ fn reparse_section_window(
     // run anywhere in the window, and neither is constrained by the anchor.
     // All three are kept rather than the reachable one alone, because "the
     // window starts at a heading" is a property of how the window is chosen,
-    // and the region tier (roadmap Phase 8) chooses differently.
+    // and the region tier chooses differently.
     if last_retained_block_can_absorb_marker(old_tree, section_window.old_start)
         && first_nonblank_line_is_container_marker(window_text)
     {

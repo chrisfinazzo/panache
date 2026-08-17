@@ -247,10 +247,18 @@ fn do_check_suffix_window_tail_edit() {
 
 #[test]
 fn do_check_suffix_window_reparses_to_eof_from_middle_edit() {
-    // Documents the suffix-window gap: an edit in the middle of a
-    // heading-free document reparses everything from the restart to EOF.
-    // The region tier (roadmap Phase 8) should shrink this window; when it
-    // does, this pinned length must go down, not up.
+    // An edit in the middle of a heading-free document reparses everything
+    // from the restart to EOF. The region tier does *not* rescue this one, and
+    // the reason is size rather than shape: the region is one 10-byte
+    // paragraph, but its two neighbours push the region-plus-context past a
+    // quarter of a 60-byte document, and the width bail carries no
+    // small-document exemption (three small parses lose to one, because
+    // `Parser::new` builds a registry each time). `TODO.md` tracks that under
+    // "Incremental Parsing -> Cost ceilings"; if the registry cost goes, this
+    // case is the one that should flip to `region` with a much shorter length.
+    //
+    // `do_check_region_tier_on_an_early_edit` is the same shape at a size where
+    // the tier does win.
     do_check(
         "para one\n\npara $0two$0\n\npara three\n\npara four\n\npara five\n",
         "TWO",
