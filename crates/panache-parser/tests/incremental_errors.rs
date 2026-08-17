@@ -1,12 +1,16 @@
 //! Error-splicing matrix for incremental reparsing.
 //!
-//! The governing invariant covers the syntax-error vector as much as the tree,
-//! and the merge has exactly two buckets — errors in the retained prefix,
-//! carried verbatim, and errors from the window parse, shifted to host
-//! coordinates. Each bucket can be *unchanged*, *fixed*, or *introduced* by an
-//! edit, and each reparse strategy reaches them differently, so this file is
-//! that matrix: {unchanged, fixed, introduced} x {suffix window, section
-//! window, full-parse bail}.
+//! The governing invariant covers the syntax-error vector as much as the tree.
+//! The *window* merge has two buckets — errors in the retained prefix, carried
+//! verbatim, and errors from the window parse, shifted to host coordinates —
+//! because both window strategies parse to EOF, so nothing downstream of the
+//! seam survives to be moved. The *region* merge has a third: a bounded region
+//! leaves a live suffix, whose errors are carried and shifted by the edit delta.
+//!
+//! Each bucket can be *unchanged*, *fixed*, or *introduced* by an edit, and each
+//! reparse strategy reaches them differently, so this file is that matrix:
+//! {unchanged, fixed, introduced} x {suffix window, section window, region,
+//! full-parse bail}.
 //!
 //! Malformed YAML is the only source of syntax errors, so every case is built
 //! from a frontmatter or mid-document metadata block. Mid-document metadata is
@@ -180,4 +184,54 @@ fn full_reparse_bail_reports_an_error_the_edit_fixes() {
         "full_reparse",
         0,
     );
+}
+
+// --- region tier --------------------------------------------------------
+//
+// The region tier is the only strategy with a *third* bucket. Both window
+// strategies parse from their window start to EOF, so every error downstream of
+// the seam is re-derived by the window parse and nothing survives to be moved.
+// A bounded region leaves a live suffix, whose errors are carried *and shifted*
+// by the edit delta -- which is why none of the cases above can express what
+// the three below do.
+
+/// Pad `input` so that every window the cascade could choose leaves more than
+/// the 85% cutoff downstream, which is what routes an early edit past the
+/// window tiers and into the region tier.
+fn with_trailing_filler(input: &str) -> String {
+    let mut out = String::from(input);
+    assert!(out.ends_with("\n\n"), "filler must start on a blank line");
+    for index in 0..200 {
+        out.push_str(&format!("Filler paragraph {index}.\n\n"));
+    }
+    out
+}
+
+/// The third bucket, end to end: an error *before* the region is carried with
+/// its offsets untouched, and an error *after* it moves by the edit delta.
+///
+/// A merge that forgot to shift the trailing error would still produce the
+/// right *count*, which is why this file compares the whole vector against a
+/// full parse rather than counting.
+#[test]
+fn region_carries_an_error_before_it_and_shifts_one_after_it() {
+    let input =
+        with_trailing_filler("---\ntitle: [\n---\n\nAlpha para.\n\n---\ntrailing: [\n---\n\n");
+    check(&input, "Alpha", "Alpha and then some more", "region", 2);
+}
+
+/// An error the edit *introduces* inside the region. The `---` delimiters are
+/// pairing lines, but they sit inside the region and the edit leaves them
+/// alone, so the long-range guard admits it.
+#[test]
+fn region_reports_an_error_the_edit_introduces_inside_it() {
+    let input = with_trailing_filler("Intro para.\n\n---\nkey: ok\n---\n\n");
+    check(&input, "ok", "[", "region", 1);
+}
+
+/// And one it fixes.
+#[test]
+fn region_reports_an_error_the_edit_fixes_inside_it() {
+    let input = with_trailing_filler("Intro para.\n\n---\nkey: [\n---\n\n");
+    check(&input, "[", "ok", "region", 0);
 }
