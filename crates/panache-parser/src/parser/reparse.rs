@@ -884,6 +884,16 @@ fn reparse_ranges(
         return None;
     }
 
+    // A retained `DEFINITION_LIST` absorbs a definition list the window starts:
+    // pandoc pairs a term with any number of definitions and consecutive items
+    // join into one list node, so a full parse has one `DEFINITION_LIST` where
+    // the standalone splice has two adjacent ones.
+    if last_retained_block_kind(old_tree, old_restart) == Some(SyntaxKind::DEFINITION_LIST)
+        && has_definition_marker_line(suffix_text)
+    {
+        return None;
+    }
+
     let (suffix_tree, suffix_errors) = Parser::new(suffix_text, config).parse_with_errors();
     let errors = merge_incremental_errors(old_errors, new_restart, suffix_errors)?;
 
@@ -1168,6 +1178,9 @@ fn last_retained_block_kind(old_tree: &SyntaxNode, boundary: usize) -> Option<Sy
 /// Whether a `:`/`~` marker line in the suffix would rewrite the last retained
 /// block: a paragraph becomes a definition-list `TERM`, and a table absorbs
 /// the line as its `TABLE_CAPTION`.
+///
+/// `DEFINITION_LIST` is deliberately absent: it couples further than a first
+/// marker line, and gets its own pairing with [`has_definition_marker_line`].
 fn last_retained_block_absorbs_colon_line(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -1206,13 +1219,34 @@ fn has_dash_rule_line(text: &str) -> bool {
 /// `:::` and `~~~` are fence openers, not markers, so the rest of the run must
 /// not be another delimiter character.
 fn first_nonblank_line_is_definition_marker(text: &str) -> bool {
-    let Some(line) = text.lines().find(|line| !line.trim().is_empty()) else {
-        return false;
-    };
-    let trimmed = line.trim_start();
-    trimmed
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(is_definition_marker_line)
+}
+
+/// Whether `line` opens a definition: a `:`/`~` marker followed by space or
+/// end of line. See [`first_nonblank_line_is_definition_marker`] for why the
+/// following character matters.
+fn is_definition_marker_line(line: &str) -> bool {
+    line.trim_start()
         .strip_prefix([':', '~'])
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t'))
+}
+
+/// Whether `text` has any definition-marker line at all.
+///
+/// Coarser than [`first_nonblank_line_is_definition_marker`] on purpose, and
+/// paired only with a retained `DEFINITION_LIST`. Definition items merge into
+/// one list node across blank lines, and the marker that opens the merging item
+/// need not lead the window: in `more prose\n:` the term is the line above the
+/// marker, and in `more prose\n\n: def` the item does not even start in the
+/// window's first block. Bounding the reach precisely would mean re-deciding
+/// textually which blocks can belong to a definition list, so this pairs
+/// "retained definition list" with "a marker anywhere in the window" and
+/// declines, the way `retained_prefix_has_thematic_break` pairs with
+/// [`has_dash_rule_line`].
+fn has_definition_marker_line(text: &str) -> bool {
+    text.lines().any(is_definition_marker_line)
 }
 
 /// Whether the first non-blank line of `text` starts with a marker that
@@ -1514,6 +1548,12 @@ fn reparse_section_window(
     }
     if retained_prefix_has_thematic_break(old_tree, section_window.old_start)
         && has_dash_rule_line(window_text)
+    {
+        return None;
+    }
+    if last_retained_block_kind(old_tree, section_window.old_start)
+        == Some(SyntaxKind::DEFINITION_LIST)
+        && has_definition_marker_line(window_text)
     {
         return None;
     }

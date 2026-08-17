@@ -277,6 +277,18 @@ no reason.
   which is the check `prefix_fence_state_is_stable`'s parity heuristic also
   wants.
 
+- [ ] **The retained-`DEFINITION_LIST` guard is coarse** in the same way.
+  Definition items merge into one list node across blank lines, and the
+  marker that opens the merging item need not lead the window, so the guard
+  pairs a retained `DEFINITION_LIST` with a `:`/`~` marker line *anywhere*
+  in the window (`has_definition_marker_line`) and declines. A precise
+  version would bound the reach at the first window block that cannot belong
+  to a definition list --- a heading or a fence breaks the chain --- but
+  deciding that textually is re-implementing the block parser, so it wants
+  the same ask-the-old-tree treatment as the item above. Pinned by
+  `definition_marker_suffix_after_a_retained_definition_list` and
+  `definition_list_grown_below_a_retained_definition_list`.
+
 #### Infrastructure
 
 - [ ] **Neither bench gate runs in CI.** Both need

@@ -184,6 +184,29 @@ fn tilde_definition_marker_suffix_after_a_retained_paragraph() {
     check_incremental("term line\n\nmore prose\n", (11, 22), "~ definition\n");
 }
 
+// Found by an exhaustive sweep of the definition-list seam while retiring
+// `first_block_has_trailing_definition_marker` (below), which was the only
+// guard keyed on a retained `DEFINITION_LIST` -- a shape no case pinned. The
+// coupling is stronger than the retained-*paragraph* one above: pandoc pairs a
+// term with any number of definitions, so consecutive items join into a single
+// `DEFINITION_LIST` node and a marker in the window reaches back into the
+// retained list. Standalone the window is its own list, so the splice had two
+// adjacent `DEFINITION_LIST`s where a full parse has one. Fixed by pairing a
+// retained `DEFINITION_LIST` with `has_definition_marker_line`.
+#[test]
+fn definition_marker_suffix_after_a_retained_definition_list() {
+    check_incremental("term\n\n: definition\n\nmore prose\n", (20, 24), "~");
+}
+
+// The same coupling with the marker *not* leading the window: appending a lone
+// `:` at EOF makes `more prose` a term, so the window opens a definition list
+// whose marker is on its second line. This is why the guard scans the whole
+// window rather than its first non-blank line.
+#[test]
+fn definition_list_grown_below_a_retained_definition_list() {
+    check_incremental("term\n\n: definition\n\nmore prose\n", (31, 31), ":");
+}
+
 // Fuzz find: snippet pipe_table, tier pandoc, seed 2654434233, single edit
 // #244 (minimized). The same `:` line after a *table* is that table's
 // caption rather than a definition term, so the retained table grows to
