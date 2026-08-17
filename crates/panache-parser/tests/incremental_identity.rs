@@ -283,19 +283,39 @@ fn do_check_section_window_last_section_runs_to_eof() {
 }
 
 #[test]
-fn do_check_edit_at_document_start_reaches_the_region_tier() {
+fn do_check_edit_at_document_start_declines_on_window_size() {
     // The restart clamps to the document start, so the "suffix" would be the
     // whole document: correct, but strictly more expensive than the full parse
-    // it duplicates. The window-size cutoff still declines it before the guard
-    // cascade and the window parse run.
+    // it duplicates. The window-size cutoff declines before the guard cascade
+    // and the window parse run, so the caller pays that full parse and nothing
+    // else.
     //
-    // What the region tier changes is what happens next. The edit sits inside
-    // one top-level `PARAGRAPH`, so the region is that paragraph -- 9 bytes of
-    // a 31-byte document -- and the two neighbours prove the seams. This is the
-    // whole point of the tier stated as one case: the window this edit *would*
-    // have chosen is the entire document, and the region it actually reparses
-    // is under a third of it.
-    do_check("$0p$0ara one\n\npara two\n\npara three\n", "P", "region", 9);
+    // The region tier does not rescue this one either, and for a cost reason
+    // rather than a correctness one: the edited paragraph is 9 bytes of a
+    // 31-byte document, and answering a region costs a fragment parse plus two
+    // boundary parses, so on a document this small three small parses lose to
+    // one. `do_check_region_tier_on_an_early_edit` is the same shape at a size
+    // where the tier wins.
+    do_check(
+        "$0p$0ara one\n\npara two\n\npara three\n",
+        "P",
+        "full_reparse",
+        31,
+    );
+}
+
+/// The region tier's structural case: the same early edit as above, on a
+/// document long enough that the window would cover nearly all of it.
+///
+/// The pinned length is the granularity claim this file exists for. A window
+/// here would be the whole 4 KB document; the region is one paragraph.
+#[test]
+fn do_check_region_tier_on_an_early_edit() {
+    let mut input = String::from("$0p$0ara one\n\n");
+    for index in 0..200 {
+        input.push_str(&format!("Filler paragraph {index}.\n\n"));
+    }
+    do_check(&input, "P", "region", 9);
 }
 
 #[test]

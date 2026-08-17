@@ -223,13 +223,47 @@ pub fn reparse_with_cost_guards(
     }
 
     let old_edit = (edit.range.start, edit.range.end);
+
+    // Both remaining tiers have an O(1) reason they might be hopeless, and when
+    // both are, the answer is known before anything is scanned or walked. A
+    // window cannot start after the edit, and a region cannot be narrower than
+    // one, so the edit offset bounds the first and the edit span the second.
+    // A whole-document replacement -- which some clients send on every
+    // format-on-save -- fails both and costs arithmetic on three offsets.
+    let new_edit = edit.new_range();
+    let window_hopeless = window_is_too_wide(cost_guards, new_edit.0, new_text.len());
+    let region_hopeless = region_is_too_wide(
+        cost_guards,
+        new_edit.1.saturating_sub(new_edit.0),
+        new_text.len(),
+    );
+    if window_hopeless && region_hopeless {
+        return None;
+    }
+
+    // Reference and footnote definitions are document-scoped: retained children
+    // keep the resolution they were parsed with, so an edit that can add,
+    // remove, or alter one invalidates them at a distance. Hoisted out of the
+    // window cascade so both it and the region tier are covered by one scan
+    // rather than each running its own -- a declined attempt is charged to the
+    // bench's bail budget, and paying for this twice broke it
+    // (`bail_refdef_edit`, 32.7% of a full parse). It sits behind the O(1)
+    // checks above because it is a textual scan, and `full_replace` used to
+    // reach a decline without paying for one.
+    //
+    // The token tier runs ahead of this and needs no such guard: its byte
+    // allowlist admits no character that can open a definition.
+    if edit_may_touch_refdefs(&prev_tree, old_edit, new_text, new_edit) {
+        return None;
+    }
+
     if let Some(result) = reparse_ranges(
         new_text,
         &options,
         &prev_tree,
         prev_errors,
         old_edit,
-        edit.new_range(),
+        new_edit,
         cost_guards,
     ) {
         return Some(result);
@@ -247,7 +281,7 @@ pub fn reparse_with_cost_guards(
         &prev_tree,
         prev_errors,
         old_edit,
-        edit.new_range(),
+        new_edit,
         cost_guards,
     )
 }
@@ -671,15 +705,9 @@ fn reparse_ranges(
         return None;
     }
 
-    // Reference definitions are document-scoped: retained blocks keep the
-    // resolution they were parsed with, so an edit that can add, remove, or
-    // alter a refdef (or footnote definition) invalidates them at a
-    // distance. Bail on cheap textual evidence near the edit; the precise
-    // old-set-vs-new-set comparison belongs to the host layer, which caches
-    // both sets.
-    if edit_may_touch_refdefs(old_tree, old_edit, input, new_edit) {
-        return None;
-    }
+    // The refdef guard that used to sit here is hoisted into
+    // `reparse_with_cost_guards`, so it covers the region tier too and is paid
+    // for once.
 
     // A section window is anchored at the previous top-level heading, which can
     // sit far earlier than the edit's own block -- so a too-wide section window
@@ -871,48 +899,53 @@ const REFDEF_SCAN_WINDOW: usize = 512;
 /// definition, judged by cheap textual evidence: a `]:` occurrence within a
 /// bounded window around the edit, in the old text or the new. False
 /// positives (a literal `]:` in prose) only cost a full reparse.
+///
+/// Only the *new* text is windowed. The old text is read across the edited
+/// span alone, and that is an equivalence rather than a weakening: outside the
+/// edit the two texts are byte-identical, so the old window's two flanks are
+/// the very bytes the new window already covers. What the old text can still
+/// hide is the *deleted* span, which has no image in the new text at all --- so
+/// that is what gets read, plus one byte on each side, which is enough for a
+/// two-byte `]:` straddling either boundary.
+///
+/// The union of bytes examined is therefore exactly what it was, and the cost
+/// stops depending on the size of the document: reading a 1 KB window out of
+/// the tree meant walking every token in it, because a window that wide spans
+/// several top-level children and `covering_element` resolves to the root.
+/// Measured on the 300 KB pandoc manual, that was ~800 us on the path of every
+/// reparse attempt, accepted or declined.
 fn edit_may_touch_refdefs(
     old_tree: &SyntaxNode,
     old_edit: (usize, usize),
     input: &str,
     new_edit: (usize, usize),
 ) -> bool {
-    let old_len: usize = old_tree.text_range().end().into();
-    // Snap to token boundaries before slicing: a window edge landing inside a
-    // multi-byte token is not a char boundary, and `SyntaxText::slice` panics
-    // on one. Snapping outward also only ever widens the scan, which is the
-    // safe direction for a conservative guard.
-    let old_start = snap_out_to_token_boundary(
-        old_tree,
-        old_edit.0.saturating_sub(REFDEF_SCAN_WINDOW),
-        false,
+    let new_start = floor_char_boundary(input, new_edit.0.saturating_sub(REFDEF_SCAN_WINDOW));
+    let new_end = floor_char_boundary(
+        input,
+        new_edit
+            .1
+            .saturating_add(REFDEF_SCAN_WINDOW)
+            .min(input.len()),
     );
-    let old_end = snap_out_to_token_boundary(
-        old_tree,
-        old_edit.1.saturating_add(REFDEF_SCAN_WINDOW).min(old_len),
-        true,
-    );
-    if old_start < old_end {
-        let old_slice = old_tree
-            .text()
-            .slice(rowan::TextRange::new(
-                (old_start as u32).into(),
-                (old_end as u32).into(),
-            ))
-            .to_string();
-        if old_slice.contains("]:") {
-            return true;
-        }
+    if new_start < new_end && input[new_start..new_end].contains("]:") {
+        return true;
     }
 
-    let new_start = new_edit.0.saturating_sub(REFDEF_SCAN_WINDOW);
-    let new_end = new_edit
-        .1
-        .saturating_add(REFDEF_SCAN_WINDOW)
-        .min(input.len());
-    let new_start = floor_char_boundary(input, new_start);
-    let new_end = floor_char_boundary(input, new_end);
-    new_start < new_end && input[new_start..new_end].contains("]:")
+    // Snap to token boundaries before slicing: a range edge landing inside a
+    // multi-byte token is not a char boundary, and slicing panics on one.
+    // Snapping outward only ever widens the read, which is the safe direction
+    // for a conservative guard.
+    let old_len: usize = old_tree.text_range().end().into();
+    let old_start = snap_out_to_token_boundary(old_tree, old_edit.0.saturating_sub(1), false);
+    let old_end =
+        snap_out_to_token_boundary(old_tree, old_edit.1.saturating_add(1).min(old_len), true);
+    old_start < old_end
+        && covering_text(
+            old_tree,
+            rowan::TextRange::new((old_start as u32).into(), (old_end as u32).into()),
+        )
+        .contains("]:")
 }
 
 /// Move `offset` outward (down when `upward` is false, up when it is true) to
@@ -921,18 +954,68 @@ fn edit_may_touch_refdefs(
 /// Token edges are always char boundaries — a token's text is a whole `str` —
 /// so this is how an arbitrary byte offset is made safe to slice the tree
 /// with, without materializing the document's text.
+/// The text of `tree` over `range`, without walking the whole tree.
+///
+/// `tree.text().slice(range).to_string()` reads like a windowed slice and is
+/// not one: rowan builds a [`rowan::SyntaxText`] from `descendants_with_tokens()`
+/// over the *whole* node and filters by range, so pulling 1 KB out of a 300 KB
+/// document costs the 300 KB. That is an `O(document)` term on the path of
+/// every reparse attempt, accepted or declined, which is precisely the shape
+/// this tier ladder exists to remove --- measured, it was 29.5 us of a 30.4 us
+/// decline on a 20 KB document, and the whole rest of the cascade was 0.9 us.
+///
+/// Descending to the covering element first bounds the walk by that element
+/// rather than by the document. The result is byte-identical; only the cost
+/// changes.
+fn covering_text(tree: &SyntaxNode, range: rowan::TextRange) -> String {
+    match tree.covering_element(range) {
+        rowan::NodeOrToken::Node(node) => {
+            let base = node.text_range().start();
+            node.text()
+                .slice(rowan::TextRange::new(
+                    range.start() - base,
+                    range.end() - base,
+                ))
+                .to_string()
+        }
+        rowan::NodeOrToken::Token(token) => {
+            let base = token.text_range().start();
+            let start = usize::from(range.start() - base);
+            let end = usize::from(range.end() - base);
+            token.text()[start..end].to_owned()
+        }
+    }
+}
+
 fn snap_out_to_token_boundary(tree: &SyntaxNode, offset: usize, upward: bool) -> usize {
     let len: usize = tree.text_range().end().into();
     let clamped = offset.min(len);
-    let at = tree.token_at_offset((clamped as u32).into());
-    let snapped = if upward {
-        at.right_biased()
-            .map(|token| usize::from(token.text_range().end()))
+    // A one-byte probe through `covering_element`, rather than
+    // `token_at_offset`. The two agree at every offset --- pinned by
+    // `snapping_agrees_with_a_linear_token_scan` --- and differ only in cost:
+    // rowan's `token_at_offset` filters `children_with_tokens()` linearly at
+    // each level (its own source carries a TODO saying so), while
+    // `child_or_token_at_range` binary-searches the green children. On a
+    // document with a few thousand top-level children that is the difference
+    // between `O(children)` and `O(log children)`, and this runs twice on the
+    // path of every reparse attempt.
+    //
+    // The probe is taken on the side we are snapping *away* from, so that an
+    // offset already sitting on a boundary snaps outward rather than staying
+    // put: upward looks at the byte after it, downward at the byte before.
+    if upward {
+        if clamped >= len {
+            return len;
+        }
+        let probe = rowan::TextRange::at((clamped as u32).into(), 1.into());
+        usize::from(tree.covering_element(probe).text_range().end()).min(len)
     } else {
-        at.left_biased()
-            .map(|token| usize::from(token.text_range().start()))
-    };
-    snapped.unwrap_or(if upward { len } else { 0 }).min(len)
+        if clamped == 0 {
+            return 0;
+        }
+        let probe = rowan::TextRange::at(((clamped - 1) as u32).into(), 1.into());
+        usize::from(tree.covering_element(probe).text_range().start())
+    }
 }
 
 fn floor_char_boundary(text: &str, mut pos: usize) -> usize {
@@ -1507,14 +1590,21 @@ fn reparse_section_window(
 /// One green child of `DOCUMENT`, owned.
 type GreenChild = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 
-/// Below this a region is always attempted, whatever share of the file it is:
-/// on a small document every parse in play is small, and the fraction test
-/// alone would refuse the ordinary case of a document with one or two blocks.
-const REGION_ALWAYS_TRY_BYTES: usize = 4 * 1024;
-
 /// A region wider than `1 / REGION_MAX_FILE_DIVISOR` of the document costs more
 /// to answer than the full parse it is avoiding. A divisor rather than a
 /// fraction, so `4` here means a quarter.
+///
+/// The quarter is the tier's own arithmetic rather than a tuned number: it
+/// answers a region with a fragment parse *plus* up to two boundary parses that
+/// each carry a neighbour, so roughly three region-sized parses. Three quarters
+/// of a full parse is where that stops being worth doing.
+///
+/// Fatou pairs this with an always-try floor for small files, on the reasoning
+/// that every parse in play is small there. Measurement says otherwise here and
+/// the floor is deliberately absent: `Parser::new` builds a
+/// `BlockParserRegistry` per parse, so three parses of a 74-byte document cost
+/// 10.2 us against a 4.3 us full parse (`multi_change_utf16_4`). Charging the
+/// fraction on every document is what keeps that case from losing.
 const REGION_MAX_FILE_DIVISOR: usize = 4;
 
 /// Whether a region is too wide to be worth attempting.
@@ -1537,7 +1627,7 @@ fn region_is_too_wide(cost_guards: CostGuards, parsed_len: usize, text_len: usiz
     if cost_guards == CostGuards::Ignored {
         return false;
     }
-    parsed_len > REGION_ALWAYS_TRY_BYTES && parsed_len > text_len / REGION_MAX_FILE_DIVISOR
+    parsed_len > text_len / REGION_MAX_FILE_DIVISOR
 }
 
 /// A contiguous run of top-level `DOCUMENT` children, in old-text coordinates.
@@ -1573,27 +1663,40 @@ struct Region {
 /// compare a full parse to itself while the splice counter reported a hit. It
 /// therefore stays unconditional even under [`CostGuards::Ignored`].
 fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Region> {
-    let children: Vec<SyntaxNode> = old_tree.children().collect();
-    if children.is_empty() {
+    // Read the children off the *green* tree, as `(is_blank, start, end)`.
+    // Walking `old_tree.children()` instead materializes a cursor `SyntaxNode`
+    // per child, which this function cannot afford: it runs on the way to every
+    // decline as well as every accept, and a decline is charged against the
+    // bench's bail budget. On a document with a few hundred top-level children
+    // that cost 36 us, enough to fail the budget on its own.
+    let blank: rowan::SyntaxKind = SyntaxKind::BLANK_LINE.into();
+    let mut offset = 0usize;
+    let spans: Vec<(bool, usize, usize)> = old_tree
+        .green()
+        .children()
+        .map(|child| {
+            let start = offset;
+            offset += usize::from(child.text_len());
+            (child.kind() == blank, start, offset)
+        })
+        .collect();
+    if spans.is_empty() {
         return None;
     }
 
-    let touches = |child: &SyntaxNode| {
-        let range = child.text_range();
-        usize::from(range.start()) <= old_edit.1 && usize::from(range.end()) >= old_edit.0
-    };
-    let mut first = children.iter().position(touches)?;
-    let mut last = children.len() - 1 - children.iter().rev().position(touches)?;
+    let touches =
+        |&(_, start, end): &(bool, usize, usize)| start <= old_edit.1 && end >= old_edit.0;
+    let mut first = spans.iter().position(touches)?;
+    let mut last = spans.len() - 1 - spans.iter().rev().position(touches)?;
 
-    let is_blank = |index: usize| children[index].kind() == SyntaxKind::BLANK_LINE;
-    while first > 0 && !is_blank(first - 1) {
+    while first > 0 && !spans[first - 1].0 {
         first -= 1;
     }
-    while last + 1 < children.len() && !is_blank(last + 1) {
+    while last + 1 < spans.len() && !spans[last + 1].0 {
         last += 1;
     }
 
-    if first == 0 && last == children.len() - 1 {
+    if first == 0 && last == spans.len() - 1 {
         return None;
     }
 
@@ -1603,34 +1706,16 @@ fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Regi
     // for any edit that touches a blank line -- it pulls in the non-blank
     // neighbours -- so declining costs nothing and is simpler than fatou's
     // extra cross-region parse.
-    if (first..=last).all(is_blank) {
+    if spans[first..=last].iter().all(|&(is_blank, _, _)| is_blank) {
         return None;
     }
 
-    let prev = children[..first]
-        .iter()
-        .rfind(|child| child.kind() != SyntaxKind::BLANK_LINE)
-        .map(|child| {
-            (
-                usize::from(child.text_range().start()),
-                usize::from(child.text_range().end()),
-            )
-        });
-    let next = children[last + 1..]
-        .iter()
-        .find(|child| child.kind() != SyntaxKind::BLANK_LINE)
-        .map(|child| {
-            (
-                usize::from(child.text_range().start()),
-                usize::from(child.text_range().end()),
-            )
-        });
-
+    let span = |&(_, start, end): &(bool, usize, usize)| (start, end);
     Some(Region {
-        start: usize::from(children[first].text_range().start()),
-        end: usize::from(children[last].text_range().end()),
-        prev,
-        next,
+        start: spans[first].1,
+        end: spans[last].2,
+        prev: spans[..first].iter().rfind(|s| !s.0).map(span),
+        next: spans[last + 1..].iter().find(|s| !s.0).map(span),
     })
 }
 
@@ -1732,15 +1817,23 @@ fn long_range_pairing_lines(text: &str) -> Vec<&str> {
             if line.contains("<!--") || line.contains("-->") {
                 return true;
             }
-            // Rule-shaped lines: thematic breaks, setext underlines, and the
-            // borders and separator rows of every table dialect. Cheap and
-            // deliberately over-eager -- a false positive costs one decline.
+            // Bare `-`/`=` runs: a thematic break, a setext underline, a simple-
+            // table rule, and a multiline-table border are all this shape, and
+            // the last of those is the one that pairs across arbitrarily many
+            // blank-line-separated blocks.
+            //
+            // Grid-table borders (`+---+---+`) and pipe rows (`| --- |`) are
+            // deliberately *not* here, and that distinction is load-bearing
+            // rather than an optimization. Those constructs are contiguous ---
+            // blank-line terminated, so they cannot pair past their own block ---
+            // and any reach they do have is one line, which the boundary parses
+            // already cover. Including them declined every edit to a grid table's
+            // border, which is exactly the shape `large_authoring.qmd` puts on
+            // the bench.
             let body = trimmed.trim_end();
             !body.is_empty()
-                && body
-                    .chars()
-                    .all(|c| matches!(c, '-' | '=' | '+' | '|' | ':' | ' ' | '\t'))
-                && body.chars().any(|c| matches!(c, '-' | '=' | '+' | '|'))
+                && body.chars().all(|c| matches!(c, '-' | '=' | ' ' | '\t'))
+                && body.chars().any(|c| matches!(c, '-' | '='))
         })
         .collect()
 }
@@ -1862,6 +1955,21 @@ fn reparse_region(
         return None;
     }
 
+    // Cheapest possible decline, and the only one that runs before the old tree
+    // is walked at all: a region always contains the edit, so an edit already
+    // wider than the width bail cannot produce an admissible region. A
+    // whole-document replacement -- which some clients send on every
+    // format-on-save -- lands here and costs arithmetic on two offsets.
+    // Without it, `full_replace` paid a walk of every top-level child to learn
+    // the same thing, at 248% of the full parse it was avoiding.
+    if region_is_too_wide(
+        cost_guards,
+        new_edit.1.saturating_sub(new_edit.0),
+        input.len(),
+    ) {
+        return None;
+    }
+
     let region = select_region(old_tree, old_edit)?;
 
     // The retained prefix is the old bytes before the region, so a region
@@ -1892,14 +2000,6 @@ fn reparse_region(
         (new_region_end - region.start) + context_len,
         input.len(),
     ) {
-        return None;
-    }
-
-    // Reference definitions and footnote definitions are document-scoped:
-    // retained children keep the resolution they were parsed with, so an edit
-    // that can add, remove, or alter one invalidates them at a distance. The
-    // window tiers run this and so must this one.
-    if edit_may_touch_refdefs(old_tree, old_edit, input, new_edit) {
         return None;
     }
 
@@ -2460,20 +2560,43 @@ mod tests {
         assert_eq!(inc.strategy, "full_reparse");
     }
 
-    /// A mid-document reparse must not read `% Title` as a pandoc title block,
-    /// which is a document-start-only construct.
+    /// A window is parsed standalone, so its first line is a document's first
+    /// line to the block dispatcher, and `% Title` would become a pandoc title
+    /// block. The window path can only decline that, via a textual guard.
     ///
-    /// The suffix window could only decline this, via a textual guard on the
-    /// window's first line. The region tier *answers* it, because its fragment
-    /// parse is a `ParseOrigin::Fragment` and so has no document start to offer.
-    /// The debug oracle checks the result against a full parse on every splice,
-    /// so "region" here is a correctness claim, not just a routing one.
+    /// This document is far too small for the region tier's width bail, so the
+    /// answer here is a full parse. The padded twin below is the region-tier
+    /// version, which *answers* the same shape instead of refusing it.
     #[test]
-    fn a_mid_document_reparse_must_not_manufacture_a_pandoc_title_block() {
+    fn a_window_must_not_manufacture_a_pandoc_title_block() {
         let input = "intro para\n\n Title\n% Author\n\ntail para\n";
         let at = input.find(" Title").unwrap();
         let inc = insert_incrementally(
             input,
+            at,
+            "%",
+            flavor_options(crate::options::Flavor::Pandoc),
+        );
+        assert_eq!(inc.strategy, "full_reparse");
+    }
+
+    /// The same shape on a document long enough to reach the region tier.
+    ///
+    /// The tier *answers* it rather than declining, because its fragment parse
+    /// is a `ParseOrigin::Fragment` and so has no document start to offer. The
+    /// debug oracle checks every splice against a full parse, so `"region"`
+    /// here is a correctness claim and not just a routing one --- if the
+    /// fragment had manufactured a title block, this test would panic inside
+    /// the reparse rather than fail its assertion.
+    #[test]
+    fn a_region_reparse_must_not_manufacture_a_pandoc_title_block() {
+        let mut input = String::from("intro para\n\n Title\n% Author\n\n");
+        for index in 0..200 {
+            input.push_str(&format!("Filler paragraph {index}.\n\n"));
+        }
+        let at = input.find(" Title").unwrap();
+        let inc = insert_incrementally(
+            &input,
             at,
             "%",
             flavor_options(crate::options::Flavor::Pandoc),
@@ -2491,15 +2614,34 @@ mod tests {
         assert_eq!(inc.strategy, "full_reparse");
     }
 
-    /// The MultiMarkdown twin of the pandoc case above, and the one the textual
-    /// guard was most over-eager about: it declined any window whose first line
-    /// merely contained a colon.
+    /// The MultiMarkdown twin, and the shape the textual guard was most
+    /// over-eager about: it declined any window whose first line merely
+    /// contained a colon.
     #[test]
-    fn a_mid_document_reparse_must_not_manufacture_an_mmd_title_block() {
+    fn a_window_must_not_manufacture_an_mmd_title_block() {
         let input = "intro para\n\nKey value\nOther: thing\n\ntail para\n";
         let at = input.find("Key value").unwrap() + 3;
         let inc = insert_incrementally(
             input,
+            at,
+            ":",
+            flavor_options(crate::options::Flavor::MultiMarkdown),
+        );
+        assert_eq!(inc.strategy, "full_reparse");
+    }
+
+    /// And its region-tier twin. Prose containing a colon is ordinary enough
+    /// that a tier which had to decline it would decline a great deal of real
+    /// writing.
+    #[test]
+    fn a_region_reparse_must_not_manufacture_an_mmd_title_block() {
+        let mut input = String::from("intro para\n\nKey value\nOther: thing\n\n");
+        for index in 0..200 {
+            input.push_str(&format!("Filler paragraph {index}.\n\n"));
+        }
+        let at = input.find("Key value").unwrap() + 3;
+        let inc = insert_incrementally(
+            &input,
             at,
             ":",
             flavor_options(crate::options::Flavor::MultiMarkdown),
@@ -3435,6 +3577,85 @@ mod tests {
         }
     }
 
+    /// Snapping is a pure optimization too, so the same rule applies: it must
+    /// agree with the linear `token_at_offset` scan it replaced at *every*
+    /// offset, in both directions. The old implementation is inlined here as
+    /// the oracle, which is the only way this stays honest if rowan's
+    /// `covering_element` ever changes its boundary bias.
+    #[test]
+    fn snapping_agrees_with_a_linear_token_scan() {
+        fn by_linear_scan(tree: &SyntaxNode, offset: usize, upward: bool) -> usize {
+            let len: usize = tree.text_range().end().into();
+            let clamped = offset.min(len);
+            let at = tree.token_at_offset((clamped as u32).into());
+            let snapped = if upward {
+                at.right_biased()
+                    .map(|token| usize::from(token.text_range().end()))
+            } else {
+                at.left_biased()
+                    .map(|token| usize::from(token.text_range().start()))
+            };
+            snapped.unwrap_or(if upward { len } else { 0 }).min(len)
+        }
+
+        let options = ParserOptions::default();
+        for input in [
+            "# Title\n\nAlpha para.\n\n- one\n- two\n\nGamma para.\n",
+            "para\n\n[x]: /url\n\nmore para\n",
+            "héllo wörld\n\n```\ncode\n```\n\nπαρά κείμενο\n",
+            "a\r\nb\r\n\r\nc\r\n",
+            "",
+        ] {
+            let tree = Parser::new(input, &options).parse();
+            let len = usize::from(tree.text_range().end());
+            for offset in 0..=len + 2 {
+                for upward in [false, true] {
+                    assert_eq!(
+                        snap_out_to_token_boundary(&tree, offset, upward),
+                        by_linear_scan(&tree, offset, upward),
+                        "snapping diverged at {offset} (upward {upward}) in {input:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `covering_text` is a pure optimization, so the only thing to pin is that
+    /// it reads the same bytes as the whole-tree slice it replaced --- at every
+    /// offset, including across node boundaries and multi-byte tokens.
+    #[test]
+    fn covering_text_agrees_with_a_whole_tree_slice() {
+        let options = ParserOptions::default();
+        for input in [
+            "# Title\n\nAlpha para.\n\n- one\n- two\n\nGamma para.\n",
+            "para\n\n[x]: /url\n\nmore para\n",
+            "héllo wörld\n\n```\ncode\n```\n\nπαρά κείμενο\n",
+            "",
+        ] {
+            let tree = Parser::new(input, &options).parse();
+            let len = usize::from(tree.text_range().end());
+            for start in 0..=len {
+                for end in start..=len {
+                    if !input.is_char_boundary(start) || !input.is_char_boundary(end) {
+                        continue;
+                    }
+                    if start == end {
+                        continue;
+                    }
+                    let range = rowan::TextRange::new(
+                        rowan::TextSize::new(start as u32),
+                        rowan::TextSize::new(end as u32),
+                    );
+                    assert_eq!(
+                        covering_text(&tree, range),
+                        tree.text().slice(range).to_string(),
+                        "covering_text diverged at {start}..{end} in {input:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn no_straddle_finds_a_boundary_or_says_there_is_none() {
         let options = ParserOptions::default();
@@ -3453,21 +3674,14 @@ mod tests {
 
     #[test]
     fn region_width_bail_charges_the_neighbours_too() {
-        assert_eq!(REGION_ALWAYS_TRY_BYTES, 4 * 1024);
         assert_eq!(REGION_MAX_FILE_DIVISOR, 4);
         let enforced = |parsed, len| region_is_too_wide(CostGuards::Enforced, parsed, len);
-        assert!(
-            !enforced(4096, 4096),
-            "under the always-try floor, whatever the share"
-        );
-        assert!(
-            !enforced(5000, 100_000),
-            "over the floor but a twentieth of the file"
-        );
-        assert!(
-            enforced(30_000, 100_000),
-            "over the floor and over a quarter of the file"
-        );
+        assert!(!enforced(5000, 100_000), "a twentieth of the document");
+        assert!(!enforced(25_000, 100_000), "exactly a quarter is accepted");
+        assert!(enforced(25_001, 100_000), "one byte over is declined");
+        // No always-try floor for small documents: three parses of a 74-byte
+        // document lose to one, because each `Parser::new` builds a registry.
+        assert!(enforced(50, 74), "a small document gets no exemption");
         // The test-only opt-out, without which the fuzz snippets -- tens of
         // bytes, so every region is most of the document -- never reach the tier.
         assert!(!region_is_too_wide(CostGuards::Ignored, 30_000, 100_000));
@@ -3488,12 +3702,21 @@ mod tests {
         assert_eq!(long_range_pairing_lines("a\n::: note\n"), vec!["::: note"]);
         assert_eq!(long_range_pairing_lines("a\n----\n"), vec!["----"]);
         assert_eq!(
-            long_range_pairing_lines("a\n| - | - |\n"),
-            vec!["| - | - |"]
-        );
-        assert_eq!(
             long_range_pairing_lines("a\n<!-- c -->\n"),
             vec!["<!-- c -->"]
+        );
+        // Grid borders and pipe rows are contiguous constructs -- blank-line
+        // terminated, so they cannot pair past their own block -- and are
+        // deliberately not long-range. Treating them as such declined every
+        // edit to a grid table's border, which is what `large_authoring.qmd`
+        // puts on the bench.
+        assert_eq!(
+            long_range_pairing_lines("a\n| - | - |\n"),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            long_range_pairing_lines("a\n+----+----+\n"),
+            Vec::<&str>::new()
         );
         // Editing a code block's *body* leaves the fences alone, which is what
         // keeps the common case on the tier.
