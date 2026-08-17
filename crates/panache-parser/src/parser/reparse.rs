@@ -2533,6 +2533,231 @@ mod tests {
         assert_not_token_tier(before, at..at, "X");
     }
 
+    /// Every flavor the parser ships, so an alphabet claim is a claim about
+    /// all of them and not just the default.
+    fn every_flavor() -> Vec<(&'static str, ParserOptions)> {
+        use crate::options::Flavor;
+        [
+            ("pandoc", Flavor::Pandoc),
+            ("quarto", Flavor::Quarto),
+            ("rmarkdown", Flavor::RMarkdown),
+            ("gfm", Flavor::Gfm),
+            ("commonmark", Flavor::CommonMark),
+            ("multimarkdown", Flavor::MultiMarkdown),
+            ("mdsvex", Flavor::Mdsvex),
+            ("myst", Flavor::Myst),
+        ]
+        .into_iter()
+        .map(|(name, flavor)| (name, flavor_options(flavor)))
+        .collect()
+    }
+
+    /// The alphabet is built by subtracting the grammar's inline mask from a
+    /// hand-vetted seed, so this holds by construction --- which is exactly
+    /// why it is worth pinning. If the subtraction is ever reordered away, or
+    /// the seed is edited to "just allow" a byte the dispatcher acts on, this
+    /// is the test that notices.
+    #[test]
+    fn the_token_tier_alphabet_admits_no_structural_byte() {
+        for (name, options) in every_flavor() {
+            let structural =
+                crate::parser::inlines::core::structural_byte_mask_without_uri_schemes(&options);
+            let allowed = token_tier_allowed_mask(&options);
+            for byte in 0..=u8::MAX {
+                assert!(
+                    !(allowed[byte as usize] && structural[byte as usize]),
+                    "{name}: byte {:?} is both allowed by the token tier and \
+                     structural to the inline grammar",
+                    byte as char,
+                );
+            }
+        }
+    }
+
+    /// Two bans the tier cannot survive losing, stated separately from the
+    /// seed so that deleting them from it fails loudly rather than quietly.
+    ///
+    /// Line terminators would let a splice move block boundaries. Brackets are
+    /// what keeps reference definitions out of reach: `]:` cannot appear in a
+    /// token, so the tier needs none of the refdef machinery the window tiers
+    /// carry.
+    #[test]
+    fn the_token_tier_alphabet_bans_terminators_and_brackets() {
+        for (name, options) in every_flavor() {
+            let allowed = token_tier_allowed_mask(&options);
+            for byte in [b'\n', b'\r', b'[', b']'] {
+                assert!(
+                    !allowed[byte as usize],
+                    "{name}: byte {:?} must never be admitted",
+                    byte as char,
+                );
+            }
+        }
+    }
+
+    /// The block-side check, stated for exactly what it proves and no more.
+    ///
+    /// `structural_byte_mask` speaks only for the *inline* dispatcher, so it has
+    /// nothing to say about the 27-parser block registry. This puts every
+    /// admitted byte mid-line in a paragraph and checks the parser agrees it is
+    /// inert there: one top-level `PARAGRAPH`, the line still one coalesced
+    /// `TEXT`.
+    ///
+    /// **Mid-line is the whole claim.** A block trigger is only a trigger at the
+    /// head of a line, and this says nothing about that position --- adding `#`
+    /// to the seed would not fail here, because `a # b` really is inert prose.
+    /// What keeps line heads safe is positional, not alphabetic: strict
+    /// interiority pins the token's leading bytes and
+    /// [`edit_is_past_line_marker_zone`] pins the line's. The block bytes are
+    /// excluded from the seed as defence in depth, not because this test
+    /// demands it.
+    #[test]
+    fn every_admitted_byte_is_inert_mid_line() {
+        for (name, options) in every_flavor() {
+            let allowed = token_tier_allowed_mask(&options);
+            for byte in 0x20..=0x7Eu8 {
+                if !allowed[byte as usize] {
+                    continue;
+                }
+                let ch = byte as char;
+                let input = format!("lead in words {ch} and more prose\n");
+                let tree = crate::parser::Parser::new(&input, &options).parse();
+
+                let children: Vec<_> = tree.children().collect();
+                assert_eq!(
+                    children.len(),
+                    1,
+                    "{name}: {ch:?} split the document into {} blocks",
+                    children.len(),
+                );
+                assert_eq!(
+                    children[0].kind(),
+                    SyntaxKind::PARAGRAPH,
+                    "{name}: {ch:?} produced a {:?}, not a paragraph",
+                    children[0].kind(),
+                );
+                let texts = children[0]
+                    .children_with_tokens()
+                    .filter(|element| element.kind() == SyntaxKind::TEXT)
+                    .count();
+                assert_eq!(
+                    texts, 1,
+                    "{name}: {ch:?} split the paragraph's prose into {texts} TEXT tokens",
+                );
+            }
+        }
+    }
+
+    /// A hazard no token-local or line-local proof can see: `foo bar` above a
+    /// `--- | ---` line is a paragraph, and adding one `|` makes the pair a
+    /// `PIPE_TABLE`. The deciding byte is on a *different line* of the same
+    /// block.
+    ///
+    /// This is the case that rules out ever admitting `|`, and the reason the
+    /// alphabet is a vetted allowlist rather than the inline mask's complement:
+    /// `structural_byte_mask` never sets `|` under any configuration, because
+    /// pipe tables are a block construct and the mask speaks for inline
+    /// dispatch only.
+    #[test]
+    fn a_pipe_inserted_above_a_delimiter_row_declines() {
+        let before = "foo bar\n--- | ---\n";
+        // Confirm the premise rather than assuming it: this really is a
+        // paragraph, and the edit really does turn it into a table.
+        let tree = parse(before, None);
+        assert_eq!(
+            tree.children().next().map(|child| child.kind()),
+            Some(SyntaxKind::PARAGRAPH),
+        );
+        let after = apply_edit(before, (4, 4), "| ");
+        assert_eq!(
+            parse(&after, None).children().next().map(|c| c.kind()),
+            Some(SyntaxKind::PIPE_TABLE),
+        );
+
+        assert_not_token_tier(before, 4..4, "| ");
+    }
+
+    /// The mirror hazard, reaching the other way: a top-level paragraph whose
+    /// line carries one leading space sits *next to* a list, and widening that
+    /// indent moves the whole block inside the list item. Nothing about the
+    /// paragraph's own shape changes; its neighbour absorbs it.
+    ///
+    /// Interiority measured against the token's non-whitespace core is what
+    /// refuses this, which is why the guard is written against the core rather
+    /// than against the raw token bounds.
+    #[test]
+    fn an_edit_that_widens_a_line_indent_declines() {
+        let before = "- item\n\n foo bar\n";
+        let tree = parse(before, None);
+        assert_eq!(
+            tree.children().last().map(|child| child.kind()),
+            Some(SyntaxKind::PARAGRAPH),
+            "the paragraph must start out top-level for this to be a hazard",
+        );
+        // Offset 8 is the token start, inside its leading whitespace run.
+        assert_not_token_tier(before, 8..8, "   ");
+    }
+
+    /// The property the debug oracle enforces at runtime, hoisted into a test
+    /// that runs in release builds too: for every printable byte, typed into
+    /// prose, the tier either declines or produces exactly what a full parse
+    /// produces. There is no third outcome.
+    ///
+    /// This is the check that would catch an alphabet admitting a byte whose
+    /// hazard nobody thought of, because it does not encode anyone's idea of
+    /// what the hazards are.
+    #[test]
+    fn inserting_any_byte_into_prose_declines_or_matches_a_full_parse() {
+        for (name, options) in every_flavor() {
+            for byte in 0x20..=0x7Eu8 {
+                let ch = byte as char;
+                for before in [
+                    "lead in words here and more prose\n",
+                    "# Title\n\nlead in words here and more prose\n\ntail para\n",
+                    "12 apples in a basket here\n",
+                    "a*b c*d and more words\n",
+                    "trailing spaces live here \nsecond line\n",
+                ] {
+                    let at = before
+                        .find("words")
+                        .or_else(|| before.find("apples"))
+                        .unwrap_or(4)
+                        + 2;
+                    let insert = ch.to_string();
+                    let after = apply_edit(before, (at, at), &insert);
+
+                    let (old_tree, old_errors) =
+                        crate::parser::Parser::new(before, &options).parse_with_errors();
+                    let attempt = reparse(
+                        &old_tree.green().to_owned(),
+                        &old_errors,
+                        &edit(at..at, &insert),
+                        &after,
+                        &options,
+                    );
+
+                    let Some(spliced) = attempt else {
+                        continue; // Declining is always allowed.
+                    };
+                    let (full, full_errors) =
+                        crate::parser::Parser::new(&after, &options).parse_with_errors();
+                    assert_eq!(
+                        crate::parser::fingerprint(&SyntaxNode::new_root(spliced.green)),
+                        crate::parser::fingerprint(&full),
+                        "{name}: inserting {ch:?} into {before:?} spliced a tree a full \
+                         parse disagrees with ({} strategy)",
+                        spliced.strategy.as_str(),
+                    );
+                    assert_eq!(
+                        spliced.errors, full_errors,
+                        "{name}: inserting {ch:?} into {before:?} spliced errors a full \
+                         parse disagrees with",
+                    );
+                }
+            }
+        }
+    }
+
     /// Typing one character at a time is the motivating workload, so walk a
     /// whole word in and assert every keystroke reaches the tier and agrees
     /// with a full parse. A single-shot test would not catch a tier that works
