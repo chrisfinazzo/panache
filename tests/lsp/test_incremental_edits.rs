@@ -43,8 +43,30 @@ fn test_experimental_incremental_parsing_setting_defaults_to_on() {
     assert!(server.experimental_incremental_parsing_enabled());
 }
 
-/// The setting's only remaining use: an explicit `false` turns the incremental
-/// path off, which is what makes it a debug switch rather than dead weight.
+/// A client that sends `initializationOptions` carrying no incremental-parsing
+/// key gets the server default, not "off". This is the shape the VS Code
+/// extension sends now that it forwards the deprecated setting only when a user
+/// actually set it, so the server default is what governs an untouched
+/// configuration.
+#[test]
+fn test_incremental_parsing_defaults_to_on_with_empty_initialization_options() {
+    // This asserts the client-settings plumbing, which the environment
+    // override deliberately bypasses.
+    if incremental_parsing_forced_by_env() {
+        return;
+    }
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let root_uri = Uri::from_file_path(temp_dir.path()).unwrap();
+    let mut server = TestLspServer::new();
+
+    server.initialize_with_options(root_uri.as_str(), Some(json!({})));
+    assert!(server.experimental_incremental_parsing_enabled());
+}
+
+/// The deprecated setting's only remaining use: an explicit `false` turns the
+/// incremental path off. It is slated for removal in favour of
+/// `PANACHE_INCREMENTAL_PARSING=0`, so this pins that it keeps working until
+/// then --- deprecating a setting is not the same as breaking it.
 #[test]
 fn test_experimental_incremental_parsing_setting_can_be_disabled() {
     // This asserts the client-settings plumbing, which the environment

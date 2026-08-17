@@ -222,16 +222,32 @@ pub(crate) fn runtime_incremental_parsing_from_value(value: &Value) -> Option<bo
 }
 
 /// Incremental parsing is on unless something turns it off: the environment
-/// override first, then the client setting, then the default. The setting keeps
-/// its `experimental.` name, but its only remaining use is `false` --- a debug
-/// switch for ruling the feature out, not an opt-in.
+/// override first, then the client setting, then the default.
+///
+/// The client setting is **deprecated** and slated for removal;
+/// `PANACHE_INCREMENTAL_PARSING=0` is the supported way to switch the feature
+/// off. A client that still sends it is warned once here rather than on every
+/// `didChangeConfiguration`, because clients that mirror a whole settings
+/// section (VS Code among them) push the key on every configuration change
+/// whether the user set it or not, and a warning per keystroke-adjacent
+/// notification would report a problem nobody has.
 fn experimental_incremental_parsing_from_initialize(params: &InitializeParams) -> bool {
     incremental_parsing_env_override().unwrap_or_else(|| {
-        params
+        match params
             .initialization_options
             .as_ref()
             .and_then(runtime_incremental_parsing_from_value)
-            .unwrap_or(true)
+        {
+            Some(value) => {
+                log::warn!(
+                    "lsp client sent experimental.incrementalParsing={value}, which is deprecated \
+                     and will be removed in a future release; set \
+                     PANACHE_INCREMENTAL_PARSING=0 to switch incremental parsing off"
+                );
+                value
+            }
+            None => true,
+        }
     })
 }
 

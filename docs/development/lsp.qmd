@@ -30,10 +30,11 @@ revision and no way for a handler to see a tree that disagrees with the text it
 was handed.
 
 `parsed_document` splices that tree off the previous parse instead of reparsing
-from scratch, which is the default; `experimental.incrementalParsing = false`
-turns it off for debugging. The previous parse lives in a side channel beside
-salsa (`src/incremental.rs`), keyed on `(file, config)` and reused only when
-both the config value and the document's reference-definition set are unchanged ---
+from scratch, which is the default; `PANACHE_INCREMENTAL_PARSING=0` turns it off
+for debugging, as does the deprecated `experimental.incrementalParsing = false`
+client setting. The previous parse lives in a side channel beside salsa
+(`src/incremental.rs`), keyed on `(file, config)` and reused only when both the
+config value and the document's reference-definition set are unchanged ---
 retained blocks keep the resolution and options they were parsed with, so either
 changing invalidates them at a distance.
 

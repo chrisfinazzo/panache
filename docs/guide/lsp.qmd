@@ -288,23 +288,32 @@ Optional extension settings:
   "panache.releaseTag": "latest",
   "panache.serverArgs": [],
   "panache.serverEnv": { "RUST_LOG": "info" },
-  "panache.trace.server": "off",
-  "panache.experimental.incrementalParsing": true
+  "panache.trace.server": "off"
 }
 ```
 
-`panache.experimental.incrementalParsing` controls the incremental parse path:
-instead of reparsing the whole document after every edit, the server splices the
-edited region into the previous syntax tree. It is enabled by default, and the
-only reason to write the setting is `false`, which turns the path off while
-diagnosing a problem. A successful splice is required to be byte-identical to a
-full parse, and the server falls back to a full parse whenever it cannot
-guarantee that, so the setting changes speed rather than results.
+#### Incremental parsing
 
-The environment variable `PANACHE_INCREMENTAL_PARSING` overrides the setting for
-the whole server process --- `1` forces it on, `0` forces it off --- which is
-the escape hatch if a client cannot be reconfigured, or if you need to rule the
-feature out while diagnosing something.
+The server parses incrementally: instead of reparsing the whole document after
+every edit, it splices the edited region into the previous syntax tree. A
+successful splice is required to be byte-identical to a full parse, and the
+server falls back to a full parse whenever it cannot guarantee that, so this
+changes speed rather than results. It needs no configuration.
+
+To switch it off while diagnosing a problem, set the environment variable
+`PANACHE_INCREMENTAL_PARSING` for the server process --- `1` forces it on, `0`
+forces it off. In VS Code that goes in `panache.serverEnv`:
+
+```json
+{
+  "panache.serverEnv": { "PANACHE_INCREMENTAL_PARSING": "0" }
+}
+```
+
+`panache.experimental.incrementalParsing` *(deprecated)*
+:   The setting that used to opt in to this, back when it was off by default.
+    Setting it to `false` still works, and the environment variable still wins
+    over it, but it will be removed in a future release.
 
 ### Open VSX (Positron, Cursor, VSCodium, etc.)
 
