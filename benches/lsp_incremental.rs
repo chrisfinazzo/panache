@@ -218,8 +218,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use panache::parser::{
-    RefdefMap, SyntaxError, collect_refdef_labels, diff_edit, parse_with_refdefs_and_errors,
-    reparse_with_refdefs,
+    RefdefMap, ReparseStrategy, SyntaxError, collect_refdef_labels, diff_edit,
+    parse_with_refdefs_and_errors, reparse_with_refdefs,
 };
 use panache::{Config, SyntaxNode};
 use panache_parser::Dialect;
@@ -289,6 +289,15 @@ struct Expect {
     /// string is printed on every run so the exemption stays visible instead of
     /// becoming a quiet floor.
     ceiling: Option<(f64, &'static str)>,
+    /// The one strategy every reused step must have taken.
+    ///
+    /// A speedup floor says a case got faster; this says it got faster *for the
+    /// declared reason*. Without it, a case that claims the token tier's step
+    /// change would still pass its floor after silently regressing to a narrow
+    /// section window on a small document -- which is exactly the regression
+    /// the token tier is at risk of, because declining is always sound and so
+    /// never fails anything else.
+    strategy: Option<&'static str>,
 }
 
 impl Expect {
@@ -297,6 +306,7 @@ impl Expect {
             reuse: Reuse::Always,
             min_speedup: None,
             ceiling: None,
+            strategy: None,
         }
     }
 
@@ -305,6 +315,7 @@ impl Expect {
             reuse: Reuse::Never,
             min_speedup: None,
             ceiling: None,
+            strategy: None,
         }
     }
 
@@ -315,6 +326,11 @@ impl Expect {
 
     fn ceiling(mut self, ceiling: f64, reason: &'static str) -> Self {
         self.ceiling = Some((ceiling, reason));
+        self
+    }
+
+    fn strategy(mut self, strategy: &'static str) -> Self {
+        self.strategy = Some(strategy);
         self
     }
 }
@@ -623,7 +639,19 @@ fn incremental_step(
             let elapsed = start.elapsed();
             let outcome = StepOutcome::Reused {
                 strategy: reparsed.strategy.as_str(),
-                window_bytes: new_text.len().saturating_sub(reparsed.reparse_range.0),
+                // The two window strategies parse from their window start to
+                // EOF, so their window really is everything downstream of
+                // `reparse_range.0`. The token tier parses no window at all --
+                // its `reparse_range` *is* its work -- and measuring it the
+                // window way would report a 40-byte splice on a 300 KB
+                // document as a 99% window, which is the opposite of what
+                // happened.
+                window_bytes: match reparsed.strategy {
+                    ReparseStrategy::Token => reparsed.reparse_range.1 - reparsed.reparse_range.0,
+                    ReparseStrategy::SectionWindow | ReparseStrategy::SuffixWindow => {
+                        new_text.len().saturating_sub(reparsed.reparse_range.0)
+                    }
+                },
                 spliced_bytes: reparsed.reparse_range.1 - reparsed.reparse_range.0,
             };
             *base = ReparseBase {
@@ -958,12 +986,16 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
     let refdefs = refdef_document();
 
     vec![
+        // One word inside one prose token: the token tier's home shape, and
+        // pinned as such by `the_bench_paragraph_shape_reaches_the_token_tier`
+        // in `crates/panache-parser/src/parser/reparse.rs` --- so a guard change
+        // fails there first, where it can be attributed, rather than here.
         BenchCase {
             id: "single_change_small".to_owned(),
             steps: vec![vec![word_change(small.line(15), ALPHA, "ALPHA")]],
             input: small.text.clone(),
             iterations: default_iterations,
-            expect: Expect::reuses(),
+            expect: Expect::reuses().strategy("token"),
         },
         BenchCase {
             id: "multi_change_small_4".to_owned(),
@@ -993,6 +1025,11 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
         // scattered case, but `diff_edit` spans one line instead of 150. The
         // pair is the whole argument that clustering, not count, is what the
         // incremental path cares about.
+        //
+        // The collapsed span stays inside one prose token, so this is now a
+        // *token*-tier case while its scattered twin crosses newlines and gets
+        // a node from `covering_element`. That is the same argument the pair
+        // always made, one tier sharper.
         BenchCase {
             id: "multi_change_medium_clustered_4".to_owned(),
             steps: vec![vec![
@@ -1003,7 +1040,7 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: medium.text.clone(),
             iterations: default_iterations / 2,
-            expect: Expect::reuses(),
+            expect: Expect::reuses().strategy("token"),
         },
         BenchCase {
             id: "multi_change_large_8".to_owned(),
@@ -1058,7 +1095,11 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             input: medium.text.clone(),
             iterations: default_iterations / 2,
             // The workload the feature exists for: every keystroke must splice.
-            expect: Expect::reuses().min_speedup(2.0),
+            // Column 14 is inside the line's prose token, so the token tier
+            // takes the whole stream; the 2.0x floor is the section window's
+            // and is left where it is deliberately, as a floor the displaced
+            // tier could already clear. Raise it only from a measured run.
+            expect: Expect::reuses().strategy("token").min_speedup(2.0),
         },
         // The window-size cutoff, one case per side. The same document and the
         // same single-word edit; only how far into the document it lands
@@ -1067,16 +1108,24 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
         // 85% threshold. The pair is what stops a threshold change from being
         // invisible: move it and exactly one of these two flips its fallback
         // rate between 0% and 100%.
+        //
+        // Both replacements carry a backtick, and that is load-bearing rather
+        // than incidental: a plain word swap here is an interior edit in a
+        // prose token, so the **token tier** would take both and neither would
+        // reach the cutoff at all -- leaving a pair that brackets nothing while
+        // still passing its own declarations. A code span puts a banned byte in
+        // the token, the tier declines, and the pair goes on measuring the
+        // window cutoff and only that.
         BenchCase {
             id: "window_cutoff_accepted".to_owned(),
-            steps: vec![vec![word_change(medium.line(50), ALPHA, "ALPHA")]],
+            steps: vec![vec![word_change(medium.line(50), ALPHA, "`ALPHA`")]],
             input: medium.text.clone(),
             iterations: default_iterations / 2,
-            expect: Expect::reuses(),
+            expect: Expect::reuses().strategy("section_window"),
         },
         BenchCase {
             id: "window_cutoff_declined".to_owned(),
-            steps: vec![vec![word_change(medium.line(30), ALPHA, "ALPHA")]],
+            steps: vec![vec![word_change(medium.line(30), ALPHA, "`ALPHA`")]],
             input: medium.text.clone(),
             iterations: default_iterations / 2,
             expect: Expect::declines(),
@@ -1135,19 +1184,53 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         // next upstream commit to a Markdown file. The durable fix is pinning
         // the corpus to a revision in `download.sh`; until that happens no
         // floor here can be tighter than upstream's drift.
+        //
+        // Both edits sit at **column 0**, which is what keeps them on the
+        // section window now that the token tier exists: the tier refuses an
+        // edit at the head of a line, because that is where a block marker
+        // would be manufactured. So these two keep measuring exactly what they
+        // always measured, and their `strategy` declaration says so.
         cases.push(BenchCase {
             id: "pandoc_manual_late_edit".to_owned(),
             input: doc.clone(),
             steps: vec![vec![insert_change(7600, 0, "NOTE: ")]],
             iterations,
-            expect: Expect::reuses().min_speedup(4.5),
+            expect: Expect::reuses().strategy("section_window").min_speedup(4.5),
         });
         cases.push(BenchCase {
             id: "pandoc_manual_typing_stream".to_owned(),
-            input: doc,
+            input: doc.clone(),
             steps: typing_stream(7600, 0, "NOTE: typing"),
             iterations,
-            expect: Expect::reuses().min_speedup(4.5),
+            expect: Expect::reuses().strategy("section_window").min_speedup(4.5),
+        });
+        // The pair above, moved one column inward -- and that is the whole
+        // token tier.
+        //
+        // Same document, same line, same keystrokes. Column 0 reaches the
+        // section window and re-parses 7.5% of a 300 KB document per
+        // keystroke; column 40 replaces a single green token. Reading the two
+        // side by side on every run is a better statement of the step change
+        // than any one case getting faster, because it holds everything but the
+        // tier constant.
+        //
+        // Line 7600 is `be set. Compiling file with such metadata produces the
+        // following file` -- prose with no construct byte in it, which is what
+        // makes it eligible. The two lines around it in the same paragraph do
+        // carry constructs, but they are separate `TEXT` tokens.
+        cases.push(BenchCase {
+            id: "pandoc_manual_midline_edit".to_owned(),
+            input: doc.clone(),
+            steps: vec![vec![insert_change(7600, 40, "NOTE ")]],
+            iterations,
+            expect: Expect::reuses().strategy("token").min_speedup(4.5),
+        });
+        cases.push(BenchCase {
+            id: "pandoc_manual_typing_stream_midline".to_owned(),
+            input: doc,
+            steps: typing_stream(7600, 40, "NOTE typing"),
+            iterations,
+            expect: Expect::reuses().strategy("token").min_speedup(4.5),
         });
     }
 
@@ -1306,6 +1389,14 @@ fn check_expectations(expectations: &[(String, Expect)], results: &[CaseResult])
             checks.push((
                 result.speedup_vs_full >= min,
                 format!("speedup {:.2}x >= {min:.2}x", result.speedup_vs_full),
+            ));
+        }
+
+        if let Some(declared) = expect.strategy {
+            let took: Vec<&str> = result.strategy_counts.keys().map(String::as_str).collect();
+            checks.push((
+                took == [declared],
+                format!("every reused step took {declared:?} (took {took:?})"),
             ));
         }
 

@@ -2758,6 +2758,31 @@ mod tests {
         }
     }
 
+    /// The line shape `benches/lsp_incremental.rs` generates, and the column
+    /// its `ALPHA` word constant names.
+    ///
+    /// The bench declares per-case expectations that are checked *exactly*
+    /// (`fallback_rate == 0.0` or `== 1.0`), so which tier takes this shape
+    /// decides several of them --- including the `window_cutoff_accepted` /
+    /// `window_cutoff_declined` pair, which brackets the 85% window threshold
+    /// and would silently stop bracketing anything if the token tier claimed
+    /// both. Pinning the fact here means a guard change shows up as a parser
+    /// test failure rather than as a bench gate failure nobody can attribute.
+    #[test]
+    fn the_bench_paragraph_shape_reaches_the_token_tier() {
+        let line = "Paragraph 042 alpha beta gamma delta epsilon zeta eta theta.\n";
+        let before = format!("# Benchmark Document\n\n{line}\n{line}\n");
+        let at = before.find("alpha").expect("marker in test input");
+
+        // A bare word replacement -- `word_change(line, ALPHA, "ALPHA")` --
+        // is an interior prose edit and belongs to the token tier.
+        assert_token_tier(&before, at..at + 5, "ALPHA");
+
+        // A code span in the replacement puts a banned byte in the token, which
+        // is what keeps the cutoff pair on the window tiers.
+        assert_not_token_tier(&before, at..at + 5, "`ALPHA`");
+    }
+
     /// Typing one character at a time is the motivating workload, so walk a
     /// whole word in and assert every keystroke reaches the tier and agrees
     /// with a full parse. A single-shot test would not catch a tier that works
