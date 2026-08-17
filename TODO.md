@@ -253,16 +253,21 @@ with the exact next step.
 **Current status / next step:** Phases 1--6a done. There is one authoritative
 tree, the reparse lives inside salsa's `parsed_document`, the window-size cutoff
 keeps a losing shape from ever being slower than a full parse, and the bench
-thresholds are machine-checked (`task bench:incremental-gate`). Everything so
-far sits behind `experimental.incrementalParsing`, still default-*off*, so none
-of it has changed behavior for anyone --- which is what makes this the natural
-PR boundary, with the flip landing separately.
+thresholds are machine-checked (`task bench:incremental-gate`).
 
-Next step is Phase 6b (default flip). Its entry criteria are met; what it needs
-is the gate *run*, not more code: oracle-clean fuzz at 10x iterations, the suite
-green with the flag forced both ways, `task bench:incremental-gate` green, and
-the week of oracle-live dogfooding. Run the gate at the default iteration count
-(see the phase's own note on `multi_change_large_8`).
+Phase 6b's *code* is landed --- the default is on everywhere it is read, and the
+setting now means "write `false` to switch it off" --- but the phase box stays
+unchecked because its gate is not green. Of the four gate items: oracle-clean
+fuzz at 10x passes, the workspace and LSP suites pass with the flag forced both
+ways, and `task bench:write-phase-gate` passes recalibrated to the shipped mode.
+`task bench:incremental-gate` **fails**: both 5x floors measure 4.76--4.89x. The
+week of oracle-live dogfooding has not been run.
+
+Next step is deciding what to do about those two floors --- they are drift on
+`main`, not a consequence of the flip (verified by stashing the flip and
+re-running: 4.76x and 4.89x at HEAD), so the choice is between finding the
+regression against Phase 6a's 5.4--5.7x and re-basing the floors on a measured
+number. Do not simply lower them to what happens to measure today.
 
 `incremental_regressions.rs` carries no ignored *incremental* tests; the three
 `#[ignore]`d tests there pin two full-parser bugs (setext-after-setext, and a
@@ -615,6 +620,42 @@ reproducers are synthetic and pin their strategy instead.
     - Run the gate at the default iteration count. `multi_change_large_8` fails
       at 4 iterations and passes at 80 --- its margin is a few percent on a 1.9
       ms parse, so a shortened run measures the sampling noise, not the feature.
+  - **Landed, minus the gate.** The default is on in all three places (the
+    initialize path, `LspRuntimeSettings::default()`, and the VS Code
+    `package.json` + `extension.ts` fallback + README), the docs read opt-*out*,
+    and the tests that pinned the old default now pin the new one. Two tests
+    changed shape rather than polarity, because after the flip the old
+    assertions could no longer fail: `..._setting_can_be_enabled` became
+    `..._can_be_disabled`, and `empty_configuration_reply_is_noop` now moves the
+    flag off the default first, so "the reply was ignored" and "the reply
+    re-applied the default" stop being the same observation.
+  - **`task bench:incremental-gate` is red and the flip did not cause it.**
+    `pandoc_manual_late_edit` and `pandoc_manual_typing_stream` measure
+    4.76--4.89x against their 5x floors, over three runs, where Phase 6a
+    recorded 5.4--5.7x. Stashing the flip and re-running at HEAD reproduces it
+    (4.76x / 4.89x), so this is drift on `main` --- the thin margin doing
+    exactly what the phase said it was for. It is deliberately left failing: the
+    floors are the roadmap's, and re-basing them on today's measurement is the
+    one move the phase warns against.
+  - **The write-phase gate was collateral the phase did not name.**
+    `benches/lsp_write_phase.rs` pins `CALIBRATED_INCREMENTAL_PARSING`, and its
+    whole point is to refuse a comparison across a mode change --- so the flip
+    tripped it. Recalibrated to the shipped mode and green there, with every
+    contract passing on its own terms (shares 4.0% / 0.7% / 2.6% against a 15%
+    ceiling). Only `end_to_end` moves with the flag; the write-phase rows never
+    parse.
+  - **A 13-17% end-to-end regression on `large_authoring.qmd` came out of that
+    recalibration**, and no existing gate catches it. Same corpus, three run
+    pairs, median `didChange + parse`: 824/863/898 us off against 968/992/974 us
+    on, while `small` and `large` win 3.5x and 3.2x. Every edit in that document
+    declines the window cutoff, so the keystroke is a full parse plus the cost
+    of preparing and rejecting a reuse. `benches/lsp_incremental.rs` models that
+    same document at `+11.6 us` (0.99x, `large_authoring_single_edit`), an order
+    of magnitude under what the host path actually pays --- so the gap is in the
+    model, which measures the strategies directly rather than through salsa and
+    the side channel. Worth a Phase 7 or 8 look at the fixed cost of a decline,
+    and at whether the incremental bench should drive the LSP path end to end
+    for at least one case.
 
 - [ ] Phase 7: token tier --- edit inside plain `TEXT`; newline ban,
   construct-character ban list kept honest by a grammar-grepping test, relex
