@@ -168,11 +168,15 @@ with the write-phase rows unmoved. Retiring the memo also removed a second live
 table copy whenever a reader had run: with a read placed before it, `batch4` on
 the large document was 34.24 -> 143.71 us.
 
-- [ ] **`handlers/diagnostics.rs` builds an index twice per publish** --- the
-  shared cache at the top, then a fresh `LineIndex::new` over the same
-  document further down (which also copies the text into a `String` to do
-  it). Settle path, not the keystroke path, so it is off every bench this
-  repo has; thread the cached `Arc` through instead.
+The settle path's half is fixed as well. `handlers/diagnostics.rs` took the
+shared index for its own diagnostics and then built a second one over a fresh
+`String` copy of the same document to map the by-path group covering that same
+document; the cached `Arc` is now threaded through the loop, and the external
+linters read the index's own allocation instead of a copy. It was off every
+bench this repo had, so `benches/lsp_settle.rs` was written to price it: the
+publish over an *unchanged* document --- the cell a settle repeats once per open
+document --- went 22.89 -> 1.29 us on a 112 KB document, and is now flat across
+a 44x size range (1.05 / 0.90 / 1.29 us) instead of tracking document size.
 
 - [ ] **`set_text_if_changed`'s content compare is *not* a second scan and does
   not need bypassing.** Established by reading it, not by the clock: its

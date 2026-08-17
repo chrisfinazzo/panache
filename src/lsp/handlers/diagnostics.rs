@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DocumentDiagnosticParams, DocumentDiagnosticReport,
@@ -242,7 +243,11 @@ pub(crate) fn compute_publishes(
         return Vec::new();
     };
 
-    let text = doc_state.salsa_file.content_or_empty(snap.db()).to_string();
+    // One index per document for the whole publish: the conversion below and the
+    // by-path loop's entry for this same document both read it, so nothing here
+    // rebuilds what the write phase already patched.
+    let line_index =
+        crate::lsp::line_index::line_index(&snap.line_index_cache, snap.db(), doc_state.salsa_file);
 
     let lint_plan =
         crate::salsa::built_in_lint_plan(snap.db(), doc_state.salsa_file, doc_state.salsa_config)
@@ -253,6 +258,9 @@ pub(crate) fn compute_publishes(
 
     #[cfg(not(target_arch = "wasm32"))]
     if run_external && !external_jobs.is_empty() {
+        // The index carries the allocation salsa holds, so handing the document
+        // to the linters costs a refcount bump rather than a copy of the text.
+        let text = line_index.text_arc();
         let registry = crate::linter::external_linters::ExternalLinterRegistry::new();
         for job in &external_jobs {
             match crate::linter::external_linters_sync::run_linter_sync(
@@ -270,8 +278,6 @@ pub(crate) fn compute_publishes(
         panache_diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
     }
 
-    let line_index =
-        crate::lsp::line_index::line_index(&snap.line_index_cache, snap.db(), doc_state.salsa_file);
     let own_diagnostics: Vec<Diagnostic> = panache_diagnostics
         .iter()
         .map(|d| convert_diagnostic(d, &line_index))
@@ -301,19 +307,21 @@ pub(crate) fn compute_publishes(
     for (path, diags) in by_path {
         let target_uri = Uri::from_file_path(&path).unwrap_or_else(|| uri.clone());
 
-        let target_text = if target_uri == *uri {
-            text.clone()
+        // Every target here is a tracked document, so its index comes from the
+        // shared cache too --- including this document's own, which the write
+        // phase most likely just patched.
+        let target_index = if target_uri == *uri {
+            Arc::clone(&line_index)
         } else {
             let Some(target_state) = snap.document_state(&target_uri) else {
                 continue;
             };
-            target_state
-                .salsa_file
-                .content_or_empty(snap.db())
-                .to_string()
+            crate::lsp::line_index::line_index(
+                &snap.line_index_cache,
+                snap.db(),
+                target_state.salsa_file,
+            )
         };
-
-        let target_index = LineIndex::new(&target_text);
         let mapped: Vec<Diagnostic> = diags
             .iter()
             .map(|d| convert_diagnostic(d, &target_index))

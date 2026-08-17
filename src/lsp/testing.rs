@@ -834,8 +834,9 @@ impl LspTester {
     /// `black_box` it. This is the per-settle cost of the candidate "re-lint all
     /// open documents per quiescent settle" model (`TODO.md` rust-analyzer
     /// divergence). Unchanged docs should resolve to a `built_in_lint_plan` memo
-    /// hit; the residual cost is the un-memoized text clone + `convert_diagnostic`
-    /// in [`compute_publishes`](handlers::diagnostics::compute_publishes).
+    /// hit; the residual cost is the un-memoized `convert_diagnostic` in
+    /// [`compute_publishes`](handlers::diagnostics::compute_publishes), which
+    /// `benches/lsp_settle.rs` prices per document.
     pub fn relint_all_open_documents(&self) -> usize {
         let snap = self.snapshot();
         let mut total = 0;

@@ -23,6 +23,9 @@ cargo bench --bench lsp_write_phase
 # Same run, gated; `task bench:lsp-gate` runs both LSP gates
 task bench:write-phase-gate
 
+# Run the LSP settle benchmark (what publishing one document costs per settle)
+cargo bench --bench lsp_settle
+
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
 
@@ -66,6 +69,9 @@ PANACHE_BENCH_DOC=pandoc_manual.md PANACHE_BENCH_ITERATIONS=3 \
 # PANACHE_LSP_WRITE_BENCH_ITERATIONS=1.0 (scale factor on every row)
 # PANACHE_LSP_WRITE_BENCH_OUTPUT_JSON=benches/lsp_write_phase_results.json
 # PANACHE_LSP_WRITE_BENCH_ASSERT=1 (check thresholds; exit 1 on a violation)
+
+# LSP settle benchmark knobs
+# PANACHE_LSP_SETTLE_BENCH_ITERS=200 (default)
 ```
 
 For more detailed profiling:
