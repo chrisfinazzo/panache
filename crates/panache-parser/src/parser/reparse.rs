@@ -97,14 +97,17 @@ pub fn diff_edit(old: &str, new: &str) -> Edit {
 
 /// Which window a successful reparse re-derived.
 ///
-/// Both strategies parse their window to EOF -- list-item buffering depends on
+/// [`ReparseStrategy::Token`] is the odd one out and the cheapest: it re-derives
+/// no window at all, replacing a single green `TEXT` token in place. The other
+/// two both parse their window to EOF -- list-item buffering depends on
 /// unbounded lookahead, so a bounded standalone window parse is untrustworthy.
-/// The section window differs in that it re-adopts the old suffix children when
-/// they come back structurally equal, preserving their `Arc` identity; when
-/// they don't, it degrades to the wholesale suffix splice and reports itself as
-/// [`ReparseStrategy::SuffixWindow`].
+/// The section window differs from the suffix window in that it re-adopts the
+/// old suffix children when they come back structurally equal, preserving their
+/// `Arc` identity; when they don't, it degrades to the wholesale suffix splice
+/// and reports itself as [`ReparseStrategy::SuffixWindow`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReparseStrategy {
+    Token,
     SectionWindow,
     SuffixWindow,
 }
@@ -113,6 +116,7 @@ impl ReparseStrategy {
     /// The stable label used in logs and test assertions.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Token => "token",
             Self::SectionWindow => "section_window",
             Self::SuffixWindow => "suffix_window",
         }
@@ -199,6 +203,16 @@ pub fn reparse_with_cost_guards(
     let mut options = options.clone();
     populate_refdef_labels(new_text, &mut options);
     let prev_tree = SyntaxNode::new_root(prev_green.clone());
+
+    // Cheapest tier first, and deliberately ahead of the window-size cutoff:
+    // the token tier's whole point is that it is O(token), so it must not be
+    // gated on a cost guard that reasons about window share, nor pay for the
+    // cascade below before it is allowed to answer.
+    if let Some(result) = reparse_token(&prev_tree, prev_errors, edit, new_text, &options) {
+        assert_matches_full_parse(&result, new_text, &options);
+        return Some(result);
+    }
+
     reparse_ranges(
         new_text,
         &options,
@@ -208,6 +222,329 @@ pub fn reparse_with_cost_guards(
         edit.new_range(),
         cost_guards,
     )
+}
+
+/// The token tier: an edit confined to the interior of one plain-prose `TEXT`
+/// token replaces that token's green node and nothing else.
+///
+/// The other two strategies re-parse from a window start to EOF, so their cost
+/// is a function of where the edit sits in the document. This one parses
+/// nothing but the token, which is why it is the only thing that makes a
+/// keystroke in a 300 KB document cost what a keystroke in a small one does.
+///
+/// Not quite O(token), and the difference is worth stating plainly:
+/// [`rowan::cursor::SyntaxToken::replace_with`] rebuilds each ancestor with
+/// `replace_child`, which materialises the whole child vector at every level.
+/// At the root that is one `GreenNode` of the document's top-level arity. So
+/// the cost is O(token) + O(top-level children) --- but that second term is
+/// *already* paid by `splice_children` on the window paths, so this tier is
+/// strictly cheaper than the one it displaces, and against a millisecond-scale
+/// window parse it is noise.
+///
+/// The whole correctness argument is that nothing outside the token can
+/// observe the change:
+///
+/// * the edit is strictly interior to the token's non-whitespace core, so the
+///   bytes adjacent to *both* neighbouring tokens are untouched -- which is
+///   what makes emphasis flanking, bare-URI left boundaries, and hard-break
+///   trailing runs unable to move;
+/// * no byte of the token, before or after, can open a construct
+///   ([`token_tier_ban_mask`]), so no delimiter lives inside it that could pair
+///   with one elsewhere in the paragraph;
+/// * the token's text still lexes as exactly one `TEXT` token on its own
+///   ([`relexes_as_one_text_token`]), which is what catches the constructs the
+///   mask deliberately does not carry;
+/// * the edit sits past its line's first word ([`edit_is_past_line_marker_zone`]),
+///   so no block marker can be manufactured at the line start;
+/// * and no syntax error touches the token, so the rest merely shift.
+///
+/// Every check is a decline. `None` costs the caller the window tiers it would
+/// have tried anyway.
+fn reparse_token(
+    old_tree: &SyntaxNode,
+    old_errors: &[SyntaxError],
+    edit: &Edit,
+    new_text: &str,
+    options: &ParserOptions,
+) -> Option<Reparsed> {
+    // A newline moves block structure; `TEXT` never spans one anyway.
+    if edit.insert.contains(['\n', '\r']) {
+        return None;
+    }
+
+    let old_edit = normalize_range((edit.range.start, edit.range.end))?;
+    if old_tree.kind() != SyntaxKind::DOCUMENT {
+        return None;
+    }
+    // An edit past the old tree's end means the caller's tree and text have
+    // gone out of sync; bail before the offset reaches rowan, which panics on
+    // a range it cannot resolve.
+    if old_edit.1 > usize::from(old_tree.text_range().end()) {
+        return None;
+    }
+
+    let token = covering_token(old_tree, old_edit)?;
+    if token.kind() != SyntaxKind::TEXT {
+        return None;
+    }
+    // `TEXT` is emitted from some twenty non-prose sites -- code block bodies,
+    // HTML blocks, attribute innards, link destinations, table cells, refdef
+    // parts -- so the token kind alone proves nothing. The parent is the gate,
+    // and a *top-level* paragraph is the narrowest useful one. Table cells are
+    // the sharpest exclusion it buys: a simple or multiline table's columns are
+    // byte positions fixed by its rule row, so changing a cell's width re-cuts
+    // the whole line.
+    if token.parent().map(|parent| parent.kind()) != Some(SyntaxKind::PARAGRAPH) {
+        return None;
+    }
+    // Nested containers stay out, per the roadmap's standing non-goal: a
+    // paragraph inside a list item or block quote couples to its container
+    // through tightness, lazy continuation, and indentation, none of which this
+    // tier models.
+    if token
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map(|grandparent| grandparent.kind())
+        != Some(SyntaxKind::DOCUMENT)
+    {
+        return None;
+    }
+
+    let range = token.text_range();
+    let (t0, t1) = (usize::from(range.start()), usize::from(range.end()));
+    let old_leaf = token.text();
+
+    // Strict interiority, measured against the token's non-whitespace core so
+    // the leading and trailing whitespace runs come out byte-identical. The
+    // trailing half is load-bearing: one trailing space lives inside the
+    // token, two become a `HARD_LINE_BREAK`.
+    let leading = old_leaf.len() - old_leaf.trim_start_matches([' ', '\t']).len();
+    let trailing = old_leaf.len() - old_leaf.trim_end_matches([' ', '\t']).len();
+    if old_edit.0 <= t0 + leading || old_edit.1 >= t1.saturating_sub(trailing) {
+        return None;
+    }
+
+    let (lo, hi) = (old_edit.0 - t0, old_edit.1 - t0);
+    if !old_leaf.is_char_boundary(lo) || !old_leaf.is_char_boundary(hi) {
+        return None;
+    }
+    let mut new_leaf = String::with_capacity(old_leaf.len() - (hi - lo) + edit.insert.len());
+    new_leaf.push_str(&old_leaf[..lo]);
+    new_leaf.push_str(&edit.insert);
+    new_leaf.push_str(&old_leaf[hi..]);
+
+    // Every byte of the token, before and after, must be hand-vetted inert and
+    // non-structural. Both directions matter: inserting a `*` beside an
+    // unmatched one pairs them, and *deleting* one of three lets the survivors
+    // pair.
+    let allowed = token_tier_allowed_mask(options);
+    let inert = |text: &str| text.bytes().all(|byte| allowed[byte as usize]);
+    if !inert(old_leaf) || !inert(&new_leaf) {
+        return None;
+    }
+
+    // The relex. `structural_byte_mask` deliberately omits the bare-URI scheme
+    // alphabet (banning every letter would reject all prose under GFM and
+    // Quarto), so this is what answers that question -- exactly, and for every
+    // other construct the mask under-approximates. Checking the old text too
+    // refuses any token whose in-context reading differs from its isolated
+    // one, which is a context dependence this tier does not model.
+    if !relexes_as_one_text_token(old_leaf, options)
+        || !relexes_as_one_text_token(&new_leaf, options)
+    {
+        return None;
+    }
+
+    // Block markers are decided from the head of a line, so an edit past the
+    // line's first word cannot manufacture one. Without this, `12 apples` plus
+    // an interior `.` becomes a list.
+    if !edit_is_past_line_marker_zone(new_text, old_edit.0) {
+        return None;
+    }
+
+    // Errors only ever come from embedded YAML, so one can never originate
+    // inside a paragraph's prose -- but refusing any that touch the token
+    // keeps the remap a pure shift rather than a judgement call.
+    if old_errors
+        .iter()
+        .any(|error| usize::from(error.range.start()) <= t1 && usize::from(error.range.end()) >= t0)
+    {
+        return None;
+    }
+    let delta = edit.delta();
+    let errors = old_errors
+        .iter()
+        .map(|error| {
+            if usize::from(error.range.start()) >= t1 {
+                SyntaxError {
+                    range: shift_range(error.range, delta),
+                    ..error.clone()
+                }
+            } else {
+                error.clone()
+            }
+        })
+        .collect();
+
+    let green = token.replace_with(rowan::GreenToken::new(SyntaxKind::TEXT.into(), &new_leaf));
+    Some(Reparsed {
+        green,
+        errors,
+        reparse_range: (t0, t0 + new_leaf.len()),
+        strategy: ReparseStrategy::Token,
+    })
+}
+
+/// The single token covering `edit`, or `None` when the edit covers a node, a
+/// token boundary, or nothing.
+///
+/// A pure insertion exactly on a boundary comes back as
+/// [`rowan::TokenAtOffset::Between`] and is refused rather than disambiguated:
+/// the interiority guard would reject it a moment later anyway, and picking a
+/// side here would only make that rejection harder to read.
+fn covering_token(
+    old_tree: &SyntaxNode,
+    edit: (usize, usize),
+) -> Option<crate::syntax::SyntaxToken> {
+    let start = rowan::TextSize::new(edit.0 as u32);
+    if edit.0 == edit.1 {
+        match old_tree.token_at_offset(start) {
+            rowan::TokenAtOffset::Single(token) => Some(token),
+            _ => None,
+        }
+    } else {
+        let range = rowan::TextRange::new(start, rowan::TextSize::new(edit.1 as u32));
+        old_tree.covering_element(range).into_token()
+    }
+}
+
+/// Shift a range by a signed byte delta.
+fn shift_range(range: rowan::TextRange, delta: isize) -> rowan::TextRange {
+    let moved = |size: rowan::TextSize| {
+        rowan::TextSize::new((usize::from(size) as isize + delta).max(0) as u32)
+    };
+    rowan::TextRange::new(moved(range.start()), moved(range.end()))
+}
+
+/// Bytes a token the tier splices is allowed to contain.
+///
+/// This is an **allowlist**, and the direction is the whole point. A ban list
+/// derived from the grammar would extend itself for a new *inline* construct
+/// (that is what [`structural_byte_mask_without_uri_schemes`] buys) but would
+/// silently admit a new *block* construct, because the inline mask has no
+/// reason to carry a line-leading byte. An allowlist fails closed in both
+/// directions: a construct added tomorrow is excluded unless someone
+/// deliberately adds its trigger byte here.
+///
+/// The seed is then narrowed by the inline mask, so the two mechanisms
+/// compose --- a byte has to be both hand-vetted as inert *and* not structural
+/// under the caller's extensions.
+///
+/// [`structural_byte_mask_without_uri_schemes`]: crate::parser::inlines::core::structural_byte_mask_without_uri_schemes
+fn token_tier_allowed_mask(options: &ParserOptions) -> [bool; 256] {
+    let structural =
+        crate::parser::inlines::core::structural_byte_mask_without_uri_schemes(options);
+
+    let mut allowed = [false; 256];
+    for byte in TOKEN_TIER_ALPHABET_SEED {
+        allowed[*byte as usize] = true;
+    }
+    // Every non-ASCII byte is prose: no construct in the grammar keys off a
+    // continuation or lead byte of a multi-byte code point, and the inline
+    // mask never sets one.
+    allowed[0x80..=0xFF].fill(true);
+
+    for byte in 0..=u8::MAX {
+        if structural[byte as usize] {
+            allowed[byte as usize] = false;
+        }
+    }
+    allowed
+}
+
+/// Bytes hand-vetted as inert inside a paragraph's prose.
+///
+/// Deliberately absent, though they are common in prose and the inline mask
+/// does not always carry them: every byte that can open a block at the head of
+/// a line --- `#` `>` `|` `+` `-` `=` `~` `:` `%` `!` `?` --- plus the fence
+/// and marker characters the inline mask covers only under some extensions.
+///
+/// Deliberately *present*: `.` and `)`, which are load-bearing only as the tail
+/// of a list marker at the head of a line. Banning them would reject most
+/// English prose; [`edit_is_past_line_marker_zone`] handles them instead, which
+/// is the one place this file trades a byte ban for a position check.
+const TOKEN_TIER_ALPHABET_SEED: &[u8] = b"abcdefghijklmnopqrstuvwxyz\
+                                          ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+                                          0123456789 \t.,;?'\"/&()";
+
+/// Whether `text` parses, on its own, as exactly one `TEXT` token covering all
+/// of it.
+///
+/// This is panache's stand-in for a lexer-based relex guard. There is no lexer
+/// to re-run --- block parsing emits inline structure as it goes --- so the
+/// probe drives the real inline entry point and watches what it emits. Cost is
+/// a function of the token's length, so the tier stays O(token).
+fn relexes_as_one_text_token(text: &str, options: &ParserOptions) -> bool {
+    use crate::parser::inlines::sink::InlineSink;
+
+    #[derive(Default)]
+    struct SingleTextProbe {
+        tokens: usize,
+        bytes: usize,
+        plain: bool,
+    }
+
+    impl InlineSink for SingleTextProbe {
+        fn token(&mut self, kind: rowan::SyntaxKind, text: &str) {
+            self.tokens += 1;
+            self.bytes += text.len();
+            if kind != SyntaxKind::TEXT.into() {
+                self.plain = false;
+            }
+        }
+
+        fn start_node(&mut self, _kind: rowan::SyntaxKind) {
+            self.plain = false;
+        }
+
+        fn finish_node(&mut self) {
+            self.plain = false;
+        }
+    }
+
+    if text.is_empty() {
+        return false;
+    }
+    let mut probe = SingleTextProbe {
+        plain: true,
+        ..SingleTextProbe::default()
+    };
+    crate::parser::inlines::core::parse_inline_text_recursive(&mut probe, text, options, false);
+    probe.plain && probe.tokens == 1 && probe.bytes == text.len()
+}
+
+/// Whether `offset` sits past the zone of its line where a block marker is
+/// decided.
+///
+/// Every block construct is recognised from the head of its line: a marker
+/// (`-`, `1.`, `>`, `:::`, a fence, an indent) runs from the first non-space
+/// byte to the first space. So an edit that is already past a space on its
+/// line cannot create one --- the bytes that decide the line all sit before the
+/// edit and interiority leaves them alone.
+///
+/// This is what covers the marker shapes the ban mask deliberately allows:
+/// `12 apples` plus an interior `.` is a list, and so is `12.apples` plus an
+/// interior space, and both are refused here rather than by banning `.` from
+/// prose.
+fn edit_is_past_line_marker_zone(text: &str, offset: usize) -> bool {
+    let line_start = text[..offset]
+        .rfind(['\n', '\r'])
+        .map_or(0, |index| index + 1);
+    let head = &text[line_start..offset];
+    let indent = head.len() - head.trim_start_matches(' ').len();
+    // Four spaces is an indented code block; the guard has nothing to say
+    // about a line whose head it cannot read as prose.
+    indent <= 3 && head[indent..].contains(' ')
 }
 
 /// Splice the syntax errors of a reparse the same way the green children are
@@ -1328,7 +1665,10 @@ mod tests {
         }
         let at = input.find("paragraph 17").expect("marker in test input");
 
-        let inc = insert_incrementally(&input, at + 10, "X", ParserOptions::default());
+        // A code span, not a bare letter: this test is about which *window* a
+        // late edit reaches, and a plain interior prose insert is answered by
+        // the token tier before either window is consulted.
+        let inc = insert_incrementally(&input, at + 10, "`x`", ParserOptions::default());
         assert_eq!(inc.strategy, "suffix_window");
         assert!(
             inc.reparse_range.0 > 0,
@@ -2037,5 +2377,176 @@ mod tests {
             declined.strategy, "section_window",
             "a dash-rule partner in the window must decline the section splice"
         );
+    }
+
+    // --- token tier ---------------------------------------------------------
+
+    /// Splice `insert` in over `range` and return the strategy that ran, having
+    /// first checked the governing invariant on any splice that happened.
+    ///
+    /// The invariant check is unconditional and not an assertion about the
+    /// tier: a test that pins a *decline* still proves the fallback is right,
+    /// and a test that pins the token tier proves the splice is right. Every
+    /// case below gets both for free.
+    fn token_tier_strategy(before: &str, range: Range<usize>, insert: &str) -> &'static str {
+        let options = ParserOptions::default();
+        let after = apply_edit(before, (range.start, range.end), insert);
+        let (old_tree, old_errors) = parse_with_errors(before, None);
+
+        let spliced = reparse_or_full(
+            &after,
+            Some(options),
+            &old_tree,
+            &old_errors,
+            (range.start, range.end),
+            (range.start, range.start + insert.len()),
+        );
+
+        let (full, full_errors) = parse_with_errors(&after, None);
+        assert_eq!(
+            crate::parser::fingerprint(&spliced.tree),
+            crate::parser::fingerprint(&full),
+            "strategy {} diverged from a full parse of {after:?}",
+            spliced.strategy,
+        );
+        assert_eq!(
+            spliced.errors, full_errors,
+            "strategy {} diverged from a full parse on errors",
+            spliced.strategy,
+        );
+        spliced.strategy
+    }
+
+    fn assert_token_tier(before: &str, range: Range<usize>, insert: &str) {
+        let strategy = token_tier_strategy(before, range.clone(), insert);
+        assert_eq!(
+            strategy, "token",
+            "inserting {insert:?} at {range:?} of {before:?} should reach the token tier"
+        );
+    }
+
+    fn assert_not_token_tier(before: &str, range: Range<usize>, insert: &str) {
+        let strategy = token_tier_strategy(before, range.clone(), insert);
+        assert_ne!(
+            strategy, "token",
+            "inserting {insert:?} at {range:?} of {before:?} must not reach the token tier"
+        );
+    }
+
+    /// The shape the tier exists for: a character typed into the middle of a
+    /// paragraph's prose, far from any construct. The window tiers answer this
+    /// by re-parsing to EOF; the token tier replaces one green token.
+    #[test]
+    fn a_prose_edit_inside_a_paragraph_reaches_the_token_tier() {
+        let before = "# Title\n\nSome ordinary prose here.\n\nAnd a second paragraph.\n";
+        let at = before.find("ordinary").expect("marker in test input") + 3;
+        assert_token_tier(before, at..at, "X");
+    }
+
+    /// The tier must not need a document big enough to clear the window-size
+    /// cutoff: it is meant to run *before* that guard, which is what lets it
+    /// skip the fixed cascade overhead too.
+    #[test]
+    fn a_prose_edit_in_a_tiny_document_reaches_the_token_tier() {
+        let before = "alpha beta gamma\n";
+        assert_token_tier(before, 8..8, "X");
+    }
+
+    /// Verified hazard: `12 apples here` is a single `TEXT` inside a
+    /// `PARAGRAPH`, and inserting `.` strictly inside that token turns the whole
+    /// block into a `LIST`. A tier that only looked at the token would splice a
+    /// paragraph where a full parse has a list item.
+    #[test]
+    fn an_interior_edit_that_manufactures_a_list_marker_declines() {
+        let before = "12 apples here\n";
+        assert_not_token_tier(before, 2..2, ".");
+    }
+
+    /// The same hazard reached by inserting the *space* instead of the dot:
+    /// `12.apples` is prose, `12. apples` is a list.
+    #[test]
+    fn an_interior_edit_that_completes_a_list_marker_declines() {
+        let before = "12.apples here\n";
+        assert_not_token_tier(before, 3..3, " ");
+    }
+
+    /// Verified hazard: one trailing space stays inside the `TEXT` token, two
+    /// become a `HARD_LINE_BREAK`. An interior insert can cross that line.
+    #[test]
+    fn an_interior_space_that_manufactures_a_hard_break_declines() {
+        let before = "alpha beta \nsecond line\n";
+        assert_not_token_tier(before, 10..10, " ");
+    }
+
+    /// Verified hazard: an unmatched intraword `*` sits inside a plain `TEXT`,
+    /// so inserting another one can pair them into `EMPHASIS`. The ban has to
+    /// cover the token's own text, not just the inserted bytes.
+    #[test]
+    fn an_edit_beside_an_unmatched_delimiter_declines() {
+        let before = "abc*def ghi\n";
+        assert_not_token_tier(before, 9..9, "*");
+    }
+
+    /// The mirror image, and the reason the ban covers the *old* text too:
+    /// deleting one of three `*`s can let the survivors pair.
+    #[test]
+    fn a_deletion_that_frees_a_delimiter_to_pair_declines() {
+        let before = "a*b*c*d word\n";
+        assert_not_token_tier(before, 3..4, "");
+    }
+
+    /// A bare URI typed into prose is a construct the byte mask cannot see
+    /// (its scheme has no leading-byte gate), so the tier answers it by
+    /// re-parsing the token's text in isolation.
+    #[test]
+    fn an_edit_that_manufactures_a_bare_uri_declines() {
+        let before = "see docs now\n";
+        let options = flavor_options(crate::options::Flavor::Gfm);
+        let after = apply_edit(before, (4, 8), "https://example.com");
+        let (old_tree, old_errors) =
+            crate::parser::Parser::new(before, &options).parse_with_errors();
+        let spliced = reparse_or_full(
+            &after,
+            Some(options.clone()),
+            &old_tree,
+            &old_errors,
+            (4, 8),
+            (4, 4 + "https://example.com".len()),
+        );
+        assert_ne!(
+            spliced.strategy, "token",
+            "a bare URI is a construct; the token tier must not splice past it"
+        );
+        assert_eq!(
+            crate::parser::fingerprint(&spliced.tree),
+            crate::parser::fingerprint(&crate::parser::Parser::new(&after, &options).parse()),
+        );
+    }
+
+    /// `TEXT` is emitted from ~20 non-prose sites. A code block body is one of
+    /// them, and it is not eligible in v1 -- the tier gates on the parent kind,
+    /// not on the token kind.
+    #[test]
+    fn an_edit_inside_a_code_block_declines() {
+        let before = "```\nsome code here\n```\n";
+        let at = before.find("code").expect("marker in test input") + 1;
+        assert_not_token_tier(before, at..at, "X");
+    }
+
+    /// Typing one character at a time is the motivating workload, so walk a
+    /// whole word in and assert every keystroke reaches the tier and agrees
+    /// with a full parse. A single-shot test would not catch a tier that works
+    /// once and then splices against its own stale output.
+    #[test]
+    fn typing_a_word_character_by_character_stays_at_the_token_tier() {
+        let mut text = String::from("# Title\n\nThe quick brown fox jumps.\n\nMore prose.\n");
+        let mut at = text.find("brown").expect("marker in test input") + 2;
+
+        for ch in "increment".chars() {
+            let insert = ch.to_string();
+            assert_token_tier(&text, at..at, &insert);
+            text = apply_edit(&text, (at, at), &insert);
+            at += insert.len();
+        }
     }
 }
