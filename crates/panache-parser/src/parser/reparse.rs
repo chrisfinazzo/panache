@@ -112,6 +112,23 @@ pub fn diff_edit(old: &str, new: &str) -> Edit {
 /// equal, preserving their `Arc` identity; when they don't, it degrades to the
 /// wholesale suffix splice and reports itself as
 /// [`ReparseStrategy::SuffixWindow`].
+///
+/// **Both window tiers stay, and that is a measurement rather than caution.**
+/// The roadmap expected the region tier to replace them; it does not. Over the
+/// fuzzer's real-document corpus at 20x, of 1457 splices the region tier takes
+/// 1120, the *section* window 225, the suffix window 79, and the token tier 33 —
+/// so a seventh of real splices are still answered by the tier the roadmap
+/// planned to delete, and it beats the suffix window there by three to one. On
+/// the hazard snippets the suffix window is the workhorse instead (47 126
+/// splices against the section window's 121), because those documents have no
+/// headings to anchor a section.
+///
+/// The region tier does not subsume them because it declines for reasons a
+/// window does not share: a region wider than a quarter of the document, and a
+/// delimiter line whose pairing the edit moves. Where it declines, a window
+/// still splices, and the section window is strictly better than the suffix one
+/// when it fires — same parse, narrower splice, retained `Arc` identity.
+/// `incremental_fuzz.rs` prints the histogram on every run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReparseStrategy {
     Token,

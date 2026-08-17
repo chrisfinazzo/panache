@@ -364,6 +364,14 @@ struct FuzzStats {
     /// declines everything is *sound*, so nothing else in the suite fails when
     /// a guard silently turns this one off.
     region_tier: usize,
+    /// The two window tiers, tallied so the ladder's *shape* is measured rather
+    /// than assumed. Neither has a floor: unlike the two above, they are not at
+    /// risk of being silently switched off --- they are the fallback, so a guard
+    /// that broke them would show up as a collapsing splice rate. They are here
+    /// because the roadmap planned to delete them once the region tier landed,
+    /// and this is the evidence that says not to.
+    section_window: usize,
+    suffix_window: usize,
     /// Corpus documents that were not on disk. Counted rather than only
     /// printed: the corpus is gitignored, so a run on a clean checkout skips
     /// the strictest tier entirely and would otherwise report a full pass.
@@ -394,6 +402,10 @@ impl FuzzStats {
             self.splice_rate() * 100.0,
             self.skipped_lossy,
             self.skipped_absent
+        );
+        eprintln!(
+            "{what}: tiers token={} region={} section_window={} suffix_window={}",
+            self.token_tier, self.region_tier, self.section_window, self.suffix_window
         );
         assert!(
             self.splice_rate() >= 0.25,
@@ -761,8 +773,11 @@ fn check_edit(
         if inc.strategy == "token" {
             run.stats.token_tier += 1;
         }
-        if inc.strategy == "region" {
-            run.stats.region_tier += 1;
+        match inc.strategy {
+            "region" => run.stats.region_tier += 1,
+            "section_window" => run.stats.section_window += 1,
+            "suffix_window" => run.stats.suffix_window += 1,
+            _ => {}
         }
     }
 
