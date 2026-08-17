@@ -29,25 +29,26 @@ Download the benchmark documents:
 ./download.sh
 ```
 
-Or manually:
+## Pinned revisions
 
-```bash
-# Local realistic doc + upstream fixture
-cp ../../docs/guide/configuration.qmd configuration.qmd
-curl -o pandoc_testsuite.md https://raw.githubusercontent.com/jgm/pandoc/main/test/testsuite.txt
+`download.sh` fetches every upstream document at a **pinned commit**, recorded in
+`PANDOC_REV` and `QUARTO_WEB_REV` at the top of the script. This is not
+housekeeping; several thresholds read these documents' exact size.
 
-# Large: Quarto authoring guide (complex)
-curl -o large_authoring.qmd https://raw.githubusercontent.com/quarto-dev/quarto-web/main/docs/authoring/markdown-basics.qmd
+`benches/lsp_incremental.rs` establishes that incremental speedup is a function
+of window share and nothing else, so a document that grows upstream moves every
+floor calibrated against it. That is not hypothetical: tracking `main` once
+grew `pandoc_manual.md` from 300 856 to 304 665 bytes, which slid a fixed edit
+from a 7.0% window to a 7.5% one and cost the two `pandoc_manual` floors
+5.0x -> 4.5x for no code change at all.
 
-# Table-heavy: Tables documentation
-curl -o tables.qmd https://raw.githubusercontent.com/quarto-dev/quarto-web/main/docs/authoring/tables.qmd
+Pinning also makes a gate run byte-stable. `pandoc_testsuite.md` is tracked in
+git, and re-downloading it from a moving branch dirtied the working tree on
+every run.
 
-# Math-heavy: Julia computational documents
-curl -o math.qmd https://raw.githubusercontent.com/quarto-dev/quarto-web/main/docs/computations/julia.qmd
-
-# Stress-test document from upstream pandoc
-curl -o pandoc_manual.md https://raw.githubusercontent.com/jgm/pandoc/refs/heads/main/MANUAL.txt
-```
+To bump a revision, change the variable, re-run `./download.sh`, and re-run
+`task bench:incremental-gate` in the same commit so the threshold movement is
+recorded next to its cause.
 
 ## Regenerating Benchmarks
 
