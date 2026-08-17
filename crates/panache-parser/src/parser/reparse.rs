@@ -2405,9 +2405,7 @@ mod tests {
     /// `"full_reparse"` is how they spell "every guard declined".
     struct Spliced {
         tree: SyntaxNode,
-        #[allow(dead_code)]
         errors: Vec<SyntaxError>,
-        #[allow(dead_code)]
         reparse_range: (usize, usize),
         strategy: &'static str,
     }

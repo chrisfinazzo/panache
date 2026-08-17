@@ -21,8 +21,8 @@ pub struct Spliced {
     pub tree: SyntaxNode,
     pub errors: Vec<SyntaxError>,
     pub reparse_range: (usize, usize),
-    /// `"section_window"`, `"suffix_window"`, or `"full_reparse"` when every
-    /// guard declined.
+    /// The tier that answered: `"token"`, `"region"`, `"section_window"`, or
+    /// `"suffix_window"` --- or `"full_reparse"` when every guard declined.
     pub strategy: &'static str,
 }
 
