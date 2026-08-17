@@ -183,11 +183,6 @@ fn legacy_root_uri(params: &InitializeParams) -> Option<Uri> {
         .and_then(|root_uri| serde_json::from_value(root_uri).ok())
 }
 
-/// Read the experimental incremental-parsing flag from a settings/options JSON
-/// value, tolerating the `settings.panache.*`, `panache.*`, and bare `*` nesting
-/// that different clients use for both `initializationOptions` and
-/// `workspace/didChangeConfiguration`. Returns `None` when the key is absent so
-/// callers can distinguish "unset" from "explicitly false".
 /// Environment override for the incremental-parsing flag, winning over
 /// whatever the client asked for.
 ///
@@ -204,6 +199,11 @@ pub(crate) fn incremental_parsing_env_override() -> Option<bool> {
     }
 }
 
+/// Read the incremental-parsing flag from a settings/options JSON value,
+/// tolerating the `settings.panache.*`, `panache.*`, and bare `*` nesting that
+/// different clients use for both `initializationOptions` and
+/// `workspace/didChangeConfiguration`. Returns `None` when the key is absent so
+/// callers can distinguish "unset" from "explicitly false".
 pub(crate) fn runtime_incremental_parsing_from_value(value: &Value) -> Option<bool> {
     fn get_bool(value: &Value, path: &[&str]) -> Option<bool> {
         let mut current = value;
@@ -221,13 +221,17 @@ pub(crate) fn runtime_incremental_parsing_from_value(value: &Value) -> Option<bo
     .or_else(|| get_bool(value, &["experimental", "incrementalParsing"]))
 }
 
+/// Incremental parsing is on unless something turns it off: the environment
+/// override first, then the client setting, then the default. The setting keeps
+/// its `experimental.` name, but its only remaining use is `false` --- a debug
+/// switch for ruling the feature out, not an opt-in.
 fn experimental_incremental_parsing_from_initialize(params: &InitializeParams) -> bool {
     incremental_parsing_env_override().unwrap_or_else(|| {
         params
             .initialization_options
             .as_ref()
             .and_then(runtime_incremental_parsing_from_value)
-            .unwrap_or(false)
+            .unwrap_or(true)
     })
 }
 

@@ -29,7 +29,7 @@ fn test_incremental_edit_simple() {
 }
 
 #[test]
-fn test_experimental_incremental_parsing_setting_defaults_to_off() {
+fn test_experimental_incremental_parsing_setting_defaults_to_on() {
     // This asserts the client-settings plumbing, which the environment
     // override deliberately bypasses.
     if incremental_parsing_forced_by_env() {
@@ -40,14 +40,16 @@ fn test_experimental_incremental_parsing_setting_defaults_to_off() {
     let mut server = TestLspServer::new();
 
     server.initialize(root_uri.as_str());
-    assert!(!server.experimental_incremental_parsing_enabled());
+    assert!(server.experimental_incremental_parsing_enabled());
 }
 
+/// The setting's only remaining use: an explicit `false` turns the incremental
+/// path off, which is what makes it a debug switch rather than dead weight.
 #[test]
-fn test_experimental_incremental_parsing_setting_can_be_enabled() {
-    // Needs the incremental flag on; the environment override can force it
-    // off for a flag-off suite run.
-    if incremental_parsing_forced_off() {
+fn test_experimental_incremental_parsing_setting_can_be_disabled() {
+    // This asserts the client-settings plumbing, which the environment
+    // override deliberately bypasses.
+    if incremental_parsing_forced_by_env() {
         return;
     }
     let temp_dir = tempfile::TempDir::new().unwrap();
@@ -60,14 +62,14 @@ fn test_experimental_incremental_parsing_setting_can_be_enabled() {
             "settings": {
                 "panache": {
                     "experimental": {
-                        "incrementalParsing": true
+                        "incrementalParsing": false
                     }
                 }
             }
         })),
     );
 
-    assert!(server.experimental_incremental_parsing_enabled());
+    assert!(!server.experimental_incremental_parsing_enabled());
 }
 
 #[test]

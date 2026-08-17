@@ -48,7 +48,7 @@ fn initialized_pulls_panache_configuration() {
 }
 
 /// The pull reply applies the runtime setting: a section object carrying
-/// `experimental.incrementalParsing = true` flips the flag live.
+/// `experimental.incrementalParsing = false` flips the flag live.
 #[test]
 fn configuration_reply_applies_runtime_setting() {
     // This asserts the client-settings plumbing, which the environment
@@ -60,8 +60,8 @@ fn configuration_reply_applies_runtime_setting() {
     server.initialize_pull_configuration("file:///workspace");
     server.initialized();
     assert!(
-        !server.experimental_incremental_parsing_enabled(),
-        "incremental parsing defaults off"
+        server.experimental_incremental_parsing_enabled(),
+        "incremental parsing defaults on"
     );
 
     let (id, _params) = drain_config_pulls(&server)
@@ -71,12 +71,12 @@ fn configuration_reply_applies_runtime_setting() {
     // A `section: "panache"` request returns the bare section object per item.
     server.send_client_response(
         id,
-        json!([{ "experimental": { "incrementalParsing": true } }]),
+        json!([{ "experimental": { "incrementalParsing": false } }]),
     );
 
     assert!(
-        server.experimental_incremental_parsing_enabled(),
-        "workspace/configuration reply should enable incremental parsing"
+        !server.experimental_incremental_parsing_enabled(),
+        "workspace/configuration reply should disable incremental parsing"
     );
 }
 
@@ -131,15 +131,28 @@ fn empty_configuration_reply_is_noop() {
         .next()
         .expect("a pull");
 
-    server.send_client_response(id, json!([]));
+    // Move off the default first, so a reply that is ignored and a reply that
+    // re-applies the default are distinguishable below.
+    server.send_client_response(
+        id,
+        json!([{ "experimental": { "incrementalParsing": false } }]),
+    );
     assert!(!server.experimental_incremental_parsing_enabled());
 
-    // A `null` section (client has no `panache` settings) is likewise ignored.
     server.did_change_configuration(json!(null));
     let (id2, _) = drain_config_pulls(&server)
         .into_iter()
         .next()
         .expect("a re-pull");
-    server.send_client_response(id2, json!([null]));
+    server.send_client_response(id2, json!([]));
+    assert!(!server.experimental_incremental_parsing_enabled());
+
+    // A `null` section (client has no `panache` settings) is likewise ignored.
+    server.did_change_configuration(json!(null));
+    let (id3, _) = drain_config_pulls(&server)
+        .into_iter()
+        .next()
+        .expect("a re-pull");
+    server.send_client_response(id3, json!([null]));
     assert!(!server.experimental_incremental_parsing_enabled());
 }

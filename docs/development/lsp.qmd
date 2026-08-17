@@ -29,13 +29,13 @@ consumer (request handlers, the linter, diagnostics) reads the tree from the
 revision and no way for a handler to see a tree that disagrees with the text it
 was handed.
 
-When `experimental.incrementalParsing` is on, `parsed_document` splices that
-tree off the previous parse instead of reparsing from scratch. The previous
-parse lives in a side channel beside salsa (`src/incremental.rs`), keyed on
-`(file, config)` and reused only when both the config value and the document's
-reference-definition set are unchanged --- retained blocks keep the resolution
-and options they were parsed with, so either changing invalidates them at a
-distance.
+`parsed_document` splices that tree off the previous parse instead of reparsing
+from scratch, which is the default; `experimental.incrementalParsing = false`
+turns it off for debugging. The previous parse lives in a side channel beside
+salsa (`src/incremental.rs`), keyed on `(file, config)` and reused only when
+both the config value and the document's reference-definition set are unchanged ---
+retained blocks keep the resolution and options they were parsed with, so either
+changing invalidates them at a distance.
 
 Four properties make reading and writing that channel from inside an otherwise
 pure query sound:
@@ -67,8 +67,9 @@ pure query sound:
   newer one; each is internally consistent, and a stale base only widens the
   next diff.
 
-Only the LSP admits a document to the channel, and only while the setting is on.
-With it off nothing is admitted, so every parse is the full parse it was before.
+Only the LSP admits a document to the channel, and only while the setting is on ---
+which it is unless a client or `PANACHE_INCREMENTAL_PARSING=0` says otherwise.
+Switched off, nothing is admitted, so every parse is a full parse.
 
 ### Durability and Invalidation Policy
 

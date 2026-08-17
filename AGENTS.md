@@ -313,8 +313,9 @@ read the release asset hygiene invariant before touching release workflows.
   materialize per request.
 - Incremental reparsing lives inside `parsed_document`, splicing off a base kept
   in a side channel (`src/incremental.rs`) that only LSP-admitted documents
-  enter. See `docs/development/lsp.qmd`; with `experimental.incrementalParsing`
-  off, nothing is admitted and every parse is a full parse.
+  enter. See `docs/development/lsp.qmd`; it is on by default, and with
+  `experimental.incrementalParsing = false` nothing is admitted and every parse
+  is a full parse.
 - Incremental sync mode with UTF-16/UTF-8 position conversion
   (`src/lsp/conversions.rs`, `src/lsp/line_index.rs`).
 - Request handlers live in `src/lsp/handlers/`, routed by `src/lsp/dispatch.rs`.

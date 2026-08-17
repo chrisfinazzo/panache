@@ -8,8 +8,8 @@ use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
-/// A pushed `didChangeConfiguration` flips the experimental incremental-parsing
-/// runtime setting live (it was previously only read once at `initialize`).
+/// A pushed `didChangeConfiguration` flips the incremental-parsing runtime
+/// setting live (it was previously only read once at `initialize`).
 #[test]
 fn did_change_configuration_updates_runtime_setting() {
     // This asserts the client-settings plumbing, which the environment
@@ -21,17 +21,31 @@ fn did_change_configuration_updates_runtime_setting() {
     server.initialize("file:///workspace");
     server.open_document("file:///workspace/doc.qmd", "# Title\n", "quarto");
     assert!(
-        !server.experimental_incremental_parsing_enabled(),
-        "incremental parsing defaults off"
+        server.experimental_incremental_parsing_enabled(),
+        "incremental parsing defaults on"
     );
 
+    server.did_change_configuration(json!({
+        "settings": { "panache": { "experimental": { "incrementalParsing": false } } }
+    }));
+
+    assert!(
+        !server.experimental_incremental_parsing_enabled(),
+        "didChangeConfiguration should disable incremental parsing without a restart"
+    );
+
+    // ... and back on, exercising the re-admission of already-open documents.
     server.did_change_configuration(json!({
         "settings": { "panache": { "experimental": { "incrementalParsing": true } } }
     }));
 
     assert!(
         server.experimental_incremental_parsing_enabled(),
-        "didChangeConfiguration should enable incremental parsing without a restart"
+        "didChangeConfiguration should re-enable incremental parsing"
+    );
+    assert!(
+        server.document_reparse_admitted("file:///workspace/doc.qmd"),
+        "re-enabling must re-admit documents opened while it was off"
     );
 }
 

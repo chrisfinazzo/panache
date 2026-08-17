@@ -45,9 +45,20 @@ pub struct DocumentState {
     pub salsa_config: crate::salsa::FileConfig,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LspRuntimeSettings {
     pub experimental_incremental_parsing: bool,
+}
+
+impl Default for LspRuntimeSettings {
+    /// Incremental parsing is on by default, so a `GlobalState` built before
+    /// `initialize` agrees with what the initialize path resolves to when the
+    /// client says nothing.
+    fn default() -> Self {
+        Self {
+            experimental_incremental_parsing: true,
+        }
+    }
 }
 
 fn to_io<E: std::fmt::Display>(e: E) -> std::io::Error {
