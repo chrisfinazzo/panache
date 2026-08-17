@@ -103,7 +103,7 @@ configure it to run `air` on R code blocks and `ruff` on Python code blocks:
 
 ```toml
 [formatters]
-r = "air"
+r = "arity"
 python = "ruff"
 javascript = "prettier"
 typescript = "prettier" # Reuse same formatter
@@ -146,8 +146,7 @@ panache lint **/*.{qmd,md}
 As with formatting, Panache supports external linters for code blocks. These are
 configured in the `[linters]` section of the configuration, but due to the
 complexity of linting, including dealing with auto-fixing, external linters
-cannot be customized and only support presets and at the moment only support R
-via the `jarl` linter:
+cannot be customized and only support presets:
 
 ```toml
 # Enable R linting
@@ -197,10 +196,9 @@ line-ending = "auto"
 # External code formatters (opt-in)
 [formatters]
 python = ["isort", "black"] # Sequential formatting
-r = "air"                   # Built-in preset
+latex = "badness"           # Built-in preset
 javascript = "prettier"     # Reusable definitions
 typescript = "prettier"
-yaml = "yamlfmt"            # Formats both code blocks AND frontmatter
 
 # Customize formatters
 [formatters.prettier]
@@ -208,7 +206,7 @@ prepend-args = ["--print-width=100"]
 
 # External code linters
 [linters]
-r = "jarl"      # Enable R linting
+julia = "fatou" # Enable Julia linting
 python = "ruff"
 ```
 
@@ -248,7 +246,7 @@ Then add Panache to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jolars/panache-pre-commit
-    rev: v2.43.1 # Use the latest version
+    rev: v3.4.0 # Use the latest version
     hooks:
       - id: panache-format # Format files
       - id: panache-lint # Lint and auto-fix issues
@@ -256,10 +254,7 @@ repos:
 
 > **Note:** The hooks live in
 > [`jolars/panache-pre-commit`](https://github.com/jolars/panache-pre-commit), a
-> thin shim repo. This avoids `pre-commit autoupdate` resolving to unrelated
-> sub-package tags from this monorepo (e.g. `panache-code-*`). If you currently
-> point at `https://github.com/jolars/panache`, update the `repo:` URL and run
-> `pre-commit autoupdate`.
+> thin shim repo.
 
 Install the hooks:
 
