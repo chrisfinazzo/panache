@@ -250,17 +250,19 @@ records any deviation or discovered follow-up as an indented bullet under the
 phase. Never leave a phase half-landed: partial work is noted in the status line
 with the exact next step.
 
-**Current status / next step:** Phases 1--6a done. There is one authoritative
+**Current status / next step:** Phases 1--6b done. There is one authoritative
 tree, the reparse lives inside salsa's `parsed_document`, the window-size cutoff
-keeps a losing shape from ever being slower than a full parse, and the bench
-thresholds are machine-checked (`task bench:incremental-gate`).
+keeps a losing shape from ever being slower than a full parse, the bench
+thresholds are machine-checked (`task bench:incremental-gate`), and
+**incremental parsing is on by default**. The setting that used to gate it,
+`experimental.incrementalParsing`, is deprecated toward removal in favour of
+`PANACHE_INCREMENTAL_PARSING`.
 
-Phase 6b's *code* is landed --- the default is on everywhere it is read, the
-setting now means "write `false` to switch it off", and that setting is
-deprecated toward removal in favour of `PANACHE_INCREMENTAL_PARSING`. The phase
-box stays unchecked on the last gate item only: oracle-clean fuzz at 10x passes,
-the workspace and LSP suites pass with the flag forced both ways, both bench
-gates pass, and the week of oracle-live dogfooding has not been run.
+Phase 6b's gate is met on all four items: oracle-clean fuzz at 10x, the
+workspace and LSP suites green with the flag forced both ways, both bench gates
+green, and the week of oracle-live dogfooding done with zero panics.
+
+Next step is Phase 7 (token tier).
 
 The two 5x floors that failed were **lowered to 4.5x, and the cause was the
 corpus rather than the code**. `benches/documents/download.sh` fetches
@@ -570,7 +572,7 @@ reproducers are synthetic and pin their strategy instead.
     on shared runners would land flaky next to the flip. The mode and the task
     target are what make wiring it a later one-liner.
 
-- [ ] Phase 6b: default flip --- incremental parsing is **always on**, with no
+- [x] Phase 6b: default flip --- incremental parsing is **always on**, with no
   new setting. `panache.experimental.incrementalParsing` stays exactly where
   it is and keeps working, but inverts its meaning: absent means on, and the
   only reason to write it is `false`, which turns the side channel off for
@@ -628,7 +630,10 @@ reproducers are synthetic and pin their strategy instead.
       the extension was speaking for users who had said nothing.
   - Gate: oracle-clean fuzz at 10x iterations; workspace + LSP suite green with
     the flag forced on and off; 1 week oracle-live dogfooding with zero panics;
-    and `task bench:incremental-gate` green.
+    and `task bench:incremental-gate` green. **All four met.** The dogfooding
+    week was run by the maintainer on their own editing, which is the only way
+    that item was ever going to be satisfied --- it is wall-clock use, not a
+    command anyone can run on demand.
   - **The bench thresholds are no longer restated here.** Phase 6a moved them
     into the cases themselves (`Expect` in `benches/lsp_incremental.rs`), which
     is the only copy: a number in this file could not be checked and drifted
