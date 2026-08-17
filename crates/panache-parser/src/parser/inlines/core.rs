@@ -203,7 +203,49 @@ fn try_emit_plain_text_fast_path_with_mask(
 /// trigger any IR-recognised construct or dispatcher branch under the
 /// current dialect/extensions. Used by the plain-text fast path to scan
 /// inline ranges in a single pass.
-fn structural_byte_mask(config: &ParserOptions) -> [bool; 256] {
+///
+/// This is the grammar's own answer to "which bytes are inline-structural",
+/// which is why the incremental token tier
+/// ([`crate::parser::reparse`]) builds its ban set from it rather than
+/// maintaining a parallel hand-written list that could rot apart from the
+/// dispatcher. That consumer wants the set *without* the bare-URI scheme
+/// alphabet, so the two halves are separate functions --- see
+/// [`structural_byte_mask_without_uri_schemes`].
+pub(crate) fn structural_byte_mask(config: &ParserOptions) -> [bool; 256] {
+    let mut mask = structural_byte_mask_without_uri_schemes(config);
+
+    // Bare-URI autolinks (`http://...` without `<>`) have no
+    // leading-byte gate in the dispatcher — `try_parse_bare_uri`
+    // probes for a URI scheme starting at every byte. Flag all
+    // ASCII alphabetic bytes so the bulk-skip stops on every
+    // potential scheme starter. This effectively disables the
+    // bulk-skip benefit for prose under GFM-style flavors but
+    // preserves correctness; ASCII digits / punctuation / non-ASCII
+    // bytes still skip cleanly.
+    if config.extensions.autolink_bare_uris {
+        for b in b'a'..=b'z' {
+            mask[b as usize] = true;
+        }
+        for b in b'A'..=b'Z' {
+            mask[b as usize] = true;
+        }
+    }
+
+    mask
+}
+
+/// [`structural_byte_mask`] without the bare-URI scheme alphabet.
+///
+/// Every byte here is structural because *it* opens a construct. The
+/// alphabetic bytes the full mask adds are different in kind: they are not
+/// construct openers, they are "a scheme could start here", and the only way
+/// to find out is to probe. A consumer that probes anyway wants this half.
+///
+/// The incremental token tier is that consumer. It refuses any edit whose
+/// token contains a byte from this set, and answers the bare-URI question by
+/// re-parsing the token's text in isolation instead --- which is exact, where
+/// banning every letter would reject all prose under GFM and Quarto.
+pub(crate) fn structural_byte_mask_without_uri_schemes(config: &ParserOptions) -> [bool; 256] {
     let mut mask = [false; 256];
     let exts = &config.extensions;
     let pandoc = config.dialect == Dialect::Pandoc;
@@ -286,23 +328,6 @@ fn structural_byte_mask(config: &ParserOptions) -> [bool; 256] {
     // `{` regardless of the `quarto_shortcodes` extension flag, so
     // `{` must always be flagged here.
     mask[b'{' as usize] = true;
-
-    // Bare-URI autolinks (`http://...` without `<>`) have no
-    // leading-byte gate in the dispatcher — `try_parse_bare_uri`
-    // probes for a URI scheme starting at every byte. Flag all
-    // ASCII alphabetic bytes so the bulk-skip stops on every
-    // potential scheme starter. This effectively disables the
-    // bulk-skip benefit for prose under GFM-style flavors but
-    // preserves correctness; ASCII digits / punctuation / non-ASCII
-    // bytes still skip cleanly.
-    if exts.autolink_bare_uris {
-        for b in b'a'..=b'z' {
-            mask[b as usize] = true;
-        }
-        for b in b'A'..=b'Z' {
-            mask[b as usize] = true;
-        }
-    }
 
     mask
 }
