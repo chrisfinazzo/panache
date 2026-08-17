@@ -603,6 +603,25 @@ reproducers are synthetic and pin their strategy instead.
     switch is lower than the cost of carrying two keys forever. The *internal*
     name (`runtime_settings.experimental_incremental_parsing`) has no wire
     impact and can be renamed freely --- Phase 9 material.
+    - **Resolved a third way: deprecated toward removal, with no replacement
+      key.** A rename was the wrong question --- the setting has no successor
+      worth naming, because `PANACHE_INCREMENTAL_PARSING` already does the one
+      job it has left. So the key is marked deprecated (VS Code
+      `markdownDeprecationMessage`, docs, README) and still honored, the server
+      warns once at `initialize` when a client sends it, and it goes away in a
+      future release. That is the alias-and-migration cost avoided *and* the
+      misnomer retired, at the price of one release cycle's notice.
+    - The warning fires only on the initialize path, not on
+      `didChangeConfiguration`. Clients that mirror a whole settings section ---
+      VS Code among them --- push the key on every configuration change whether
+      the user set it or not, so warning there would report a problem nobody
+      has.
+    - The VS Code extension now forwards the setting **only when a user actually
+      set it** (`explicitSetting` via `config.inspect`), instead of passing its
+      own `package.json` default down. An untouched configuration therefore has
+      the server's default govern it, which is what this phase wanted in the
+      first place: the flip needed changing in three places precisely because
+      the extension was speaking for users who had said nothing.
   - Gate: oracle-clean fuzz at 10x iterations; workspace + LSP suite green with
     the flag forced on and off; 1 week oracle-live dogfooding with zero panics;
     and `task bench:incremental-gate` green.
