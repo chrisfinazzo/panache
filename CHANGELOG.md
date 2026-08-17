@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+The major new change in this version is that incremental parsing is on by default. It was previously opt-in and controlled by `experimental.incrementalParsing`, but that setting is now true by default and deprecated. Please let me know if you encounter any issues with this change.
+
 ## [3.4.0](https://github.com/jolars/panache/compare/v3.3.0...v3.4.0) (2026-08-14)
 
 This update add a compatibility layer for Pandoc 3.10. Panache now parses Pandoc
