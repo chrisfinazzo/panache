@@ -151,16 +151,45 @@ The write phase is what `did_change` does before any parse: splice the text,
 update the line index, hand salsa a new input. `benches/lsp_write_phase.rs`
 times it (`task bench:write-phase-gate`) and its module doc carries the tables;
 the three findings from fatou's 2026-08-16 `Arc<str>`-vs-rope survey that
-prompted the bench are all fixed, taking a keystroke on a 293 KB document from
-282 us to 98 us.
+prompted the bench are all fixed, and so is the per-keystroke line-index rebuild
+that survived them --- taking a keystroke on a 297 KB document from 282 us to
+8.5 us. What is left is the two splice passes that are the floor for an
+`Arc<str>` input on stable, so that row is now memory bandwidth and nothing
+else.
 
-- [ ] **Two full scans per keystroke remain on a large document** --- the line
-  index is rebuilt, on top of the two splice passes that are the floor for
-  an `Arc<str>` input on stable. Maintaining an `Arc<LineIndex>` on
-  `DocumentState`, validated against salsa's text by `Arc::ptr_eq` so a
-  stale one is discarded rather than trusted, would remove them. The salsa
-  `line_index` memo does not help: it is warm only when a reader has run
-  since the last keystroke, which during a typing burst it has not.
+- [ ] **The *reader* still rebuilds the index once per revision.** The write
+  phase keeps its own on `GlobalState`, which is main-thread-only, so the
+  first worker read after a keystroke re-executes the `line_index` memo over
+  the whole document. Moving the cache into a `SalsaDb` side channel keyed
+  on `FileText` (the shape `src/incremental.rs` already uses, validated the
+  same way by `Arc::ptr_eq`) would let one index serve both sides. Costs a
+  lock on the read path and a purity argument for reading it from a tracked
+  query; worth it only once a profile shows the reader-side rebuild
+  mattering.
+
+- [ ] **`handlers/diagnostics.rs` builds the index twice per publish** --- the
+  `line_index` memo at the top, then a fresh `LineIndex::new` over the same
+  document further down (which also copies the text into a `String` to do
+  it). Settle path, not the keystroke path, so it is off every bench this
+  repo has; thread the memo's `Arc` through instead.
+
+- [ ] **`set_text_if_changed`'s content compare is *not* a second scan and does
+  not need bypassing.** Established by reading it, not by the clock: its
+  `**current == *text` bottoms out in a slice compare that checks length
+  first, so any insert or delete short-circuits, and only an equal-length
+  edit (typing over a same-length selection, an equal-length completion, a
+  full resync) reaches the memcmp at all. Recorded so the "second near-full
+  scan per keystroke" is not re-derived. The guard stays the single point of
+  truth for spurious invalidation, which
+  `an_identical_write_executes_nothing` pins.
+
+- [ ] **`did_change` writes text by *path* but reads its input by
+  `salsa_file`.** A preceding `did_delete_files`/`did_rename_files` evicts
+  the path->id binding, so a later write can mint a fresh `FileText` while
+  the document map still names the old one. Predates the line-index cache
+  (whose store-side freshness check turns it into a missed reuse rather than
+  a wrong answer), but it is a real divergence and worth closing by writing
+  through `salsa_file` directly.
 
 - [ ] **Bypassing `diff_edit` for a single staged edit is fatou's remaining
   pipeline idea and does *not* pay here** --- measured, `diff_edit` is 7.1

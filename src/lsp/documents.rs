@@ -235,11 +235,12 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     // `parsed_document` recovers the one it needs by diffing the whole texts.
     //
     // One index serves the whole notification and is patched per change rather
-    // than rebuilt. It comes from the salsa memo, which is already warm whenever
-    // a reader has run since the last keystroke; when it is not, building it
-    // costs what the old per-change rebuild cost once. `Arc::make_mut` clones
-    // the tables at most once per notification, never once per change.
-    let mut index = crate::lsp::line_index::line_index(&gs.salsa, salsa_file).clone();
+    // than rebuilt. It is the one the previous edit left behind, taken out of
+    // `GlobalState` -- so this holds the only reference and the `Arc::make_mut`
+    // below mutates the tables in place rather than copying them. Only a first
+    // edit, or one whose text moved out from under us, falls back to the salsa
+    // memo (which every keystroke invalidates, so during a burst it is cold).
+    let mut index = gs.take_line_index(salsa_file);
     for change in params.content_changes.iter() {
         match change.range {
             Some(range) => {
@@ -264,6 +265,11 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
         gs.salsa
             .update_input_text(salsa_file, text, Durability::LOW);
     }
+
+    // Hand the patched index back for the next keystroke to splice against.
+    // This is `GlobalState`'s own side state, not `DocumentState`, so it costs
+    // no write to the document map -- see below.
+    gs.store_line_index(salsa_file, index);
 
     // Nothing else to write: `file_id`, `salsa_file` and `salsa_config` are all
     // invariant across a content edit, so the document map is untouched -- which
@@ -325,6 +331,7 @@ pub(crate) fn did_close(gs: &mut GlobalState, params: DidCloseTextDocumentParams
     if let Some(state) = gs.document_map.get(&uri_string) {
         let salsa_file = state.salsa_file;
         gs.salsa.reparse_retire_file(salsa_file);
+        gs.retire_line_index(salsa_file);
     }
     gs.document_map_mut().remove(&uri_string);
 

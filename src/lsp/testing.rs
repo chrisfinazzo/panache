@@ -642,6 +642,20 @@ impl LspTester {
         )
     }
 
+    /// How many times the write phase has built a line index from scratch rather
+    /// than patching the one the previous edit left behind. Reuse changes
+    /// nothing observable, so a regression to always-rebuilding would pass every
+    /// other test in the suite.
+    pub fn line_index_rebuilds(&self) -> u64 {
+        self.gs.line_index_rebuilds
+    }
+
+    /// How many documents currently hold a cached write-phase line index. Pins
+    /// the "bounded by the open-document count" claim.
+    pub fn cached_line_indexes(&self) -> usize {
+        self.gs.cached_line_index_count()
+    }
+
     pub fn get_cached_file_text(&self, path: &std::path::Path) -> Option<String> {
         let file = self.gs.salsa.file_text(path.to_path_buf())?;
         Some(file.content_or_empty(&self.gs.salsa).to_string())

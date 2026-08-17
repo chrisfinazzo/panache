@@ -31,6 +31,7 @@ mod lsp {
     pub(super) mod test_goto_definition;
     pub(super) mod test_hover;
     pub(super) mod test_incremental_edits;
+    pub(super) mod test_line_index_reuse;
     pub(super) mod test_link_conversion;
     pub(super) mod test_linked_editing_range;
     pub(super) mod test_navigation;

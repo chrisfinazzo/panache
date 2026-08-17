@@ -74,6 +74,18 @@ impl LineIndex {
         Arc::clone(&self.text)
     }
 
+    /// Whether this index was built for exactly `text` --- the same allocation,
+    /// not merely equal bytes.
+    ///
+    /// An `Arc<str>` is immutable and an index only ever *replaces* its handle
+    /// (see [`replace_range`](Self::replace_range)), never mutates through it,
+    /// so a shared allocation proves the tables describe those bytes without
+    /// reading one. The holder keeps a strong reference, so the allocation
+    /// cannot be freed and a different string land at the same address.
+    pub(crate) fn indexes(&self, text: &Arc<str>) -> bool {
+        Arc::ptr_eq(&self.text, text)
+    }
+
     /// Total byte length of the indexed document.
     pub(crate) fn len(&self) -> usize {
         self.text.len()
@@ -470,6 +482,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The write phase reuses an index only when it still names the allocation
+    /// salsa holds, so `indexes` must be strictly about identity: equal bytes in
+    /// a second allocation are exactly the case where reuse would be a guess.
+    #[test]
+    fn an_index_only_claims_the_allocation_it_was_built_for() {
+        let text: Arc<str> = Arc::from("ab\ncd\n");
+        let mut index = LineIndex::from_arc(Arc::clone(&text));
+        assert!(index.indexes(&text));
+
+        let twin: Arc<str> = Arc::from("ab\ncd\n");
+        assert_eq!(&*twin, &*text);
+        assert!(!index.indexes(&twin));
+
+        index.replace_range(2..2, "x");
+        assert!(!index.indexes(&text));
+        assert!(index.indexes(&index.text_arc()));
     }
 
     /// An edit replaces the text allocation rather than mutating it, so a handle

@@ -15,17 +15,23 @@
 //!
 //! `documents::did_change` (`src/lsp/documents.rs`), in order:
 //!
-//! 1. `load_config_notifying` --- an ancestor-directory walk, a `panache.toml`
-//!    read, and two TOML parses, per keystroke.
-//! 2. `content_or_empty(..).to_string()` --- a full copy of the document out of
-//!    salsa.
-//! 3. `apply_content_change` per change (`src/lsp/conversions.rs`) --- a fresh
-//!    `String` per change, and a from-scratch `LineIndex::new` per ranged
-//!    change.
-//! 4. `update_file_text` --- `Arc::from(String)`, another full copy
-//!    (`src/salsa.rs`).
-//! 5. `intern_config` --- a linear scan comparing whole `Config` values.
-//! 6. `arm_settle` --- stamps a deadline. No parse, no dispatch.
+//! 1. `take_line_index` --- the index the previous edit left behind, taken out
+//!    of `GlobalState` so the caller holds the only reference. Falls back to
+//!    the salsa `line_index` memo (a full rebuild) only on a first edit or when
+//!    another writer has moved the text underneath.
+//! 2. `content_change_span` + `LineIndex::replace_range` per change
+//!    (`src/lsp/conversions.rs`, `src/lsp/line_index.rs`) --- a binary search,
+//!    an in-place table patch, and the two copies that splicing an `Arc<str>`
+//!    costs.
+//! 3. `update_file_text` --- hands salsa the index's own `Arc` (a refcount
+//!    bump, not a copy) (`src/salsa.rs`).
+//! 4. `store_line_index` + `arm_settle` --- a map insert and a deadline stamp.
+//!    No parse, no dispatch.
+//!
+//! What is *not* here is the record of what came off this path: config
+//! resolution per keystroke, a copy of the document out of salsa, a `String`
+//! and a `LineIndex::new` per change, and finally the per-notification index
+//! rebuild. The results tables below are that history.
 //!
 //! # Rows
 //!
@@ -134,6 +140,44 @@
 //! declines at that position or host-side work this bench includes and that one
 //! does not. It is recorded in `TODO.md` as an open item.
 //!
+//! Finally, the write phase stopped rebuilding the line index. It read it from
+//! the salsa `line_index` memo, which every keystroke invalidates --- so inside
+//! a typing burst, which is the only time the write phase runs, it was always
+//! cold and always re-scanned the whole document. `GlobalState` now keeps the
+//! patched index per open document and hands it to the next keystroke, which
+//! also removes the `Arc::make_mut` clone of the tables (the memo used to hold
+//! the other reference; taking the index out of the cache leaves one). Same
+//! machine, one run pair, median us:
+//!
+//! ```text
+//!                            small (756 B)   medium (24 KB)   large (297 KB)
+//! config load + intern             52.42            52.95            54.10
+//! didChange, 1-char edit            0.93             6.51           109.33
+//! didChange, 4 changes              1.16             8.70           139.37
+//! didChange + parse                21.60           991.75         1 386.59
+//! ```
+//!
+//! ```text
+//!                            small (756 B)   medium (24 KB)   large (297 KB)
+//! config load + intern             52.41            52.73            52.71
+//! didChange, 1-char edit            0.35             1.10             8.54
+//! didChange, 4 changes              0.56             3.17            34.27
+//! didChange + parse                20.75           962.79         1 207.62
+//! ```
+//!
+//! 2.7x on a small document, 5.9x on a medium one, and 12.8x on a large one ---
+//! the last against an original baseline of 282 us, so 33x in total. What is
+//! left is the two copies `LineIndex::replace_range` makes to splice an
+//! `Arc<str>`: at 8.54 us for 297 KB the large row is now memory bandwidth and
+//! nothing else, which is the floor this bench has been driving toward.
+//!
+//! Two consequences for the checks below. The keystroke's medium -> large
+//! scaling fell from 16.8x to 7.8x, which is the sharpest remaining signal that
+//! the rebuild has not come back, so it is ratcheted hard. The four-change
+//! fan-out *rose*, to almost exactly 4.0x on the large document, and that is
+//! correct: with the shared fixed cost gone, four changes are four splices. See
+//! [`BATCH_FANOUT_MAX`] for why that check has lost its original meaning.
+//!
 //! Note the direction of the share check below: a cheaper parse is a smaller
 //! denominator, so the write phase's share *rises* when the feature works.
 //!
@@ -198,36 +242,59 @@ const CONFIG_SCALING_MAX: f64 = 1.5;
 /// the slack covers cache effects that make the large document worse than
 /// proportional.
 ///
-/// Measured at 16-21x against a 10x byte ratio: the per-byte cost degrades with
-/// size, since a 293 KB document falls out of cache where a 29 KB one does not.
-/// So the useful reading of this check is asymptotic, not constant-factor --- it
-/// catches work that is quadratic in the document (a per-change rescan of a
-/// multi-change notification lands well past it) rather than a drift of tens of
-/// percent. The fan-out check below is the sharp one.
-const KEYSTROKE_SCALING_MAX: f64 = 25.0;
+/// Measured at 7.8x (8.54 / 1.10) once the write phase stopped rebuilding the
+/// line index, against 16.3-21x while it did. That collapse is what makes this
+/// the sharp check now: a returning full-document scan puts the large row back
+/// near 109 us against a medium row that barely moves, i.e. straight back to
+/// ~17x. The ceiling keeps ~1.5x headroom over the measurement, the same slack
+/// the 25.0 it replaces encoded.
+///
+/// Caveat on the denominator: the medium row is now 1.10 us, *below*
+/// [`MIN_ABSOLUTE_US`], while the waiver only fires on the large row. So this
+/// ratio is taken over a near-noise-floor denominator and will drift more than
+/// it used to. It is kept because nothing else catches the regression it
+/// catches; if the medium row gets much cheaper still, re-base it on a document
+/// between these two rather than widening the ceiling.
+const KEYSTROKE_SCALING_MAX: f64 = 12.0;
+
+/// The same check for a four-change notification, which needs its own ceiling
+/// now that the two have diverged: measured at 9.9x (36.60 / 3.70) against the
+/// keystroke row's 7.3x, because four splices leave the medium row's small
+/// fixed cost a smaller share of the total than one splice does. Sharing
+/// [`KEYSTROKE_SCALING_MAX`] would either fail this row or have to be loosened
+/// enough to blunt the row that matters. Same ~1.5x headroom.
+const BATCH_SCALING_MAX: f64 = 15.0;
 
 /// The write phase's ceiling as a share of the end-to-end keystroke. The write
 /// phase runs on the main loop and the parse does not, so this is the number
-/// that decides whether typing stays responsive. Measured at 4.6% / 0.7% / 6.4%
-/// (small / medium / large) with the region tier live, against 4.1% / 0.6% /
-/// 2.6% before it and 1.1% / 2.8% / 2.0% before the flip.
+/// that decides whether typing stays responsive. Measured at 1.7% / 0.1% / 0.7%
+/// (small / medium / large) once the line index stopped being rebuilt, against
+/// 4.6% / 0.7% / 6.4% before it, 4.1% / 0.6% / 2.6% before the region tier, and
+/// 1.1% / 2.8% / 2.0% before the incremental flip.
 ///
-/// The large row more than doubled without the write phase changing at all,
-/// which is the direction the note below predicts: a cheaper parse is a smaller
-/// denominator, so this share *rises* when the parser gets faster. The headroom
-/// is wide for exactly that reason, and making the parser faster must not fail
+/// Ratcheted to 5%, which is ~3x the worst measured share. It is deliberately
+/// not tighter: a cheaper parse is a smaller denominator, so this share *rises*
+/// when the parser gets faster (the large row more than doubled once, without
+/// the write phase changing at all). Making the parser faster must not fail
 /// this gate.
-const KEYSTROKE_SHARE_MAX: f64 = 0.15;
+const KEYSTROKE_SHARE_MAX: f64 = 0.05;
 
-/// Four changes in one notification against one: `did_change` loops
-/// `apply_content_change` per change, so today each change pays its own full
-/// copy *and* its own `LineIndex::new`. A per-notification splice collapses
-/// this toward 1.0.
+/// Four changes in one notification against one. Measured at 1.6x / 2.9x / 4.0x
+/// (small / medium / large).
 ///
-/// Measured at 1.4-1.5x now that one index serves the whole notification. The
-/// residual is the four splices themselves, which are real work; the ceiling
-/// catches a return to per-change rebuilding, which showed as 3-4x.
-const BATCH_FANOUT_MAX: f64 = 2.5;
+/// **This check no longer means what it was written to mean.** It existed to
+/// catch a return to per-change rebuilding, which showed as 3-4x against a
+/// 1.4-1.5x baseline --- but that gap was an artifact of a large *shared* fixed
+/// cost per notification, and removing the index rebuild removed it. Four
+/// changes are now four splices and essentially nothing else, so the honest
+/// floor is 4.0x, which is also roughly what per-change rebuilding would
+/// produce. The two are no longer distinguishable here;
+/// [`KEYSTROKE_SCALING_MAX`] is what catches that regression now.
+///
+/// What survives is a ceiling on work that is *worse* than linear in the change
+/// count --- a per-change rescan of the whole notification, say. Hence 5.0: just
+/// above the four-splice floor, and far below anything quadratic.
+const BATCH_FANOUT_MAX: f64 = 5.0;
 
 /// The mode the thresholds above were calibrated against: the shipped default,
 /// which is on. Incremental parsing changes what the end-to-end row measures,
@@ -305,10 +372,10 @@ impl Row {
                 max_scaling: Some(KEYSTROKE_SCALING_MAX),
                 max_share_of_end_to_end: Some(KEYSTROKE_SHARE_MAX),
             },
-            // Same, plus the per-change fan-out checked separately against
-            // `keystroke` (see `BATCH_FANOUT_MAX`).
+            // Same, under its own ceiling, plus the per-change fan-out checked
+            // separately against `keystroke` (see `BATCH_FANOUT_MAX`).
             Row::Batch4 => Contract {
-                max_scaling: Some(KEYSTROKE_SCALING_MAX),
+                max_scaling: Some(BATCH_SCALING_MAX),
                 max_share_of_end_to_end: None,
             },
             // The denominator. It is the parse, so it has no ceiling of its own

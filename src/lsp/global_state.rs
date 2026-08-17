@@ -431,6 +431,33 @@ pub(crate) struct GlobalState {
     /// configs at most, so the linear scan is cheap.
     config_intern: Vec<(crate::Config, crate::salsa::FileConfig)>,
 
+    /// The line index the write phase last left behind, per open document.
+    ///
+    /// [`crate::lsp::documents::did_change`] patches an index rather than
+    /// rebuilding one, and the salsa `line_index` memo cannot supply the one to
+    /// patch: every keystroke invalidates it, and inside a typing burst no
+    /// reader re-runs it, so it is cold exactly when the write phase needs it.
+    /// This is the warm copy.
+    ///
+    /// An entry is never *trusted*: [`Self::take_line_index`] uses it only while
+    /// it still shares the text allocation salsa holds, which makes this a pure
+    /// memo of `line_index(db, file)` --- a hit returns bit-identical tables,
+    /// and every other writer of the text (a watcher event, a disk resync, a
+    /// reopen) invalidates it without knowing this cache exists.
+    ///
+    /// Bounded by the open-document count: only the write phase inserts, only
+    /// for a document already in [`Self::document_map`], and `did_close`
+    /// retires.
+    line_index_cache: HashMap<crate::salsa::FileText, Arc<crate::lsp::line_index::LineIndex>>,
+
+    /// How many times the write phase has had to build a line index from
+    /// scratch instead of patching the one the previous edit left behind.
+    ///
+    /// Reuse changes nothing observable, so without a counter a regression to
+    /// rebuilding on every keystroke would leave the whole suite green. Read by
+    /// the test harness only.
+    pub(crate) line_index_rebuilds: u64,
+
     pub(crate) pool: TaskPool<Task>,
     /// Dedicated single-thread pool for formatting requests. Matches
     /// rust-analyzer's split: external formatters can block for hundreds of
@@ -501,6 +528,8 @@ impl GlobalState {
             diagnostics: DiagnosticCollection::default(),
             salsa: crate::salsa::SalsaDb::default(),
             config_intern: Vec::new(),
+            line_index_cache: HashMap::new(),
+            line_index_rebuilds: 0,
             pool,
             fmt_pool,
             task_receiver,
@@ -567,6 +596,71 @@ impl GlobalState {
             .to(config.clone());
         self.config_intern.push((config, handle));
         handle
+    }
+
+    /// `file`'s line index, ready to be patched, **taken** out of
+    /// [`Self::line_index_cache`].
+    ///
+    /// Taking rather than cloning is what lets the caller's `Arc::make_mut`
+    /// mutate the tables in place: it then holds the only reference. The caller
+    /// hands the index back with [`Self::store_line_index`]; one that does not
+    /// (an early return, a panic) merely leaves the next read to rebuild, since
+    /// the entry is already gone.
+    ///
+    /// The cached index is used only when it still names the very allocation
+    /// salsa holds, so a hit is bit-identical to what the `line_index` memo
+    /// would compute for the same input --- which is what the fallback does.
+    pub(crate) fn take_line_index(
+        &mut self,
+        file: crate::salsa::FileText,
+    ) -> Arc<crate::lsp::line_index::LineIndex> {
+        // Cloned out of salsa (a refcount bump) so the immutable borrow of the
+        // database ends before the cache is mutated.
+        let current = file.text(&self.salsa).clone();
+        // The entry is removed whether or not it validates: a stale one is
+        // dropped rather than kept, since it pins a text allocation nothing else
+        // references.
+        if let Some(current) = current.as_ref()
+            && let Some(cached) = self.line_index_cache.remove(&file)
+            && cached.indexes(current)
+        {
+            return cached;
+        }
+        self.line_index_rebuilds += 1;
+        crate::lsp::line_index::line_index(&self.salsa, file).clone()
+    }
+
+    /// Keep `index` as `file`'s line index for the next edit.
+    ///
+    /// Stored only when salsa really does hold the text `index` was built for,
+    /// so the cache never carries a claim that is already false. It can be
+    /// false: an edit that reproduces the current bytes is skipped by
+    /// `set_text_if_changed`, which leaves the older, equal allocation in place.
+    pub(crate) fn store_line_index(
+        &mut self,
+        file: crate::salsa::FileText,
+        index: Arc<crate::lsp::line_index::LineIndex>,
+    ) {
+        let current = file.text(&self.salsa).clone();
+        match current.as_ref() {
+            Some(current) if index.indexes(current) => {
+                self.line_index_cache.insert(file, index);
+            }
+            _ => {
+                self.line_index_cache.remove(&file);
+            }
+        }
+    }
+
+    /// Forget `file`'s line index, when its document closes.
+    pub(crate) fn retire_line_index(&mut self, file: crate::salsa::FileText) {
+        self.line_index_cache.remove(&file);
+    }
+
+    /// How many documents currently hold a cached write-phase line index
+    /// (test-only: nothing in production asks).
+    pub(crate) fn cached_line_index_count(&self) -> usize {
+        self.line_index_cache.len()
     }
 
     /// A cheap read snapshot for a worker thread.
