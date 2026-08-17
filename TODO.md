@@ -237,10 +237,12 @@ reparse must yield a green tree and syntax-error vector byte-identical to a full
 parse of the edited text, enforced by a `#[cfg(debug_assertions)]` oracle on
 every reparse. Every guard failure bails to full parse --- never an error.
 
-Work happens on the `feat/incremental-parsing-graduation` branch; the user files
-the PR themselves. Full design detail (phase entry/exit criteria, the
-salsa-unification design, flip acceptance criteria) lives in the plan document
-at `~/.claude/plans/i-want-to-promote-splendid-stardust.md`.
+Work happens directly on `main` in atomic conventional commits; the
+`feat/incremental-parsing-graduation` branch the earlier phases named is gone,
+and Phases 6b onward landed as individual commits. Full design detail (phase
+entry/exit criteria, the salsa-unification design, flip acceptance criteria)
+lives in the plan document at
+`~/.claude/plans/i-want-to-promote-splendid-stardust.md`.
 
 **Handover protocol:** a fresh session reads this section, picks the first
 unchecked phase, verifies its entry criteria (previous phase's boxes checked,
@@ -270,11 +272,14 @@ driver, and the step change the phase demanded is measurable as a pair: the same
 keystrokes into the same line of `pandoc_manual.md`, one column apart, cost 2002
 us on the section window and 221 us on the token tier.
 
-Next step is Phase 8 (region tier). Phase 7 leaves it two things it did not have
-before: the `replace_with` root-rebuild floor is now the dominant cost of a
-cheap splice and is measured, and `Expect::strategy` exists so a bench case can
-pin *which* tier answers it --- worth extending to the cases that still only
-declare reuse or decline.
+Phase 8 (region tier) is **done**. A contiguous run of top-level `DOCUMENT`
+children touching the edit is now re-parsed as a *bounded* fragment, with each
+seam proved by a neighbour-sized boundary parse, and it is tried ahead of both
+window tiers. Every real-document bench case it was built for went from 1.0x
+with a 100% fallback rate to a splice; the fuzzer's region hit rate on
+multi-block documents is 72%.
+
+Next step is Phase 9 (closeout).
 
 The two 5x floors that failed were **lowered to 4.5x, and the cause was the
 corpus rather than the code**. `benches/documents/download.sh` used to fetch
@@ -827,12 +832,12 @@ reproducers are synthetic and pin their strategy instead.
     down once. Now that the corpus is pinned it should stop moving, but the
     margin is a few percent and the next real change to that tier will trip it.
 
-- [ ] Phase 8: region tier over top-level `DOCUMENT` children replacing
-  section/suffix windows --- symmetric newline-decoupling scans in old and
-  new text, `no_straddle` seam primitive, fence/div balance,
-  setext/lazy-continuation/list-tightness/HTML-block coupling guards. Fixes
-  the suffix-window reparse-to-EOF gap. (The too-wide bail this phase used
-  to carry is Phase 5b; re-tune its threshold here.)
+- [x] Phase 8: region tier over top-level `DOCUMENT` children --- bounded
+  fragment parse, `no_straddle` seam primitive, neighbour-sized boundary
+  parses, a long-range delimiter-pairing guard, and a region width bail.
+  Fixes the suffix-window reparse-to-EOF gap. (The too-wide bail this phase
+  used to carry is Phase 5b; it keeps its threshold and the region tier got
+  its own.)
   - Phase 5 confirms the premise: window share is the only lever on speedup, and
     the current tier gets 92-98% windows on all three real documents, so it wins
     nothing on early or mid-document edits in real files.
@@ -841,6 +846,117 @@ reproducers are synthetic and pin their strategy instead.
     still starts \~450 bytes in, because that is where the nearest top-level
     heading sits. More headings would not help; regions over `DOCUMENT` children
     are what does.
+  - **The premise measured before implementing.** Top-level children over the
+    pinned corpus: median 1-17 bytes, p90 219-297, max 1.2-19.4 KB, across 229
+    to 2662 children per document. The child enclosing each bench edit is 512 B -
+    10.6 KB, i.e. 0.06-6.2% of its document against the 92-98% windows those
+    same edits chose. That ratio is the whole phase.
+  - Bench, before -> after: `tables_single_edit` 1.0x -> 4.1x,
+    `large_authoring_single_edit` 1.0x -> 4.0x, `math_single_edit` 1.0x -> 3.2x,
+    `pandoc_manual_early_edit` 1.0x -> 3.1x (all four were 100% fallback),
+    `pandoc_manual_late_edit` and `..._typing_stream` 4.8x -> 8.4x. The fuzzer's
+    region hit rate on multi-block documents is 72%.
+  - **`pandoc_manual_early_edit` flips, against this roadmap's own prediction
+    and the bench comment that carried it.** Its edit is inside a nested
+    container, but the *region* is the whole top-level `DEFINITION_LIST` that
+    contains it --- 10 576 bytes of 304 665. The nested-container non-goal below
+    bites when a region would have to *start* inside a container, not when an
+    edit does.
+  - **The reparse-to-EOF objection is retired by cross-checking, not by proving
+    bounded parsing safe.** A fragment parsed alone is still untrustworthy. It
+    is never trusted alone: each seam is re-parsed with the one neighbour on
+    that side, requiring no straddle, the fragment's children and errors
+    identical to what it produced in isolation, and the neighbour
+    byte-identical. Absorptive constructs swallow greedily, so anything left
+    open eats that neighbour first and cannot hide.
+  - **Two constructs reach past any neighbour, and both were reproduced against
+    the parser before being guarded.** Appending a closing fence three siblings
+    below an opener collapses five top-level children into one `CODE_BLOCK` ---
+    under the Pandoc dialect an *unclosed* fence is paragraph text, so the
+    opener looks inert. And `----\nx\nfoo\n\nbar\n\n----\n` is one
+    `MULTILINE_TABLE`, matching pandoc. The guard compares the region's
+    delimiter lines before and after the edit: unchanged means the document's
+    whole sequence of them is unchanged, so no pairing anywhere can move. It
+    costs O(region) rather than the O(prefix) scan it stands in for.
+  - Grid-table borders and pipe rows are deliberately *not* treated as
+    long-range. Those constructs are blank-line terminated, so they cannot pair
+    past their own block, and including them declined every edit to a grid
+    table's border --- which is exactly what `large_authoring.qmd` puts on the
+    bench.
+  - **`prev` must come back byte-identical, which fatou does not need.**
+    Markdown's backward reach rewrites the previous node *in place* without
+    crossing the seam: a `:`/`~` line promotes a paragraph to a definition
+    `TERM`, a `===` line to a setext heading.
+  - The third error bucket landed as `merge_region_errors` (before kept, inside
+    dropped, after shifted by the delta), closing the deferral
+    `merge_incremental_errors` recorded. `SyntaxErrorSource::Yaml` being the
+    only source, and both emit sites lying strictly inside their owning child,
+    is what makes a straddle unreachable rather than merely unlikely.
+  - `Parser::new_fragment` / `ParseOrigin` closes the other deferral: splitting
+    "byte 0 of the document" from "blank-line separated fragment start". It also
+    forced the split it was conflating --- `at_document_start` fed
+    `has_blank_before_strict`, which indented code reads, so that now comes from
+    a positional `at_line_zero`. A mid-document reparse can no longer
+    manufacture a pandoc or MultiMarkdown title block, so the textual
+    over-approximation is no longer what refuses it.
+  - **No always-try floor for small documents, unlike fatou.** Three parses of a
+    74-byte document lose to one, because `Parser::new` builds a
+    `BlockParserRegistry` per parse (`multi_change_utf16_4`: 10.2 us against a
+    4.3 us full parse). The width fraction is charged on every document instead.
+  - **A pre-existing `O(document)` term was found on the path of every reparse
+    and removed.** The refdef proximity guard read its old-text window out of
+    the CST, and `SyntaxText::slice(..).to_string()` is not a windowed read ---
+    rowan builds it from `descendants_with_tokens()` over the whole node. \~800
+    us per attempt on the 300 KB manual. Only the new text needs windowing:
+    outside the edit the texts are byte-identical, so the old window's flanks
+    are bytes the new scan already covers, and only the *deleted* span (plus one
+    byte each side) has no image in the new text. This moved every row of the
+    bench and is what took the two `pandoc_manual` floors from \~4.8x to \~7.7x,
+    retiring the thin margin Phase 6b flagged --- the numbers moved up, not the
+    threshold down.
+  - **Tier order changes what the cheapest tier costs, through inlining.**
+    Reordering the two window-class tiers cost the token tier 20% (43x -> 35x on
+    `pandoc_manual_midline_edit`) with nothing on its own path changed: inlined,
+    a tier's locals land in the dispatcher's frame and every early return pays
+    for it. All three tier entry points are `#[inline(never)]` now, which is a
+    property a "cheapest first, return early" ladder should have had from the
+    start.
+  - **Neither window tier is retired, and that is a measurement rather than
+    caution.** The roadmap said this phase would replace them. Over the
+    real-document corpus at 20x, of 1457 splices the region tier takes 1120, the
+    *section* window 225, the suffix window 79, the token tier 33 --- a seventh
+    of real splices go to the tier that was to be deleted, and it beats the
+    suffix window there three to one. On heading-less hazard snippets the
+    balance inverts (suffix 47 126 against section 121). `FuzzStats` now prints
+    the tier histogram on every driver so this stays measured.
+  - The `window_cutoff_*` bracketing pair had to be rebuilt, the same trap Phase
+    7 hit: promotion made both sides region splices at 9.1x, so the pair agreed
+    on every input while still passing. `WideBlockDoc` now carries two oversized
+    blocks, giving the three outcomes the two cost guards can produce, and each
+    guard is isolated by a pair sharing a case.
+  - Three unit tests moved onto a `window_cascade_incrementally` helper that
+    drives `reparse_ranges` directly. Their subject is which window a shape
+    reaches; through the public entry point they would have measured the region
+    tier instead, and a test that quietly changes subject goes on passing.
+  - **The `large_authoring.qmd` end-to-end regression Phase 6b recorded is
+    fixed**, and the write-phase tables are re-measured. Median
+    `didChange + parse`, off against on: small 105.05 -> 20.70 us, medium
+    1024.89 -> 977.26, large 10 132.03 -> 1392.49. The medium row was 13-17%
+    *slower* with the flag on; it is now marginally faster. The large document
+    went 3.2x -> 7.3x.
+  - Still open, and worth chasing rather than accepting: the medium row is only
+    break-even (1.05x) where `benches/lsp_incremental.rs` splices the same
+    document at 4.0x. The two edit in different places --- the write-phase bench
+    types at 4/5 of the way through, the incremental one at line 60 --- so the
+    gap is either a shape the region tier declines at that position or host-side
+    work only the write-phase bench includes. Phase 9 should find out which.
+  - Deferred out of this phase: the `splice_children` root rebuild, which is
+    `O(top-level arity)` and is now the dominant cost of a cheap region splice
+    just as `replace_with` is for the token tier (2662 children on the pandoc
+    manual, \~220 us); `populate_refdef_labels` re-scanning the whole document
+    on every attempt; and the fixed `BlockParserRegistry` construction per
+    parse, which is what makes three small parses lose to one on a tiny
+    document.
 
 - [ ] Phase 9: closeout --- architecture docs, dead-path pruning, record
   deferrals.

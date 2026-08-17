@@ -113,18 +113,26 @@
 //! against the shipped mode. Same corpus, same run pair, median us:
 //!
 //! ```text
-//!                    small (756 B)   medium (24 KB)   large (297 KB)
-//! parse off                  83.59           824.01         10 200.03
-//! parse on                   23.24           968.15          3 210.55
+//!                    small (756 B)   medium (25 KB)   large (297 KB)
+//! parse off                 105.05         1 024.89         10 132.03
+//! parse on                   20.70           977.26          1 392.49
 //! ```
 //!
-//! The two wins are the point of the feature. The medium row is not a fluke:
-//! across three run pairs it lands 13-17% *slower* with the flag on (824/863/898
-//! off against 968/992/974 on). `large_authoring.qmd` declines the window cutoff
-//! on every edit, so its keystroke is a full parse plus the host-side cost of
-//! preparing and rejecting a reuse --- and that cost is an order of magnitude
-//! above the `+11.6 us` that `benches/lsp_incremental.rs` models for the same
-//! document, which is a gap in the model rather than in this measurement.
+//! Re-measured after the region tier (roadmap Phase 8). The medium row used to
+//! be the embarrassing one: `large_authoring.qmd` declined the window cutoff on
+//! every edit, so its keystroke was a full parse *plus* the cost of preparing
+//! and rejecting a reuse, and across three run pairs it landed 13-17% **slower**
+//! with the flag on. That regression is gone --- it is now marginally faster
+//! (1.05x) rather than materially slower --- and the large document went from
+//! 3.2x to 7.3x, most of which is the refdef guard no longer reading its
+//! old-text window out of the whole tree.
+//!
+//! The medium row is still only break-even, and that is worth chasing rather
+//! than accepting: `benches/lsp_incremental.rs` splices the same document at
+//! 4.0x. The two differ in where they edit --- this bench types at 4/5 of the way
+//! through, that one at line 60 --- so the gap is either a shape the region tier
+//! declines at that position or host-side work this bench includes and that one
+//! does not. It is recorded in `TODO.md` as an open item.
 //!
 //! Note the direction of the share check below: a cheaper parse is a smaller
 //! denominator, so the write phase's share *rises* when the feature works.
@@ -200,10 +208,15 @@ const KEYSTROKE_SCALING_MAX: f64 = 25.0;
 
 /// The write phase's ceiling as a share of the end-to-end keystroke. The write
 /// phase runs on the main loop and the parse does not, so this is the number
-/// that decides whether typing stays responsive. Measured at 4.1% / 0.6% / 2.6%
-/// (small / medium / large) with incremental parsing on, against 1.1% / 2.8% /
-/// 2.0% before the flip; the headroom is wide because the denominator is a
-/// parse, and making the parser faster must not fail this gate.
+/// that decides whether typing stays responsive. Measured at 4.6% / 0.7% / 6.4%
+/// (small / medium / large) with the region tier live, against 4.1% / 0.6% /
+/// 2.6% before it and 1.1% / 2.8% / 2.0% before the flip.
+///
+/// The large row more than doubled without the write phase changing at all,
+/// which is the direction the note below predicts: a cheaper parse is a smaller
+/// denominator, so this share *rises* when the parser gets faster. The headroom
+/// is wide for exactly that reason, and making the parser faster must not fail
+/// this gate.
 const KEYSTROKE_SHARE_MAX: f64 = 0.15;
 
 /// Four changes in one notification against one: `did_change` loops

@@ -38,27 +38,58 @@ config value and the document's reference-definition set are unchanged ---
 retained blocks keep the resolution and options they were parsed with, so either
 changing invalidates them at a distance.
 
-The splice is attempted in three tiers, cheapest first, and the first one that
+The splice is attempted in four tiers, cheapest first, and the first one that
 succeeds wins:
 
 - **Token.** An edit strictly inside one plain-prose `TEXT` token of a top-level
   paragraph replaces that one green token. It costs the token's length plus a
-  green root rebuild, so unlike the two below it does not scale with the
-  document --- which is what makes a keystroke in a 300 KB file cost what a
-  keystroke in a small one does. It is tried before the cost guard below, so an
-  accepted edit also skips the price of deciding not to reuse. The guards are
-  strict: the edit must not touch either end of the token's non-whitespace core,
-  every byte of the token must be inert prose, the token must still read as one
-  `TEXT` on its own, and the edit must sit past its line's first word so no
-  block marker can be manufactured.
+  green root rebuild, so like the region tier below and unlike the two windows
+  it does not scale with the document --- which is what makes a keystroke in a
+  300 KB file cost what a keystroke in a small one does. It is tried before the
+  cost guards below, so an accepted edit also skips the price of deciding not to
+  reuse. The guards are strict: the edit must not touch either end of the
+  token's non-whitespace core, every byte of the token must be inert prose, the
+  token must still read as one `TEXT` on its own, and the edit must sit past its
+  line's first word so no block marker can be manufactured.
+- **Region.** Re-parses one contiguous run of top-level `DOCUMENT` children ---
+  the run the edit touches, widened until a blank line sits on each side. Unlike
+  the two below it, the parse is *bounded*: it covers the region and not the
+  rest of the document, so an edit near the top of a large file costs what the
+  same edit costs near the bottom. It answers most edits in ordinary prose
+  documents.
 - **Section window.** Re-parses from the previous top-level heading, and
   re-adopts the old tail by `Arc` identity when it comes back structurally
   equal.
 - **Suffix window.** Re-parses from the enclosing block.
 
-Both window tiers parse to the end of the document, because list-item buffering
-depends on unbounded lookahead and a bounded standalone window parse is
-therefore untrustworthy.
+The two window tiers parse to the end of the document. The region tier does not,
+and the difference is not that bounded parsing turned out to be safe after all ---
+a fragment parsed on its own really is untrustworthy, because list-item
+buffering, fence pairing and table detection all depend on lookahead that runs
+past the fragment's end. It is that the fragment is never trusted on its own.
+Each seam is proved by re-parsing the fragment together with the one neighbour
+on that side and requiring three things: that no top-level child straddles the
+seam, that the fragment comes back with exactly the children and errors it
+produced in isolation, and that the neighbour comes back byte-identical.
+Anything the fragment leaves open --- an unclosed fence or div --- swallows
+greedily, so it reaches that neighbour first and cannot hide.
+
+Two constructs reach further than one neighbour and no boundary parse can catch
+them: a fence can pair with an opener several blocks back (under the Pandoc
+dialect an *unclosed* fence is ordinary paragraph text, so the opener looks
+inert), and a multiline-table border pairs across arbitrarily many
+blank-line-separated blocks. The region tier answers those by comparing the
+region's delimiter lines before and after the edit: if they are unchanged, the
+document's whole sequence of them is unchanged, so no pairing anywhere can move.
+That admits editing prose, a table cell, or a code block's body, and declines an
+edit that adds, removes, or alters a delimiter.
+
+All four tiers stay because all four are used. Over the fuzzer's real-document
+corpus, the region tier takes about three quarters of splices, the section
+window a seventh, and the suffix window and token tier the rest; on heading-less
+documents the suffix window becomes the workhorse instead.
+`crates/panache-parser/tests/incremental_fuzz.rs` prints that histogram on every
+run.
 
 Four properties make reading and writing that channel from inside an otherwise
 pure query sound:
@@ -74,16 +105,19 @@ pure query sound:
   writes the user's file.
 - Every guard declines to `None` rather than guessing, so the query's fallback
   is an ordinary full parse.
-- One guard declines for cost rather than correctness. Both *window* strategies
-  parse their window to the end of the document, so a window that starts near
-  the top of the file re-derives nearly all of it and then pays a splice on top:
-  measured, that is a 5-10% loss against simply parsing the file again. The
-  parser therefore refuses a window leaving more than 85% of the document
-  downstream, before running the rest of the cascade or the window parse. A
-  whole-document replacement, which some clients send on every format-on-save,
-  takes that path and costs the full parse it would have cost anyway.
-  `benches/lsp_incremental.rs` carries the measurements and a case on each side
-  of the threshold.
+- Two guards decline for cost rather than correctness, one per tier that has a
+  cost worth guarding. Both *window* strategies parse their window to the end of
+  the document, so a window that starts near the top of the file re-derives
+  nearly all of it and then pays a splice on top: measured, that is a 5-10% loss
+  against simply parsing the file again, so a window leaving more than 85% of
+  the document downstream is refused. The *region* tier answers a region with a
+  fragment parse plus up to two neighbour-sized boundary parses --- roughly
+  three region-sized parses --- so a region covering more than a quarter of the
+  document is refused for the same reason, counting its neighbours as well as
+  itself. Both are evaluated before any parse runs, and a whole-document
+  replacement (which some clients send on every format-on-save) fails both and
+  costs the full parse it would have cost anyway. `benches/lsp_incremental.rs`
+  carries the measurements and a case on each side of both thresholds.
 - The base is stored last, after every fallible step, so a panic or a salsa
   cancellation mid-query can never leave a base whose text and tree disagree.
   Stores are not ordered across revisions, so an older base can overwrite a
