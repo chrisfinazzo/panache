@@ -99,7 +99,7 @@ panache format --check document.qmd
 #### External Code Formatters
 
 Panache supports external formatters for code blocks. For example, you can
-configure it to run `air` on R code blocks and `ruff` on Python code blocks:
+configure it to run `arity` on R code blocks and `ruff` on Python code blocks:
 
 ```toml
 [formatters]
@@ -115,7 +115,7 @@ arguments:
 ```toml
 [formatters]
 python = ["isort", "black"]
-javascript = "foobar"
+javascript = "myformatters"
 
 [formatters.isort]
 args = ["--profile=black"]
@@ -171,7 +171,7 @@ The list of LSP features supported by Panache includes, among others:
 - Document symbols/outline
 - Folding ranges
 - Go to definition for references and footnotes
-- Quaro and Bookdown project awareness
+- Quarto and Bookdown project awareness
 
 ## Configuration
 
@@ -298,4 +298,4 @@ page](https://panache.bz/guide/performance).
 The development of Panache has simplified considerably thanks to the extensive
 documentation, well-structured code, and testing infrastructure provided by
 Pandoc. We also owe significant debt to the rust-analyzer project, on which
-Panche is heavily inspired.
+Panache is heavily inspired.
