@@ -1,12 +1,13 @@
 ---
 name: html-conformance
-description: Incrementally make Panache's CST shape for HTML-block /
+description: >
+  Incrementally make Panache's CST shape for HTML-block /
   raw-HTML conform to pandoc's AST shape under `Flavor::Pandoc`, so
   downstream consumers (linter, salsa anchor index, LSP, formatter)
   see the same structural decisions pandoc would have made. The
   `pandoc -f markdown -t native` projector at
-  `crates/panache-parser/src/pandoc_ast.rs` is a **test-only
-  diagnostic**: divergence from pandoc-native points at a wrong CST,
+  `crates/panache-parser/src/pandoc_ast.rs` is a test-only
+  diagnostic - divergence from pandoc-native points at a wrong CST,
   not a fix-it-here problem. Lift HTML structure into the CST by
   tokenizing existing source bytes at finer granularity (e.g.
   `HTML_ATTRS` inside `HTML_BLOCK_TAG`), retag wrappers (e.g.
@@ -481,7 +482,7 @@ byte-identical to `pandoc -f markdown -t native`.
 ## Session recap (`RECAP.md`)
 
 This skill keeps a rolling recap at
-`.claude/skills/html-conformance/RECAP.md`. Layout (top → bottom):
+`.agents/skills/html-conformance/RECAP.md`. Layout (top → bottom):
 
 1. **Persistent traps & invariants** — cross-session knowledge.
    Read first.

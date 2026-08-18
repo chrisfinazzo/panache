@@ -337,7 +337,7 @@ regression, identify which lever applies before editing.
 ## Session recap (`RECAP.md`)
 
 This skill keeps a rolling recap at
-`.claude/skills/pandoc-ir-migrate/RECAP.md`. It is the handoff
+`.agents/skills/pandoc-ir-migrate/RECAP.md`. It is the handoff
 between sessions — short, judgment-call-only, not a duplicate of the
 test report.
 

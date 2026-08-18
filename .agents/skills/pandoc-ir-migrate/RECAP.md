@@ -45,7 +45,7 @@ updated to pandoc-native parity.
 - `crates/panache-parser/src/parser/inlines/inline_ir.rs` (degrade
   pass + cascade `excluded` plumbing + 2 new unit tests)
 - `crates/panache-parser/tests/snapshots/golden_parser_cases__parser_cst_bug_2_emphasis_crosses_brackets_pandoc.snap`
-- `.claude/skills/pandoc-ir-migrate/RECAP.md` (this entry).
+- `.agents/skills/pandoc-ir-migrate/RECAP.md` (this entry).
 
 ### Suggested next sub-targets, ranked
 
@@ -85,7 +85,7 @@ suite green.
   parenthetical phase tags dropped from comments at the
   NativeSpan / FootnoteReference / BracketedCitation / BareCitation /
   BracketedSpan opaque-construct scan branches in `build_ir`)
-- `.claude/skills/pandoc-ir-migrate/RECAP.md` (this entry).
+- `.agents/skills/pandoc-ir-migrate/RECAP.md` (this entry).
 
 ### Verification done
 
@@ -170,7 +170,7 @@ encodes this divergence in the dispatcher's bracket-scanner.
 
 ### Files changed
 
-- `.claude/skills/pandoc-ir-migrate/RECAP.md` (this entry).
+- `.agents/skills/pandoc-ir-migrate/RECAP.md` (this entry).
 
 ### Suggested next sub-targets, ranked
 
@@ -277,7 +277,7 @@ the code. Net diff: documentation only --- `inline_ir.rs`
 
 - `crates/panache-parser/src/parser/inlines/inline_ir.rs`
 - `crates/panache-parser/src/parser/inlines/core.rs`
-- `.claude/skills/pandoc-ir-migrate/RECAP.md` (this entry).
+- `.agents/skills/pandoc-ir-migrate/RECAP.md` (this entry).
 
 ### Suggested next sub-targets, ranked
 

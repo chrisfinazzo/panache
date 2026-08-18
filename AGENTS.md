@@ -1,7 +1,7 @@
 # Panache agent guide
 
 Use this file for durable, high-signal guidance only. Keep procedural playbooks
-in `.claude/skills/` and path-specific constraints in `.claude/rules/`.
+in `.agents/skills/` and path-specific constraints in `.claude/rules/`.
 
 ## Project snapshot
 

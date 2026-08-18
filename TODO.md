@@ -755,7 +755,7 @@ dollar-math, deflists, ...) stay opt-in.
 ## Math Parser and Formatter
 
 Multi-session effort --- see the `math-parser-formatter` skill
-(`.claude/skills/math-parser-formatter/`) for the phased roadmap, locked-in
+(`.agents/skills/math-parser-formatter/`) for the phased roadmap, locked-in
 design decisions, and per-session workflow. Parser invariants:
 `.claude/rules/math-parser.md`.
 
