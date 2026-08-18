@@ -5,15 +5,10 @@ paths:
   - "editors/code/README.md"
 ---
 
-VS Code extension changes should preserve reliable LSP startup and predictable
-user configuration behavior.
+VS Code extension changes should preserve reliable LSP startup.
 
-- Keep extension settings in sync across implementation, `package.json`
-  contributes schema, and `editors/code/README.md` documentation.
-- Preserve activation behavior for supported languages/workspaces and avoid
-  regressing startup reliability.
-- Prefer reusing existing process/download/config helpers over duplicating
-  command resolution or install logic.
-- When changing server launch behavior, ensure `panache lsp` invocation and
-  argument/environment wiring remain explicit and testable.
+- Keep settings aligned across implementation, schema, and README docs.
+- Preserve activation behavior for supported languages/workspaces.
+- Reuse existing process/download/config helpers where possible.
+- Keep `panache lsp` launch wiring explicit and predictable.
 - Validate extension changes with `npm run compile` in `editors/code/`.
