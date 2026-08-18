@@ -115,12 +115,12 @@ arguments:
 ```toml
 [formatters]
 python = ["isort", "black"]
-javascript = "myformatters"
+javascript = "myformatter"
 
 [formatters.isort]
 args = ["--profile=black"]
 
-[formatters.myformatters]
+[formatters.myformatter]
 cmd = "foobar"
 args = ["--print-width=100"]
 stdin = true
