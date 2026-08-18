@@ -91,7 +91,6 @@ impl Edit {
         out
     }
 
-    /// The edit's footprint in the *new* text: where `insert` landed.
     fn new_range(&self) -> (usize, usize) {
         (self.range.start, self.range.start + self.insert.len())
     }
@@ -267,10 +266,6 @@ pub fn reparse_with_cost_guards(
     populate_refdef_labels(new_text, &mut options);
     let prev_tree = SyntaxNode::new_root(prev_green.clone());
 
-    // Cheapest tier first, and deliberately ahead of the window-size cutoff:
-    // the token tier's whole point is that it is O(token), so it must not be
-    // gated on a cost guard that reasons about window share, nor pay for the
-    // cascade below before it is allowed to answer.
     if let Some(result) = reparse_token(&prev_tree, prev_errors, edit, new_text, &options) {
         assert_matches_full_parse(&result, new_text, &options);
         return Some(result);
@@ -278,12 +273,6 @@ pub fn reparse_with_cost_guards(
 
     let old_edit = (edit.range.start, edit.range.end);
 
-    // Both remaining tiers have an O(1) reason they might be hopeless, and when
-    // both are, the answer is known before anything is scanned or walked. A
-    // window cannot start after the edit, and a region cannot be narrower than
-    // one, so the edit offset bounds the first and the edit span the second.
-    // A whole-document replacement -- which some clients send on every
-    // format-on-save -- fails both and costs arithmetic on three offsets.
     let new_edit = edit.new_range();
     let window_hopeless = window_is_too_wide(cost_guards, new_edit.0, new_text.len());
     let region_hopeless = region_is_too_wide(
@@ -295,31 +284,10 @@ pub fn reparse_with_cost_guards(
         return None;
     }
 
-    // Reference and footnote definitions are document-scoped: retained children
-    // keep the resolution they were parsed with, so an edit that can add,
-    // remove, or alter one invalidates them at a distance. Hoisted out of the
-    // window cascade so both it and the region tier are covered by one scan
-    // rather than each running its own -- a declined attempt is charged to the
-    // bench's bail budget, and paying for this twice broke it
-    // (`bail_refdef_edit`, 32.7% of a full parse). It sits behind the O(1)
-    // checks above because it is a textual scan, and `full_replace` used to
-    // reach a decline without paying for one.
-    //
-    // The token tier runs ahead of this and needs no such guard: its byte
-    // allowlist admits no character that can open a definition.
     if edit_may_touch_refdefs(&prev_tree, old_edit, new_text, new_edit) {
         return None;
     }
 
-    // Cheapest first. The region tier parses a bounded fragment plus two
-    // neighbours; the window tiers parse from their window start to EOF. So
-    // wherever both can answer, the region tier's answer is the cheaper one by
-    // a margin that grows with the document -- an edit at line 7600 of the
-    // 300 KB pandoc manual re-parses a 186-byte paragraph instead of 22 KB.
-    //
-    // The window tiers are what is left for the shapes a region cannot take:
-    // an edit whose region is too wide (scattered changes, one enormous block)
-    // but whose window is still under the cutoff.
     if let Some(result) = reparse_region(
         new_text,
         &options,
@@ -393,7 +361,6 @@ fn reparse_token(
     new_text: &str,
     options: &ParserOptions,
 ) -> Option<Reparsed> {
-    // A newline moves block structure; `TEXT` never spans one anyway.
     if edit.insert.contains(['\n', '\r']) {
         return None;
     }
@@ -402,9 +369,6 @@ fn reparse_token(
     if old_tree.kind() != SyntaxKind::DOCUMENT {
         return None;
     }
-    // An edit past the old tree's end means the caller's tree and text have
-    // gone out of sync; bail before the offset reaches rowan, which panics on
-    // a range it cannot resolve.
     if old_edit.1 > usize::from(old_tree.text_range().end()) {
         return None;
     }
@@ -413,20 +377,9 @@ fn reparse_token(
     if token.kind() != SyntaxKind::TEXT {
         return None;
     }
-    // `TEXT` is emitted from some twenty non-prose sites -- code block bodies,
-    // HTML blocks, attribute innards, link destinations, table cells, refdef
-    // parts -- so the token kind alone proves nothing. The parent is the gate,
-    // and a *top-level* paragraph is the narrowest useful one. Table cells are
-    // the sharpest exclusion it buys: a simple or multiline table's columns are
-    // byte positions fixed by its rule row, so changing a cell's width re-cuts
-    // the whole line.
     if token.parent().map(|parent| parent.kind()) != Some(SyntaxKind::PARAGRAPH) {
         return None;
     }
-    // Nested containers stay out, per the roadmap's standing non-goal: a
-    // paragraph inside a list item or block quote couples to its container
-    // through tightness, lazy continuation, and indentation, none of which this
-    // tier models.
     if token
         .parent()
         .and_then(|parent| parent.parent())
@@ -440,10 +393,6 @@ fn reparse_token(
     let (t0, t1) = (usize::from(range.start()), usize::from(range.end()));
     let old_leaf = token.text();
 
-    // Strict interiority, measured against the token's non-whitespace core so
-    // the leading and trailing whitespace runs come out byte-identical. The
-    // trailing half is load-bearing: one trailing space lives inside the
-    // token, two become a `HARD_LINE_BREAK`.
     let leading = old_leaf.len() - old_leaf.trim_start_matches([' ', '\t']).len();
     let trailing = old_leaf.len() - old_leaf.trim_end_matches([' ', '\t']).len();
     if old_edit.0 <= t0 + leading || old_edit.1 >= t1.saturating_sub(trailing) {
@@ -459,38 +408,22 @@ fn reparse_token(
     new_leaf.push_str(&edit.insert);
     new_leaf.push_str(&old_leaf[hi..]);
 
-    // Every byte of the token, before and after, must be hand-vetted inert and
-    // non-structural. Both directions matter: inserting a `*` beside an
-    // unmatched one pairs them, and *deleting* one of three lets the survivors
-    // pair.
     let allowed = token_tier_allowed_mask(options);
     let inert = |text: &str| text.bytes().all(|byte| allowed[byte as usize]);
     if !inert(old_leaf) || !inert(&new_leaf) {
         return None;
     }
 
-    // The relex. `structural_byte_mask` deliberately omits the bare-URI scheme
-    // alphabet (banning every letter would reject all prose under GFM and
-    // Quarto), so this is what answers that question -- exactly, and for every
-    // other construct the mask under-approximates. Checking the old text too
-    // refuses any token whose in-context reading differs from its isolated
-    // one, which is a context dependence this tier does not model.
     if !relexes_as_one_text_token(old_leaf, options)
         || !relexes_as_one_text_token(&new_leaf, options)
     {
         return None;
     }
 
-    // Block markers are decided from the head of a line, so an edit past the
-    // line's first word cannot manufacture one. Without this, `12 apples` plus
-    // an interior `.` becomes a list.
     if !edit_is_past_line_marker_zone(new_text, old_edit.0) {
         return None;
     }
 
-    // Errors only ever come from embedded YAML, so one can never originate
-    // inside a paragraph's prose -- but refusing any that touch the token
-    // keeps the remap a pure shift rather than a judgement call.
     if old_errors
         .iter()
         .any(|error| usize::from(error.range.start()) <= t1 && usize::from(error.range.end()) >= t0)
@@ -521,13 +454,6 @@ fn reparse_token(
     })
 }
 
-/// The single token covering `edit`, or `None` when the edit covers a node, a
-/// token boundary, or nothing.
-///
-/// A pure insertion exactly on a boundary comes back as
-/// [`rowan::TokenAtOffset::Between`] and is refused rather than disambiguated:
-/// the interiority guard would reject it a moment later anyway, and picking a
-/// side here would only make that rejection harder to read.
 fn covering_token(
     old_tree: &SyntaxNode,
     edit: (usize, usize),
@@ -544,7 +470,6 @@ fn covering_token(
     }
 }
 
-/// Shift a range by a signed byte delta.
 fn shift_range(range: rowan::TextRange, delta: isize) -> rowan::TextRange {
     let moved = |size: rowan::TextSize| {
         rowan::TextSize::new((usize::from(size) as isize + delta).max(0) as u32)
@@ -575,9 +500,6 @@ fn token_tier_allowed_mask(options: &ParserOptions) -> [bool; 256] {
     for byte in TOKEN_TIER_ALPHABET_SEED {
         allowed[*byte as usize] = true;
     }
-    // Every non-ASCII byte is prose: no construct in the grammar keys off a
-    // continuation or lead byte of a multi-byte code point, and the inline
-    // mask never sets one.
     allowed[0x80..=0xFF].fill(true);
 
     for byte in 0..=u8::MAX {
@@ -588,28 +510,10 @@ fn token_tier_allowed_mask(options: &ParserOptions) -> [bool; 256] {
     allowed
 }
 
-/// Bytes hand-vetted as inert inside a paragraph's prose.
-///
-/// Deliberately absent, though they are common in prose and the inline mask
-/// does not always carry them: every byte that can open a block at the head of
-/// a line --- `#` `>` `|` `+` `-` `=` `~` `:` `%` `!` `?` --- plus the fence
-/// and marker characters the inline mask covers only under some extensions.
-///
-/// Deliberately *present*: `.` and `)`, which are load-bearing only as the tail
-/// of a list marker at the head of a line. Banning them would reject most
-/// English prose; [`edit_is_past_line_marker_zone`] handles them instead, which
-/// is the one place this file trades a byte ban for a position check.
 const TOKEN_TIER_ALPHABET_SEED: &[u8] = b"abcdefghijklmnopqrstuvwxyz\
                                           ABCDEFGHIJKLMNOPQRSTUVWXYZ\
                                           0123456789 \t.,;?'\"/&()";
 
-/// Whether `text` parses, on its own, as exactly one `TEXT` token covering all
-/// of it.
-///
-/// This is panache's stand-in for a lexer-based relex guard. There is no lexer
-/// to re-run --- block parsing emits inline structure as it goes --- so the
-/// probe drives the real inline entry point and watches what it emits. Cost is
-/// a function of the token's length, so the tier stays O(token).
 fn relexes_as_one_text_token(text: &str, options: &ParserOptions) -> bool {
     use crate::parser::inlines::sink::InlineSink;
 
@@ -673,20 +577,6 @@ fn edit_is_past_line_marker_zone(text: &str, offset: usize) -> bool {
     indent <= 3 && head[indent..].contains(' ')
 }
 
-/// Splice the syntax errors of a reparse the same way the green children are
-/// spliced: prefix kept, everything from `seam` onward re-derived.
-///
-/// Two buckets, not rust-analyzer's three. Both strategies parse their window
-/// to EOF and both window starts are `<= edit.0`, where `map_old_offset_to_new`
-/// is the identity — so the seam sits at the same offset in the old and the new
-/// text and no error can straddle it. The straddling case is a
-/// `debug_assert!` plus a `None` (which the caller turns into a bail) rather
-/// than a guess. A real third bucket only appears once a *bounded* window
-/// leaves a live suffix to shift by the edit delta; that is `merge_region_errors`,
-/// which the region tier uses instead of this one.
-///
-/// Old errors that start at or after the seam are dropped: the window parse
-/// re-derives them.
 fn merge_incremental_errors(
     old_errors: &[SyntaxError],
     seam: usize,
@@ -724,11 +614,6 @@ fn merge_incremental_errors(
     Some(merged)
 }
 
-/// The guard cascade and splice behind [`reparse`], expressed over the old and
-/// new edit ranges rather than an [`Edit`].
-///
-/// Refusal-first: every guard returns [`None`] and leaves the full parse to the
-/// caller. Never returns a best-effort tree.
 #[inline(never)]
 fn reparse_ranges(
     input: &str,
@@ -956,9 +841,6 @@ fn window_is_too_wide(cost_guards: CostGuards, window_start: usize, input_len: u
     window * 100 > input_len as u64 * MAX_WINDOW_SHARE_PERCENT as u64
 }
 
-/// How far around an edit the refdef guard scans. Refdef and footnote
-/// definition lines are short; a label whose `]:` sits further than this
-/// from the edit is not worth the precision.
 const REFDEF_SCAN_WINDOW: usize = 512;
 
 /// Whether the edit could add, remove, or alter a reference or footnote
@@ -1014,25 +896,6 @@ fn edit_may_touch_refdefs(
         .contains("]:")
 }
 
-/// Move `offset` outward (down when `upward` is false, up when it is true) to
-/// the nearest token edge of `tree`.
-///
-/// Token edges are always char boundaries — a token's text is a whole `str` —
-/// so this is how an arbitrary byte offset is made safe to slice the tree
-/// with, without materializing the document's text.
-/// The text of `tree` over `range`, without walking the whole tree.
-///
-/// `tree.text().slice(range).to_string()` reads like a windowed slice and is
-/// not one: rowan builds a [`rowan::SyntaxText`] from `descendants_with_tokens()`
-/// over the *whole* node and filters by range, so pulling 1 KB out of a 300 KB
-/// document costs the 300 KB. That is an `O(document)` term on the path of
-/// every reparse attempt, accepted or declined, which is precisely the shape
-/// this tier ladder exists to remove --- measured, it was 29.5 us of a 30.4 us
-/// decline on a 20 KB document, and the whole rest of the cascade was 0.9 us.
-///
-/// Descending to the covering element first bounds the walk by that element
-/// rather than by the document. The result is byte-identical; only the cost
-/// changes.
 fn covering_text(tree: &SyntaxNode, range: rowan::TextRange) -> String {
     match tree.covering_element(range) {
         rowan::NodeOrToken::Node(node) => {
@@ -1148,8 +1011,6 @@ fn prefix_ends_structurally_decoupled(old_tree: &SyntaxNode, boundary: usize) ->
         .is_none_or(|child| child.kind() == SyntaxKind::BLANK_LINE)
 }
 
-/// Whether the last retained top-level block before `boundary` is a
-/// container that absorbs marker-led lines across blank lines.
 fn last_retained_block_can_absorb_marker(old_tree: &SyntaxNode, boundary: usize) -> bool {
     old_tree
         .children()
@@ -1164,8 +1025,6 @@ fn last_retained_block_can_absorb_marker(old_tree: &SyntaxNode, boundary: usize)
         })
 }
 
-/// The kind of the last retained top-level block before `boundary`, ignoring
-/// blank lines.
 fn last_retained_block_kind(old_tree: &SyntaxNode, boundary: usize) -> Option<SyntaxKind> {
     old_tree
         .children()
@@ -1175,12 +1034,6 @@ fn last_retained_block_kind(old_tree: &SyntaxNode, boundary: usize) -> Option<Sy
         .map(|child| child.kind())
 }
 
-/// Whether a `:`/`~` marker line in the suffix would rewrite the last retained
-/// block: a paragraph becomes a definition-list `TERM`, and a table absorbs
-/// the line as its `TABLE_CAPTION`.
-///
-/// `DEFINITION_LIST` is deliberately absent: it couples further than a first
-/// marker line, and gets its own pairing with [`has_definition_marker_line`].
 fn last_retained_block_absorbs_colon_line(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -1192,8 +1045,6 @@ fn last_retained_block_absorbs_colon_line(kind: SyntaxKind) -> bool {
     )
 }
 
-/// Whether any retained top-level block before `boundary` parsed as a
-/// thematic break — a dash run that a multiline table could claim as a rule.
 fn retained_prefix_has_thematic_break(old_tree: &SyntaxNode, boundary: usize) -> bool {
     old_tree
         .children()
@@ -1201,8 +1052,6 @@ fn retained_prefix_has_thematic_break(old_tree: &SyntaxNode, boundary: usize) ->
         .any(|child| child.kind() == SyntaxKind::HORIZONTAL_RULE)
 }
 
-/// Whether `text` has a line that is nothing but a run of three or more
-/// dashes: a multiline-table rule candidate.
 fn has_dash_rule_line(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim();
@@ -1224,27 +1073,12 @@ fn first_nonblank_line_is_definition_marker(text: &str) -> bool {
         .is_some_and(is_definition_marker_line)
 }
 
-/// Whether `line` opens a definition: a `:`/`~` marker followed by space or
-/// end of line. See [`first_nonblank_line_is_definition_marker`] for why the
-/// following character matters.
 fn is_definition_marker_line(line: &str) -> bool {
     line.trim_start()
         .strip_prefix([':', '~'])
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t'))
 }
 
-/// Whether `text` has any definition-marker line at all.
-///
-/// Coarser than [`first_nonblank_line_is_definition_marker`] on purpose, and
-/// paired only with a retained `DEFINITION_LIST`. Definition items merge into
-/// one list node across blank lines, and the marker that opens the merging item
-/// need not lead the window: in `more prose\n:` the term is the line above the
-/// marker, and in `more prose\n\n: def` the item does not even start in the
-/// window's first block. Bounding the reach precisely would mean re-deciding
-/// textually which blocks can belong to a definition list, so this pairs
-/// "retained definition list" with "a marker anywhere in the window" and
-/// declines, the way `retained_prefix_has_thematic_break` pairs with
-/// [`has_dash_rule_line`].
 fn has_definition_marker_line(text: &str) -> bool {
     text.lines().any(is_definition_marker_line)
 }
@@ -1319,29 +1153,15 @@ fn window_start_manufactures_document_start_construct(
     config.dialect == Dialect::CommonMark && first.trim() == "---"
 }
 
-/// Strip one trailing line terminator, CRLF before LF so a `\r\n` is not left
-/// half-consumed. `None` when `text` does not end with one.
 fn strip_line_ending(text: &str) -> Option<&str> {
     text.strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
 }
 
-/// Whether `prefix` ends with a blank line, under any line ending.
-///
-/// Two terminators back to back is what a blank line *is*, so stripping one
-/// and finding another is the whole test -- and it is line-ending agnostic,
-/// where a `"\n\n"` suffix check silently refuses every CRLF document (a
-/// blank line there ends `"\r\n\r\n"`, whose last two bytes are `\r\n`).
 fn ends_with_blank_line(prefix: &str) -> bool {
     strip_line_ending(prefix).is_some_and(|rest| strip_line_ending(rest).is_some())
 }
 
-/// Whether a splice seam at `seam` is structurally decoupled in `text`:
-/// the prefix before it ends with a blank line (or is empty), and the
-/// suffix's first non-blank line is not indented. Blank separation kills
-/// paragraph/lazy continuation and setext underlines; the indentation check
-/// covers list, footnote, and indented-code continuation, which absorb
-/// indented lines even across blank lines.
 fn seam_is_decoupled(text: &str, seam: usize) -> bool {
     if seam != 0 && !ends_with_blank_line(&text[..seam]) {
         return false;
@@ -1387,10 +1207,6 @@ fn map_old_offset_to_new(
     new_edit.1.min(new_len)
 }
 
-/// Index of the first top-level child whose end offset exceeds `pos`.
-///
-/// Every child before this index ends at or before `pos`, so those children can
-/// be retained verbatim (by `Arc` identity) when splicing.
 fn first_child_ending_after(green: &rowan::GreenNodeData, pos: usize) -> usize {
     let mut offset = 0usize;
     for (index, child) in green.children().enumerate() {
@@ -1403,11 +1219,6 @@ fn first_child_ending_after(green: &rowan::GreenNodeData, pos: usize) -> usize {
     green.children().count()
 }
 
-/// Index of the first top-level child that starts at or after `pos`.
-///
-/// Together with [`first_child_ending_after`] this bounds the child range a
-/// section-window reparse replaces, so the surrounding children keep their
-/// `Arc` identity across the splice.
 fn first_child_starting_at_or_after(green: &rowan::GreenNodeData, pos: usize) -> usize {
     let mut offset = 0usize;
     for (index, child) in green.children().enumerate() {
@@ -1464,8 +1275,6 @@ fn find_top_level_heading_section_window(
         return None;
     }
 
-    // Be conservative and only use the section window for edits that are
-    // strictly inside the section body (not touching heading boundaries).
     if old_edit.0 <= previous_end || old_edit.1 >= next_start {
         return None;
     }
@@ -1501,10 +1310,6 @@ fn reparse_section_window(
         return None;
     }
 
-    // Backward seam: the reparsed region is parsed without its prefix, so
-    // the retained prefix must be blank-line separated from it (see
-    // `seam_is_decoupled`), and the prefix's fence-pairing state must not
-    // be flippable by the reparsed content (`prefix_fence_state_is_stable`).
     if !seam_is_decoupled(input, section_window.new_start)
         || !prefix_ends_structurally_decoupled(old_tree, section_window.old_start)
         || !prefix_fence_state_is_stable(&input[..section_window.new_start])
@@ -1514,27 +1319,12 @@ fn reparse_section_window(
 
     let window_text = &input[section_window.new_start..];
 
-    // Defensive: a section window starts at a top-level `HEADING`, which is
-    // none of these shapes, so this cannot fire today. It is here because that
-    // is a property of how the window is *chosen*, not of the splice, and the
-    // region tier will choose differently.
     if section_window.new_start > 0
         && window_start_manufactures_document_start_construct(window_text, config)
     {
         return None;
     }
 
-    // The suffix path's backward-coupling guards apply here for the same
-    // reason: this function also retains a prefix and parses everything after
-    // it standalone, so nothing in the window may reach back and rewrite a
-    // retained block. The first two cannot fire while the window is anchored at
-    // a top-level `HEADING` -- its first non-blank line is that heading, which
-    // is neither a container marker nor a `:`/`~` line -- but the thematic-break
-    // one *can*: it pairs a `---` anywhere in the retained prefix with a dash
-    // run anywhere in the window, and neither is constrained by the anchor.
-    // All are kept rather than the reachable one alone, because "the window
-    // starts at a heading" is a property of how the window is chosen, and the
-    // region tier chooses differently.
     if last_retained_block_can_absorb_marker(old_tree, section_window.old_start)
         && first_nonblank_line_is_container_marker(window_text)
     {
@@ -1558,17 +1348,8 @@ fn reparse_section_window(
         return None;
     }
 
-    // Parse from the window start TO EOF, not just to the window end: block
-    // decisions inside the window (list-item buffering, tightness, div and
-    // fence pairing) can depend on unbounded lookahead past the window, so
-    // a standalone parse of only the window text is not trustworthy. This
-    // costs the same as the suffix strategy's parse; the win over it is
-    // below, where the unchanged tail is re-adopted by `Arc` identity.
     let (tail_tree, tail_errors) =
         Parser::new(&input[section_window.new_start..], config).parse_with_errors();
-    // The tail parse covers everything from the window start to EOF, so it
-    // re-derives the errors of the re-adopted suffix too — which is sound
-    // precisely because that suffix is only re-adopted on structural equality.
     let errors = merge_incremental_errors(old_errors, section_window.new_start, tail_errors)?;
     let tail_green = tail_tree.green();
     let window_len = section_window.new_end - section_window.new_start;
@@ -1577,11 +1358,6 @@ fn reparse_section_window(
     let start_idx = first_child_ending_after(old_green, section_window.old_start);
     let end_idx = first_child_starting_at_or_after(old_green, section_window.old_end);
 
-    // Try to re-adopt the old tree's suffix: if the freshly parsed tail has
-    // a top-level boundary exactly at the window end and its beyond-window
-    // children are structurally equal to the old suffix children, splice
-    // only the window portion so the retained suffix keeps its `Arc`
-    // identity (which downstream per-block memoization relies on).
     let mut offset = 0usize;
     let mut boundary_idx = None;
     for (index, child) in tail_green.children().enumerate() {
@@ -1623,9 +1399,6 @@ fn reparse_section_window(
         }
     }
 
-    // No adoptable boundary: the parsed tail is still a correct parse of
-    // everything from the window start, so splice it wholesale (this is the
-    // suffix strategy anchored at the section start).
     let new_green = old_green.splice_children(
         start_idx..,
         tail_green.children().map(|child| child.to_owned()),
@@ -1639,11 +1412,6 @@ fn reparse_section_window(
     })
 }
 
-// ---------------------------------------------------------------------------
-// The region tier
-// ---------------------------------------------------------------------------
-
-/// One green child of `DOCUMENT`, owned.
 type GreenChild = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 
 /// A region wider than `1 / REGION_MAX_FILE_DIVISOR` of the document costs more
@@ -1686,12 +1454,6 @@ fn region_is_too_wide(cost_guards: CostGuards, parsed_len: usize, text_len: usiz
     parsed_len > text_len / REGION_MAX_FILE_DIVISOR
 }
 
-/// A contiguous run of top-level `DOCUMENT` children, in old-text coordinates.
-///
-/// `first`/`last` are inclusive indices into `old_tree.children()`; `prev`/`next`
-/// are the nearest non-`BLANK_LINE` children outside the run, which the boundary
-/// parses use as context. The bytes between a neighbour and the region are all
-/// blank lines, and are passed to the boundary parses verbatim as gap text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Region {
     start: usize,
@@ -1700,31 +1462,7 @@ struct Region {
     next: Option<(usize, usize)>,
 }
 
-/// Select the run of top-level children the edit touches, widened to blank-line
-/// boundaries.
-///
-/// Closed-interval touch (fatou's rule) makes a boundary insertion extend into
-/// the neighbour it abuts; deleting the blank line between two paragraphs pulls
-/// in both. The run is then widened outward until a `BLANK_LINE` child sits on
-/// each side, which is panache's substitute for fatou's four textual
-/// newline-decoupling scans: `BLANK_LINE` is a top-level *child* here, so
-/// "blank-line separated" is a kind test on the tree rather than a scan of two
-/// texts. Anchoring there is what makes the fragment's entry context canonical
-/// (`has_blank_before` is already true at its byte 0) and what kills the whole
-/// lazy-continuation and setext-reaching-back class by construction.
-///
-/// `None` when the run covers every child, which is a degeneracy check rather
-/// than a cost one -- there is nothing outside the region to splice against, the
-/// fragment parse *is* the full parse, and admitting it would have the oracle
-/// compare a full parse to itself while the splice counter reported a hit. It
-/// therefore stays unconditional even under [`CostGuards::Ignored`].
 fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Region> {
-    // Read the children off the *green* tree, as `(is_blank, start, end)`.
-    // Walking `old_tree.children()` instead materializes a cursor `SyntaxNode`
-    // per child, which this function cannot afford: it runs on the way to every
-    // decline as well as every accept, and a decline is charged against the
-    // bench's bail budget. On a document with a few hundred top-level children
-    // that cost 36 us, enough to fail the budget on its own.
     let blank: rowan::SyntaxKind = SyntaxKind::BLANK_LINE.into();
     let mut offset = 0usize;
     let spans: Vec<(bool, usize, usize)> = old_tree
@@ -1756,12 +1494,6 @@ fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Regi
         return None;
     }
 
-    // A region of nothing but blank lines has no content to reparse, and the
-    // two neighbours then sit next to each other across it in a way neither
-    // one-sided boundary parse can see. Widening above makes this unreachable
-    // for any edit that touches a blank line -- it pulls in the non-blank
-    // neighbours -- so declining costs nothing and is simpler than fatou's
-    // extra cross-region parse.
     if spans[first..=last].iter().all(|&(is_blank, _, _)| is_blank) {
         return None;
     }
@@ -1775,21 +1507,12 @@ fn select_region(old_tree: &SyntaxNode, old_edit: (usize, usize)) -> Option<Regi
     })
 }
 
-/// Whether no top-level child of `tree` straddles `seam`.
-///
-/// `DOCUMENT` children tile the text, so no-straddle is exactly "a child
-/// boundary exists at `seam`", i.e. the two sides parsed independently. A
-/// straddling child is a construct that reached across the seam: a fence or div
-/// that swallowed its neighbour, a setext underline that promoted the paragraph
-/// above it, a table that claimed a rule on the far side.
 fn no_straddle(tree: &SyntaxNode, seam: usize) -> bool {
     let seam = rowan::TextSize::new(seam as u32);
     tree.children_with_tokens()
         .all(|child| !(child.text_range().start() < seam && seam < child.text_range().end()))
 }
 
-/// The top-level children of `tree`, split at `seam` -- `None` when
-/// [`no_straddle`] fails, so every caller gets the seam check for free.
 fn split_children_at(tree: &SyntaxNode, seam: usize) -> Option<(Vec<GreenChild>, Vec<GreenChild>)> {
     if !no_straddle(tree, seam) {
         return None;
@@ -1809,7 +1532,6 @@ fn split_children_at(tree: &SyntaxNode, seam: usize) -> Option<(Vec<GreenChild>,
     Some((before, after))
 }
 
-/// The top-level children of `tree`, owned.
 fn green_children(tree: &SyntaxNode) -> Vec<GreenChild> {
     tree.green()
         .children()
@@ -1817,8 +1539,6 @@ fn green_children(tree: &SyntaxNode) -> Vec<GreenChild> {
         .collect()
 }
 
-/// Parse `text` as a fragment lifted from `offset` in a larger document, or as a
-/// document when `offset` is 0 (where it really is one).
 fn parse_fragment_at(
     text: &str,
     offset: usize,
@@ -1873,19 +1593,6 @@ fn long_range_pairing_lines(text: &str) -> Vec<&str> {
             if line.contains("<!--") || line.contains("-->") {
                 return true;
             }
-            // Bare `-`/`=` runs: a thematic break, a setext underline, a simple-
-            // table rule, and a multiline-table border are all this shape, and
-            // the last of those is the one that pairs across arbitrarily many
-            // blank-line-separated blocks.
-            //
-            // Grid-table borders (`+---+---+`) and pipe rows (`| --- |`) are
-            // deliberately *not* here, and that distinction is load-bearing
-            // rather than an optimization. Those constructs are contiguous ---
-            // blank-line terminated, so they cannot pair past their own block ---
-            // and any reach they do have is one line, which the boundary parses
-            // already cover. Including them declined every edit to a grid table's
-            // border, which is exactly the shape `large_authoring.qmd` puts on
-            // the bench.
             let body = trimmed.trim_end();
             !body.is_empty()
                 && body.chars().all(|c| matches!(c, '-' | '=' | ' ' | '\t'))
@@ -1947,7 +1654,6 @@ fn merge_region_errors(
                 ..error.clone()
             });
         } else if error.range.end() <= region_start {
-            // Already carried by the "before" pass above.
         } else if error.range.start() < region_start || error.range.end() > region_end {
             debug_assert!(
                 false,
@@ -1956,8 +1662,6 @@ fn merge_region_errors(
             );
             return None;
         }
-        // Otherwise the error lies inside the region and the fragment parse
-        // re-derived it.
     }
 
     debug_assert!(
@@ -2012,13 +1716,6 @@ fn reparse_region(
         return None;
     }
 
-    // Cheapest possible decline, and the only one that runs before the old tree
-    // is walked at all: a region always contains the edit, so an edit already
-    // wider than the width bail cannot produce an admissible region. A
-    // whole-document replacement -- which some clients send on every
-    // format-on-save -- lands here and costs arithmetic on two offsets.
-    // Without it, `full_replace` paid a walk of every top-level child to learn
-    // the same thing, at 248% of the full parse it was avoiding.
     if region_is_too_wide(
         cost_guards,
         new_edit.1.saturating_sub(new_edit.0),
@@ -2029,12 +1726,6 @@ fn reparse_region(
 
     let region = select_region(old_tree, old_edit)?;
 
-    // The retained prefix is the old bytes before the region, so a region
-    // starting past the edit would keep stale pre-edit bytes and drop the edit
-    // from the spliced tree. Closed-interval touch gives this, and widening
-    // only moves the start left, so it is an invariant rather than a guard --
-    // but it is load-bearing for the error merge's "before" bucket, which keeps
-    // offsets verbatim on exactly this ground.
     debug_assert!(region.start <= old_edit.0, "region starts past the edit");
     if region.start > old_edit.0 {
         return None;
@@ -2049,8 +1740,6 @@ fn reparse_region(
         return None;
     }
 
-    // Cost, before any parse: the region plus whatever the boundary parses will
-    // carry with it.
     let context_len = region.prev.map_or(0, |(s, e)| e - s) + region.next.map_or(0, |(s, e)| e - s);
     if region_is_too_wide(
         cost_guards,
@@ -2072,14 +1761,6 @@ fn reparse_region(
     let frag_children = green_children(&frag_tree);
     let old_children = green_children(old_tree);
 
-    // Backward boundary parse: the previous child, the blank lines between it
-    // and the region, and the fragment. Three things must hold. Nothing may
-    // straddle the seam; the fragment must reparse in context exactly as it did
-    // alone; and `prev` must come back byte-identical -- that last one is not in
-    // fatou, and Markdown needs it, because the backward reach here rewrites the
-    // previous node *in place* without crossing the seam: a `:`/`~` line
-    // promotes a paragraph to a definition `TERM`, a `===` line to a setext
-    // heading, and a dash run turns one into a table rule.
     if let Some((prev_start, prev_end)) = region.prev {
         let guard = format!("{}{}", &old_text[prev_start..region.start], fragment);
         let seam = region.start - prev_start;
@@ -2094,9 +1775,6 @@ fn reparse_region(
         debug_assert!(prev_end <= region.start);
     }
 
-    // Forward boundary parse: the fragment, the blank lines after it, and the
-    // next child -- or the whole remaining tail when no child follows, since an
-    // EOF-adjacent construct can read differently once text follows it.
     let tail_end = region.next.map_or(old_text.len(), |(_, end)| end);
     if tail_end > region.end {
         let guard = format!("{}{}", fragment, &old_text[region.end..tail_end]);
@@ -2128,8 +1806,6 @@ fn reparse_region(
     Some(result)
 }
 
-/// The slice of `children` covering exactly `[start, end)` in `tree`'s
-/// coordinates.
 fn children_covering(
     tree: &SyntaxNode,
     children: &[GreenChild],
@@ -2187,7 +1863,6 @@ mod tests {
 
     #[test]
     fn diff_edit_collapses_disjoint_edits_into_one_span() {
-        // Two edits (a -> z at 0, c -> z at 4) collapse into one spanning edit.
         let e = diff_edit("a b c\n", "z b z\n");
         assert_eq!(e, edit(0..5, "z b z"));
         assert_eq!(e.apply("a b c\n"), "z b z\n");
@@ -2202,13 +1877,10 @@ mod tests {
 
     #[test]
     fn diff_edit_clamps_to_char_boundaries() {
-        // A (0xCE 0xB1) and B (0xCE 0xB2) share their lead byte; a naive byte
-        // prefix would split the code point.
         let e = diff_edit("\u{3B1} text\n", "\u{3B2} text\n");
         assert_eq!(e, edit(0..2, "\u{3B2}"));
         assert_eq!(e.apply("\u{3B1} text\n"), "\u{3B2} text\n");
 
-        // Shared trail bytes mid-character.
         let old = "x\u{3AC}";
         let new = "x\u{1FB6}";
         let e = diff_edit(old, new);
@@ -2243,24 +1915,16 @@ mod tests {
 
     #[test]
     fn window_share_cutoff_is_inclusive_at_the_threshold() {
-        // A window of exactly `MAX_WINDOW_SHARE_PERCENT` is accepted; one byte
-        // wider is not. Pinned arithmetically because every case below depends
-        // on which side of the boundary its document lands.
         assert_eq!(MAX_WINDOW_SHARE_PERCENT, 85);
         let enforced = |start, len| window_is_too_wide(CostGuards::Enforced, start, len);
         assert!(!enforced(15, 100), "an 85% window is accepted");
         assert!(enforced(14, 100), "an 86% window is declined");
         assert!(enforced(0, 100), "a 100% window is declined");
-        // Degenerate inputs must not panic or divide by zero.
         assert!(!enforced(0, 0));
         assert!(!enforced(9, 4));
-        // The test-only opt-out accepts the widest window there is.
         assert!(!window_is_too_wide(CostGuards::Ignored, 0, 100));
     }
 
-    /// A whole-document replacement is the shape the cutoff exists for: the
-    /// edit starts at byte 0, so nothing of the old tree can be retained and
-    /// the splice would re-derive the entire document at a surcharge.
     #[test]
     fn reparse_declines_a_whole_document_replacement() {
         let old_text = "# One\n\nAlpha.\n\n# Two\n\nBeta.\n";
@@ -2280,9 +1944,6 @@ mod tests {
         );
     }
 
-    /// The same document and the same kind of edit on either side of the
-    /// cutoff: a section a fifth of the way in is declined, one four fifths of
-    /// the way in is spliced.
     #[test]
     fn reparse_declines_an_early_edit_and_accepts_a_late_one() {
         let mut input = String::new();
@@ -2294,10 +1955,6 @@ mod tests {
         let options = ParserOptions::default();
         let (old_tree, old_errors) = Parser::new(&input, &options).parse_with_errors();
 
-        // Driven through the window cascade directly. The subject is the
-        // window-size cutoff, and through the public entry point the region
-        // tier answers *both* of these edits before a window is consulted --
-        // which is the tier working, not the cutoff failing.
         let splice_at = |needle: &str| {
             let at = input.find(needle).expect("marker in test input");
             let updated = apply_edit(&input, (at, at + 4), "BODY");
@@ -2338,17 +1995,12 @@ mod tests {
     /// window starts at the enclosing block and is narrower here.
     #[test]
     fn a_too_wide_section_window_falls_through_to_the_suffix_window() {
-        // One heading at byte 0 and none after it, so the section window would
-        // start at 0 (a 100% window) while the edited paragraph starts late.
         let mut input = String::from("# Only heading\n\n");
         for index in 0..20 {
             input.push_str(&format!("paragraph {index:02} of the body text\n\n"));
         }
         let at = input.find("paragraph 17").expect("marker in test input");
 
-        // Driven through the window cascade directly: the subject is which
-        // *window* a late edit reaches, and both the token and region tiers
-        // answer this shape before either window is consulted.
         let inc = window_cascade_incrementally(&input, at + 10, "`x`", ParserOptions::default());
         assert_eq!(inc.strategy, "suffix_window");
         assert!(
@@ -2364,7 +2016,6 @@ mod tests {
         let (old_tree, old_errors) =
             super::super::Parser::new(old_text, &options).parse_with_errors();
 
-        // A range beyond the old text: the caller's tree and text disagree.
         let stale = Edit {
             range: 50..60,
             insert: String::new(),
@@ -2381,13 +2032,6 @@ mod tests {
         );
     }
 
-    // --- moved from `parser.rs` with the machinery above ---
-
-    /// The retired `parse_incremental_suffix` shape, kept as a *test* adapter.
-    ///
-    /// The full-parse fallback belongs to the caller now, and these tests are
-    /// that caller: they assert which window a given edit reaches, and
-    /// `"full_reparse"` is how they spell "every guard declined".
     struct Spliced {
         tree: SyntaxNode,
         errors: Vec<SyntaxError>,
@@ -2417,9 +2061,6 @@ mod tests {
         new_edit: (usize, usize),
     ) -> Spliced {
         let options = options.unwrap_or_default();
-        // An `Edit` pins the insertion to the deletion's start, so a range pair
-        // that disagrees (or that does not fit the new text) is not an edit this
-        // entry point can express -- exactly the shapes the old API bailed on.
         let Some(insert) = input
             .get(new_edit.0..new_edit.1)
             .filter(|_| new_edit.0 == old_edit.0)
@@ -2573,8 +2214,6 @@ mod tests {
 
     #[test]
     fn merge_drops_old_errors_the_window_reparses() {
-        // The window parse re-derives everything from the seam onward, so an
-        // old error there must not be carried over as well (it would double).
         let old = vec![yaml_error(3, 9), yaml_error(30, 40)];
         let merged = merge_incremental_errors(&old, 20, vec![yaml_error(10, 20)]).unwrap();
         assert_eq!(merged.len(), 2);
@@ -2598,19 +2237,8 @@ mod tests {
         merge_incremental_errors(&[yaml_error(15, 25)], 20, Vec::new());
     }
 
-    // A window is parsed as a standalone document, so `at_document_start` is
-    // true at its first line. These three constructs are the only ones that
-    // test it *without* an `|| has_blank_before` escape, so a window starting
-    // on one of them manufactures a block a full parse would never produce.
-    // Each case is a plausible keystroke: finishing the marker of a
-    // frontmatter-shaped block that is not at the document start.
-
     #[test]
     fn refdef_guard_survives_a_scan_window_edge_inside_a_multibyte_token() {
-        // Fuzz find (math.qmd, seed 12647662): the refdef guard sliced the old
-        // tree at `edit +/- REFDEF_SCAN_WINDOW`, and an edge landing inside a
-        // multi-byte token is not a char boundary, which `SyntaxText::slice`
-        // panics on. The emoji is placed so that one edge falls inside it.
         let mut input = String::from("para one\n\n");
         input.push_str(&"x".repeat(REFDEF_SCAN_WINDOW - 12));
         input.push_str("\u{2705}\n\npara two\n");
@@ -2631,10 +2259,6 @@ mod tests {
 
     #[test]
     fn incremental_bails_when_the_edit_range_exceeds_the_old_tree() {
-        // A caller whose tree and text have drifted apart hands over an edit
-        // the old tree cannot resolve. The fuzz harness reached this with a
-        // lossy base parse, and rowan turns it into a panic; the parser must
-        // bail instead.
         let input = "para one\n\npara two\n";
         let (old_tree, old_errors) = parse_with_errors(input, None);
         let past_end = usize::from(old_tree.text_range().end()) + 5;
@@ -2695,17 +2319,12 @@ mod tests {
 
     #[test]
     fn suffix_window_must_not_manufacture_mid_document_yaml_under_commonmark() {
-        // Under a CommonMark-family dialect `---`/`key: value`/`---` in the
-        // body is a thematic break plus a setext heading, never metadata.
         let input = "intro para\n\n--\nkey: value\n---\n\ntail para\n";
         let at = input.find("--\nkey").unwrap() + 2;
         let inc = insert_incrementally(input, at, "-", flavor_options(crate::options::Flavor::Gfm));
         assert_eq!(inc.strategy, "full_reparse");
     }
 
-    /// The MultiMarkdown twin, and the shape the textual guard was most
-    /// over-eager about: it declined any window whose first line merely
-    /// contained a colon.
     #[test]
     fn a_window_must_not_manufacture_an_mmd_title_block() {
         let input = "intro para\n\nKey value\nOther: thing\n\ntail para\n";
@@ -2719,9 +2338,6 @@ mod tests {
         assert_eq!(inc.strategy, "full_reparse");
     }
 
-    /// And its region-tier twin. Prose containing a colon is ordinary enough
-    /// that a tier which had to decline it would decline a great deal of real
-    /// writing.
     #[test]
     fn a_region_reparse_must_not_manufacture_an_mmd_title_block() {
         let mut input = String::from("intro para\n\nKey value\nOther: thing\n\n");
@@ -2740,8 +2356,6 @@ mod tests {
 
     #[test]
     fn suffix_window_still_reuses_when_the_construct_is_not_live() {
-        // The same edit under Pandoc, where `mmd_title_block` is off: the
-        // guard must key on the extension, not on the line's shape.
         let input = "intro para\n\nKey value\nOther: thing\n\ntail para\n";
         let at = input.find("Key value").unwrap() + 3;
         let inc = insert_incrementally(
@@ -2893,8 +2507,6 @@ mod tests {
 
     #[test]
     fn incremental_ignores_nested_headings_for_window_boundaries() {
-        // Three top-level sections, so the window anchors on `# Middle` rather
-        // than on byte 0, which the window-size cutoff would decline.
         let input =
             "# Intro\n\nprelude para\n\n# Middle\n\n> ## Nested\n> quote body\n\n# End\n\nomega\n";
         let old_tree = parse(input, None);
@@ -3070,15 +2682,12 @@ mod tests {
     fn a_blank_line_is_recognized_under_every_line_ending() {
         assert!(ends_with_blank_line("a\n\n"));
         assert!(ends_with_blank_line("a\r\n\r\n"));
-        // Mixed endings, which an editor produces while converting a file.
         assert!(ends_with_blank_line("a\n\r\n"));
         assert!(ends_with_blank_line("a\r\n\n"));
-        // One terminator is a line end, not a blank line.
         assert!(!ends_with_blank_line("a\n"));
         assert!(!ends_with_blank_line("a\r\n"));
         assert!(!ends_with_blank_line("a"));
         assert!(!ends_with_blank_line(""));
-        // A lone `\r` is not a terminator, so it cannot complete a blank line.
         assert!(!ends_with_blank_line("a\n\r"));
     }
 
@@ -3118,12 +2727,6 @@ mod tests {
         }
     }
 
-    /// The section window retains a prefix and parses everything after it
-    /// standalone, exactly as the suffix window does, so it runs the same
-    /// backward-coupling guards. This is the one of the three that its heading
-    /// anchor does not already make unreachable: a `---` in the retained prefix
-    /// is a multiline-table rule candidate, and the window can supply a partner
-    /// arbitrarily far below the heading.
     #[test]
     fn a_section_window_declines_a_retained_thematic_break_with_a_dash_partner() {
         let mut input = String::from("intro para\n\n---\n\n");
@@ -3133,13 +2736,10 @@ mod tests {
         input.push_str("# Section\n\nbody text\n");
         let at = input.find("body text").expect("marker in test input");
 
-        // Without a dash partner in the window the section window is taken.
         let accepted =
             window_cascade_incrementally(&input, at, "edited ", ParserOptions::default());
         assert_eq!(accepted.strategy, "section_window");
 
-        // With one, the retained `---` could be re-read as a table's top rule,
-        // so the strategy must decline rather than re-adopt the prefix.
         let declined =
             window_cascade_incrementally(&input, at, "a b\n---\n1 2\n", ParserOptions::default());
         assert_ne!(
@@ -3147,8 +2747,6 @@ mod tests {
             "a dash-rule partner in the window must decline the section splice"
         );
     }
-
-    // --- token tier ---------------------------------------------------------
 
     /// Splice `insert` in over `range` and return the strategy that ran, having
     /// first checked the governing invariant on any splice that happened.
@@ -3202,9 +2800,6 @@ mod tests {
         );
     }
 
-    /// The shape the tier exists for: a character typed into the middle of a
-    /// paragraph's prose, far from any construct. The window tiers answer this
-    /// by re-parsing to EOF; the token tier replaces one green token.
     #[test]
     fn a_prose_edit_inside_a_paragraph_reaches_the_token_tier() {
         let before = "# Title\n\nSome ordinary prose here.\n\nAnd a second paragraph.\n";
@@ -3221,43 +2816,30 @@ mod tests {
         assert_token_tier(before, 8..8, "X");
     }
 
-    /// Verified hazard: `12 apples here` is a single `TEXT` inside a
-    /// `PARAGRAPH`, and inserting `.` strictly inside that token turns the whole
-    /// block into a `LIST`. A tier that only looked at the token would splice a
-    /// paragraph where a full parse has a list item.
     #[test]
     fn an_interior_edit_that_manufactures_a_list_marker_declines() {
         let before = "12 apples here\n";
         assert_not_token_tier(before, 2..2, ".");
     }
 
-    /// The same hazard reached by inserting the *space* instead of the dot:
-    /// `12.apples` is prose, `12. apples` is a list.
     #[test]
     fn an_interior_edit_that_completes_a_list_marker_declines() {
         let before = "12.apples here\n";
         assert_not_token_tier(before, 3..3, " ");
     }
 
-    /// Verified hazard: one trailing space stays inside the `TEXT` token, two
-    /// become a `HARD_LINE_BREAK`. An interior insert can cross that line.
     #[test]
     fn an_interior_space_that_manufactures_a_hard_break_declines() {
         let before = "alpha beta \nsecond line\n";
         assert_not_token_tier(before, 10..10, " ");
     }
 
-    /// Verified hazard: an unmatched intraword `*` sits inside a plain `TEXT`,
-    /// so inserting another one can pair them into `EMPHASIS`. The ban has to
-    /// cover the token's own text, not just the inserted bytes.
     #[test]
     fn an_edit_beside_an_unmatched_delimiter_declines() {
         let before = "abc*def ghi\n";
         assert_not_token_tier(before, 9..9, "*");
     }
 
-    /// The mirror image, and the reason the ban covers the *old* text too:
-    /// deleting one of three `*`s can let the survivors pair.
     #[test]
     fn a_deletion_that_frees_a_delimiter_to_pair_declines() {
         let before = "a*b*c*d word\n";
@@ -3292,9 +2874,6 @@ mod tests {
         );
     }
 
-    /// `TEXT` is emitted from ~20 non-prose sites. A code block body is one of
-    /// them, and it is not eligible in v1 -- the tier gates on the parent kind,
-    /// not on the token kind.
     #[test]
     fn an_edit_inside_a_code_block_declines() {
         let before = "```\nsome code here\n```\n";
@@ -3302,8 +2881,6 @@ mod tests {
         assert_not_token_tier(before, at..at, "X");
     }
 
-    /// Every flavor the parser ships, so an alphabet claim is a claim about
-    /// all of them and not just the default.
     fn every_flavor() -> Vec<(&'static str, ParserOptions)> {
         use crate::options::Flavor;
         [
@@ -3321,11 +2898,6 @@ mod tests {
         .collect()
     }
 
-    /// The alphabet is built by subtracting the grammar's inline mask from a
-    /// hand-vetted seed, so this holds by construction --- which is exactly
-    /// why it is worth pinning. If the subtraction is ever reordered away, or
-    /// the seed is edited to "just allow" a byte the dispatcher acts on, this
-    /// is the test that notices.
     #[test]
     fn the_token_tier_alphabet_admits_no_structural_byte() {
         for (name, options) in every_flavor() {
@@ -3430,8 +3002,6 @@ mod tests {
     #[test]
     fn a_pipe_inserted_above_a_delimiter_row_declines() {
         let before = "foo bar\n--- | ---\n";
-        // Confirm the premise rather than assuming it: this really is a
-        // paragraph, and the edit really does turn it into a table.
         let tree = parse(before, None);
         assert_eq!(
             tree.children().next().map(|child| child.kind()),
@@ -3446,14 +3016,6 @@ mod tests {
         assert_not_token_tier(before, 4..4, "| ");
     }
 
-    /// The mirror hazard, reaching the other way: a top-level paragraph whose
-    /// line carries one leading space sits *next to* a list, and widening that
-    /// indent moves the whole block inside the list item. Nothing about the
-    /// paragraph's own shape changes; its neighbour absorbs it.
-    ///
-    /// Interiority measured against the token's non-whitespace core is what
-    /// refuses this, which is why the guard is written against the core rather
-    /// than against the raw token bounds.
     #[test]
     fn an_edit_that_widens_a_line_indent_declines() {
         let before = "- item\n\n foo bar\n";
@@ -3463,7 +3025,6 @@ mod tests {
             Some(SyntaxKind::PARAGRAPH),
             "the paragraph must start out top-level for this to be a hazard",
         );
-        // Offset 8 is the token start, inside its leading whitespace run.
         assert_not_token_tier(before, 8..8, "   ");
     }
 
@@ -3527,35 +3088,17 @@ mod tests {
         }
     }
 
-    /// The line shape `benches/lsp_incremental.rs` generates, and the column
-    /// its `ALPHA` word constant names.
-    ///
-    /// The bench declares per-case expectations that are checked *exactly*
-    /// (`fallback_rate == 0.0` or `== 1.0`), so which tier takes this shape
-    /// decides several of them --- including the `window_cutoff_accepted` /
-    /// `window_cutoff_declined` pair, which brackets the 85% window threshold
-    /// and would silently stop bracketing anything if the token tier claimed
-    /// both. Pinning the fact here means a guard change shows up as a parser
-    /// test failure rather than as a bench gate failure nobody can attribute.
     #[test]
     fn the_bench_paragraph_shape_reaches_the_token_tier() {
         let line = "Paragraph 042 alpha beta gamma delta epsilon zeta eta theta.\n";
         let before = format!("# Benchmark Document\n\n{line}\n{line}\n");
         let at = before.find("alpha").expect("marker in test input");
 
-        // A bare word replacement -- `word_change(line, ALPHA, "ALPHA")` --
-        // is an interior prose edit and belongs to the token tier.
         assert_token_tier(&before, at..at + 5, "ALPHA");
 
-        // A code span in the replacement puts a banned byte in the token, which
-        // is what keeps the cutoff pair on the window tiers.
         assert_not_token_tier(&before, at..at + 5, "`ALPHA`");
     }
 
-    /// Typing one character at a time is the motivating workload, so walk a
-    /// whole word in and assert every keystroke reaches the tier and agrees
-    /// with a full parse. A single-shot test would not catch a tier that works
-    /// once and then splices against its own stale output.
     #[test]
     fn typing_a_word_character_by_character_stays_at_the_token_tier() {
         let mut text = String::from("# Title\n\nThe quick brown fox jumps.\n\nMore prose.\n");
@@ -3569,16 +3112,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // The region tier
-    // -----------------------------------------------------------------------
-
-    /// A document whose top-level children are easy to name, so a region can be
-    /// stated as a byte range rather than counted.
-    ///
-    /// Children: `HEADING`, `BLANK_LINE`, `PARAGRAPH`(alpha), `BLANK_LINE`,
-    /// `LIST`, `BLANK_LINE`, `PARAGRAPH`(gamma), `BLANK_LINE`,
-    /// `PARAGRAPH`(delta).
     const REGION_DOC: &str =
         "# Title\n\nAlpha para.\n\n- one\n- two\n\nGamma para.\n\nDelta para.\n";
 
@@ -3588,8 +3121,6 @@ mod tests {
         select_region(&tree, old_edit)
     }
 
-    /// The edit's own top-level child, and nothing else, when the edit is
-    /// strictly inside one and blank lines separate it from both neighbours.
     #[test]
     fn select_region_takes_the_edited_child_alone() {
         let at = REGION_DOC.find("Gamma").expect("marker") + 2;
@@ -3610,10 +3141,6 @@ mod tests {
         );
     }
 
-    /// An insertion exactly on a child boundary could attach to either side, so
-    /// closed-interval touch takes both -- and widening then pulls in the real
-    /// child behind the blank line. Getting this wrong is how a splice loses an
-    /// edit that a full parse attaches to the neighbour.
     #[test]
     fn select_region_widens_at_a_child_boundary() {
         let at = REGION_DOC.find("Gamma").expect("marker");
@@ -3639,20 +3166,14 @@ mod tests {
         );
     }
 
-    /// A region covering every child has nothing to splice against: the
-    /// "fragment" parse would be the full parse, and admitting it would have the
-    /// oracle compare a full parse to itself.
     #[test]
     fn select_region_declines_when_it_would_cover_the_whole_document() {
         let input = "Only para.\n";
         assert_eq!(region_of(input, (0, input.len())), None);
         assert_eq!(region_of(REGION_DOC, (0, REGION_DOC.len())), None);
-        // An empty document has no children at all.
         assert_eq!(region_of("", (0, 0)), None);
     }
 
-    /// The region always starts at or before the edit, which is what lets the
-    /// error merge keep its "before" bucket's offsets verbatim.
     #[test]
     fn select_region_never_starts_past_the_edit() {
         let options = ParserOptions::default();
@@ -3710,9 +3231,6 @@ mod tests {
         }
     }
 
-    /// `covering_text` is a pure optimization, so the only thing to pin is that
-    /// it reads the same bytes as the whole-tree slice it replaced --- at every
-    /// offset, including across node boundaries and multi-byte tokens.
     #[test]
     fn covering_text_agrees_with_a_whole_tree_slice() {
         let options = ParserOptions::default();
@@ -3749,15 +3267,12 @@ mod tests {
     #[test]
     fn no_straddle_finds_a_boundary_or_says_there_is_none() {
         let options = ParserOptions::default();
-        // `Para one.\n` is 10 bytes, then a blank line, then `Para two.\n`.
         let tree = Parser::new("Para one.\n\nPara two.\n", &options).parse();
         assert!(no_straddle(&tree, 0), "the document start is a boundary");
         assert!(no_straddle(&tree, 10), "a child boundary");
         assert!(no_straddle(&tree, 21), "EOF is a boundary");
         assert!(!no_straddle(&tree, 5), "mid-paragraph is not");
 
-        // A setext underline makes the two lines one child, so the boundary
-        // between them is gone.
         let fused = Parser::new("Para one.\n=========\n", &options).parse();
         assert!(!no_straddle(&fused, 10), "a setext heading spans the seam");
     }
@@ -3769,19 +3284,11 @@ mod tests {
         assert!(!enforced(5000, 100_000), "a twentieth of the document");
         assert!(!enforced(25_000, 100_000), "exactly a quarter is accepted");
         assert!(enforced(25_001, 100_000), "one byte over is declined");
-        // No always-try floor for small documents: three parses of a 74-byte
-        // document lose to one, because each `Parser::new` builds a registry.
         assert!(enforced(50, 74), "a small document gets no exemption");
-        // The test-only opt-out, without which the fuzz snippets -- tens of
-        // bytes, so every region is most of the document -- never reach the tier.
         assert!(!region_is_too_wide(CostGuards::Ignored, 30_000, 100_000));
-        // Degenerate inputs must not panic or divide by zero.
         assert!(!enforced(0, 0));
     }
 
-    /// The guard is a *comparison*: an edit that leaves the region's pairing
-    /// lines alone is admitted, and one that adds, removes, or alters a
-    /// delimiter is not.
     #[test]
     fn long_range_pairing_lines_ignore_prose_and_catch_delimiters() {
         assert_eq!(
@@ -3795,11 +3302,6 @@ mod tests {
             long_range_pairing_lines("a\n<!-- c -->\n"),
             vec!["<!-- c -->"]
         );
-        // Grid borders and pipe rows are contiguous constructs -- blank-line
-        // terminated, so they cannot pair past their own block -- and are
-        // deliberately not long-range. Treating them as such declined every
-        // edit to a grid table's border, which is what `large_authoring.qmd`
-        // puts on the bench.
         assert_eq!(
             long_range_pairing_lines("a\n| - | - |\n"),
             Vec::<&str>::new()
@@ -3808,13 +3310,10 @@ mod tests {
             long_range_pairing_lines("a\n+----+----+\n"),
             Vec::<&str>::new()
         );
-        // Editing a code block's *body* leaves the fences alone, which is what
-        // keeps the common case on the tier.
         assert_eq!(
             long_range_pairing_lines("```\nlet x = 1;\n```\n"),
             long_range_pairing_lines("```\nlet x = 12;\n```\n")
         );
-        // Typing a fence does not.
         assert_ne!(
             long_range_pairing_lines("prose\n"),
             long_range_pairing_lines("```\n")
@@ -3868,8 +3367,6 @@ mod tests {
         spliced
     }
 
-    /// The tier's reason for existing: an edit near the top of a document that
-    /// the window-size cutoff refuses outright.
     #[test]
     fn region_tier_answers_an_early_edit_the_window_cutoff_declines() {
         let input = long_document_with_early_paragraph();
@@ -3882,11 +3379,6 @@ mod tests {
         );
     }
 
-    /// A fence typed into the region can pair with an opener several siblings
-    /// back, which no one-neighbour boundary parse can see. Verified against the
-    /// full parser: appending a closing fence to the last paragraph of
-    /// `` ```\naaa\n\nbbb\n\nccc\n `` collapses all five children into one
-    /// `CODE_BLOCK`.
     #[test]
     fn region_tier_declines_a_fence_that_pairs_beyond_the_neighbour() {
         let input = "```\naaa\n\nbbb\n\nccc\n\nddd\n";
@@ -3958,9 +3450,6 @@ mod tests {
         }
     }
 
-    /// Long enough that every window this cascade could choose is over
-    /// [`MAX_WINDOW_SHARE_PERCENT`], so an edit in `Alpha` reaches the region
-    /// tier rather than a window.
     fn long_document_with_early_paragraph() -> String {
         let mut input = String::from("# Title\n\nAlpha para.\n\n");
         for index in 0..400 {

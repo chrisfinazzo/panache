@@ -184,17 +184,12 @@ pub(crate) fn fold_quoted_inner(inner: &str, escaped_breaks: bool) -> String {
         }
         trim_trailing_ws_respecting_escape(&mut out, escaped_breaks);
         if escaped_breaks && blanks == 0 && have_first && ends_with_odd_backslashes(&out) {
-            // The preceding line ends in an unescaped backslash: the line
-            // break is escaped, so the continuation joins with no folded
-            // space and the escaping backslash is consumed.
             out.pop();
             out.push_str(stripped);
             blanks = 0;
             continue;
         }
         if !have_first {
-            // No content yet, so prepend nothing — first-line leading
-            // whitespace is preserved later by the `idx == 0` branch only.
         } else if blanks == 0 {
             out.push(' ');
         } else {
@@ -207,13 +202,6 @@ pub(crate) fn fold_quoted_inner(inner: &str, escaped_breaks: bool) -> String {
         have_first = true;
     }
     if blanks > 0 {
-        // A trailing run of blank/whitespace-only lines ends the scalar.
-        // The accumulated content is followed by a fold, so strip its
-        // trailing whitespace, then append the folded breaks: a single
-        // break collapses to a space, a run of `n` breaks collapses to
-        // `n - 1` newlines. When every line is empty/whitespace-only
-        // the content is empty and this is the scalar's only
-        // contribution (yaml-test-suite NAT4).
         trim_trailing_ws_respecting_escape(&mut out, escaped_breaks);
         if blanks == 1 {
             out.push(' ');
@@ -223,9 +211,6 @@ pub(crate) fn fold_quoted_inner(inner: &str, escaped_breaks: bool) -> String {
             }
         }
     }
-    // No trailing blank run: the final line's trailing whitespace before
-    // the closing quote is content (yaml-test-suite 7A4E) and is
-    // preserved as-is.
     out
 }
 
@@ -259,8 +244,6 @@ pub(crate) fn trim_trailing_ws_respecting_escape(out: &mut String, escaped_break
     }
     let bs_count = end - bs_start;
     if bs_count % 2 == 1 {
-        // Unescaped `\` — the next byte (a space or tab) is the escape's
-        // argument; keep it and trim anything past it.
         out.truncate(end + 1);
     } else {
         out.truncate(end);
@@ -294,9 +277,6 @@ pub(crate) fn decode_double_quoted_inner(body: &str) -> String {
     out
 }
 
-/// Decode a single `\<X>` escape, given the char after the backslash
-/// and a chars iterator positioned just after `next`. Pushes the
-/// decoded character(s) into `out`.
 fn decode_double_quoted_escape(next: char, chars: &mut std::str::Chars<'_>, out: &mut String) {
     match next {
         '0' => out.push('\0'),
@@ -410,7 +390,6 @@ mod tests {
         assert_eq!(cook(ScalarStyle::Plain, "  x  "), "x");
         assert_eq!(cook(ScalarStyle::SingleQuoted, "'x'"), "x");
         assert_eq!(cook(ScalarStyle::DoubleQuoted, "\"x\""), "x");
-        // Block scalars: unhandled here, returned verbatim.
         assert_eq!(cook(ScalarStyle::Literal, "|\n  x\n"), "|\n  x\n");
         assert_eq!(cook(ScalarStyle::Folded, ">\n  x\n"), ">\n  x\n");
     }

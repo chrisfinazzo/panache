@@ -54,8 +54,6 @@ fn extension_off_keeps_space_between_wide_chars() {
 
 #[test]
 fn suppresses_inside_link_text() {
-    // Pandoc's filter suppresses the space inside a link text when both
-    // adjacent chars are wide. The link's own surface markup is unaffected.
     let input = "[象限\n角](https://example.com)\n";
     let out = format(input, Some(cfg_with_ext(true)), None);
     assert_eq!(out, "[象限角](https://example.com)\n");

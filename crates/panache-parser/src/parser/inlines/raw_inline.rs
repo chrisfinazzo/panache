@@ -17,8 +17,6 @@ use crate::syntax::SyntaxKind;
 /// Check if a code span with attributes is actually a raw inline span.
 /// Raw inline spans have attributes of the form {=format} (no other attributes).
 pub fn is_raw_inline(attributes: &AttributeBlock) -> Option<&str> {
-    // Raw inline must have exactly one class starting with '='
-    // and no identifier or key-value pairs
     if attributes.identifier.is_some() || !attributes.key_values.is_empty() {
         return None;
     }
@@ -49,22 +47,18 @@ pub fn emit_raw_inline(
 ) {
     builder.start_node(SyntaxKind::RAW_INLINE.into());
 
-    // Opening backticks
     builder.token(
         SyntaxKind::RAW_INLINE_MARKER.into(),
         &backtick_run(backtick_count),
     );
 
-    // Raw content
     builder.token(SyntaxKind::RAW_INLINE_CONTENT.into(), content);
 
-    // Closing backticks
     builder.token(
         SyntaxKind::RAW_INLINE_MARKER.into(),
         &backtick_run(backtick_count),
     );
 
-    // Format attribute `{=format}`, structured over the raw source bytes.
     emit_attribute_node(builder, attr_raw);
 
     builder.finish_node();
@@ -155,9 +149,6 @@ mod tests {
         assert_eq!(is_raw_inline(&attrs), None);
     }
 
-    /// The `{=format}` attribute is now structured over the raw source bytes
-    /// (an `ATTR_CLASS` token wrapping `=format`) rather than synthesized, so
-    /// the `RAW_INLINE` node round-trips byte-for-byte and exposes structure.
     #[test]
     fn raw_inline_attribute_is_structured_and_lossless() {
         let input = "`<a>`{=html}\n";
@@ -177,8 +168,6 @@ mod tests {
         assert_eq!(class.text(), "=html");
     }
 
-    /// Interior whitespace inside the braces is preserved verbatim — the old
-    /// synthesizing emitter collapsed `{ =html }` to `{=html}`.
     #[test]
     fn raw_inline_attribute_preserves_interior_whitespace() {
         let input = "`<a>`{ =html }\n";

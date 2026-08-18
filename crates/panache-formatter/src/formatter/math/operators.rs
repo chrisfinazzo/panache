@@ -103,22 +103,17 @@ pub fn classify_operator(atom: &str) -> AtomClass {
 /// KaTeX-bounded). Extend freely; the `Op` arm is deliberately conservative.
 pub fn command_class(name: &str) -> Option<AtomClass> {
     let class = match name {
-        // Relations.
         "leq" | "le" | "geq" | "ge" | "neq" | "ne" | "equiv" | "approx" | "sim" | "simeq"
         | "cong" | "propto" | "subset" | "supset" | "subseteq" | "supseteq" | "in" | "ni"
         | "notin" | "to" | "gets" | "mapsto" | "rightarrow" | "leftarrow" | "leftrightarrow"
         | "Rightarrow" | "Leftarrow" | "Leftrightarrow" | "implies" | "iff" | "perp"
         | "parallel" | "mid" | "models" | "vdash" | "dashv" | "prec" | "succ" | "preceq"
         | "succeq" | "ll" | "gg" | "doteq" | "asymp" | "coloneqq" => AtomClass::Rel,
-        // Binary operators.
         "cdot" | "times" | "div" | "pm" | "mp" | "ast" | "star" | "circ" | "bullet" | "oplus"
         | "ominus" | "otimes" | "oslash" | "odot" | "cap" | "cup" | "uplus" | "sqcap" | "sqcup"
         | "wedge" | "vee" | "setminus" | "amalg" => AtomClass::Bin,
-        // Large operators: Ord-like for spacing, but a following `+`/`-` is unary.
         "sum" | "prod" | "int" | "oint" | "coprod" | "bigcup" | "bigcap" | "bigoplus"
         | "bigotimes" | "bigvee" | "bigwedge" | "lim" => AtomClass::Op,
-        // Delimiter commands (defensive; the common `\left(`/`\right)` path is
-        // already covered by the `(`/`)` MATH_OPEN/MATH_CLOSE tokens).
         "left" => AtomClass::Open,
         "right" => AtomClass::Close,
         _ => return None,
@@ -214,13 +209,10 @@ mod tests {
 
     #[test]
     fn operator_runs_split_into_atoms() {
-        // Single operators are one atom.
         assert_eq!(split_operator_atoms("+"), vec!["+"]);
         assert_eq!(split_operator_atoms("="), vec!["="]);
-        // Adjacent relation chars merge into one composite relation.
         assert_eq!(split_operator_atoms("<="), vec!["<="]);
         assert_eq!(split_operator_atoms("=="), vec!["=="]);
-        // A sign char is always its own atom (so it can be unary).
         assert_eq!(split_operator_atoms("=-"), vec!["=", "-"]);
         assert_eq!(split_operator_atoms("->"), vec!["-", ">"]);
         assert_eq!(split_operator_atoms("--"), vec!["-", "-"]);
@@ -231,7 +223,6 @@ mod tests {
     fn definition_colon_needs_an_adjacent_equals() {
         let eq = Some((SyntaxKind::MATH_OPERATOR, "="));
         assert!(is_definition_colon(":", eq));
-        // `:` is only ever a definition head when an `=` follows immediately.
         assert!(!is_definition_colon(":", None));
         assert!(!is_definition_colon(
             ":",
@@ -245,7 +236,6 @@ mod tests {
             ":",
             Some((SyntaxKind::MATH_OPERATOR, "<"))
         ));
-        // Only a lone `:` token — the parser never fuses it into a text run.
         assert!(!is_definition_colon("ab:", eq));
         assert!(!is_definition_colon("::", eq));
     }
@@ -269,7 +259,6 @@ mod tests {
         assert_eq!(command_class("sum"), Some(AtomClass::Op));
         assert_eq!(command_class("left"), Some(AtomClass::Open));
         assert_eq!(command_class("right"), Some(AtomClass::Close));
-        // Unknown / ordinary commands fall through to None (caller → Ord).
         assert_eq!(command_class("alpha"), None);
         assert_eq!(command_class("frac"), None);
         assert_eq!(command_class("text"), None);
@@ -277,16 +266,13 @@ mod tests {
 
     #[test]
     fn text_mode_command_set() {
-        // Text-switching commands → true (interior whitespace is significant).
         assert!(is_text_mode_command("text"));
         assert!(is_text_mode_command("textbf"));
         assert!(is_text_mode_command("mbox"));
-        // Math-mode font commands and ordinary commands → false.
         assert!(!is_text_mode_command("mathrm"));
         assert!(!is_text_mode_command("mathbf"));
         assert!(!is_text_mode_command("frac"));
         assert!(!is_text_mode_command("alpha"));
-        // Multi-argument `\textcolor` is intentionally excluded.
         assert!(!is_text_mode_command("textcolor"));
     }
 
@@ -304,14 +290,12 @@ mod tests {
             delimiter_class(SyntaxKind::MATH_PUNCT),
             Some(AtomClass::Punct)
         );
-        // Non-delimiter kinds are not the delimiter table's concern.
         assert_eq!(delimiter_class(SyntaxKind::MATH_TEXT), None);
         assert_eq!(delimiter_class(SyntaxKind::MATH_OPERATOR), None);
     }
 
     #[test]
     fn bin_coerces_to_unary_in_unary_positions() {
-        // Unary positions → Ord (tight).
         assert_eq!(coerce(AtomClass::Bin, None), AtomClass::Ord);
         assert_eq!(
             coerce(AtomClass::Bin, Some(AtomClass::Open)),
@@ -324,13 +308,11 @@ mod tests {
             AtomClass::Ord
         );
         assert_eq!(coerce(AtomClass::Bin, Some(AtomClass::Op)), AtomClass::Ord);
-        // Binary positions stay Bin.
         assert_eq!(coerce(AtomClass::Bin, Some(AtomClass::Ord)), AtomClass::Bin);
         assert_eq!(
             coerce(AtomClass::Bin, Some(AtomClass::Close)),
             AtomClass::Bin
         );
-        // Relations never coerce.
         assert_eq!(coerce(AtomClass::Rel, None), AtomClass::Rel);
         assert_eq!(
             coerce(AtomClass::Rel, Some(AtomClass::Open)),
@@ -351,11 +333,8 @@ mod tests {
 
     #[test]
     fn break_priority_ranks_rel_over_bin_over_rest() {
-        // Relations break first, then binary operators.
         assert!(break_priority(AtomClass::Rel) > break_priority(AtomClass::Bin));
         assert!(break_priority(AtomClass::Bin) > break_priority(AtomClass::Ord));
-        // Everything that is not a binary/relation operator is never a break
-        // site (priority 0) — including delimiters, punctuation, and large ops.
         for class in [
             AtomClass::Ord,
             AtomClass::Open,
@@ -365,7 +344,6 @@ mod tests {
         ] {
             assert_eq!(break_priority(class), 0, "{class:?}");
         }
-        // Only spaced classes are break sites.
         assert_eq!(
             break_priority(AtomClass::Rel) > 0,
             is_spaced(AtomClass::Rel)

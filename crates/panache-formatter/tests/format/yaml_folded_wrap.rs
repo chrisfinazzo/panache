@@ -57,16 +57,12 @@ fn folded_scalar_wraps_long_line() {
         body_lines(&out, "abstract").len() >= 2,
         "expected wrapped body:\n{out}"
     );
-    // Folding is loss-free: the wrapped words rejoin to the original.
     assert_eq!(folded_body_words(&out, "abstract"), LONG);
-    // Idempotent.
     assert_eq!(format(&out, Some(reflow80()), None), out, "not idempotent");
 }
 
 #[test]
 fn reflow_joins_short_lines_and_refills() {
-    // The motivating case: a folded paragraph hand-wrapped at uneven
-    // widths is rejoined and greedily refilled to the line width.
     let input = "---\ndescription: >\n  This page presents performance benchmarks for Panache, comparing its formatting\n  and linting speed against popular alternatives like Prettier, Pandoc, rumdl.\n---\n\n# Test\n";
     let out = format(input, Some(reflow80()), None);
 
@@ -76,7 +72,6 @@ fn reflow_joins_short_lines_and_refills() {
             "line over width: {line:?}\n{out}"
         );
     }
-    // The orphaned word `formatting` is rejoined, not stranded on its own line.
     assert!(
         !out.lines().any(|l| l.trim() == "formatting"),
         "short line should be rejoined, not stranded:\n{out}"
@@ -88,7 +83,6 @@ fn reflow_joins_short_lines_and_refills() {
 
 #[test]
 fn short_folded_lines_are_joined_under_reflow() {
-    // Rule 15 (revised): short folded lines now join when they fit.
     let input = "---\nmsg: >\n  line one\n  line two\n---\n\n# Test\n";
     let out = format(input, Some(reflow80()), None);
     assert!(
@@ -111,7 +105,6 @@ fn sentence_mode_breaks_one_sentence_per_line() {
         ],
         "one sentence per line:\n{out}"
     );
-    // Folding rejoins to the original prose.
     assert_eq!(
         folded_body_words(&out, "msg"),
         "First sentence here. Second sentence follows. Third one too."
@@ -125,8 +118,6 @@ fn sentence_mode_breaks_one_sentence_per_line() {
 
 #[test]
 fn semantic_mode_preserves_breaks_and_splits_sentences() {
-    // Two author lines; the first carries two sentences. Semantic keeps
-    // the author break AND splits the first line's two sentences.
     let input = "---\nmsg: >\n  First sentence. Second sentence.\n  A third on its own line.\n---\n\n# Test\n";
     let out = format(input, Some(cfg(WrapMode::Semantic)), None);
     assert_eq!(
@@ -176,7 +167,6 @@ fn folded_strip_and_keep_preserve_header_and_wrap() {
 
 #[test]
 fn folded_with_indentation_indicator_is_left_alone() {
-    // Explicit indentation indicator (`>2`) is out of scope for rule 15.
     let input = format!("---\nabstract: >2\n  {LONG}\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
     assert!(
@@ -187,8 +177,6 @@ fn folded_with_indentation_indicator_is_left_alone() {
 
 #[test]
 fn blank_line_separates_paragraphs() {
-    // A blank line inside a folded scalar is folding-significant (it
-    // folds to a newline); reflow must not merge across it.
     let input = "---\nmsg: >\n  one two\n  three four\n\n  five six\n---\n\n# Test\n";
     let out = format(input, Some(reflow80()), None);
     assert!(

@@ -19,22 +19,18 @@ use crate::syntax::SyntaxKind;
 pub fn try_parse_superscript(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with ^
     if bytes.is_empty() || bytes[0] != b'^' {
         return None;
     }
 
-    // Check that it's not ^[ (inline footnote)
     if bytes.len() > 1 && bytes[1] == b'[' {
         return None;
     }
 
-    // Content cannot start with whitespace
     if bytes.len() > 1 && bytes[1].is_ascii_whitespace() {
         return None;
     }
 
-    // Find the closing ^
     let mut pos = 1;
     let mut found_close = false;
 
@@ -50,23 +46,16 @@ pub fn try_parse_superscript(text: &str) -> Option<(usize, &str)> {
         return None;
     }
 
-    // Extract content between the delimiters
     let content = &text[1..pos];
 
-    // Content cannot be empty or only whitespace
     if content.trim().is_empty() {
         return None;
     }
 
-    // Content cannot end with whitespace
     if content.ends_with(char::is_whitespace) {
         return None;
     }
 
-    // Pandoc rule: superscripted text cannot contain unescaped whitespace.
-    // To include a space, source must escape it as `\ `. Verified against
-    // `pandoc -f markdown` for `^x y^` → not a superscript, `^x\ y^` →
-    // Superscript with NBSP-joined content.
     if contains_unescaped_whitespace(content) {
         return None;
     }
@@ -101,15 +90,12 @@ pub fn emit_superscript(
 ) {
     builder.start_node(SyntaxKind::SUPERSCRIPT.into());
 
-    // Opening marker
     builder.start_node(SyntaxKind::SUPERSCRIPT_MARKER.into());
     builder.token(SyntaxKind::SUPERSCRIPT_MARKER.into(), "^");
     builder.finish_node();
 
-    // Parse inner content recursively for nested inline elements
     parse_inline_text(builder, inner_text, config, false, suppress_footnote_refs);
 
-    // Closing marker
     builder.start_node(SyntaxKind::SUPERSCRIPT_MARKER.into());
     builder.token(SyntaxKind::SUPERSCRIPT_MARKER.into(), "^");
     builder.finish_node();
@@ -135,10 +121,8 @@ mod tests {
 
     #[test]
     fn test_no_whitespace_inside_delimiters() {
-        // Content cannot start with whitespace
         assert_eq!(try_parse_superscript("^ text^"), None);
 
-        // Content cannot end with whitespace
         assert_eq!(try_parse_superscript("^text ^"), None);
     }
 
@@ -156,7 +140,6 @@ mod tests {
 
     #[test]
     fn test_not_confused_with_inline_footnote() {
-        // ^[ should not be parsed as superscript
         assert_eq!(try_parse_superscript("^[footnote]"), None);
     }
 
@@ -168,8 +151,6 @@ mod tests {
 
     #[test]
     fn test_internal_whitespace_rejected() {
-        // Pandoc rejects unescaped internal whitespace in superscripts;
-        // backslash-escaped spaces are accepted.
         assert_eq!(try_parse_superscript("^some text^"), None);
         assert_eq!(
             try_parse_superscript("^some\\ text^"),

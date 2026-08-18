@@ -40,9 +40,6 @@ pub enum Flavor {
 #[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Extensions {
-    // ===== Block-level extensions =====
-
-    // Headings
     /// Require blank line before headers (default: enabled)
     pub blank_before_header: bool,
     /// Full attribute syntax on headers {#id .class key=value}
@@ -54,11 +51,9 @@ pub struct Extensions {
     /// Implicit header references ([Heading] links to header)
     pub implicit_header_references: bool,
 
-    // Block quotes
     /// Require blank line before blockquotes (default: enabled)
     pub blank_before_blockquote: bool,
 
-    // Lists
     /// Fancy list markers (roman numerals, letters, etc.)
     pub fancy_lists: bool,
     /// Start ordered lists at arbitrary numbers
@@ -75,7 +70,6 @@ pub struct Extensions {
     /// nested lists require four-space (one tab-width) indentation
     pub four_space_rule: bool,
 
-    // Code blocks
     /// Fenced code blocks with backticks
     pub backtick_code_blocks: bool,
     /// Fenced code blocks with tildes
@@ -91,7 +85,6 @@ pub struct Extensions {
     /// Attributes on inline code
     pub inline_code_attributes: bool,
 
-    // Tables
     /// Simple table syntax
     pub simple_tables: bool,
     /// Multiline cell content in tables
@@ -103,19 +96,14 @@ pub struct Extensions {
     /// Table captions
     pub table_captions: bool,
 
-    // Divs
     /// Fenced divs ::: {.class}
     pub fenced_divs: bool,
     /// HTML <div> elements
     pub native_divs: bool,
 
-    // Other block elements
     /// Line blocks for poetry | prefix
     pub line_blocks: bool,
 
-    // ===== Inline elements =====
-
-    // Emphasis
     /// Underscores don't trigger emphasis in snake_case
     pub intraword_underscores: bool,
     /// Strikethrough ~~text~~
@@ -124,7 +112,6 @@ pub struct Extensions {
     pub superscript: bool,
     pub subscript: bool,
 
-    // Links
     /// Inline links [text](url)
     pub inline_links: bool,
     /// Reference links [text][ref]
@@ -136,13 +123,11 @@ pub struct Extensions {
     /// Automatic links <http://example.com>
     pub autolinks: bool,
 
-    // Images
     /// Inline images ![alt](url)
     pub inline_images: bool,
     /// Paragraph with just image becomes figure
     pub implicit_figures: bool,
 
-    // Math
     /// Dollar-delimited math $x$ and $$equation$$
     pub tex_math_dollars: bool,
     /// [NON-DEFAULT] GFM math: inline $`...`$ and fenced ``` math blocks
@@ -152,23 +137,19 @@ pub struct Extensions {
     /// [NON-DEFAULT] Double backslash math \\(...\\) and \\[...\\]
     pub tex_math_double_backslash: bool,
 
-    // Footnotes
     /// Inline footnotes ^[text]
     pub inline_footnotes: bool,
     /// Reference footnotes `[^1]` (requires footnote parsing)
     pub footnotes: bool,
 
-    // Citations
     /// Citation syntax [@cite]
     pub citations: bool,
 
-    // Spans
     /// Bracketed spans [text]{.class}
     pub bracketed_spans: bool,
     /// HTML <span> elements
     pub native_spans: bool,
 
-    // ===== Metadata =====
     /// YAML metadata block
     pub yaml_metadata_block: bool,
     /// Pandoc title block (Title/Author/Date)
@@ -176,7 +157,6 @@ pub struct Extensions {
     /// [NON-DEFAULT] MultiMarkdown metadata/title block (Key: Value ...)
     pub mmd_title_block: bool,
 
-    // ===== Raw content =====
     /// Raw HTML blocks and inline
     pub raw_html: bool,
     /// Markdown inside HTML blocks
@@ -186,14 +166,11 @@ pub struct Extensions {
     /// Generic raw blocks with {=format} syntax
     pub raw_attribute: bool,
 
-    // ===== Escapes and special characters =====
     /// Backslash escapes any symbol
     pub all_symbols_escapable: bool,
     /// Backslash at line end = hard line break
     pub escaped_line_breaks: bool,
 
-    // ===== NON-DEFAULT EXTENSIONS =====
-    // These are disabled by default in Pandoc
     /// [NON-DEFAULT] Bare URLs become links
     pub autolink_bare_uris: bool,
     /// [NON-DEFAULT] Newline = <br>
@@ -222,7 +199,6 @@ pub struct Extensions {
     /// [NON-DEFAULT] Allow whitespace between reference link brackets: `[foo] [bar]`
     pub spaced_reference_links: bool,
 
-    // ===== Quarto-specific extensions =====
     /// Quarto callout blocks (.callout-note, etc.)
     pub quarto_callouts: bool,
     /// Quarto cross-references @fig-id, @tbl-id
@@ -234,13 +210,11 @@ pub struct Extensions {
     /// Bookdown equation references in LaTeX math blocks (\#eq:label)
     pub bookdown_equation_references: bool,
 
-    // ===== mdsvex-specific extensions =====
     /// [NON-DEFAULT] Svelte template syntax: `{#if}`/`{:else}`/`{/each}` block
     /// logic, `{@html ...}`/`{@const ...}` tags, and `{expr}` interpolation.
     /// Parsed as opaque, lossless spans (content preserved verbatim).
     pub svelte_template: bool,
 
-    // ===== MyST-specific extensions =====
     /// [NON-DEFAULT] MyST directives: ```` ```{name} ```` (and, with
     /// `myst_colon_fence`, `:::{name}`) blocks carrying `:key: value` options
     /// and a markdown body.
@@ -373,7 +347,6 @@ impl Extensions {
 
     fn pandoc_defaults() -> Self {
         Self {
-            // Block-level - enabled by default in Pandoc
             auto_identifiers: true,
             blank_before_blockquote: true,
             blank_before_header: true,
@@ -381,7 +354,6 @@ impl Extensions {
             header_attributes: true,
             implicit_header_references: true,
 
-            // Lists
             definition_lists: true,
             example_lists: true,
             fancy_lists: true,
@@ -389,7 +361,6 @@ impl Extensions {
             startnum: true,
             task_lists: true,
 
-            // Code
             backtick_code_blocks: true,
             executable_code: false,
             rmarkdown_inline_code: false,
@@ -398,70 +369,56 @@ impl Extensions {
             fenced_code_blocks: true,
             inline_code_attributes: true,
 
-            // Tables
             grid_tables: true,
             multiline_tables: true,
             pipe_tables: true,
             simple_tables: true,
             table_captions: true,
 
-            // Divs
             fenced_divs: true,
             native_divs: true,
 
-            // Other blocks
             line_blocks: true,
 
-            // Inline
             intraword_underscores: true,
             strikeout: true,
             subscript: true,
             superscript: true,
 
-            // Links
             autolinks: true,
             inline_links: true,
             link_attributes: true,
             reference_links: true,
             shortcut_reference_links: true,
 
-            // Images
             implicit_figures: true,
             inline_images: true,
 
-            // Math
             tex_math_dollars: true,
             tex_math_double_backslash: false,
             tex_math_gfm: false,
             tex_math_single_backslash: false,
 
-            // Footnotes
             footnotes: true,
             inline_footnotes: true,
 
-            // Citations
             citations: true,
 
-            // Spans
             bracketed_spans: true,
             native_spans: true,
 
-            // Metadata
             mmd_title_block: false,
             pandoc_title_block: true,
             yaml_metadata_block: true,
 
-            // Raw
             markdown_in_html_blocks: false,
             raw_attribute: true,
             raw_html: true,
             raw_tex: true,
 
-            // Escapes
             all_symbols_escapable: true,
             escaped_line_breaks: true,
 
-            // Non-default
             alerts: false,
             python_markdown_admonitions: false,
             pymdownx_details: false,
@@ -474,24 +431,19 @@ impl Extensions {
             mmd_header_identifiers: false,
             mmd_link_attributes: false,
 
-            // Quarto/Bookdown-specific
             bookdown_references: false,
             bookdown_equation_references: false,
             quarto_callouts: false,
             quarto_crossrefs: false,
             quarto_shortcodes: false,
 
-            // Wikilinks (opt-in, no flavor default)
             wikilinks_title_after_pipe: false,
             wikilinks_title_before_pipe: false,
 
-            // Spaced reference links (opt-in)
             spaced_reference_links: false,
 
-            // mdsvex (opt-in, mdsvex flavor only)
             svelte_template: false,
 
-            // MyST (opt-in, myst flavor only)
             myst_directives: false,
             myst_roles: false,
             myst_targets: false,
@@ -538,9 +490,6 @@ impl Extensions {
         ext.autolinks = true;
         ext.backtick_code_blocks = true;
         ext.emoji = true;
-        // GFM is a CommonMark superset, so a trailing backslash is a hard
-        // break. `pandoc --list-extensions=gfm` doesn't list the extension
-        // because it's built into the commonmark reader rather than toggleable.
         ext.escaped_line_breaks = true;
         ext.fenced_code_blocks = true;
         ext.footnotes = true;
@@ -562,15 +511,6 @@ impl Extensions {
 
     fn commonmark_defaults() -> Self {
         let mut ext = Self::none_defaults();
-        // CommonMark's core grammar is what pandoc's commonmark reader treats
-        // as "not extensions" — they're built into the reader. Panache's
-        // parser still gates each construct on its extension flag, so we have
-        // to enable the CommonMark-mandatory ones explicitly here.
-        //
-        // Notably absent: `all_symbols_escapable`. CommonMark only allows
-        // backslash escapes of ASCII punctuation, and panache's
-        // `all_symbols_escapable` flag widens that to any character — so it
-        // must stay off for CommonMark.
         ext.autolinks = true;
         ext.backtick_code_blocks = true;
         ext.escaped_line_breaks = true;
@@ -612,30 +552,6 @@ impl Extensions {
     }
 
     fn mdsvex_defaults() -> Self {
-        // mdsvex (≤0.12.x) builds on `remark-parse@8`, the pre-micromark parser
-        // whose options default to `gfm: true`. So tables, strikethrough, bare
-        // autolinks, and task lists work out of the box with **no** plugins —
-        // confirmed by the official "Svex up your markdown" getting-started
-        // (which uses a pipe table) and by real plugin-free `svelte.config.js`
-        // setups. `remark-gfm` is only needed on *modern* remark, which mdsvex
-        // does not use. A CommonMark-only default would wrongly reflow those
-        // tables as prose.
-        //
-        // We therefore start from the GFM extension set (still the CommonMark
-        // *dialect* per `Dialect::for_flavor`, and still with every Pandoc
-        // attribute extension off, so `{` stays free for Svelte), then trim the
-        // extras that remark-parse@8's `gfm: true` does NOT include: footnotes
-        // (a separate, default-off option), math (needs remark-math), emoji
-        // (needs remark-gemoji), and GitHub alerts (postdates this remark).
-        //
-        // Heading ids also go: unlike GitHub, which slugs headings itself,
-        // mdsvex is a remark -> rehype pipeline whose default `rehypePlugins`
-        // is empty and whose own transformers never touch `h1`-`h6`, so
-        // `# My heading` emits a bare `<h1>` and `[x](#my-heading)` is a dead
-        // link. `gfm_auto_identifiers` stays on because it is inert while
-        // `auto_identifiers` is off, and it is the *correct* algorithm for the
-        // sites that do add `rehype-slug` (which slugs with `github-slugger`):
-        // they only have to set `auto-identifiers = true`.
         let mut ext = Self::gfm_defaults();
 
         ext.footnotes = false;
@@ -651,14 +567,6 @@ impl Extensions {
     }
 
     fn myst_defaults() -> Self {
-        // MyST is a CommonMark superset (markdown-it based), so we start from
-        // the CommonMark extension set and layer MyST's always-on constructs on
-        // top. Per the project decision, only MyST's *core* constructs are on by
-        // default — directives, roles, targets, and comments. Every MyST markup
-        // extension (`dollarmath`, `amsmath`, `colon_fence`, `deflist`,
-        // `fieldlist`, `tasklist`, `substitution`, `attrs_*`, `linkify`,
-        // `strikethrough`, `smartquotes`) is opt-in, matching a bare
-        // `myst-parser` install. Users enable them individually via config.
         let mut ext = Self::commonmark_defaults();
 
         ext.myst_directives = true;
@@ -667,27 +575,12 @@ impl Extensions {
         ext.myst_comments = true;
         ext.myst_block_breaks = true;
 
-        // MyST is GFM-flavored, not bare CommonMark: `myst-parser` builds its
-        // markdown-it parser with `.enable("table")` and the footnote plugin on
-        // by default. The plugin is loaded as `footnote_plugin, inline=False`,
-        // so reference footnotes (`[^ref]`) are on but inline footnotes
-        // (`^[...]`) stay off, matching a bare `myst-parser` install. (The
-        // remaining markup extensions below stay opt-in.)
         ext.pipe_tables = true;
         ext.footnotes = true;
         ext.inline_footnotes = false;
 
-        // `myst-parser`'s default parser loads `front_matter_plugin`, which
-        // treats a leading `---`-delimited block as YAML front matter. Without
-        // this, panache mis-parses it as a setext heading plus a thematic
-        // break. The plugin only fires at the document start; panache's
-        // `yaml_metadata_block` covers that leading case.
         ext.yaml_metadata_block = true;
 
-        // Opt-in MyST extensions (off here, overridable via [extensions]):
-        // colon_fence, substitution, and the markup extensions that map onto
-        // existing flags (tex_math_dollars, definition_lists, task_lists,
-        // strikeout, footnotes, ...).
         ext.myst_substitutions = false;
         ext.myst_colon_fence = false;
 
@@ -747,8 +640,6 @@ macro_rules! known_extensions {
                 Self::KNOWN_NAMES.iter().any(|k| *k == name)
             }
 
-            /// Set the named extension on `self`, returning `true` if `name`
-            /// matched a known field. Only kebab-case is accepted.
             fn set_by_name(&mut self, name: &str, value: bool) -> bool {
                 match name {
                     $( $kebab => { self.$field = value; true } )*
@@ -902,8 +793,6 @@ mod tests {
 
     #[test]
     fn escaped_line_breaks_defaults_on_for_commonmark_derived_flavors() {
-        // A trailing backslash is a hard break in CommonMark, and GFM, MyST,
-        // and mdsvex all inherit that from their CommonMark base.
         for flavor in [
             Flavor::Pandoc,
             Flavor::Quarto,
@@ -947,27 +836,18 @@ mod tests {
     fn myst_defaults_enable_core_constructs_only() {
         let ext = Extensions::for_flavor(Flavor::Myst);
 
-        // MyST core constructs are on by default.
         assert!(ext.myst_directives);
         assert!(ext.myst_roles);
         assert!(ext.myst_targets);
         assert!(ext.myst_comments);
         assert!(ext.myst_block_breaks);
 
-        // MyST is a GFM-flavored superset, not bare CommonMark: markdown-it's
-        // `table` and footnote rules are on by default in `myst-parser`. The
-        // footnote plugin is loaded with `inline=False`, so reference footnotes
-        // are on but inline footnotes (`^[...]`) stay off.
         assert!(ext.pipe_tables);
         assert!(ext.footnotes);
         assert!(!ext.inline_footnotes);
 
-        // `myst-parser` loads `front_matter_plugin` by default, so a leading
-        // `---` YAML block is metadata, not a setext heading + thematic break.
         assert!(ext.yaml_metadata_block);
 
-        // MyST markup extensions are opt-in (off by default), matching a bare
-        // `myst-parser` install.
         assert!(!ext.myst_colon_fence);
         assert!(!ext.myst_substitutions);
         assert!(!ext.tex_math_dollars);
@@ -975,8 +855,6 @@ mod tests {
         assert!(!ext.task_lists);
         assert!(!ext.strikeout);
 
-        // CommonMark superset: CommonMark core on, Pandoc `{...}` constructs off
-        // so braces are free for directives/roles.
         assert!(ext.inline_links);
         assert!(ext.backtick_code_blocks);
         assert!(!ext.fenced_divs);
@@ -1011,32 +889,23 @@ mod tests {
     fn mdsvex_defaults_match_remark_parse_8_gfm() {
         let ext = Extensions::for_flavor(Flavor::Mdsvex);
 
-        // The Svelte template layer is on; raw HTML and frontmatter pass through.
         assert!(ext.svelte_template);
         assert!(ext.raw_html);
         assert!(ext.yaml_metadata_block);
 
-        // remark-parse@8 defaults to `gfm: true`, so these work with no plugins.
         assert!(ext.pipe_tables);
         assert!(ext.strikeout);
         assert!(ext.task_lists);
         assert!(ext.autolink_bare_uris);
 
-        // Extras that remark-parse@8's gfm does NOT include stay off.
         assert!(!ext.footnotes);
         assert!(!ext.tex_math_dollars);
         assert!(!ext.emoji);
         assert!(!ext.alerts);
 
-        // Heading ids are a rehype concern, and mdsvex ships no rehype plugins
-        // of its own, so `# My heading` renders as a bare `<h1>`. The GFM
-        // algorithm stays selected for anyone who adds `rehype-slug` and flips
-        // `auto-identifiers` back on.
         assert!(!ext.auto_identifiers);
         assert!(ext.gfm_auto_identifiers);
 
-        // CommonMark dialect, so the Pandoc `{...}` attribute constructs are off
-        // — this is what frees `{` for Svelte template syntax.
         assert_eq!(Dialect::for_flavor(Flavor::Mdsvex), Dialect::CommonMark);
         assert!(!ext.header_attributes);
         assert!(!ext.bracketed_spans);
@@ -1207,9 +1076,6 @@ impl schemars::JsonSchema for Flavor {
     }
 
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        // Include serde aliases so the schema accepts every spelling the
-        // parser accepts (e.g. `commonmark` alongside the kebab-case
-        // `common-mark` canonical form).
         schemars::json_schema!({
             "type": "string",
             "description": "Markdown flavor to parse and format against.",

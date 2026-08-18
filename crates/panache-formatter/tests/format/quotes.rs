@@ -37,7 +37,6 @@ fn quote_with_fenced_code_block() {
 > Text after code.
 "#;
 
-    // Use config with empty formatters to avoid external formatter invocation
     let config = panache_formatter::Config {
         formatters: std::collections::HashMap::new(),
         ..Default::default()
@@ -45,7 +44,6 @@ fn quote_with_fenced_code_block() {
 
     let output = format(input, Some(config), None);
 
-    // Should preserve blockquote markers
     assert!(output.contains("> ```python"));
     assert!(output.contains("> def hello():"));
     assert!(output.contains(">     print(\"world\")"));
@@ -71,7 +69,6 @@ fn quote_with_indented_code_block() {
 
     let output = format(input, None, None);
 
-    // Indented code blocks get normalized to fenced code blocks
     assert!(output.contains("> ```"));
     assert!(output.contains("> x = 1"));
     assert!(output.contains("> y = 2"));
@@ -90,7 +87,6 @@ fn nested_quote_with_code() {
 
     let output = format(input, None, None);
 
-    // Should handle nested blockquotes with code
     assert!(output.contains("> > ```"));
     assert!(output.contains("> > code here"));
 }
@@ -126,7 +122,6 @@ fn quote_with_multiple_code_blocks() {
 
     let output = format(input, None, None);
 
-    // Should handle multiple code blocks in same blockquote
     assert!(output.contains("> ```"));
     assert!(output.contains("> first"));
     assert!(output.contains("> Some text"));

@@ -39,8 +39,6 @@ use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_
 use pulldown_latex::config::RenderConfig;
 use pulldown_latex::{Parser, Storage, push_mathml};
 
-/// Fail the run if more than this fraction of (non-excluded) cases skip — a
-/// guard against the oracle silently covering less and less of the corpus.
 const MAX_SKIP_FRACTION: f64 = 0.40;
 
 fn corpus_root() -> PathBuf {
@@ -86,10 +84,6 @@ fn format_opts(context: MathContext) -> MathFormatOptions {
     }
 }
 
-/// Render math content to a MathML string, or return `None` if `pulldown-latex`
-/// rejects it (a parse error). `push_mathml` itself renders parse errors as
-/// inline error nodes rather than failing, so we first collect the event stream
-/// into a `Result` to detect rejection, then render the validated events.
 fn render_mathml(tex: &str) -> Option<String> {
     let storage = Storage::new();
     let events = Parser::new(tex, &storage)
@@ -105,12 +99,6 @@ fn render_mathml(tex: &str) -> Option<String> {
     Some(normalize_mathml(&out))
 }
 
-/// Collapse insignificant inter-tag whitespace so benign source reflow doesn't
-/// register as a MathML difference. Significant attributes and text content are
-/// preserved; only run-length whitespace and newlines between/inside tags are
-/// normalized. We deliberately avoid a full XML parse — `pulldown-latex`'s
-/// output is regular enough that textual normalization is sufficient and keeps
-/// the harness dependency-light.
 fn normalize_mathml(mathml: &str) -> String {
     let mut out = String::with_capacity(mathml.len());
     let mut prev_space = false;
@@ -125,8 +113,6 @@ fn normalize_mathml(mathml: &str) -> String {
             prev_space = false;
         }
     }
-    // Drop whitespace that hugs tag boundaries (`> <` → `><`, `> x` → `>x`),
-    // which carries no MathML meaning.
     out.replace("> ", ">").replace(" <", "<")
 }
 
@@ -150,7 +136,6 @@ fn corpus_cross_validates_against_pulldown_latex() {
             .display()
             .to_string();
 
-        // Macro-dependent cases need document-level macros the oracle can't see.
         if id.starts_with("macro_dependent/") {
             continue;
         }
@@ -166,17 +151,12 @@ fn corpus_cross_validates_against_pulldown_latex() {
         let context = context_for(&id);
 
         let Some(before) = render_mathml(&input) else {
-            // Oracle rejects the input itself → outside its scope, skip.
             skipped.push(id);
             continue;
         };
 
-        // `None` ⇒ non-reflowable (malformed / lone `$`): the caller emits the
-        // content verbatim, so the cross-validated output is the input itself.
         let formatted = format_math(&input, &format_opts(context)).unwrap_or_else(|| input.clone());
         let Some(after) = render_mathml(&formatted) else {
-            // The formatter turned oracle-parseable input into something the
-            // oracle rejects — that is a real formatter bug.
             failures.push(format!(
                 "[{id}] format produced oracle-unparseable output:\n  input:\n{}\n  formatted:\n{}",
                 indent_block(&input),

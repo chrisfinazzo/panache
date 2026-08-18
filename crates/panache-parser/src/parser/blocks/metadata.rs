@@ -71,12 +71,6 @@ pub(crate) enum YamlContentOutcome {
 /// consumer (pandoc-family); GFM/CommonMark-family frontmatter stays lenient.
 pub(crate) fn prepare_yaml_content(content: &str, flavor: Flavor) -> Option<YamlContentOutcome> {
     let yaml_ctx = YamlValidationContext::frontmatter(flavor);
-    // The validator already builds the `YAML_STREAM` its structural checks run
-    // against, so take that tree instead of re-parsing `content`. This is the
-    // empty-prefix case of `locate_yaml_diagnostic_ctx`, whose offsets are the
-    // identity, so the range arithmetic is inlined here unchanged. The block
-    // dispatcher reaches this per `---` line during lookahead, so the second
-    // parse was a measurable share of whole-document parse time.
     let (diag, tree) = validate_yaml_with_context_tree(content, yaml_ctx);
     if let Some(diag) = diag {
         let start = diag.byte_start.min(content.len());
@@ -89,8 +83,6 @@ pub(crate) fn prepare_yaml_content(content: &str, flavor: Flavor) -> Option<Yaml
     }
     let stream = match tree {
         Some(tree) => tree,
-        // Unreachable in practice: a `None` tree always carries a diagnostic,
-        // handled above. Re-parse rather than assume it.
         None => parse_stream(content),
     };
     if !yaml_ctx.consumers().is_empty() && !top_level_is_mapping_or_null(&stream) {
@@ -131,9 +123,6 @@ fn top_level_is_mapping_or_null(stream: &SyntaxNode) -> bool {
     }
 }
 
-/// Whether a `YAML_SCALAR` node is a plain null scalar (`~`, `null`, `Null`,
-/// `NULL`). Quoted forms keep their quotes in `YAML_SCALAR_TEXT`, so they
-/// correctly resolve to strings, not null.
 fn scalar_is_null(scalar: &SyntaxNode) -> bool {
     let mut text = String::new();
     for token in scalar.children_with_tokens().filter_map(|t| t.into_token()) {
@@ -186,12 +175,10 @@ pub(crate) fn find_yaml_block_closing_pos<'a>(
         return None;
     }
 
-    // Must start with `---`, unindented.
     if !is_metadata_open_delim(strip(pos)) {
         return None;
     }
 
-    // If not at document start, previous line must be blank
     if !at_document_start && pos > 0 {
         let prev_line = lines[pos - 1];
         if !prev_line.trim().is_empty() {
@@ -199,19 +186,15 @@ pub(crate) fn find_yaml_block_closing_pos<'a>(
         }
     }
 
-    // Check that next line (if exists) is NOT blank (this distinguishes from horizontal rule)
     if pos + 1 < lines.len() {
         let next_line = lines[pos + 1];
         if next_line.trim().is_empty() {
-            // This is likely a horizontal rule, not YAML
             return None;
         }
     } else {
-        // No content after ---, can't be a YAML block
         return None;
     }
 
-    // Find a closing delimiter before emitting; otherwise this is not a valid YAML block.
     (pos + 1..lines.len()).find(|&i| is_metadata_close_delim(strip(i)))
 }
 
@@ -226,10 +209,8 @@ pub(crate) fn emit_yaml_block(
     if pos >= lines.len() || closing_pos <= pos || closing_pos >= lines.len() {
         return None;
     }
-    // Start metadata node
     builder.start_node(SyntaxKind::YAML_METADATA.into());
 
-    // Opening delimiter - strip newline before emitting
     let (text, newline_str) = strip_newline(lines[pos]);
     builder.token(SyntaxKind::YAML_METADATA_DELIM.into(), text);
     if !newline_str.is_empty() {
@@ -238,30 +219,12 @@ pub(crate) fn emit_yaml_block(
 
     builder.start_node(SyntaxKind::YAML_METADATA_CONTENT.into());
 
-    // Embed the in-tree YAML CST under YAML_METADATA_CONTENT when the
-    // content validates. On validation failure, fall back to the
-    // opaque line-token shape so downstream re-parse (and the host
-    // CST snapshot of malformed YAML) keep their current behavior.
-    //
-    // The stored stream is a `YAML_STREAM` wrapping one or more
-    // `YAML_DOCUMENT` children. The wrapper is the YAML-spec stream
-    // container — but inside frontmatter the host's
-    // `YAML_METADATA_CONTENT` already plays that role (and
-    // `find_yaml_block_closing_pos` guarantees a single document by
-    // stopping at the first internal `---` / `...`). Splice the stream's
-    // children in directly to avoid the redundant wrapper.
     match outcome {
         YamlContentOutcome::Invalid {
             message,
             start,
             end,
         } => {
-            // Malformed frontmatter YAML: record the syntax error at its host
-            // position (the parser already has the verdict), then fall back to
-            // the opaque line-token shape. The content begins at
-            // `lines[pos + 1]`, a subslice of the host input, so its host
-            // start is the pointer offset from line 0; offsets are identity
-            // (no per-line prefix).
             let host_start = lines[pos + 1].as_ptr() as usize - lines[0].as_ptr() as usize;
             diags.push(SyntaxError {
                 range: TextRange::new(
@@ -314,44 +277,35 @@ pub(crate) fn try_parse_pandoc_title_block(
         return None;
     }
 
-    // Start title block node
     builder.start_node(SyntaxKind::PANDOC_TITLE_BLOCK.into());
 
     let mut current_pos = 0;
     let mut field_count = 0;
 
-    // Parse up to 3 fields (title, author, date)
     while current_pos < lines.len() && field_count < 3 {
         let line = lines[current_pos];
 
-        // Check if this line starts a field (begins with %)
         if line.trim_start().starts_with('%') {
             emit_line_tokens(builder, line);
             field_count += 1;
             current_pos += 1;
 
-            // Collect continuation lines (start with leading space, not with %)
             while current_pos < lines.len() {
                 let cont_line = lines[current_pos];
                 if cont_line.is_empty() {
-                    // Blank line ends title block
                     break;
                 }
                 if cont_line.trim_start().starts_with('%') {
-                    // Next field
                     break;
                 }
                 if cont_line.starts_with(' ') || cont_line.starts_with('\t') {
-                    // Continuation line
                     emit_line_tokens(builder, cont_line);
                     current_pos += 1;
                 } else {
-                    // Non-continuation, non-% line ends title block
                     break;
                 }
             }
         } else {
-            // Line doesn't start with %, title block ends
             break;
         }
     }
@@ -394,7 +348,6 @@ pub(crate) fn try_parse_mmd_title_block(
 
     let mut current_pos = pos;
 
-    // First line must be a key-value pair with non-empty value.
     let first = lines[current_pos];
     let (_first_key, first_value) = mmd_key_value(first)?;
     if first_value.is_empty() {
@@ -418,7 +371,6 @@ pub(crate) fn try_parse_mmd_title_block(
         emit_line_tokens(builder, line);
         current_pos += 1;
 
-        // Optional continuation lines (must be indented and not key-value starts).
         while current_pos < lines.len() {
             let cont_line = lines[current_pos];
             if cont_line.trim().is_empty() {
@@ -540,10 +492,6 @@ mod tests {
 
     #[test]
     fn test_indented_opening_delimiter_is_not_metadata() {
-        // Pandoc's `yamlMetaBlock` is `string "---"` with no leading-space
-        // parser in front, so even one column of indent takes the lines out
-        // of the metadata reading (they become a simple table at 1-3
-        // columns, an indented code block at 4+).
         for indent in [" ", "  ", "   ", "    ", "\t"] {
             let opener = format!("{indent}---");
             let content = format!("{indent}title: Test");
@@ -563,9 +511,6 @@ mod tests {
 
     #[test]
     fn test_indented_closing_delimiter_does_not_close_metadata() {
-        // `stopLine` is anchored the same way, so an indented `---` / `...`
-        // is content, not a closer --- and with no other closer the block
-        // is not metadata at all.
         for closer in ["  ---", "    ---", "  ...", "    ..."] {
             let lines = vec!["---", "title: Test", closer];
             let mut builder = GreenNodeBuilder::new();
@@ -583,7 +528,6 @@ mod tests {
 
     #[test]
     fn test_delimiter_trailing_whitespace_is_allowed() {
-        // `blankline` skips spaces and tabs after the delimiter.
         let lines = vec!["---  ", "title: Test", "---\t"];
         let mut builder = GreenNodeBuilder::new();
         let result = try_parse_yaml_block(
@@ -599,9 +543,6 @@ mod tests {
 
     #[test]
     fn test_metadata_in_list_item_is_measured_from_content_column() {
-        // The column-0 anchor is relative to the container's content
-        // column: pandoc parses (and swallows) a metadata block inside a
-        // list item whose delimiters sit at the item's content column.
         let input = "- item\n\n  ---\n  title: x\n  ---\n\n  after\n";
         let tree = crate::parse(input, Some(crate::ParserOptions::default()));
         assert_eq!(tree.text().to_string(), input);
@@ -614,9 +555,6 @@ mod tests {
 
     #[test]
     fn test_nonmapping_yaml_is_not_metadata() {
-        // Pandoc backtracks when the content is well-formed YAML whose top
-        // level is not a mapping (scalar, sequence): the lines reparse as
-        // ordinary blocks (simple table, or HR + paragraph).
         for content in ["- a", "plain prose here", "42", "[a, b]"] {
             let lines = vec!["---", content, "---"];
             let mut builder = GreenNodeBuilder::new();
@@ -634,8 +572,6 @@ mod tests {
 
     #[test]
     fn test_mapping_and_null_yaml_is_metadata() {
-        // Pandoc accepts a top-level mapping, and null or comments-only
-        // content (empty metadata).
         for content in ["foo: bar", "{a: 1}", "null", "~", "# comment"] {
             let lines = vec!["---", content, "---"];
             let mut builder = GreenNodeBuilder::new();
@@ -653,8 +589,6 @@ mod tests {
 
     #[test]
     fn test_nonmapping_yaml_stays_metadata_for_lenient_flavors() {
-        // GFM/CommonMark frontmatter has no asserted YAML metadata consumer,
-        // so the mapping gate does not apply there.
         let lines = vec!["---", "42", "---"];
         let mut builder = GreenNodeBuilder::new();
         let result = try_parse_yaml_block(
@@ -670,9 +604,6 @@ mod tests {
 
     #[test]
     fn test_invalid_yaml_stays_metadata_with_diagnostic() {
-        // Pandoc hard-errors on YAML parse exceptions (no fallback
-        // interpretation exists); the lossless analog is keeping the
-        // metadata node and reporting a syntax error.
         let lines = vec!["---", "foo: \"bar", "---"];
         let mut builder = GreenNodeBuilder::new();
         let diags = Diagnostics::default();

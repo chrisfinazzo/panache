@@ -48,9 +48,6 @@ fn smart_normalizes_unicode_ellipsis() {
 
 #[test]
 fn smart_does_not_normalize_inline_code_span_content() {
-    // Code spans are literal: smart punctuation must never rewrite their
-    // contents. Pandoc keeps em/en dashes, ellipsis, and curly quotes verbatim
-    // inside code.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let input = "`a — b … “q” –`\n";
@@ -61,8 +58,6 @@ fn smart_does_not_normalize_inline_code_span_content() {
 
 #[test]
 fn smart_does_not_normalize_autolink_url() {
-    // Autolinks are literal URLs/emails: smart punctuation must not rewrite
-    // their contents (pandoc keeps `—` verbatim inside the URL).
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let input = "<https://example.com/a—b>\n";
@@ -73,9 +68,6 @@ fn smart_does_not_normalize_autolink_url() {
 
 #[test]
 fn smart_normalizes_dashes_in_atx_heading() {
-    // Regression: document-body headings bypassed smart normalization while
-    // paragraphs (and list-nested headings) applied it, so `# —` stayed but a
-    // bare `—` paragraph became `---`. Pandoc normalizes headings too.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let input = "# em — dash and en – dash\n";
@@ -85,9 +77,6 @@ fn smart_normalizes_dashes_in_atx_heading() {
 
 #[test]
 fn smart_dash_only_paragraph_does_not_become_thematic_break() {
-    // A paragraph whose sole content is an em dash must not normalize to bare
-    // `---`, which re-parses as a thematic break (a semantic + idempotency
-    // break). Keep the lossless unicode character instead.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let out = format("—\n", Some(cfg.clone()), None);
@@ -97,7 +86,6 @@ fn smart_dash_only_paragraph_does_not_become_thematic_break() {
 
 #[test]
 fn smart_multi_dash_paragraph_does_not_become_thematic_break() {
-    // Two en dashes normalize to `-- --` (4 dashes + space) -> thematic break.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let out = format("– –\n", Some(cfg.clone()), None);
@@ -113,8 +101,6 @@ fn smart_multi_dash_paragraph_does_not_become_thematic_break() {
 
 #[test]
 fn smart_single_en_dash_paragraph_normalizes_safely() {
-    // A lone en dash normalizes to `--` (only 2 dashes): not a thematic break
-    // and a single line, so the guard must NOT fire here.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     let out = format("–\n", Some(cfg.clone()), None);
@@ -124,7 +110,6 @@ fn smart_single_en_dash_paragraph_normalizes_safely() {
 
 #[test]
 fn smart_dash_within_text_still_normalizes() {
-    // Non-isolated dashes can never form a block marker and must still convert.
     let mut cfg = Config::default();
     cfg.formatter_extensions.smart = true;
     assert_eq!(format("a — b\n", Some(cfg), None), "a --- b\n");

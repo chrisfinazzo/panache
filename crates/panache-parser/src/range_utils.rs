@@ -37,7 +37,6 @@ pub fn line_range_to_byte_offsets(
         }
 
         if current_line == end_line {
-            // End offset is at the end of the end_line (inclusive)
             let end_offset = byte_offset + line.len();
             return start_offset.map(|start| (start, end_offset));
         }
@@ -46,25 +45,19 @@ pub fn line_range_to_byte_offsets(
         current_line += 1;
     }
 
-    // If we reached end of document
     if current_line == end_line + 1 && start_offset.is_some() {
-        // end_line was the last line
         return start_offset.map(|start| (start, byte_offset));
     }
 
-    // end_line is beyond document
     None
 }
 
-/// Find the smallest block-level node containing the given offset
 fn find_enclosing_block(node: &SyntaxNode, offset: usize) -> Option<SyntaxNode> {
     let text_offset = rowan::TextSize::try_from(offset).ok()?;
 
-    // Start with the node at this offset
     let token = node.token_at_offset(text_offset).right_biased()?;
     let mut current = token.parent()?;
 
-    // Walk up the tree to find the smallest block element
     loop {
         if is_block_element(current.kind()) {
             return Some(current);
@@ -74,7 +67,6 @@ fn find_enclosing_block(node: &SyntaxNode, offset: usize) -> Option<SyntaxNode> 
     }
 }
 
-/// Check if a node or any of its ancestors is a container that should be expanded as a unit
 fn find_expandable_container(node: &SyntaxNode) -> Option<SyntaxNode> {
     let mut current = node.clone();
     let mut best: Option<SyntaxNode> = None;
@@ -116,9 +108,7 @@ fn find_expandable_container(node: &SyntaxNode) -> Option<SyntaxNode> {
 /// # Returns
 /// Expanded byte range `(start, end)` that covers complete blocks
 pub fn expand_byte_range_to_blocks(tree: &SyntaxNode, start: usize, end: usize) -> (usize, usize) {
-    // Handle empty or invalid ranges
     if start >= end {
-        // Treat as cursor position - find enclosing block
         if let Some(block) = find_enclosing_block(tree, start) {
             let range = block.text_range();
             return (range.start().into(), range.end().into());
@@ -126,7 +116,6 @@ pub fn expand_byte_range_to_blocks(tree: &SyntaxNode, start: usize, end: usize) 
         return (start, start);
     }
 
-    // Find blocks at start and end positions
     let start_block = find_enclosing_block(tree, start);
     let end_block = find_enclosing_block(tree, end.saturating_sub(1)); // end is exclusive
 
@@ -137,23 +126,18 @@ pub fn expand_byte_range_to_blocks(tree: &SyntaxNode, start: usize, end: usize) 
             (start_range.start().into(), end_range.end().into())
         }
         (Some(start_node), None) => {
-            // Only start is in a block
             let range = start_node.text_range();
             (range.start().into(), end)
         }
         (None, Some(end_node)) => {
-            // Only end is in a block
             let range = end_node.text_range();
             (start, range.end().into())
         }
         (None, None) => {
-            // Neither position is in a block (shouldn't normally happen)
             return (start, end);
         }
     };
 
-    // Check if we need to expand to encompass parent containers
-    // This handles cases where the range touches list items, blockquotes, etc.
     if let Some(start_node) = find_enclosing_block(tree, expanded_start)
         && let Some(container) = find_expandable_container(&start_node)
     {
@@ -228,19 +212,15 @@ mod tests {
     fn test_line_range_to_byte_offsets() {
         let doc = "Line 1\nLine 2\nLine 3\n";
 
-        // Line 1 (1-indexed)
         let (start, end) = line_range_to_byte_offsets(doc, 1, 1).unwrap();
         assert_eq!(&doc[start..end], "Line 1\n");
 
-        // Line 2
         let (start, end) = line_range_to_byte_offsets(doc, 2, 2).unwrap();
         assert_eq!(&doc[start..end], "Line 2\n");
 
-        // Lines 1-2
         let (start, end) = line_range_to_byte_offsets(doc, 1, 2).unwrap();
         assert_eq!(&doc[start..end], "Line 1\nLine 2\n");
 
-        // Invalid ranges
         assert!(line_range_to_byte_offsets(doc, 0, 1).is_none()); // 0-indexed not allowed
         assert!(line_range_to_byte_offsets(doc, 2, 1).is_none()); // start > end
         assert!(line_range_to_byte_offsets(doc, 1, 10).is_none()); // beyond document
@@ -251,7 +231,6 @@ mod tests {
         let doc = "Para 1\n\nPara 2\n\nPara 3\n";
         let tree = parse_test_doc(doc);
 
-        // Select line 3 (Para 2)
         let (start, end) = expand_line_range_to_blocks(&tree, doc, 3, 3).unwrap();
 
         let selected = &doc[start..end];
@@ -271,11 +250,8 @@ mod tests {
         let doc = "Text before\n\n```rust\nfn main() {}\n```\n\nText after\n";
         let tree = parse_test_doc(doc);
 
-        // Line 3 is "```rust", line 4 is "fn main() {}", line 5 is "```"
-        // Select line 4 (inside code block)
         let (start, end) = expand_line_range_to_blocks(&tree, doc, 4, 4).unwrap();
 
-        // Should expand to entire code block
         let selected = &doc[start..end];
         assert!(
             selected.contains("```rust"),
@@ -304,10 +280,8 @@ mod tests {
         let doc = "Before\n\n- Item 1\n- Item 2\n- Item 3\n\nAfter\n";
         let tree = parse_test_doc(doc);
 
-        // Line 4 is "- Item 2"
         let (start, end) = expand_line_range_to_blocks(&tree, doc, 4, 4).unwrap();
 
-        // Should expand to entire list (all items)
         let selected = &doc[start..end];
         assert!(selected.contains("Item 1"), "Range should include Item 1");
         assert!(selected.contains("Item 2"), "Range should include Item 2");
@@ -327,10 +301,8 @@ mod tests {
         let doc = "# Heading\n\nParagraph text here.\n";
         let tree = parse_test_doc(doc);
 
-        // Line 3 is "Paragraph text here."
         let (start, end) = expand_line_range_to_blocks(&tree, doc, 3, 3).unwrap();
 
-        // Should expand to entire paragraph
         let selected = &doc[start..end];
         assert!(
             selected.contains("Paragraph text here."),
@@ -347,16 +319,12 @@ mod tests {
         let doc = "Before\n\n> Line 1\n> Line 2\n> Line 3\n\nAfter\n";
         let tree = parse_test_doc(doc);
 
-        // Line 4 is "> Line 2"
         let result = expand_line_range_to_blocks(&tree, doc, 4, 4);
         assert!(result.is_some(), "Failed to expand range for line 4");
         let (start, end) = result.unwrap();
 
-        // Should expand to entire blockquote (note: parser strips "> " markers)
-        // So the range will be "Line 1\nLine 2\nLine 3\n" without markers
         let selected = &doc[start..end];
 
-        // The range should include all three lines
         assert!(selected.contains("Line 1"), "Range should include Line 1");
         assert!(selected.contains("Line 2"), "Range should include Line 2");
         assert!(selected.contains("Line 3"), "Range should include Line 3");
@@ -368,7 +336,5 @@ mod tests {
             !selected.contains("After"),
             "Range should not include After"
         );
-
-        // Range should cover the blockquote and nothing else (offsets may vary with parser changes)
     }
 }

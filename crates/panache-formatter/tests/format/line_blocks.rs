@@ -144,8 +144,6 @@ fn test_line_block_in_list_item_is_idempotent() {
 
 #[test]
 fn test_line_block_continuation_folds_into_the_line_above() {
-    // `| a` + `  b` is one line (`a b`), so re-emitting the continuation with
-    // its own `|` would turn one line into two.
     let input = "| a\n  b\n| c\n";
 
     let result = format(input, None, None);
@@ -154,7 +152,6 @@ fn test_line_block_continuation_folds_into_the_line_above() {
 
 #[test]
 fn test_under_indented_lazy_line_folds_into_the_line_block() {
-    // Pandoc reads this as a single `LineBlock [[a, b, |]]` inside the item.
     let input = "- x\n\n  | a\n b |\n";
 
     let result1 = format(input, None, None);

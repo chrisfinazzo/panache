@@ -107,11 +107,6 @@ pub fn collect_refdef_labels(input: &str, dialect: Dialect) -> RefdefMap {
     let mut pos = 0;
 
     while pos < bytes.len() {
-        // Cheap leading-byte gate: a refdef line starts with `[` after
-        // up to 3 spaces, or with `>` (blockquote-wrapped). Anything
-        // else can't be a refdef — skip the full
-        // `try_parse_reference_definition` scan and the blockquote
-        // strip+retry. Most lines in a typical doc fail this gate.
         let mut gate = pos;
         while gate < bytes.len() && gate - pos < 3 && bytes[gate] == b' ' {
             gate += 1;
@@ -148,8 +143,6 @@ fn memchr_newline(bytes: &[u8]) -> Option<usize> {
     memchr::memchr(b'\n', bytes)
 }
 
-/// `true` if the line starting at `text[0]` begins with a blockquote
-/// marker (`>` after up to 3 leading spaces).
 fn line_starts_with_blockquote(text: &str) -> bool {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -191,18 +184,13 @@ fn strip_blockquote_line(text: &str, max_lines: usize) -> Option<String> {
             i += 1;
         }
         if bytes.get(i) != Some(&b'>') {
-            // Not a blockquote continuation — stop.
             break;
         }
         i += 1;
-        // Optional single space after `>`.
         if bytes.get(i) == Some(&b' ') {
             i += 1;
         }
         let rest = &line[i..];
-        // A blank blockquote line (`>` with nothing after) terminates the
-        // refdef. Only applies to continuation lines: the first line is a
-        // refdef candidate by construction (the `>` gate matched content).
         if idx > 0 && rest.trim().is_empty() {
             break;
         }
@@ -257,7 +245,6 @@ mod tests {
 
     #[test]
     fn collects_blockquote_wrapped_refdef() {
-        // CommonMark spec example #218: a refdef inside a blockquote.
         let input = "> [foo]: /url\n>\n> [foo]\n";
         let map = collect_refdef_labels(input, Dialect::CommonMark);
         assert!(map.contains("foo"));
@@ -265,8 +252,6 @@ mod tests {
 
     #[test]
     fn collects_blockquote_refdef_with_wrapped_title() {
-        // The destination and title wrap onto continuation lines, each
-        // still carrying the `>` marker.
         let input = "> [foo]:\n>   /url\n>   \"the title\"\n";
         let map = collect_refdef_labels(input, Dialect::CommonMark);
         assert!(map.contains("foo"));
@@ -274,9 +259,6 @@ mod tests {
 
     #[test]
     fn collects_refdef_in_multiparagraph_blockquote() {
-        // A refdef in the first and last paragraph of a blockquote, with
-        // blank `>` separators between paragraphs. Both must be collected,
-        // proving the blank-stop doesn't skip past later definitions.
         let input =
             "> [foo]: /url\n>\n> first paragraph\n>\n> second paragraph\n>\n> [bar]: /url2\n";
         let map = collect_refdef_labels(input, Dialect::CommonMark);
@@ -293,8 +275,6 @@ mod tests {
 
     #[test]
     fn label_523_is_not_collected() {
-        // CMark example 523 has no refdef; the bracket should fall through
-        // to literal text under bracket resolution.
         let map = collect_refdef_labels("*foo [bar* baz]\n", Dialect::CommonMark);
         assert!(map.is_empty());
     }

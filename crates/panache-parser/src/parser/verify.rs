@@ -101,7 +101,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "diverged from full parse")]
     fn oracle_panics_on_injected_divergence() {
-        // A tree parsed from different text stands in for a bad splice.
         let input = "# Title\n\nParagraph.\n";
         let wrong = Reparsed {
             green: parse("# Title\n\n> quoted\n", None).green().to_owned(),
@@ -116,8 +115,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "diverged from full parse on syntax errors")]
     fn oracle_panics_when_only_the_error_vector_diverges() {
-        // Identical tree, dropped error: the shape of a splice that reuses a
-        // prefix without carrying the prefix's errors.
         let input = "---\ntitle: [\n---\n\nParagraph.\n";
         let options = crate::options::ParserOptions::default();
         let (tree, errors) = crate::parser::Parser::new(input, &options).parse_with_errors();

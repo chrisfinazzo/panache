@@ -30,7 +30,6 @@ const SOURCE_REL: &str = "tests/fixtures/pandoc-conformance/.panache-source";
 const ALLOWLIST_REL: &str = "tests/pandoc/allowlist.txt";
 const BLOCKED_REL: &str = "tests/pandoc/blocked.txt";
 const REPORT_REL: &str = "tests/pandoc/report.txt";
-/// Structured sidecar written beside `report.txt` for conformance tooling.
 const REPORT_JSON_REL: &str = "tests/pandoc/report.json";
 
 fn manifest_path(rel: &str) -> PathBuf {

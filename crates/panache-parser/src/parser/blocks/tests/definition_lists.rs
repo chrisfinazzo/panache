@@ -17,9 +17,6 @@ fn definition_list_allows_nested_list_after_blank_line() {
 
 #[test]
 fn definition_list_plain_starts_list_at_content_column_without_blank_line() {
-    // A list marker indented to the definition's content column starts a nested
-    // list inside the definition, even without a separating blank line. Matches
-    // pandoc-native (`pandoc -f markdown -t native`).
     let input = "A definition list with nested items\n:   Here comes a list (or wait, is it?)\n    - A\n    - B\n";
     let tree = parse_blocks(input);
 
@@ -188,8 +185,6 @@ fn dedented_list_after_blank_line_does_not_continue_definition_list() {
 
 #[test]
 fn orphan_colon_marker_with_content_is_paragraph() {
-    // A `:` marker with no preceding term is not a definition list; pandoc
-    // treats the whole line as a paragraph (`Para [Str ":", Space, Str "foo"]`).
     let input = ":   foo\n";
     let tree = parse_blocks(input);
 
@@ -214,8 +209,6 @@ fn orphan_tilde_marker_with_content_is_paragraph() {
 
 #[test]
 fn orphan_bare_marker_with_body_next_line_is_paragraph() {
-    // Bare marker with the body on the next line, no term above: pandoc yields
-    // `Para [Str ":", SoftBreak, Str "foo"]`.
     let input = ":\n    foo\n";
     let tree = parse_blocks(input);
 
@@ -227,8 +220,6 @@ fn orphan_bare_marker_with_body_next_line_is_paragraph() {
 
 #[test]
 fn colon_marker_line_becomes_term_when_next_line_is_marker() {
-    // `: foo` / `: bar` has no explicit term, but pandoc makes the first line
-    // the term (literal `: foo`) and the second the definition (`bar`).
     let input = ":   foo\n:   bar\n";
     let tree = parse_blocks(input);
 
@@ -266,8 +257,6 @@ fn colon_table_caption_before_table_is_not_definition_list() {
     );
 }
 
-/// Assert the whole document is a single definition list nested `depth`
-/// blockquotes deep, with `term` / `definition` as its one item.
 fn assert_quoted_definition_list(input: &str, depth: usize, term: &str, definition: &str) {
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "parse must be lossless");
@@ -300,9 +289,6 @@ fn assert_quoted_definition_list(input: &str, depth: usize, term: &str, definiti
 
 #[test]
 fn definition_list_in_blockquote_keeps_its_body() {
-    // The term look-ahead runs on container-stripped lines, so it sees `: b`
-    // through the `> ` prefix. Pandoc: `BlockQuote [DefinitionList [(a, [[Plain
-    // b]])]]`.
     assert_quoted_definition_list("> a\n> : b\n", 1, "a", "b");
 }
 
@@ -313,9 +299,6 @@ fn definition_list_in_nested_blockquote_keeps_its_body() {
 
 #[test]
 fn lazy_definition_marker_stays_inside_blockquote() {
-    // Pandoc folds lazy lines into the blockquote's raw content before parsing
-    // blocks, so the unquoted `: b` is the term's definition rather than a
-    // top-level paragraph.
     assert_quoted_definition_list("> a\n: b\n", 1, "a", "b");
 }
 
@@ -326,8 +309,6 @@ fn lazy_definition_marker_stays_inside_nested_blockquote() {
 
 #[test]
 fn lazy_definition_marker_reduced_depth_stays_inside_blockquote() {
-    // One `>` under a depth-2 quote is still lazy: the marker belongs to the
-    // inner definition list, not to the outer quote.
     assert_quoted_definition_list("> > a\n> : b\n", 2, "a", "b");
 }
 
@@ -346,11 +327,6 @@ fn lazy_definition_markers_add_further_definitions() {
 
 #[test]
 fn trailing_marker_line_outside_the_item_is_not_a_definition_marker() {
-    // `ContainerPrefix::strip` used to advance the item's content
-    // column column-blind. Inside a two-column item that turned `"c :"`
-    // into `":"`, so the term lookahead saw a bare marker and promoted
-    // the line above it. Pandoc reads
-    // `BulletList [[Plain [a, SoftBreak, b]]]` + `Para [c, Space, ":"]`.
     for input in [
         "- a\nb\n\nc :\n",
         "- a\n  b\n\nc :\n",
@@ -385,9 +361,6 @@ fn trailing_marker_line_outside_the_item_is_inert_in_a_blockquote() {
 
 #[test]
 fn ordered_and_tab_variants_already_agree_with_pandoc() {
-    // Controls for the case above: an ordered marker gives content_col 3 (the
-    // faked slice is just the newline) and a tab overshoots column 2, so
-    // neither ever reached the bad path. They must stay put.
     for input in ["1. a\nb\n\nc :\n", "- a\nb\n\nc\t:\n"] {
         assert!(
             find_first(&parse_blocks(input), SyntaxKind::DEFINITION_LIST).is_none(),
@@ -398,7 +371,6 @@ fn ordered_and_tab_variants_already_agree_with_pandoc() {
 
 #[test]
 fn definition_marker_at_the_item_content_column_still_opens_a_definition() {
-    // The gate must only reject lines that fall short of the content column.
     let input = "- a\n\n  b\n\n  : def\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
@@ -408,9 +380,6 @@ fn definition_marker_at_the_item_content_column_still_opens_a_definition() {
 
 #[test]
 fn multiline_paragraph_last_line_is_not_a_term() {
-    // Pandoc's term is read where a block may start, so it is always a
-    // one-line block of its own: `a\nb\n\n: def` is `Para [a, SoftBreak, b]`
-    // + `Para [":", Space, "def"]`, not a definition list on `b`.
     let input = "a\nb\n\n: def\n";
     let tree = parse_blocks(input);
     assert!(
@@ -429,8 +398,6 @@ fn multiline_paragraph_last_line_is_not_a_term() {
 
 #[test]
 fn blank_line_resets_the_one_line_block_rule() {
-    // The rule is per block: a blank line closes the paragraph, so `b` is a
-    // one-line block again and does become a term.
     let input = "a\n\nb\n\n: def\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
@@ -446,8 +413,6 @@ fn blank_line_resets_the_one_line_block_rule() {
 
 #[test]
 fn multiline_item_content_last_line_is_not_a_term() {
-    // Same rule through a list item's buffered content. Pandoc:
-    // `BulletList [[Para [a, SoftBreak, b], Para [":", Space, "def"]]]`.
     let input = "- a\n  b\n\n  : def\n";
     let tree = parse_blocks(input);
     assert!(
@@ -472,9 +437,6 @@ fn multiline_paragraph_last_line_is_not_a_term_in_a_blockquote() {
 
 #[test]
 fn refused_term_still_lets_a_marker_pair_form_a_term() {
-    // `: def` is itself a one-line block whose next line is a marker, so it
-    // becomes the literal term. Pandoc: `Para [a, SoftBreak, b]` +
-    // `DefinitionList [([": def"], [[Plain "def2"]])]`.
     let input = "a\nb\n\n: def\n: def2\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
@@ -490,8 +452,6 @@ fn refused_term_still_lets_a_marker_pair_form_a_term() {
 
 #[test]
 fn footnote_body_first_line_term_still_opens_a_definition_list() {
-    // `footnote_first_line_term_lookahead` must stay live: its term is the
-    // body's first line, so it is a one-line block by construction.
     let input = "x[^1]\n\n[^1]: Term\n\n    :   Definition\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
@@ -507,10 +467,6 @@ fn footnote_body_first_line_term_still_opens_a_definition_list() {
 
 #[test]
 fn definition_marker_is_detected_at_a_deep_item_content_column() {
-    // Pandoc reparses item contents from the item's content column, so the
-    // 0-3 space allowance is measured from there, not from column 0. With a
-    // content column of 4 the marker used to be read as indented code, which
-    // left the term above it with no definition at all.
     let input = "- - foo\n\n    bar\n\n    : baz\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::DEFINITION_LIST).expect("definition list");
@@ -531,8 +487,6 @@ fn definition_marker_is_detected_at_a_deep_item_content_column() {
 
 #[test]
 fn definition_marker_beyond_the_content_column_stays_indented_code() {
-    // Four further columns past the item's content column is an indented code
-    // block, exactly as at top level.
     let input = "- a\n\n  bar\n\n      : baz\n";
     assert!(
         find_first(&parse_blocks(input), SyntaxKind::DEFINITION_LIST).is_none(),
@@ -542,9 +496,6 @@ fn definition_marker_beyond_the_content_column_stays_indented_code() {
 
 #[test]
 fn term_on_the_list_marker_line_nests_the_definition_list_in_the_item() {
-    // Pandoc reparses item contents as a fresh block sequence, so `- Term`
-    // followed by a marker line is `BulletList [[DefinitionList [(Term,
-    // [[Plain def]])]]]` — the definition list lives inside the item.
     for input in [
         "- Term\n  : def\n",
         "- Term\n  ~ def\n",
@@ -573,8 +524,6 @@ fn term_on_the_list_marker_line_nests_the_definition_list_in_the_item() {
 
 #[test]
 fn blocks_that_outrank_a_term_still_win_on_the_marker_line() {
-    // Everything pandoc's reader reaches before `definitionList` keeps the
-    // marker line; only then does the term lookahead get a turn.
     for input in [
         "- # H\n  : def\n",
         "- ***\n  : def\n",
@@ -592,7 +541,6 @@ fn blocks_that_outrank_a_term_still_win_on_the_marker_line() {
 
 #[test]
 fn a_dedented_marker_does_not_make_the_marker_line_a_term() {
-    // The marker must reach the item's content column.
     for input in ["- Term\n: def\n", "- Term\n : def\n"] {
         let tree = parse_blocks(input);
         assert!(find_first(&tree, SyntaxKind::TERM).is_none(), "{input:?}");
@@ -601,10 +549,6 @@ fn a_dedented_marker_does_not_make_the_marker_line_a_term() {
 
 #[test]
 fn a_dedented_marker_closes_the_list_instead_of_continuing_it() {
-    // A definition marker is a block start, so it is not lazy continuation
-    // text. Dedented below the item's content column it lands outside the
-    // item entirely: pandoc gives `BulletList [[Plain "Term"]]` followed by
-    // `Para [":", Space, "def"]`.
     for input in ["- Term\n: def\n", "- Term\n : def\n"] {
         let tree = parse_blocks(input);
         assert_block_kinds_for_node(&tree, &[SyntaxKind::LIST, SyntaxKind::PARAGRAPH], input);
@@ -616,9 +560,6 @@ fn a_dedented_marker_closes_the_list_instead_of_continuing_it() {
 
 #[test]
 fn a_marker_at_the_content_column_breaks_the_items_paragraph() {
-    // Same rule one column further in: the marker still cannot continue the
-    // paragraph, but it does stay inside the item, so pandoc splits the item
-    // into `Plain [a, SoftBreak, b]` and `Plain [":", Space, "def"]`.
     let input = "- a\n  b\n  : def\n";
     let tree = parse_blocks(input);
     let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
@@ -634,10 +575,6 @@ fn a_marker_at_the_content_column_breaks_the_items_paragraph() {
 
 #[test]
 fn a_marker_at_the_content_column_breaks_the_definition_body_block() {
-    // Pandoc re-reads a definition body from its content column, so a marker
-    // that reaches it is a block start inside the *same* definition, not a
-    // second one: `T\n:   a\n    b\n    : def` is
-    // `DefinitionList [(T, [[Plain "a b", Plain ": def"]])]`.
     for input in [
         "T\n:   a\n    b\n    : def\n",
         "T\n: a\n  b\n  : def\n",
@@ -659,11 +596,6 @@ fn a_marker_at_the_content_column_breaks_the_definition_body_block() {
 
 #[test]
 fn a_marker_under_a_single_body_line_promotes_it_to_a_nested_term() {
-    // A term is a one-line block, and a definition body is re-read as its own
-    // block sequence, so a single buffered body line *is* a term: the marker
-    // below it opens a definition list nested in that body rather than a
-    // second definition of the outer term. `T\n:   a\n    : def` is
-    // `DefinitionList [(T, [[DefinitionList [(a, [[Plain "def"]])]]])]`.
     for input in [
         "T\n:   a\n    : def\n",
         "T\n: a\n  : def\n",
@@ -700,10 +632,6 @@ fn a_marker_under_a_single_body_line_promotes_it_to_a_nested_term() {
 
 #[test]
 fn a_marker_under_a_marker_that_broke_the_body_block_promotes_it_to_a_term() {
-    // The line a broken block leaves behind is itself a one-line block, so a
-    // second marker under it promotes it in turn:
-    // `T\n:   a\n    b\n    : def\n    : def2` is
-    // `DefinitionList [(T, [[Plain "a b", DefinitionList [(": def", ...)]]])]`.
     let input = "T\n:   a\n    b\n    : def\n    : def2\n";
     let tree = parse_blocks(input);
 
@@ -731,10 +659,6 @@ fn a_marker_under_a_marker_that_broke_the_body_block_promotes_it_to_a_term() {
 
 #[test]
 fn a_marker_across_a_blank_line_promotes_the_single_body_line_to_a_term() {
-    // A blank line does not detach the marker from the block above it: the
-    // body's last block is still a one-line block, so it is still a term.
-    // `T\n:   a\n\n    :   b` is
-    // `DefinitionList [(T, [[DefinitionList [(a, [[Para "b"]])]]])]`.
     for input in [
         "T\n:   a\n\n    :   b\n",
         "T\n\n:   a\n\n    :   b\n",
@@ -767,10 +691,6 @@ fn a_marker_across_a_blank_line_promotes_the_single_body_line_to_a_term() {
 
 #[test]
 fn a_marker_across_a_blank_line_promotes_a_later_body_block_too() {
-    // The promotion reads the body's *last* block, not its first: the earlier
-    // blocks stay `PLAIN` siblings inside the same body.
-    // `T\n:   a\n\n    b\n\n    : c` is
-    // `DefinitionList [(T, [[Plain "a", DefinitionList [(b, [[Para "c"]])]]])]`.
     let input = "T\n:   a\n\n    b\n\n    : c\n";
     let tree = parse_blocks(input);
 
@@ -798,10 +718,6 @@ fn a_marker_across_a_blank_line_promotes_a_later_body_block_too() {
 
 #[test]
 fn a_multi_line_body_block_across_a_blank_line_is_not_promoted() {
-    // Only a *one-line* block is a term, blank line or not. Pandoc keeps
-    // `a\nb` a `Plain` and reads the marker line as the body's next block, so
-    // the marker must not promote it and must not become a second definition
-    // of `T` either.
     for input in [
         "T\n:   a\n    b\n\n    : c\n",
         "T\n:   x\n\n    a\n    b\n\n    : c\n",
@@ -824,10 +740,6 @@ fn a_multi_line_body_block_across_a_blank_line_is_not_promoted() {
 
 #[test]
 fn a_marker_across_a_blank_line_promotes_inside_a_list_item_and_a_blockquote() {
-    // The lookahead reads the marker line in the body's own frame, so the
-    // promotion survives any container above it. Inside a list item the
-    // definition's content column is absolute (item indent included), which is
-    // what the dedent test has to measure against.
     for input in [
         "- T\n\n  : a\n\n    : b\n",
         "> T\n>\n> :   a\n>\n>     :   b\n",
@@ -848,10 +760,6 @@ fn a_marker_across_a_blank_line_promotes_inside_a_list_item_and_a_blockquote() {
 
 #[test]
 fn two_blank_lines_detach_the_marker_from_the_body_block_above_it() {
-    // A term keeps at most one blank line between itself and its definition,
-    // so two blanks leave `a` a body block of its own, and the marker line
-    // becomes a further block of the same body:
-    // `DefinitionList [(T, [[Plain "a", Plain ": b"]])]`.
     for input in [
         "T\n:   a\n\n\n    :   b\n",
         "T\n:   a\n\n\n    :   b\n\n\n    :   c\n",
@@ -875,9 +783,6 @@ fn two_blank_lines_detach_the_marker_from_the_body_block_above_it() {
 
 #[test]
 fn two_blank_lines_detach_a_term_from_its_definition_marker() {
-    // Pandoc's term parser allows one optional blank line before the first
-    // definition marker, so two blanks leave no term at all and the marker
-    // line is just a paragraph: `T\n\n\n: b` is `Para "T"` + `Para ": b"`.
     for input in [
         "T\n\n\n: b\n",
         "T\n\n\n\n: b\n",
@@ -895,10 +800,6 @@ fn two_blank_lines_detach_a_term_from_its_definition_marker() {
 
 #[test]
 fn a_marker_in_an_empty_definition_body_is_body_content() {
-    // A body that has not started yet is still a body: pandoc reads a marker
-    // at its content column as the body's first block, not as a second
-    // definition of the term. `T\n:\n    : b` is
-    // `DefinitionList [(T, [[Plain ": b"]])]`.
     for input in ["T\n:\n    : b\n", "T\n:\n\n    : b\n"] {
         let tree = parse_blocks(input);
         assert_eq!(
@@ -913,9 +814,6 @@ fn a_marker_in_an_empty_definition_body_is_body_content() {
 
 #[test]
 fn a_dedented_marker_across_two_blank_lines_still_opens_a_sibling_definition() {
-    // Blank lines do not detach a *definition* from its list, only a term from
-    // its first marker: below the body's content column the marker is still a
-    // second definition of the same term, however many blanks precede it.
     for input in [
         "T\n:   a\n\n\n: b\n",
         "T\n:   a\n\n\n  : b\n",
@@ -939,9 +837,6 @@ fn a_dedented_marker_across_two_blank_lines_still_opens_a_sibling_definition() {
 
 #[test]
 fn a_dedented_marker_across_a_blank_line_still_opens_a_sibling_definition() {
-    // Below the body's content column the marker is a second definition of the
-    // same term, so the blank-line lookahead must not promote across it:
-    // `DefinitionList [(T, [[Plain "a"], [Plain "b"]])]`.
     for input in ["T\n:   a\n\n  : b\n", "T\n:   a\n\n: b\n"] {
         let tree = parse_blocks(input);
         assert_eq!(
@@ -961,8 +856,6 @@ fn a_dedented_marker_across_a_blank_line_still_opens_a_sibling_definition() {
 
 #[test]
 fn a_promoted_term_keeps_its_own_body_continuations() {
-    // The nested definition is a definition like any other: its body keeps
-    // reading continuation lines from its own content column.
     let input = "T\n:   a\n    : def\n    more\n";
     let tree = parse_blocks(input);
 
@@ -977,10 +870,6 @@ fn a_promoted_term_keeps_its_own_body_continuations() {
 
 #[test]
 fn a_dedented_marker_leaves_the_nested_definition_list() {
-    // A marker is a block start, read in the frame of the body it lands in.
-    // Below the nested list's frame — the content column of the body holding
-    // it — it is a second definition of the *outer* term:
-    // `DefinitionList [(T, [[DefinitionList [(a, ...)]], [Plain "sibling"]])]`.
     for input in [
         "T\n:   a\n    : def\n  : sibling\n",
         "T\n:   a\n    : def\n: sibling\n",
@@ -1005,8 +894,6 @@ fn a_dedented_marker_leaves_the_nested_definition_list() {
 
 #[test]
 fn a_dedented_plain_line_stays_a_lazy_continuation_of_the_nested_body() {
-    // Only a marker is a block start; plain text below the nested frame is
-    // still a lazy continuation of the innermost body, so nothing unwinds.
     let input = "T\n:   a\n    : def\n  tail\n";
     let tree = parse_blocks(input);
 
@@ -1017,9 +904,6 @@ fn a_dedented_plain_line_stays_a_lazy_continuation_of_the_nested_body() {
 
 #[test]
 fn a_term_below_the_body_frame_closes_the_nested_definition_list() {
-    // Across a blank line a nested list only stays open for a term that
-    // reaches the body holding it, or `T2` would become a term of the list
-    // nested in `T`'s body instead of a sibling of `T`.
     let input = "T\n:   a\n    : def\n\nT2\n:   x\n";
     let tree = parse_blocks(input);
 
@@ -1038,9 +922,6 @@ fn a_term_below_the_body_frame_closes_the_nested_definition_list() {
 
 #[test]
 fn a_dedented_marker_still_opens_a_sibling_definition() {
-    // Below the body's content column the marker is a definition of the same
-    // term again, whatever the block above it is doing:
-    // `DefinitionList [(T, [[Plain "a b"], [Plain "def"]])]`.
     for input in ["T\n:   a\n    b\n  : def\n", "T\n:   a\n    b\n: def\n"] {
         let tree = parse_blocks(input);
         assert_eq!(
@@ -1066,11 +947,6 @@ fn definition_list_in_list_item_survives_siblings_and_trailing_blocks() {
 
 #[test]
 fn blank_line_between_items_stays_at_the_list_level() {
-    // A definition list opened on a list-marker line must not swallow the
-    // blank line that separates two sibling items: the `LIST` needs to see it
-    // to stay loose. The next line, `- Term`, is a sibling marker at indent 0
-    // and never reaches the item's content column, so it cannot continue the
-    // definition list as a term.
     let input = "- Term\n  : def\n\n- Term\n  : def\n";
     let tree = parse_blocks(input);
     let list = find_first(&tree, SyntaxKind::LIST).expect("list");
@@ -1083,12 +959,6 @@ fn blank_line_between_items_stays_at_the_list_level() {
 
 #[test]
 fn definition_marker_behind_a_straddling_tab_promotes_the_term() {
-    // A tab straddling the item's content column is container indent
-    // with no byte boundary to split on, but the line does reach the
-    // column: pandoc reads a definition list on `b`
-    // (`pandoc -f markdown -t native`). The dispatch side always saw
-    // this marker; the lookahead reads it via
-    // `FrameVerdict::StraddlingTab`.
     let input = "- a\n\n  b\n\n\t: def\n";
     let tree = parse_blocks(input);
     let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("list item");
@@ -1100,7 +970,6 @@ fn definition_marker_behind_a_straddling_tab_promotes_the_term() {
     assert_eq!(find_all(&item, SyntaxKind::TERM).len(), 1);
     assert_eq!(tree.text().to_string(), input, "losslessness");
 
-    // The no-blank variant promotes the same way.
     let input = "- a\n\n  b\n\t: def\n";
     let tree = parse_blocks(input);
     assert_eq!(find_all(&tree, SyntaxKind::DEFINITION_LIST).len(), 1);
@@ -1109,17 +978,10 @@ fn definition_marker_behind_a_straddling_tab_promotes_the_term() {
 
 #[test]
 fn quoted_definition_body_keeps_every_continuation_marker() {
-    // A definition body buffers its PLAIN content and emits it in one go when
-    // the block closes. A blockquote marker on a *continuation* line has to be
-    // buffered along with it: emitted straight to the builder it lands before
-    // the whole PLAIN node, so the bytes come out of source order and every
-    // line after the first loses its `>`.
     let input = "> term\n> :   body\n>\n>     one\n>     two\n";
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "losslessness");
 
-    // Two-line body, one continuation: the marker is buffered from the very
-    // first continuation line, with no blank line involved.
     let input = "> term\n> :   body one\n>     body two\n";
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "losslessness");
@@ -1127,8 +989,6 @@ fn quoted_definition_body_keeps_every_continuation_marker() {
 
 #[test]
 fn quoted_definition_body_reads_an_indented_simple_table() {
-    // Pandoc reads the indented block as a `Table` inside the definition body
-    // (`pandoc -f markdown -t native`); the `>` prefixes must survive it.
     let input = "> term\n> :   body\n>\n>     A    B\n>     --- ---\n>     x    y\n";
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "losslessness");

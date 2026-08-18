@@ -31,7 +31,6 @@ fn multiple_strikeouts() {
 
 #[test]
 fn strikeout_not_confused_with_subscript() {
-    // Single ~ should not be parsed as anything yet
     let input = "This is ~not~ strikethrough.\n";
     let output = format(input, None, None);
     assert!(output.contains("~not~"));
@@ -53,6 +52,5 @@ fn strikeout_in_paragraph_with_wrapping() {
     let input = "This is a long paragraph with ~~strikethrough text~~ that should wrap at the configured line width.";
     let output = format(input, Some(cfg), None);
 
-    // Should preserve strikeout even with wrapping
     assert!(output.contains("~~strikethrough text~~"));
 }

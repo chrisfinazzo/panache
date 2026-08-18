@@ -95,12 +95,9 @@ fn parses_multiline_code_block() {
 
 #[test]
 fn code_block_can_interrupt_paragraph() {
-    // Fenced code blocks with language identifiers can interrupt paragraphs
-    // Bare fences (```) require a blank line to avoid ambiguity with inline code
     let input = "text\n```python\ncode\n```\n";
     let node = parse_blocks(input);
 
-    // Should parse as paragraph followed by code block
     assert_block_kinds_for_node(
         &node,
         &[SyntaxKind::PARAGRAPH, SyntaxKind::CODE_BLOCK],
@@ -113,12 +110,9 @@ fn code_block_can_interrupt_paragraph() {
 
 #[test]
 fn bare_fence_without_closing_fence_does_not_interrupt_paragraph() {
-    // Unclosed bare fences should not interrupt paragraphs.
     let input = "text\n```\ncode\n";
-    // Use full parse to get inline parsing too
     let tree = crate::parse(input, None);
 
-    // Should parse as single paragraph
     let paragraphs: Vec<_> = tree
         .descendants()
         .filter(|n| n.kind() == SyntaxKind::PARAGRAPH)
@@ -144,7 +138,6 @@ fn fence_with_info_without_closing_fence_is_not_code_block() {
 
 #[test]
 fn code_block_with_language_can_interrupt_paragraph() {
-    // Test with language identifier
     let input = "Some text:\n```r\na <- 1\n```\n";
     let node = parse_blocks(input);
 
@@ -195,8 +188,6 @@ fn bare_fence_closing_an_open_code_span_stays_paragraph_text() {
     assert_block_kinds_for_node(&node, &[SyntaxKind::PARAGRAPH], input);
 }
 
-/// The same guard one container down: a list item's buffered content is an
-/// open paragraph by another name.
 #[test]
 fn bare_fence_closing_a_list_item_code_span_stays_item_text() {
     let input = "- a ```\n  c\n  ```\n";
@@ -235,7 +226,6 @@ fn bare_fence_in_list_item_with_closing_fence_can_interrupt_paragraph() {
     );
 }
 
-/// The children of `root`, for the shape assertions below.
 fn block_kinds(root: &crate::syntax::SyntaxNode) -> Vec<SyntaxKind> {
     root.children().map(|node| node.kind()).collect()
 }
@@ -293,8 +283,6 @@ fn indented_code_follows_a_fenced_code_block_pandoc() {
     );
 }
 
-/// Same for a tilde fence, and inside a list item at the item's content column
-/// plus four.
 #[test]
 fn indented_code_follows_a_fenced_code_block_in_a_list_item_pandoc() {
     let input = "- a\n\n  ~~~\n  c\n  ~~~\n      x\n";
@@ -323,8 +311,6 @@ fn indented_line_below_an_unterminated_item_fence_stays_item_text() {
     );
 }
 
-/// The boundary: at the item's content column the fence *is* item content, so
-/// the code block stays inside and the `Plain` is promoted to `Para` (0514).
 #[test]
 fn fence_at_the_item_content_column_stays_in_the_item() {
     let input = "- a\n  ```rust\n  c\n  ```\n";
@@ -353,8 +339,6 @@ fn under_indented_fence_without_a_closer_stays_lazy_item_text() {
     );
 }
 
-/// The boundary is the item's content column, so an ordered marker moves it:
-/// `1. a` puts content at 3, and indent 2 is still under-indented.
 #[test]
 fn ordered_item_content_column_sets_the_fence_boundary() {
     let outside = parse_blocks("1. a\n  ```r\n  c\n  ```\n");
@@ -417,7 +401,6 @@ fn requires_at_least_three_fence_chars() {
     let input = "``\ncode\n``\n";
     let node = parse_blocks(input);
 
-    // Should not parse as code block
     assert!(find_first(&node, SyntaxKind::CODE_BLOCK).is_none());
 }
 
@@ -426,7 +409,6 @@ fn closing_fence_must_have_at_least_same_length() {
     let input = "````\ncode\n```\n";
     let node = parse_blocks(input);
 
-    // Without a valid closing fence, this should stay paragraph content.
     assert!(find_first(&node, SyntaxKind::CODE_BLOCK).is_none());
 }
 
@@ -446,7 +428,6 @@ fn mixed_fence_chars_dont_close() {
     let input = "```\ncode\n~~~\n";
     let node = parse_blocks(input);
 
-    // Without a matching closing fence, this should stay paragraph content.
     assert!(find_first(&node, SyntaxKind::CODE_BLOCK).is_none());
 }
 
@@ -457,7 +438,6 @@ fn empty_code_block() {
 
     assert_block_kinds(input, &[SyntaxKind::CODE_BLOCK]);
 
-    // Should have no content node for empty blocks
     assert!(get_code_content(&node).is_none());
 }
 
@@ -499,7 +479,6 @@ fn executable_chunk_embeds_hashpipe_label_as_yaml() {
     let info = get_code_info(&code_block).expect("expected code info");
     assert_eq!(info, "{r}");
 
-    // Hashpipe options are now embedded YAML structure, not CHUNK_OPTION.
     assert!(
         code_block
             .descendants()
@@ -513,7 +492,6 @@ fn executable_chunk_embeds_hashpipe_label_as_yaml() {
         "hashpipe options should no longer emit CHUNK_OPTION nodes"
     );
 
-    // The label key and value survive as YAML scalar-text leaves.
     let scalar_texts: Vec<String> = code_block
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -678,9 +656,6 @@ fn executable_chunk_carries_hashpipe_prefix_as_yaml_line_prefix() {
         .find(|n| n.kind() == SyntaxKind::HASHPIPE_YAML_PREAMBLE)
         .expect("expected hashpipe preamble node");
 
-    // The `#|` marker is now carried as YAML_LINE_PREFIX trivia inside the
-    // embedded YAML (marker plus its one trailing space), not a
-    // HASHPIPE_PREFIX token.
     let prefix_tokens: Vec<_> = preamble
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -927,7 +902,6 @@ fn bracket_display_math_does_not_split_into_tex_block() {
 
 #[test]
 fn bracket_display_math_delimiters_with_content_do_not_split_into_tex_block() {
-    // Pandoc does not require `\[`/`\]` to sit on their own lines.
     let input = "Before\n\n\\[ N(A)=\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\n\nText\n";
     let tree = parse_blocks_with_config(input, &single_backslash_math_options());
 
@@ -943,8 +917,6 @@ fn bracket_display_math_delimiters_with_content_do_not_split_into_tex_block() {
 
 #[test]
 fn bracket_display_math_closer_with_content_releases_paragraph() {
-    // A closer sharing its line with math content must clear the open state so
-    // following blocks can interrupt the paragraph again.
     let input = "Before\n\n\\[\nE = mc^2 \\]\n``` python\nx = 1\n```\n";
     let tree = parse_blocks_with_config(input, &single_backslash_math_options());
 
@@ -956,8 +928,6 @@ fn bracket_display_math_closer_with_content_releases_paragraph() {
 
 #[test]
 fn bracket_delimiters_inside_dollar_math_do_not_latch() {
-    // A `\[` line inside open `$$` math is dollar-math content; it must not
-    // leave bracket state latched once the dollars close.
     let input = "$$\n\\[\n$$\n``` python\nx = 1\n```\n";
     let tree = parse_blocks_with_config(input, &single_backslash_math_options());
 
@@ -969,9 +939,6 @@ fn bracket_delimiters_inside_dollar_math_do_not_latch() {
 
 #[test]
 fn bracket_delimiters_ignored_without_tex_math_extension() {
-    // Without `tex_math_single_backslash` (Pandoc and Quarto defaults), `\[`
-    // is not a display-math delimiter; pandoc splits the environment into a
-    // raw TeX block, and so do we.
     let input = "Before\n\n\\[\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n";
     let tree = parse_blocks(input);
 
@@ -983,8 +950,6 @@ fn bracket_delimiters_ignored_without_tex_math_extension() {
 
 #[test]
 fn commonmark_escaped_bracket_line_does_not_hold_paragraph_open() {
-    // In CommonMark `\[` is just an escaped bracket; a heading must still
-    // interrupt the paragraph.
     let input = "text\n\\[\n# Heading\n";
     let config = ParserOptions {
         flavor: Flavor::CommonMark,
@@ -1059,8 +1024,6 @@ fn list_item_dollar_display_math_does_not_split_into_tex_block() {
 
 #[test]
 fn list_item_marker_line_bracket_opener_does_not_split_into_tex_block() {
-    // The opener sits on the marker line itself, exercising the buffer seed
-    // in `lists.rs` rather than the continuation path.
     let input = "- \\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n  \\]\n\n# Heading after\n";
     let tree = parse_blocks_with_config(input, &single_backslash_math_options());
 
@@ -1076,9 +1039,6 @@ fn list_item_marker_line_bracket_opener_does_not_split_into_tex_block() {
 
 #[test]
 fn blank_line_inside_list_item_bracket_math_releases_state() {
-    // A blank line flushes the item's buffered chunk and must reset the open
-    // math state; the unclosed `\[` degrades to literal text and the heading
-    // still interrupts.
     let input = "- item\n\n  \\[\n  x\n\n# Heading\n";
     let tree = parse_blocks_with_config(input, &single_backslash_math_options());
 
@@ -1090,8 +1050,6 @@ fn blank_line_inside_list_item_bracket_math_releases_state() {
 
 #[test]
 fn sibling_list_marker_interrupts_open_dollar_math_in_list_item() {
-    // Pandoc splits items before scanning math: `- $$` / `- next` is two
-    // items with literal dollars, not one item swallowing the sibling.
     let input = "- $$\n- next\n$$\n";
     let tree = parse_blocks(input);
 
@@ -1105,8 +1063,6 @@ fn sibling_list_marker_interrupts_open_dollar_math_in_list_item() {
 
 #[test]
 fn commonmark_list_item_bracket_line_does_not_hold_item_open() {
-    // In CommonMark `\[` is just an escaped bracket; a heading must still
-    // interrupt the list item content.
     let input = "- text\n  \\[\n# Heading\n";
     let config = ParserOptions {
         flavor: Flavor::CommonMark,
@@ -1121,8 +1077,6 @@ fn commonmark_list_item_bracket_line_does_not_hold_item_open() {
         "an escaped `\\[` line in a CommonMark list item must not suppress interruption"
     );
 }
-
-// Indented code block tests
 
 #[test]
 fn parses_indented_code_block() {
@@ -1156,7 +1110,6 @@ fn indented_code_requires_blank_line_before() {
     not code";
     let tree = parse_blocks(input);
 
-    // Should be a single paragraph, not a code block
     assert_eq!(find_all(&tree, SyntaxKind::CODE_BLOCK).len(), 0);
     assert_eq!(find_all(&tree, SyntaxKind::PARAGRAPH).len(), 1);
 }

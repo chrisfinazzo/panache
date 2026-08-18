@@ -158,22 +158,16 @@ pub fn convert_to_reference(
             let end: usize = def.syntax().text_range().end().into();
             offset_to_position(&index, end)
         })
-        .unwrap_or_else(|| {
-            // No existing definitions, insert at end of document
-            offset_to_position(&index, text.len())
-        });
+        .unwrap_or_else(|| offset_to_position(&index, text.len()));
 
-    // Determine if we need leading newlines
     let prefix = if tree
         .descendants()
         .filter_map(FootnoteDefinition::cast)
         .next()
         .is_some()
     {
-        // There are existing definitions, just add a newline before our definition
         "\n"
     } else {
-        // No existing definitions, add two newlines to separate from content
         "\n\n"
     };
 

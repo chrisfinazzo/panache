@@ -184,9 +184,6 @@ fn frontmatter_consumers(flavor: Flavor) -> ConsumerSet {
     }
 }
 
-/// Hashpipe `#|` cell options are parsed by the executable engine: js-yaml for
-/// Quarto, the R `yaml` package for RMarkdown (via knitr). Other flavors do not
-/// recognize executable cells, so no hashpipe region reaches validation there.
 fn hashpipe_consumers(flavor: Flavor) -> ConsumerSet {
     match flavor {
         Flavor::Quarto => ConsumerSet::of(YamlConsumer::Jsyaml),
@@ -255,13 +252,10 @@ mod tests {
 
     #[test]
     fn any_rejects_matches_intersection() {
-        // implicit-empty-key rejects under every consumer.
         let all = ConsumerSet::all();
         assert!(YamlValidationContext::frontmatter(Flavor::Pandoc).any_rejects(all));
         assert!(YamlValidationContext::frontmatter(Flavor::RMarkdown).any_rejects(all));
 
-        // duplicate-key rejects under js-yaml (Quarto) and R yaml (RMarkdown),
-        // not under pandoc/libyaml.
         let dup = ConsumerSet::of(YamlConsumer::Jsyaml).with(YamlConsumer::RYaml);
         assert!(!YamlValidationContext::frontmatter(Flavor::Pandoc).any_rejects(dup));
         assert!(YamlValidationContext::frontmatter(Flavor::Quarto).any_rejects(dup));

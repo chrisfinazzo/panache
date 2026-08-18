@@ -67,7 +67,6 @@ fn long_double_quoted_becomes_folded() {
         body_lines(&out, "description").len() >= 2,
         "expected wrapped body:\n{out}"
     );
-    // The conversion is loss-free: the folded body rejoins to the value.
     assert_eq!(
         fold_body(&out, "description"),
         LONG,
@@ -78,12 +77,6 @@ fn long_double_quoted_becomes_folded() {
 
 #[test]
 fn next_line_double_quoted_folds_onto_key_line() {
-    // A double-quoted value written on its *own* line (indented under the
-    // key) must fold to the same shape as the same-line case: the `>-`
-    // indicator hoisted onto the key line. Emitting `>-` on its own
-    // indented line is not a fixpoint of the indent pass (it relocates the
-    // indicator on a second format), so it breaks idempotency (issue
-    // #400).
     let input = format!("---\ndescription:\n  \"{LONG}\"\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
 
@@ -105,8 +98,6 @@ fn next_line_double_quoted_folds_onto_key_line() {
 
 #[test]
 fn multi_space_run_is_preserved_when_folded() {
-    // A run of >=2 spaces must never sit at a line break (a fold would
-    // collapse it to one space). It stays verbatim mid-line.
     const V: &str = "Column   alignment is preserved here and this caption is certainly long enough to overflow.";
     let input = format!("---\ntbl-cap: \"{V}\"\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
@@ -135,8 +126,6 @@ fn short_double_quoted_stays_quoted() {
 
 #[test]
 fn escapes_keep_scalar_quoted() {
-    // A `\n` escape resolves to a newline that folding can't represent;
-    // leave the scalar quoted even though it overflows.
     let v = "This description deliberately embeds a newline escape \\n right here and is also long enough to overflow eighty columns.";
     let input = format!("---\ndescription: \"{v}\"\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
@@ -152,8 +141,6 @@ fn escapes_keep_scalar_quoted() {
 
 #[test]
 fn leading_space_keeps_scalar_quoted() {
-    // A folded scalar strips leading whitespace (and a leading space
-    // makes the line "more-indented" = literal), so this can't fold.
     let v = " this description begins with a space that folding would strip, and it is long enough to overflow the cap.";
     let input = format!("---\ndescription: \"{v}\"\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
@@ -165,8 +152,6 @@ fn leading_space_keeps_scalar_quoted() {
 
 #[test]
 fn simple_single_quoted_folds_via_double_quoted() {
-    // Rule 3 rewrites a simple single-quoted scalar to double-quoted,
-    // which rule 17 then folds.
     let v = "This single quoted caption has no apostrophe so it normalizes to double quotes and folds when it overflows.";
     let input = format!("---\ndescription: '{v}'\n---\n\n# Test\n");
     let out = format(&input, Some(reflow80()), None);
@@ -180,8 +165,6 @@ fn simple_single_quoted_folds_via_double_quoted() {
 
 #[test]
 fn single_quoted_with_apostrophe_stays_quoted() {
-    // Rule 3 preserves a single-quoted scalar whose content holds a `'`,
-    // so rule 17 (which only matches `"`) never sees it.
     let input = "---\ndescription: 'A long single-quoted caption that won''t fold because it keeps its quotes for the apostrophe and is long'\n---\n\n# Test\n";
     let out = format(input, Some(reflow80()), None);
     assert!(

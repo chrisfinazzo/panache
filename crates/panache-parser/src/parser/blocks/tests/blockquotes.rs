@@ -48,14 +48,12 @@ fn single_blockquote_paragraph() {
     let input = "> This is a simple blockquote.";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node and 1 Paragraph node
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
 
-    // The paragraph should be inside the blockquote
     assert_eq!(count_nodes_of_type(blockquote, SyntaxKind::PARAGRAPH), 1);
 }
 
@@ -64,7 +62,6 @@ fn multi_line_blockquote() {
     let input = "> This is line one.\n> This is line two.";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node and 1 Paragraph node (multi-line paragraph)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 }
@@ -74,15 +71,12 @@ fn nested_blockquotes() {
     let input = "> Outer quote\n>\n> > Inner quote\n>\n> Back to outer";
     let tree = parse_blocks(input);
 
-    // Should have 2 BlockQuote nodes (outer and inner)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
 
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
 
-    // Outer blockquote should contain the inner blockquote
     let outer = &blockquotes[0]; // First one should be the outer
 
-    // Check that inner blockquote is actually inside the outer one
     let inner_found_in_outer = !find_nodes_of_type(outer, SyntaxKind::BLOCK_QUOTE).is_empty();
     assert!(
         inner_found_in_outer,
@@ -95,7 +89,6 @@ fn triple_nested_blockquotes() {
     let input = "> Level 1\n>\n> > Level 2\n> >\n> > > Level 3";
     let tree = parse_blocks(input);
 
-    // Should have 3 BlockQuote nodes
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 3);
 }
 
@@ -104,10 +97,8 @@ fn blockquote_with_blank_lines() {
     let input = "> First paragraph\n>\n> Second paragraph";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // Should have 2 Paragraph nodes inside the blockquote
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
     assert_eq!(count_nodes_of_type(blockquote, SyntaxKind::PARAGRAPH), 2);
@@ -118,15 +109,11 @@ fn multiline_strong_across_blockquote_markers() {
     let input = "> **bold\n> text**\n";
     let tree = parse_blocks(input);
 
-    // Should parse as a single STRONG spanning the newline, even though the second
-    // line starts with a blockquote marker.
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::STRONG), 1);
 
-    // Must remain lossless.
     assert_eq!(tree.text().to_string(), input);
 }
 
-/// Count tokens of `kind` anywhere within (and including) `node`.
 fn count_tokens_in(node: &crate::syntax::SyntaxNode, kind: SyntaxKind) -> usize {
     node.descendants_with_tokens()
         .filter(|el| el.kind() == kind)
@@ -135,8 +122,6 @@ fn count_tokens_in(node: &crate::syntax::SyntaxNode, kind: SyntaxKind) -> usize 
 
 #[test]
 fn blockquote_marker_lands_inside_multiline_strong() {
-    // The marker after the newline falls *inside* the STRONG node (between the
-    // NEWLINE and the continuation TEXT), since the STRONG spans both lines.
     let input = "> **bold\n> text**\n";
     let tree = parse_blocks(input);
 
@@ -144,16 +129,12 @@ fn blockquote_marker_lands_inside_multiline_strong() {
     assert_eq!(strongs.len(), 1);
     let strong = &strongs[0];
 
-    // The second line's `> ` prefix must live inside the STRONG, tagged
-    // as LINE_PREFIX (a marker byte and its padding space).
     assert_eq!(
         count_tokens_in(strong, SyntaxKind::LINE_PREFIX),
         2,
         "the continuation prefix must be nested inside STRONG"
     );
 
-    // The marker must come before the `text` continuation TEXT token. Collect the
-    // STRONG's descendant tokens in source order and check relative position.
     let tokens: Vec<_> = strong
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -171,15 +152,11 @@ fn blockquote_marker_lands_inside_multiline_strong() {
         "marker must precede continuation text"
     );
 
-    // Lossless.
     assert_eq!(tree.text().to_string(), input);
 }
 
 #[test]
 fn blockquote_marker_at_node_boundary_stays_outside() {
-    // Here the marker offset coincides with the START of the EMPHASIS node
-    // (`*b*` begins exactly at the line boundary). The marker must be emitted
-    // OUTSIDE the EMPHASIS, not nested as its first child.
     let input = "> a\n> *b*";
     let tree = parse_blocks(input);
 
@@ -191,8 +168,6 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
         "a boundary-coincident marker must not be nested inside EMPHASIS"
     );
 
-    // The continuation marker is a direct child of the PARAGRAPH, appearing
-    // before the EMPHASIS node (i.e. outside it).
     let paragraphs = find_nodes_of_type(&tree, SyntaxKind::PARAGRAPH);
     assert_eq!(paragraphs.len(), 1);
     let para = &paragraphs[0];
@@ -209,7 +184,6 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
             _ => None,
         })
         .collect();
-    // Exactly two: the LINE_PREFIX marker child then the EMPHASIS node, in order.
     assert_eq!(
         positions.len(),
         2,
@@ -220,7 +194,6 @@ fn blockquote_marker_at_node_boundary_stays_outside() {
         "marker precedes (is outside) emphasis"
     );
 
-    // Lossless.
     assert_eq!(tree.text().to_string(), input);
 }
 
@@ -229,13 +202,11 @@ fn blockquote_with_heading() {
     let input = "> # This is a heading in a blockquote\n>\n> And this is a paragraph.";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
 
-    // Should have 1 Heading and 1 Paragraph inside the blockquote
     assert_eq!(count_nodes_of_type(blockquote, SyntaxKind::HEADING), 1);
     assert_eq!(count_nodes_of_type(blockquote, SyntaxKind::PARAGRAPH), 1);
 }
@@ -245,9 +216,7 @@ fn blockquote_requires_blank_line_before() {
     let input = "Regular paragraph\n> This should not be a blockquote";
     let tree = parse_blocks(input);
 
-    // Should have 0 BlockQuote nodes (no blank line before)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 0);
-    // Should have 1 paragraph (no blank line means they merge in Markdown)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 }
 
@@ -256,7 +225,6 @@ fn blockquote_at_start_of_document() {
     let input = "> This is at the start of the document";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node (no blank line needed at start)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 }
 
@@ -265,9 +233,7 @@ fn blockquote_after_blank_line() {
     let input = "Regular paragraph\n\n> This should be a blockquote";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node (has blank line before)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
-    // Should have 1 regular paragraph + 1 paragraph inside blockquote
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 2);
 }
 
@@ -276,7 +242,6 @@ fn complex_nested_structure() {
     let input = "> Outer quote with paragraph\n>\n> > Inner quote\n> >\n> > > Triple nested\n> >\n> > Back to double nested\n>\n> Back to outer";
     let tree = parse_blocks(input);
 
-    // Should have multiple BlockQuote nodes (at least 3 levels)
     let blockquote_count = count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     assert!(
         blockquote_count >= 3,
@@ -284,7 +249,6 @@ fn complex_nested_structure() {
         blockquote_count
     );
 
-    // Should have multiple paragraphs
     let paragraph_count = count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH);
     assert!(
         paragraph_count >= 3,
@@ -293,17 +257,13 @@ fn complex_nested_structure() {
     );
 }
 
-// Tests based on Pandoc spec examples
-
 #[test]
 fn spec_basic_blockquote() {
     let input = "> This is a block quote. This\n> paragraph has two lines.\n>\n> 1. This is a list inside a block quote.\n> 2. Second item.";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // Should contain paragraphs (lists not yet parsed, but treated as paragraphs)
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
     assert!(count_nodes_of_type(blockquote, SyntaxKind::PARAGRAPH) >= 1);
@@ -314,27 +274,21 @@ fn spec_nested_blockquote() {
     let input = "> This is a block quote.\n>\n> > A block quote within a block quote.";
     let tree = parse_blocks(input);
 
-    // Should have 2 BlockQuote nodes (outer and inner)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
 
-    // Verify nesting structure
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let outer = &blockquotes[0];
 
-    // Inner blockquote should be nested inside outer
     assert!(!find_nodes_of_type(outer, SyntaxKind::BLOCK_QUOTE).is_empty());
 }
 
 #[test]
 fn spec_blank_before_blockquote_required() {
-    // This should NOT create a nested blockquote due to blank_before_blockquote
     let input = "> This is a block quote.\n>> Not nested, since blank_before_blockquote is enabled by default";
     let tree = parse_blocks(input);
 
-    // Should have only 1 BlockQuote node (the >> line becomes part of the paragraph)
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // Should have 1 paragraph containing both lines
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 }
 
@@ -349,10 +303,6 @@ fn blockquote_can_interrupt_when_blank_before_blockquote_disabled() {
 
 #[test]
 fn list_item_lazy_blockquote_line_stays_item_text() {
-    // Pandoc: `BulletList [[Plain [Str "a", SoftBreak, Str ">", Space, Str "q"]]]`.
-    // `blank_before_blockquote` keeps the quote from interrupting the item's
-    // in-progress text, so the `>` line is lazy continuation of that text, not
-    // a second block.
     for input in [
         "- a\n  > q\n",
         "- a\n> q\n",
@@ -489,10 +439,8 @@ fn spec_blockquote_with_indented_code() {
     let input = ">     code";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // The content should preserve the indentation
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
     let text = blockquote.text().to_string();
@@ -515,7 +463,6 @@ fn blockquote_indented_code_preserves_markers_on_all_lines() {
 
 #[test]
 fn spec_blockquote_optional_space_after_marker() {
-    // Test both "> " and ">" forms
     let input1 = "> With space";
     let input2 = ">Without space";
 
@@ -523,14 +470,12 @@ fn spec_blockquote_optional_space_after_marker() {
 
     let tree2 = parse_blocks(input2);
 
-    // Both should create blockquotes
     assert_eq!(count_nodes_of_type(&tree1, SyntaxKind::BLOCK_QUOTE), 1);
     assert_eq!(count_nodes_of_type(&tree2, SyntaxKind::BLOCK_QUOTE), 1);
 }
 
 #[test]
 fn spec_blockquote_max_three_space_indent() {
-    // Up to 3 spaces before > should be allowed
     let input1 = "   > Three spaces should work";
     let input2 = "    > Four spaces should not work"; // This should be treated as code block
 
@@ -538,29 +483,23 @@ fn spec_blockquote_max_three_space_indent() {
 
     let tree2 = parse_blocks(input2);
 
-    // First should create blockquote
     assert_eq!(count_nodes_of_type(&tree1, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // Second should NOT create blockquote (should be treated as code block)
     assert_eq!(count_nodes_of_type(&tree2, SyntaxKind::BLOCK_QUOTE), 0);
     assert_eq!(count_nodes_of_type(&tree2, SyntaxKind::CODE_BLOCK), 1);
 }
 
-// Test lazy blockquote form
 #[test]
 fn spec_lazy_blockquote_form() {
     let input = "> This is a block quote. This\nparagraph has two lines.";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote node containing the lazy continuation
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
 
-    // The blockquote should contain both lines as a single paragraph
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
     let text = blockquote.text().to_string();
 
-    // Should contain both the first line and the lazy continuation
     assert!(
         text.contains("This is a block quote"),
         "Should contain first line"
@@ -576,14 +515,12 @@ fn blockquote_with_code_block() {
     let input = "> ```python\n> print(\"hello\")\n> ```\n";
     let tree = parse_blocks(input);
 
-    // Should have 1 BlockQuote with 1 CodeBlock inside
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::CODE_BLOCK), 1);
 
     let blockquotes = find_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE);
     let blockquote = &blockquotes[0];
 
-    // Code block should be inside the blockquote
     assert_eq!(count_nodes_of_type(blockquote, SyntaxKind::CODE_BLOCK), 1);
 }
 
@@ -961,8 +898,6 @@ fn definition_list_list_blockquote_continuation_stays_structural() {
         .into_iter()
         .next()
         .expect("expected blockquote node");
-    // Line 0's marker is blockquote structure; the two continuation
-    // markers land inside the quote's paragraph as LINE_PREFIX.
     let structural_marker_count = blockquote
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -1034,7 +969,6 @@ fn pandoc_lazy_line_cannot_continue_a_quoted_line_block() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::PARAGRAPH), 1);
 }
 
-/// The same fold at depth two: a one-marker line lands in the inner quote.
 #[test]
 fn pandoc_lazy_line_folds_into_the_innermost_quote() {
     let input = ">> # h\n> b |\n";
@@ -1074,8 +1008,6 @@ fn backtick_fence_on_a_lazy_line_ends_the_quote() {
     );
 }
 
-/// The same guard is anchored on a backtick, so a `~~~` fence is gobbled
-/// into the quote instead of ending it.
 #[test]
 fn tilde_fence_on_a_lazy_line_folds_into_the_quote() {
     let input = "> # h\n~~~\ncode\n~~~\n";
@@ -1110,8 +1042,6 @@ fn pandoc_lazy_html_block_interrupts_the_quoted_paragraph() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
 }
 
-/// The fold drops the lazy line's indentation before the quote's content
-/// parse sees it, so an indented `<hr>` interrupts all the same.
 #[test]
 fn pandoc_indented_lazy_html_block_still_interrupts() {
     let input = "> a\n  <hr>\n";
@@ -1124,9 +1054,6 @@ fn pandoc_indented_lazy_html_block_still_interrupts() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
 }
 
-/// A close-form strict-block tag interrupts too: `> a` / `</div>` is
-/// `BlockQuote [Plain "a", RawBlock "</div>"]` (no div open anywhere, so
-/// the closer is quote content, not a quote terminator).
 #[test]
 fn pandoc_lazy_html_closer_becomes_the_quotes_raw_block() {
     let input = "> a\n</div>\n";
@@ -1143,8 +1070,6 @@ fn pandoc_lazy_html_closer_becomes_the_quotes_raw_block() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 1);
 }
 
-/// The same fold at depth two: a one-marker `<hr>` line lands in the
-/// inner quote as its RawBlock.
 #[test]
 fn pandoc_lazy_html_block_folds_into_the_innermost_quote() {
     let input = "> > a\n> <hr>\n";
@@ -1202,9 +1127,6 @@ fn pandoc_lazy_non_tag_html_shapes_stay_paragraph_text() {
     }
 }
 
-/// The same interruption applies to a quoted list item's buffered text:
-/// `> - a` / `<hr>` is `BulletList [[Plain "a", RawBlock "<hr>"]]` inside
-/// the quote — the tag becomes the item's block, not its inline text.
 #[test]
 fn pandoc_lazy_html_block_interrupts_the_quoted_list_item() {
     let input = "> - a\n<hr>\n";
@@ -1234,9 +1156,6 @@ fn commonmark_lazy_html_block_line_ends_the_quote() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::HTML_BLOCK), 0);
 }
 
-/// `notFollowedBy (inList >> listStart)`: a list marker ends the gobble
-/// only while the quote is itself inside a list item. A list opened inside
-/// the quote is quote content, so the marker line continues it.
 #[test]
 fn list_marker_ends_the_gobble_only_for_a_quote_inside_a_list_item() {
     let quoted_list = parse_blocks("> - a\n- b\n");
@@ -1253,8 +1172,6 @@ fn list_marker_ends_the_gobble_only_for_a_quote_inside_a_list_item() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::LIST_ITEM), 0);
 }
 
-/// A fenced div opened *inside* the quote closes inside it: the closer is
-/// part of the quote's raw content, so the quote outlives the div.
 #[test]
 fn div_closer_inside_the_quote_closes_only_the_div() {
     let input = "> ::: a\n> x\n:::\n";
@@ -1269,11 +1186,6 @@ fn div_closer_inside_the_quote_closes_only_the_div() {
     assert_eq!(count_nodes_of_type(&quotes[0], SyntaxKind::FENCED_DIV), 1);
 }
 
-/// The code a fenced block actually holds: the TEXT and NEWLINE tokens of
-/// the first `CODE_CONTENT`, leaving out the container-prefix tokens
-/// (`BLOCK_QUOTE_MARKER` / `WHITESPACE`) the emitter peels off around them.
-/// That split is the whole point of the lazy gobble, so assert on it rather
-/// than on `CODE_CONTENT`'s raw text, which is byte-identical either way.
 fn fenced_code_text(root: &crate::syntax::SyntaxNode) -> String {
     find_nodes_of_type(root, SyntaxKind::CODE_CONTENT)
         .first()
@@ -1311,41 +1223,26 @@ fn assert_quoted_fence_body(input: &str, expected: &str) {
 /// `CodeBlock "code"`, not `CodeBlock " code"`.
 #[test]
 fn lazy_fence_opened_by_a_fold_deindents_its_body() {
-    // pandoc -f markdown -t native:
-    //   [ BlockQuote [ Header 1 .., CodeBlock ("", [], []) "code" ] ]
     assert_quoted_fence_body("> # h\n ```\n code\n ```\n", "code\n");
 }
 
-/// The same de-indent with no fold in sight: the fence opens on a line that
-/// carries its `>` marker and only the body line is lazy.
 #[test]
 fn lazy_body_line_deindents_inside_a_quoted_fence() {
-    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code" ] ]
     assert_quoted_fence_body("> ```\n code\n> ```\n", "code\n");
 }
 
-/// The gobble skips *all* leading whitespace, not the three columns a block
-/// construct would tolerate — nine spaces do not make an indented code block
-/// inside the fence.
 #[test]
 fn lazy_body_line_deindent_is_unbounded() {
-    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "deep" ] ]
     assert_quoted_fence_body("> ```\n         deep\n> ```\n", "deep\n");
 }
 
-/// Tabs are skipped alongside spaces, matching
-/// `fold_lazy_line_into_blockquote`'s `trim_start_matches([' ', '\t'])`.
 #[test]
 fn lazy_body_line_deindent_skips_tabs() {
-    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code" ] ]
     assert_quoted_fence_body("> ```\n\t code\n> ```\n", "code\n");
 }
 
-/// The closing fence may itself be lazy: de-indented it matches, so the code
-/// block ends there and the quote carries on with the next line.
 #[test]
 fn lazy_closing_fence_closes_the_quoted_code_block() {
-    // pandoc: [ BlockQuote [ CodeBlock ("", [], []) "code", Para [ Str "after" ] ] ]
     let input = "> ```\n code\n ```\n> after\n";
     assert_quoted_fence_body(input, "code\n");
 
@@ -1361,12 +1258,8 @@ fn lazy_closing_fence_closes_the_quoted_code_block() {
     );
 }
 
-/// Each quote level de-indents its own lazy lines: the outer quote strips one
-/// marker off `> code`, and the inner one finds a marker-less line and drops
-/// the (empty) indent.
 #[test]
 fn lazy_body_line_deindents_at_each_quote_level() {
-    // pandoc: [ BlockQuote [ BlockQuote [ CodeBlock ("", [], []) "code" ] ] ]
     let input = ">> ```\n> code\n>> ```\n";
     assert_quoted_fence_body(input, "code\n");
 
@@ -1374,11 +1267,8 @@ fn lazy_body_line_deindents_at_each_quote_level() {
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 2);
 }
 
-/// With the list *outside* the quote the list-content strip runs first and the
-/// gobble then finds nothing left to drop.
 #[test]
 fn lazy_body_line_keeps_list_content_indent_when_the_list_is_outer() {
-    // pandoc: [ BulletList [ [ BlockQuote [ CodeBlock ("", [], []) "code" ] ] ] ]
     assert_quoted_fence_body("- > ```\n  code\n  > ```\n", "code\n");
 }
 
@@ -1401,9 +1291,6 @@ fn commonmark_lazy_line_ends_the_quote_before_a_fence() {
     );
 }
 
-/// The kinds of `BLOCK_QUOTE`'s element children, for the shape assertions
-/// below. Tokens are skipped: the gobbled indent rides along as a bare
-/// `WHITESPACE` token and says nothing about block structure.
 fn quote_block_kinds(input: &str) -> Vec<SyntaxKind> {
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "parser must be lossless");
@@ -1417,8 +1304,6 @@ fn quote_block_kinds(input: &str) -> Vec<SyntaxKind> {
 /// column is 2 — the code block is the *list's* sibling.
 #[test]
 fn lazy_fence_after_a_quoted_list_item_is_the_lists_sibling() {
-    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a"]]]
-    //                      , CodeBlock ("", [], []) "c" ] ]
     let input = "> - a\n   ```\n   c\n   ```\n";
     assert_eq!(
         quote_block_kinds(input),
@@ -1437,8 +1322,6 @@ fn lazy_fence_after_a_quoted_list_item_is_the_lists_sibling() {
     );
 }
 
-/// The gobble is unbounded, so the boundary does not move with the indent:
-/// one space, four spaces and a tab all read the same.
 #[test]
 fn lazy_fence_after_a_quoted_list_item_is_indent_agnostic() {
     for indent in [" ", "    ", "\t"] {
@@ -1452,12 +1335,8 @@ fn lazy_fence_after_a_quoted_list_item_is_indent_agnostic() {
     }
 }
 
-/// The *list* boundary is fence-char agnostic, unlike the paragraph guard in
-/// `endline`: `~~~` ends the item too.
 #[test]
 fn lazy_tilde_fence_after_a_quoted_list_item_is_the_lists_sibling() {
-    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a"]]]
-    //                      , CodeBlock ("", [], []) "c" ] ]
     let input = "> - a\n   ~~~\n   c\n   ~~~\n";
     assert_eq!(
         quote_block_kinds(input),
@@ -1466,12 +1345,8 @@ fn lazy_tilde_fence_after_a_quoted_list_item_is_the_lists_sibling() {
     assert_quoted_fence_body(input, "c\n");
 }
 
-/// A fence with no closer is not a fence: `codeBlockFenced` fails, so the lines
-/// stay lazy item text in a single `PLAIN`.
 #[test]
 fn lazy_fence_without_a_closer_stays_one_plain() {
-    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a", SoftBreak
-    //                      , Str "```", SoftBreak, Str "c"]]] ] ]
     let input = "> - a\n   ```\n   c\n";
     assert_eq!(quote_block_kinds(input), vec![SyntaxKind::LIST]);
 
@@ -1480,12 +1355,8 @@ fn lazy_fence_without_a_closer_stays_one_plain() {
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::CODE_BLOCK), 0);
 }
 
-/// A blank line ends the quote's raw content, so a closer beyond it is not the
-/// opener's closer and the fence never forms.
 #[test]
 fn a_closer_past_a_blank_line_does_not_complete_the_lazy_fence() {
-    // pandoc: [ BlockQuote [ BulletList [[Plain [Str "a", SoftBreak
-    //                      , Str "```"]]] ], Para [ Str "```" ] ]
     let input = "> - a\n   ```\n\n   ```\n";
     let tree = parse_blocks(input);
 
@@ -1505,8 +1376,6 @@ fn a_closer_past_a_blank_line_does_not_complete_the_lazy_fence() {
 /// asymmetry the fence-only close has to preserve.
 #[test]
 fn lazy_heading_stays_in_the_quoted_list_item() {
-    // pandoc -f markdown-blank_before_header:
-    //   [ BlockQuote [ BulletList [[Para [Str "item"], Header 1 ..]] ] ]
     let mut config = ParserOptions::default();
     config.extensions.blank_before_header = false;
     let input = "> - item\n # head\n";
@@ -1518,14 +1387,8 @@ fn lazy_heading_stays_in_the_quoted_list_item() {
     assert_eq!(count_nodes_of_type(&items[0], SyntaxKind::HEADING), 1);
 }
 
-/// The quoted-paragraph half of the same rule: the quote's content is
-/// de-indented before `endline` runs, so its backtick lookahead succeeds at
-/// column 0 and the fence breaks the paragraph. Cf.
-/// `backtick_fence_on_a_lazy_line_ends_the_quote`, where a byte-0 fence ends
-/// the *quote* instead of opening a block inside it.
 #[test]
 fn indented_lazy_backtick_fence_breaks_the_quoted_paragraph() {
-    // pandoc: [ BlockQuote [ Para [ Str "a" ], CodeBlock ("", [], []) "c" ] ]
     let input = "> a\n   ```\n   c\n   ```\n";
     assert_eq!(
         quote_block_kinds(input),
@@ -1534,11 +1397,8 @@ fn indented_lazy_backtick_fence_breaks_the_quoted_paragraph() {
     assert_quoted_fence_body(input, "c\n");
 }
 
-/// That guard is backtick-anchored, so `~~~` keeps continuing the paragraph
-/// even though it ends a list item.
 #[test]
 fn indented_lazy_tilde_fence_keeps_continuing_the_quoted_paragraph() {
-    // pandoc: [ BlockQuote [ Para [ Str "a", SoftBreak, Subscript [], .. ] ] ]
     let input = "> a\n   ~~~\n   c\n   ~~~\n";
     assert_eq!(quote_block_kinds(input), vec![SyntaxKind::PARAGRAPH]);
     assert_eq!(
@@ -1547,10 +1407,8 @@ fn indented_lazy_tilde_fence_keeps_continuing_the_quoted_paragraph() {
     );
 }
 
-/// No closer, no interruption — the paragraph swallows the backticks.
 #[test]
 fn indented_lazy_fence_without_a_closer_keeps_continuing_the_paragraph() {
-    // pandoc: [ BlockQuote [ Para [ Str "a", SoftBreak, Str "```", .. ] ] ]
     let input = "> a\n   ```\n   c\n";
     assert_eq!(quote_block_kinds(input), vec![SyntaxKind::PARAGRAPH]);
 }
@@ -1561,7 +1419,6 @@ fn indented_lazy_fence_without_a_closer_keeps_continuing_the_paragraph() {
 /// document at any nesting depth (issue #310, one level deeper).
 #[test]
 fn nested_quote_opens_as_first_child_of_a_quoted_div() {
-    // pandoc: [ BlockQuote [ Div .. [ BlockQuote [ Para [ Str "inner" ] ] ] ] ]
     let input = "> ::: note\n> > inner\n> :::\n";
     let tree = parse_blocks(input);
 
@@ -1573,7 +1430,6 @@ fn nested_quote_opens_as_first_child_of_a_quoted_div() {
     assert_eq!(count_nodes_of_type(&tree, SyntaxKind::PARAGRAPH), 1);
 }
 
-/// The same, with the div body separated by quoted blank lines.
 #[test]
 fn nested_quote_opens_after_a_quoted_blank_line_in_a_div() {
     let input = "> ::: note\n>\n> > inner\n>\n> :::\n";

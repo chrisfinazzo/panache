@@ -21,13 +21,6 @@ fn expand_tabs_code_span(node: &SyntaxNode, tab_width: usize) -> String {
     code_span_payload(node, tab_width).replace('\n', " ")
 }
 
-/// Render a `CITATION` or `CROSSREF` node by concatenating its child tokens.
-///
-/// Both kinds share the same syntax (`[ ... @key ... ]`) and are emitted the
-/// same way: smart-normalize text tokens, skip the whitespace that follows a
-/// blockquote marker, then collapse any internal line break (a citation may be
-/// split across input lines) so the unit reflows like ordinary inline text
-/// instead of pinning a hard newline into the paragraph.
 fn format_citation_like(node: &SyntaxNode, config: &Config) -> String {
     let mut result = String::new();
     for child in node.children_with_tokens() {
@@ -51,12 +44,6 @@ fn format_citation_like(node: &SyntaxNode, config: &Config) -> String {
     collapse_internal_newlines(&result).into_owned()
 }
 
-/// Collapse any whitespace run that contains a line break into a single space.
-///
-/// A citation or cross-reference split across input lines leaves a literal
-/// newline inside the assembled string. Emitting it verbatim makes the
-/// surrounding paragraph un-reflowable, so we normalize it the way the wrapper
-/// treats ordinary inter-word whitespace.
 fn collapse_internal_newlines(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains('\n') {
         return std::borrow::Cow::Borrowed(text);
@@ -65,8 +52,6 @@ fn collapse_internal_newlines(text: &str) -> std::borrow::Cow<'_, str> {
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch.is_whitespace() {
-            // Consume the whole whitespace run, tracking whether it contains a
-            // line break.
             let mut has_newline = ch == '\n';
             let mut run = String::from(ch);
             while let Some(&next) = chars.peek() {
@@ -116,8 +101,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 if let NodeOrToken::Token(tok) = child {
                     match tok.kind() {
                         SyntaxKind::AUTO_LINK_MARKER | SyntaxKind::TEXT => {
-                            // Autolinks are literal URLs/emails: emit verbatim,
-                            // never smart-normalize (pandoc keeps `—`/`…` here).
                             result.push_str(tok.text());
                         }
                         _ => {}
@@ -134,18 +117,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             for child in node.children_with_tokens() {
                 match child {
                     NodeOrToken::Node(n) if n.kind() == SyntaxKind::ATTRIBUTE => {
-                        // The parser now preserves attribute bytes verbatim;
-                        // normalization (id-first, quoted values) is a formatter
-                        // concern, applied here as for headings.
                         attributes = normalize_attribute_text(&n.text().to_string());
                     }
                     NodeOrToken::Token(t) => {
                         if t.kind() == SyntaxKind::INLINE_CODE_MARKER {
                             marker_len = marker_len.max(t.text().len());
                         } else if t.kind() == SyntaxKind::INLINE_CODE_CONTENT {
-                            // Code spans are literal: never apply smart
-                            // punctuation normalization to their contents
-                            // (pandoc keeps `—`/`…`/curly quotes verbatim here).
                             content.push_str(t.text());
                         }
                     }
@@ -153,20 +130,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 }
             }
 
-            // A multi-line triple-backtick code span is a fence line that failed to
-            // open a block: pandoc anchors a paragraph-interrupting fence on the
-            // fence character itself, so one leftover column of indent leaves the
-            // whole run as lazy paragraph text. Its newlines join to spaces like any
-            // other code span's, which is what pandoc's own reader and markdown
-            // writer do. Re-emitting the original bytes instead is not an option --
-            // the writers re-indent continuation lines to the enclosing container's
-            // content indent, which is exactly where the fence *does* interrupt, so
-            // pass 2 reads a real code block.
-            //
-            // A single-line Quarto executable chunk (```` ```{r}\n...\n``` ````) is
-            // collapsed to inline `{r} ...` form. Its surrounding newlines are
-            // block-structure boundaries, not code content, so they must be trimmed
-            // after the newline->space normalization below.
             let mut collapse_block_chunk = false;
             if marker_len >= 3 && content.contains('\n') {
                 let trimmed_start = content.trim_start();
@@ -178,12 +141,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 }
             }
 
-            // Preserve code-span content verbatim: surrounding spaces are
-            // meaningful and kept as-is (unlike pandoc's markdown reader, which
-            // strips them). Only apply spec-mandated normalizations: internal
-            // line endings become spaces, and tabs expand unless preserved. The
-            // exception is a collapsed block chunk (above), whose structural
-            // boundary whitespace is trimmed.
             let mut normalized_content =
                 if matches!(config.tab_stops, crate::config::TabStopMode::Preserve) {
                     content.replace('\n', " ")
@@ -249,7 +206,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             format!("`{}`{{r}}{}{}\\`\\`", prefix.trim_end(), spacing, code)
         }
         SyntaxKind::RAW_INLINE => {
-            // Format raw inline span: `content`{=format}
             let mut content = String::new();
             let mut backtick_count = 1;
             let mut format_attr = String::new();
@@ -313,7 +269,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     }
                 }
             }
-            // Trim leading and trailing whitespace from emphasis content
             let content = content.trim();
             format!("*{}*", content)
         }
@@ -338,15 +293,10 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     }
                 }
             }
-            // Trim leading and trailing whitespace from strong emphasis content
             let content = content.trim();
             format!("**{}**", content)
         }
         SyntaxKind::INLINE_HTML_SPAN => {
-            // Inline `<span ...>...</span>` lift (Pandoc dialect). The open
-            // tag's bytes are tokenized at finer granularity (TEXT, WHITESPACE,
-            // HTML_ATTRS) — emit them verbatim. SPAN_CONTENT recurses through
-            // the inline formatter for nested markdown.
             let mut result = String::new();
             for child in node.children_with_tokens() {
                 match child {
@@ -364,8 +314,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                                 }
                             }
                         } else {
-                            // HTML_ATTRS and any other open-tag region nodes —
-                            // emit their bytes verbatim to stay lossless.
                             result.push_str(&n.text().to_string());
                         }
                     }
@@ -374,8 +322,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             result
         }
         SyntaxKind::BRACKETED_SPAN => {
-            // Format bracketed span: [content]{.attributes}
-            // Need to traverse children to avoid extra spaces
             let mut result = String::new();
             for child in node.children_with_tokens() {
                 match child {
@@ -393,7 +339,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         );
                     }
                     NodeOrToken::Node(n) => {
-                        // Recursively format nested content
                         if n.kind() == SyntaxKind::SPAN_CONTENT {
                             for elem in n.children_with_tokens() {
                                 match elem {
@@ -416,8 +361,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                                 }
                             }
                         } else if n.kind() == SyntaxKind::SPAN_ATTRIBUTES {
-                            // Normalize attributes: collapse interior whitespace
-                            // runs to a single space (structure-independent).
                             result.push_str(&normalize_span_attributes(&n));
                         } else {
                             result.push_str(&n.text().to_string());
@@ -428,20 +371,16 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             result
         }
         SyntaxKind::INLINE_MATH => {
-            // Check if this is display math (has DisplayMathMarker)
             let is_display_math = node.children_with_tokens().any(|t| {
                 matches!(t, NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DISPLAY_MATH_MARKER)
             });
 
-            // Content now lives in a `MATH_CONTENT` subtree; its text is the
-            // raw bytes between the delimiters (verbatim path).
             let content = node
                 .children()
                 .find(|n| n.kind() == SyntaxKind::MATH_CONTENT)
                 .map(|n| n.text().to_string())
                 .unwrap_or_default();
 
-            // Get original marker to determine input format
             let original_marker = node
                 .children_with_tokens()
                 .find_map(|t| match t {
@@ -455,10 +394,8 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 })
                 .unwrap_or_else(|| "$".to_string());
 
-            // Determine output format based on config
             let (open, close) = match config.math_delimiter_style {
                 MathDelimiterStyle::Preserve => {
-                    // Keep original format
                     if is_display_math {
                         match original_marker.as_str() {
                             "\\[" => (r"\[", r"\]"),
@@ -475,7 +412,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     }
                 }
                 MathDelimiterStyle::Dollars => {
-                    // Normalize to dollars
                     if is_display_math {
                         ("$$", "$$")
                     } else {
@@ -483,7 +419,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     }
                 }
                 MathDelimiterStyle::Backslash => {
-                    // Normalize to single backslash
                     if is_display_math {
                         (r"\[", r"\]")
                     } else {
@@ -492,9 +427,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 }
             };
 
-            // Experimental gate: reformat content structurally (clean content
-            // read via the prefix-stripping `InlineMath::content()`). Off ⇒
-            // verbatim (byte-identical to before).
             if is_display_math {
                 let opts = MathFormatOptions::from_config(config, MathContext::Display);
                 let clean = InlineMath::cast(node.clone())
@@ -511,25 +443,16 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     .unwrap_or_else(|| content.clone());
                 match math::format_math(&clean, &opts) {
                     Some(body) => format!("{}{}{}", open, body, close),
-                    // A raw newline inside inline `$…$` is insignificant TeX
-                    // whitespace, but emitted verbatim it survives as a physical
-                    // break that splits the span across lines during reflow.
-                    // Collapse newline-bearing whitespace to a single space so the
-                    // span stays one atomic wrap unit (gate-off / bail path).
                     None => format!("{}{}{}", open, collapse_internal_newlines(&content), close),
                 }
             }
         }
         SyntaxKind::DISPLAY_MATH => {
-            // Display math: $$content$$ or \[content\] or \\[content\\]
-            // Format on separate lines with proper normalization
             let Some(display_math) = DisplayMath::cast(node.clone()) else {
                 return node.text().to_string();
             };
             let content = display_math.content();
 
-            // Preserve malformed display math that contains unescaped single-dollar
-            // delimiters inside content; normalizing it can cause cross-pass drift.
             if display_math.has_unescaped_single_dollar_in_content() {
                 return node.text().to_string();
             }
@@ -544,18 +467,11 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             let closing = closing_value.as_str();
             let is_environment = display_math.is_environment_form();
 
-            // Display math inside a single-line table cell (pipe/simple table)
-            // must stay on one line: those cell formats terminate a row at the
-            // newline, so expanding `$$…$$` into a `$$\n…\n$$` block would split
-            // the cell across rows and corrupt the table (pandoc keeps the math
-            // inline in the cell). Collapse interior whitespace and emit a
-            // single-line `$$content$$`, which is idempotent across passes.
             if in_single_line_table_cell(node) {
                 let inline_content = content.split_whitespace().collect::<Vec<_>>().join(" ");
                 return format!("{opening}{inline_content}{closing}");
             }
 
-            // Apply delimiter style preference
             let (open, close) = if is_environment {
                 (opening, closing)
             } else {
@@ -587,10 +503,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 return result;
             }
 
-            // Normalize content:
-            // 1. Trim leading/trailing whitespace (including newlines)
-            // 2. Ensure content is on separate lines from delimiters
-            // 3. Strip common leading whitespace from all lines (preserve relative indentation)
             result.push_str(open);
             result.push('\n');
 
@@ -601,17 +513,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     result.push('\n');
                 }
                 None => {
-                    // Process content: drop leading blank (whitespace-only) lines and
-                    // trailing whitespace, strip common leading indentation, then
-                    // re-indent every line by `math_indent`. Leading whitespace-only
-                    // lines must be dropped rather than emitted: a blank line directly
-                    // after the opening `$$` reparses as a paragraph break that splits
-                    // the display math (pandoc ends `$$…$$` on any blank line), so
-                    // emitting one is not lossless across passes. The opening marker's
-                    // own trailing whitespace (`$$ `) surfaces here as exactly such a
-                    // leading line. Stripping only full blank lines (not leading spaces
-                    // of a content line) keeps each real line's indent visible to
-                    // `min_indent`, so the re-indent stays idempotent.
                     let mut trimmed_content = content.trim_end();
                     while let Some((first, rest)) = trimmed_content.split_once('\n') {
                         if first.trim().is_empty() {
@@ -621,7 +522,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         }
                     }
                     if !trimmed_content.is_empty() {
-                        // Find minimum indentation across all non-empty lines
                         let min_indent = trimmed_content
                             .lines()
                             .filter(|line| !line.trim().is_empty())
@@ -630,14 +530,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                             .unwrap_or(0);
 
                         let pad = " ".repeat(config.math_indent);
-                        // Strip common indentation, then re-indent each line.
                         for line in trimmed_content.lines() {
                             let stripped = if line.len() >= min_indent {
                                 &line[min_indent..]
                             } else {
                                 line
                             };
-                            // Skip padding blank lines to avoid trailing whitespace.
                             if !stripped.is_empty() {
                                 result.push_str(&pad);
                                 result.push_str(stripped);
@@ -652,8 +550,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             result
         }
         SyntaxKind::HARD_LINE_BREAK => {
-            // Normalize hard line breaks to backslash-newline when escaped_line_breaks is enabled
-            // Otherwise preserve original format (trailing spaces)
             if config.formatter_extensions.escaped_line_breaks {
                 "\\\n".to_string()
             } else {
@@ -663,10 +559,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             }
         }
         SyntaxKind::NONBREAKING_SPACE => "\\ ".to_string(),
-        SyntaxKind::SHORTCODE => {
-            // Format Quarto shortcodes with normalized spacing
-            format_shortcode(node)
-        }
+        SyntaxKind::SHORTCODE => format_shortcode(node),
         SyntaxKind::INLINE_FOOTNOTE => {
             let mut content = String::new();
             for child in node.children_with_tokens() {
@@ -696,9 +589,6 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             format!("^[{}]", normalized)
         }
         SyntaxKind::CITATION | SyntaxKind::CROSSREF => format_citation_like(node, config),
-        _ => {
-            // For other inline nodes, just return their text
-            node.text().to_string()
-        }
+        _ => node.text().to_string(),
     }
 }

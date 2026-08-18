@@ -56,10 +56,6 @@ pub mod diagnostic_codes {
     pub const PARSE_UNDECLARED_ALIAS: &str = "YAML_PARSE_UNDECLARED_ALIAS";
     pub const PARSE_NODE_PROPERTY_UNDERINDENTED: &str = "YAML_PARSE_NODE_PROPERTY_UNDERINDENTED";
 
-    // Consumer-only diagnostics: valid YAML 1.2 that a real consumer
-    // (pandoc/libyaml or quarto/js-yaml) rejects. Emitted only under a
-    // production `YamlValidationContext`, never on the 1.2 substrate path.
-    // See crates/panache-parser/tests/yaml/consumer-matrix.md.
     pub const CONSUMER_IMPLICIT_EMPTY_KEY: &str = "YAML_CONSUMER_IMPLICIT_EMPTY_KEY";
     pub const CONSUMER_DUPLICATE_KEY: &str = "YAML_CONSUMER_DUPLICATE_KEY";
 }

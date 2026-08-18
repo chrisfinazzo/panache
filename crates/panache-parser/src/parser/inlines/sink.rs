@@ -92,7 +92,6 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
         }
     }
 
-    /// Emit any markers whose offset equals the current byte position.
     fn emit_markers_at_current(&mut self) {
         while let Some(&(byte_offset, marker)) = self.marker_positions.get(self.idx)
             && byte_offset == self.offset
@@ -102,8 +101,6 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
                     leading_spaces,
                     has_trailing_space,
                 } => {
-                    // Continuation-line container prefix inside the inline
-                    // container: kind-tagged, legacy token boundaries.
                     if leading_spaces > 0 {
                         self.inner
                             .token(SyntaxKind::LINE_PREFIX.into(), &space_run(leading_spaces));
@@ -132,7 +129,6 @@ impl InlineSink for MarkerInjectingSink<'_, '_> {
     fn token(&mut self, kind: rowan::SyntaxKind, text: &str) {
         let mut start = 0;
         while start < text.len() {
-            // Markers at the current offset must be emitted before any bytes.
             self.emit_markers_at_current();
 
             let remaining = text.len() - start;
@@ -141,7 +137,6 @@ impl InlineSink for MarkerInjectingSink<'_, '_> {
                 .get(self.idx)
                 .map(|(byte_offset, _)| *byte_offset);
 
-            // If a marker falls strictly inside this token, split it there.
             if let Some(next) = next_marker_offset
                 && next > self.offset
                 && next < self.offset + remaining
@@ -163,9 +158,6 @@ impl InlineSink for MarkerInjectingSink<'_, '_> {
     }
 
     fn start_node(&mut self, kind: rowan::SyntaxKind) {
-        // Emit any markers at the current offset *outside* this node — otherwise
-        // they nest inside (e.g. a quote marker inside an emphasis span),
-        // which breaks lossless reconstruction during reformatting.
         self.emit_markers_at_current();
         self.inner.start_node(kind);
     }

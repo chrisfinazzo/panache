@@ -53,7 +53,6 @@ pub fn parse_math_content(content: &str, opts: MathParseOptions) -> GreenNode {
     parser.builder.finish()
 }
 
-/// Parse context, controlling which delimiter ends the current element run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ctx {
     /// Top level of the math content.
@@ -82,16 +81,12 @@ impl MathParser<'_> {
         self.rest().chars().next()
     }
 
-    /// Emit a token of `len` bytes (from the current position) with `kind`.
     fn bump_bytes(&mut self, len: usize, kind: SyntaxKind) {
         let text = &self.input[self.pos..self.pos + len];
         self.builder.token(kind.into(), text);
         self.pos += len;
     }
 
-    /// If the cursor is at a control word (`\` followed by ASCII letters or
-    /// `@`, matching TeX/texlab's control-word class), return that word
-    /// (without the backslash) without consuming anything.
     fn peek_control_word(&self) -> Option<&str> {
         let after = self.rest().strip_prefix('\\')?;
         let len: usize = after
@@ -105,9 +100,6 @@ impl MathParser<'_> {
         while let Some(c) = self.peek_char() {
             match c {
                 '}' if ctx == Ctx::Group => break,
-                // A `}` outside any group is an unmatched close: keep it as a
-                // faithful (stray) close token. `math_diagnostics` flags it from
-                // the shape (a `MATH_GROUP_CLOSE` with no enclosing `MATH_GROUP`).
                 '}' => self.bump_bytes(1, SyntaxKind::MATH_GROUP_CLOSE),
                 '\\' => {
                     if self.rest().starts_with("\\\\") {
@@ -117,17 +109,11 @@ impl MathParser<'_> {
                             "begin" => self.parse_environment(),
                             "end" if ctx == Ctx::Env => break,
                             "end" => {
-                                // Stray `\end` with no open `\begin` at this
-                                // level; keep it as a plain command token.
-                                // `math_diagnostics` flags it from the shape.
                                 self.parse_control_word();
                             }
                             "left" => self.parse_delimited(),
                             "right" if ctx == Ctx::LeftRight => break,
                             "right" => {
-                                // Stray `\right` with no open `\left` at this
-                                // level; keep it as a plain command token.
-                                // `math_diagnostics` flags it from the shape.
                                 self.parse_control_word();
                             }
                             _ => self.parse_control_word(),
@@ -137,30 +123,16 @@ impl MathParser<'_> {
                     }
                 }
                 '{' => self.parse_group(),
-                // Bookdown equation label `(\#eq:label)`, only when enabled.
-                // A non-matching `(` falls through to an ordinary open delimiter.
                 '(' if self.opts.bookdown_equation_labels => match self.equation_label_len() {
                     Some(len) => self.bump_bytes(len, SyntaxKind::MATH_EQUATION_LABEL),
                     None => self.bump_bytes(1, SyntaxKind::MATH_OPEN),
                 },
-                // Delimiters and punctuation: their TeX mathcode class is fixed
-                // at the character level, so it is a CST fact (unlike operator
-                // class). The ambiguous `| . /` stay in MATH_TEXT.
                 '(' | '[' => self.bump_bytes(1, SyntaxKind::MATH_OPEN),
                 ')' | ']' => self.bump_bytes(1, SyntaxKind::MATH_CLOSE),
                 ',' | ';' => self.bump_bytes(1, SyntaxKind::MATH_PUNCT),
-                // A `:` stays an ordinary atom (its class needs macro context,
-                // like `| . /`), but it gets its own token so a consumer can see
-                // the `:=` definition boundary: `:` fused into a longer text run
-                // (`ab:=`) would leave the formatter no element boundary to
-                // align or break the composite relation on.
                 ':' => self.bump_bytes(1, SyntaxKind::MATH_TEXT),
                 '&' => self.bump_bytes(1, SyntaxKind::MATH_ALIGN),
                 '^' | '_' => self.bump_bytes(1, SyntaxKind::MATH_SCRIPT),
-                // Operator atoms (`+ - * = < >`), one token per char. Class and
-                // precedence are *not* assigned here: TeX itself coerces a
-                // binary atom to ordinary by its neighbors (unary minus), so the
-                // class is a property of list position, owned by the formatter.
                 c if is_operator(c) => self.bump_bytes(1, SyntaxKind::MATH_OPERATOR),
                 '%' => self.parse_comment(),
                 ' ' | '\t' => self.parse_spaces(),
@@ -178,10 +150,6 @@ impl MathParser<'_> {
         }
     }
 
-    /// `\begin{env} ... \end{env}`. Matching is done by recursion plus the
-    /// `Env` context. The begin/end name groups are captured as `MATH_GROUP`
-    /// children; a missing `\end` or a name mismatch is left in the shape for
-    /// `math_diagnostics` to report, and never aborts the parse.
     fn parse_environment(&mut self) {
         self.builder.start_node(SyntaxKind::MATH_ENVIRONMENT.into());
         self.parse_control_word(); // \begin
@@ -194,9 +162,6 @@ impl MathParser<'_> {
         self.builder.finish_node();
     }
 
-    /// Parse the `{name}` group following `\begin` / `\end`, if present. The
-    /// name is captured as a `MATH_GROUP` in the CST; begin/end matching is
-    /// derived from the tree shape by `math_diagnostics`.
     fn parse_environment_name(&mut self) {
         if self.peek_char() == Some('{') {
             self.parse_group();
@@ -210,17 +175,9 @@ impl MathParser<'_> {
         if self.peek_char() == Some('}') {
             self.bump_bytes(1, SyntaxKind::MATH_GROUP_CLOSE); // }
         }
-        // An unclosed group (no `MATH_GROUP_CLOSE`) is left as-is; the missing
-        // close token is what `math_diagnostics` keys on.
         self.builder.finish_node();
     }
 
-    /// `\left<d> ... \right<d>`. Both `\left` and `\right` take a delimiter
-    /// argument; TeX allows asymmetric pairs (`\left( … \right]`) and the null
-    /// delimiter `.` (`\left.`), so no delimiter *matching* is attempted — only
-    /// the `\left`/`\right` pairing is structural. A missing `\right` leaves a
-    /// `MATH_DELIMITED` node without its closing command, which
-    /// `math_diagnostics` reports.
     fn parse_delimited(&mut self) {
         self.builder.start_node(SyntaxKind::MATH_DELIMITED.into());
         self.parse_control_word(); // \left
@@ -256,21 +213,17 @@ impl MathParser<'_> {
         }
     }
 
-    /// `\` + a run of control-word characters (e.g. `\alpha`, `\frac`, `\begin`).
     fn parse_control_word(&mut self) {
         let word_len = self.peek_control_word().map(str::len).unwrap_or(0);
         self.bump_bytes(1 + word_len, SyntaxKind::MATH_COMMAND);
     }
 
-    /// `\` + exactly one following character (e.g. `\%`, `\{`, `\,`), or a
-    /// lone trailing backslash at EOF.
     fn parse_control_symbol(&mut self) {
         let after = &self.input[self.pos + 1..];
         let len = 1 + after.chars().next().map(char::len_utf8).unwrap_or(0);
         self.bump_bytes(len, SyntaxKind::MATH_COMMAND);
     }
 
-    /// `%` to (but not including) the end of the line.
     fn parse_comment(&mut self) {
         let len = self
             .rest()
@@ -288,10 +241,6 @@ impl MathParser<'_> {
         self.bump_bytes(len, SyntaxKind::MATH_SPACE);
     }
 
-    /// A run of ordinary atoms, up to the next structural character. Delimiters
-    /// and punctuation (`( ) [ ] , ;`) bound the run too — they are now their
-    /// own tokens (including the `(` that the dispatcher's equation-label check
-    /// sees while the bookdown extension is on), as does the `:` of a `:=`.
     fn parse_text(&mut self) {
         let len = self
             .rest()
@@ -301,15 +250,11 @@ impl MathParser<'_> {
         self.bump_bytes(len, SyntaxKind::MATH_TEXT);
     }
 
-    /// If the cursor is at a bookdown equation label `(\#eq:label)`, return its
-    /// byte length. Reuses the shared bookdown definition parser so the
-    /// recognized span matches the rest of the codebase exactly.
     fn equation_label_len(&self) -> Option<usize> {
         try_parse_bookdown_equation_definition(self.rest()).map(|(len, _)| len)
     }
 }
 
-/// Characters that terminate a [`SyntaxKind::MATH_TEXT`] run.
 fn is_special(c: char) -> bool {
     is_operator(c)
         || is_delimiter(c)
@@ -319,10 +264,6 @@ fn is_special(c: char) -> bool {
         )
 }
 
-/// Delimiter/punctuation atoms split out of ordinary text into their own
-/// [`SyntaxKind::MATH_OPEN`]/[`SyntaxKind::MATH_CLOSE`]/[`SyntaxKind::MATH_PUNCT`]
-/// tokens. Their TeX mathcode class is fixed at the character level, so it is a
-/// CST fact; the ambiguous `| . /` are deliberately excluded (they stay text).
 fn is_delimiter(c: char) -> bool {
     matches!(c, '(' | ')' | '[' | ']' | ',' | ';')
 }
@@ -371,11 +312,8 @@ mod tests {
 
     #[test]
     fn plain_text_is_one_atom_run() {
-        // A run with no structural or operator chars stays a single atom.
         assert_eq!(token_kinds("abc"), vec![SyntaxKind::MATH_TEXT]);
         assert_lossless("abc");
-        // `/` and `.` are ambiguous, so they stay ordinary atoms (not operators
-        // and not delimiters); only the parens split out.
         assert_eq!(
             token_kinds("f(x)/2.5"),
             vec![
@@ -391,8 +329,6 @@ mod tests {
 
     #[test]
     fn delimiters_and_punctuation_split_atom_runs() {
-        // `( [` open, `) ]` close, `, ;` punctuation — one token per char, with
-        // a fixed CST kind (their TeX mathcode class is character-level).
         assert_eq!(
             token_kinds("[a,b);"),
             vec![
@@ -405,18 +341,14 @@ mod tests {
             ]
         );
         assert_lossless("[a,b);");
-        // The ambiguous `| . /` are NOT delimiters — they stay in MATH_TEXT.
         assert_eq!(token_kinds("a|b.c/d"), vec![SyntaxKind::MATH_TEXT]);
         assert_lossless("a|b.c/d");
-        // An escaped delimiter stays a control symbol, never a delimiter token.
         assert_eq!(token_kinds(r"\(\)\[\]"), vec![SyntaxKind::MATH_COMMAND; 4]);
         assert_lossless(r"\(\)\[\]");
     }
 
     #[test]
     fn operators_split_atom_runs() {
-        // `+ - * = < >` each break the surrounding text into their own
-        // MATH_OPERATOR token. Class/precedence is deferred to the formatter.
         assert_eq!(
             token_kinds("a+b=c"),
             vec![
@@ -440,7 +372,6 @@ mod tests {
             );
             assert_lossless(op);
         }
-        // Adjacent operators do not coalesce — one token per char.
         assert_eq!(
             token_kinds("a<=b"),
             vec![
@@ -450,13 +381,11 @@ mod tests {
                 SyntaxKind::MATH_TEXT,
             ]
         );
-        // Unary vs binary minus is NOT distinguished here — both are operators.
         assert_eq!(
             token_kinds("-x"),
             vec![SyntaxKind::MATH_OPERATOR, SyntaxKind::MATH_TEXT]
         );
         assert_lossless("-x");
-        // An escaped special stays a control symbol, never an operator.
         assert_eq!(token_kinds(r"\<"), vec![SyntaxKind::MATH_COMMAND]);
         assert_lossless(r"\<");
     }
@@ -475,7 +404,6 @@ mod tests {
             vec![SyntaxKind::MATH_COMMAND, SyntaxKind::MATH_COMMAND]
         );
         assert_lossless(r"\alpha\,");
-        // Escaped specials are control symbols, not structural markers.
         assert_eq!(token_kinds(r"\&\%\{\}"), vec![SyntaxKind::MATH_COMMAND; 4]);
         assert_lossless(r"\&\%\{\}");
     }
@@ -591,8 +519,6 @@ mod tests {
         assert_lossless("a\\");
     }
 
-    // Malformed-math cases stay lossless (diagnostics now live in
-    // `syntax::math::math_diagnostics`, tested there).
     #[test]
     fn malformed_math_is_still_lossless() {
         for content in [
@@ -605,8 +531,6 @@ mod tests {
             assert_lossless(content);
         }
     }
-
-    // --- `\left` / `\right` paired delimiters (MATH_DELIMITED node) ---
 
     fn delimited_count(content: &str) -> usize {
         node(content)
@@ -624,7 +548,6 @@ mod tests {
             .find(|n| n.kind() == SyntaxKind::MATH_DELIMITED)
             .expect("delimited node");
         assert_eq!(delim.text().to_string(), content);
-        // The `\left` and `\right` are direct command children of the node.
         let commands: Vec<String> = delim
             .children_with_tokens()
             .filter_map(|el| el.into_token())
@@ -637,7 +560,6 @@ mod tests {
 
     #[test]
     fn left_right_delimiters_keep_their_token_kinds() {
-        // Opening `(` and closing `)` stay MATH_OPEN / MATH_CLOSE inside the node.
         assert_eq!(
             token_kinds(r"\left(x\right)"),
             vec![
@@ -652,7 +574,6 @@ mod tests {
 
     #[test]
     fn null_delimiter_and_asymmetric_pairs_are_lossless() {
-        // `\left.` null delimiter, `.` stays MATH_TEXT.
         for content in [
             r"\left. x \right|",
             r"\left( x \right]",
@@ -672,8 +593,6 @@ mod tests {
 
     #[test]
     fn unclosed_and_stray_delimiters_stay_lossless() {
-        // Unclosed `\left(` still builds a (single) node; stray `\right)` builds
-        // none. Both are lossless; the diagnostics live in `math_diagnostics`.
         assert_eq!(delimited_count(r"\left( x"), 1);
         assert_lossless(r"\left( x");
         assert_eq!(delimited_count(r"x \right)"), 0);
@@ -682,13 +601,10 @@ mod tests {
 
     #[test]
     fn leftarrow_and_rightarrow_are_not_delimiters() {
-        // `\leftarrow` / `\rightarrow` are ordinary commands, not `\left`/`\right`.
         let content = r"a \leftarrow b \rightarrow c";
         assert_eq!(delimited_count(content), 0);
         assert_lossless(content);
     }
-
-    // --- Bookdown equation labels (gated on the extension) ---
 
     const BOOKDOWN: MathParseOptions = MathParseOptions {
         bookdown_equation_labels: true,
@@ -706,7 +622,6 @@ mod tests {
     fn equation_label_recognized_when_enabled() {
         let kinds = label_kinds(r"a (\#eq:foo)", BOOKDOWN);
         assert!(kinds.contains(&SyntaxKind::MATH_EQUATION_LABEL));
-        // The label is a single token spanning the whole `(\#eq:foo)`.
         let label = node_with(r"a (\#eq:foo)", BOOKDOWN)
             .descendants_with_tokens()
             .filter_map(|el| el.into_token())
@@ -717,16 +632,12 @@ mod tests {
 
     #[test]
     fn equation_label_ignored_when_disabled() {
-        // Default options: no label token, and plain math is byte-identical.
         let kinds = label_kinds(r"a (\#eq:foo)", MathParseOptions::default());
         assert!(!kinds.contains(&SyntaxKind::MATH_EQUATION_LABEL));
     }
 
     #[test]
     fn plain_parens_tokenize_the_same_with_or_without_bookdown() {
-        // A non-label `(` is an ordinary open delimiter in both modes; only a
-        // genuine `(\#eq:...)` label is special, and only when the extension is
-        // on. So `f(x)` tokenizes identically either way.
         let expected = vec![
             SyntaxKind::MATH_TEXT,  // f
             SyntaxKind::MATH_OPEN,  // (

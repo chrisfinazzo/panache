@@ -155,8 +155,8 @@ pub(crate) fn did_open(gs: &mut GlobalState, params: DidOpenTextDocumentParams) 
     let config = gs.load_config_notifying(&uri);
     let doc_path = uri.to_file_path().map(|p| p.into_owned());
     // On-disk documents register under their path; an in-memory buffer gets a
-    // distinct `FileId` with no backing path (retires the `<memory>` sentinel,
-    // and avoids two untitled buffers colliding on one key) (audit §3.3 / G3).
+    // distinct `FileId` with no backing path, avoiding collisions between
+    // untitled buffers.
     let salsa_file = match doc_path.clone() {
         Some(path) => {
             gs.salsa

@@ -2,8 +2,6 @@ use panache_formatter::config::{Extensions, Flavor};
 use panache_formatter::format;
 use panache_formatter::{Config, ConfigBuilder};
 
-/// Config with `tex_math_dollars` on (Quarto default) and the experimental math
-/// formatter toggled.
 fn math_config(format_math: bool) -> Config {
     let flavor = Flavor::Quarto;
     Config {
@@ -16,9 +14,6 @@ fn math_config(format_math: bool) -> Config {
 
 #[test]
 fn experimental_format_math_defaults_off() {
-    // Regression lock: with the experimental formatter off, alignment columns
-    // are NOT reformatted (`x &= 1` stays `x &= 1`). The default two-space
-    // `math-indent` still applies, so content is indented but otherwise verbatim.
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(false)), None);
@@ -27,21 +22,16 @@ fn experimental_format_math_defaults_off() {
 
 #[test]
 fn display_math_default_indent_is_two() {
-    // The default config indents `$$` content by two spaces.
     let input = "$$\nx + y\n$$\n";
     let expected = "$$\n  x + y\n$$\n";
     let output = format(input, Some(math_config(false)), None);
     similar_asserts::assert_eq!(output, expected);
-    // Idempotent across passes (no indent stacking).
     let twice = format(&output, Some(math_config(false)), None);
     similar_asserts::assert_eq!(twice, output);
 }
 
 #[test]
 fn display_math_default_indent_multiline_idempotent() {
-    // Multiline content must re-indent idempotently: the second pass sees the
-    // two-space indent on every line, strips it as common indentation, and
-    // re-applies the same pad rather than stacking.
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(false)), None);
@@ -52,14 +42,10 @@ fn display_math_default_indent_multiline_idempotent() {
 
 #[test]
 fn bracket_display_math_preserves_following_markdown_structure() {
-    // Multi-line `\[ ... \]` display math (tex_math_single_backslash) must
-    // stay one paragraph so following blocks keep their structure.
     let mut config = math_config(false);
     config.parser_extensions.tex_math_single_backslash = true;
 
     let input = "Before\n\n\\[\n\\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\nText\n";
-    // Bracket display math gets the same layout as `$$` blocks: delimiters on
-    // their own lines, content at the default two-space `math-indent`.
     let expected = "Before\n\n\\[\n  \\begin{bmatrix}1\\\\1\\\\0\\end{bmatrix}\n\\]\n\nAfter\n\n# Heading\n\nText\n";
     let output = format(input, Some(config.clone()), None);
 
@@ -69,8 +55,6 @@ fn bracket_display_math_preserves_following_markdown_structure() {
 
 #[test]
 fn list_item_bracket_display_math_preserves_following_markdown_structure() {
-    // Multi-line `\[ ... \]` display math inside a list item must stay one
-    // paragraph so a following top-level heading keeps its structure.
     let mut config = math_config(false);
     config.parser_extensions.tex_math_single_backslash = true;
 
@@ -86,7 +70,6 @@ fn list_item_bracket_display_math_preserves_following_markdown_structure() {
 
 #[test]
 fn display_math_indent_zero_stays_flush() {
-    // Explicit `math-indent = 0` keeps the old flush-left behavior.
     let cfg = Config {
         math_indent: 0,
         ..math_config(false)
@@ -102,11 +85,9 @@ fn display_math_indent_zero_stays_flush() {
 #[test]
 fn experimental_format_math_aligns_environment() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}\n$$\n";
-    // `&` columns and trailing `\\` both align.
     let expected = "$$\n\\begin{aligned}\n  x & = 1   \\\\\n  y & = 22  \\\\\n  z & = 333\n\\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(true)), None);
     similar_asserts::assert_eq!(output, expected);
-    // Idempotent.
     let twice = format(&output, Some(math_config(true)), None);
     similar_asserts::assert_eq!(twice, output);
 }
@@ -122,7 +103,6 @@ fn experimental_format_math_collapses_inline_whitespace() {
 
 #[test]
 fn experimental_format_math_preserves_malformed() {
-    // Unclosed group → bail to verbatim even with the gate on.
     let input = "$$\n\\frac{1}{2\n$$\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("\\frac{1}{2"), "got: {output}");
@@ -132,8 +112,6 @@ fn experimental_format_math_preserves_malformed() {
 
 #[test]
 fn math_no_wrap() {
-    // Pin `math_indent` to 0 so this asserts only that math content is not
-    // wrapped (the default base indent is covered elsewhere).
     let cfg = ConfigBuilder::default()
         .line_width(10)
         .math_indent(0)
@@ -141,7 +119,6 @@ fn math_no_wrap() {
     let input = "$$\n\\begin{matrix}\nA & B\\\\\nC & D\n\\end{matrix}\n$$\n";
     let output = format(input, Some(cfg), None);
 
-    // Math blocks should not be wrapped
     similar_asserts::assert_eq!(output, input);
 }
 
@@ -161,30 +138,20 @@ fn math_config_width(format_math: bool, width: usize) -> Config {
 fn experimental_format_math_breaks_overwidth_display_chain() {
     let cfg = math_config_width(true, 30);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
-    // Breaks at the second (top-level) relation; the continuation aligns under
-    // the first `=` (equality chain). `+` sub-terms stay put (binary outranked).
     let expected = "$$\nA = aaaaaaaaaa + bbbbbbbbbb\n  = cccccccccc + dddddddddd\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
-    // Idempotent: the already-broken multi-line form re-joins and re-breaks
-    // to the identical layout.
     let twice = format(&output, Some(cfg), None);
     similar_asserts::assert_eq!(twice, output);
 }
 
 #[test]
 fn experimental_line_break_budget_accounts_for_math_indent() {
-    // The flat `math-indent` is charged against `line-width`: the chain is 21
-    // chars wide, which fits in `line-width` 22 on its own, but the two-space
-    // `math-indent` would push it to 23. So it is broken at the second relation,
-    // keeping every emitted line within `line-width`.
     let cfg = Config {
         line_width: 22,
         ..math_config(true) // default math_indent = 2
     };
     let input = "$$\naa = bbbbbb = ccccccc\n$$\n";
-    // Continuation `=` aligns under the first `=` (column 3) + the two-space
-    // block indent ⇒ column 5.
     let expected = "$$\n  aa = bbbbbb\n     = ccccccc\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
@@ -196,9 +163,6 @@ fn experimental_line_break_budget_accounts_for_math_indent() {
 fn experimental_format_math_nests_binary_under_relations() {
     let cfg = math_config_width(true, 20);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
-    // Narrow enough that each relation segment overflows ⇒ relations align under
-    // the first `=` (col 2); each over-width segment nests its `+` one level
-    // deeper, under the relation's right-hand side (col 4).
     let expected = "$$\nA = aaaaaaaaaa\n    + bbbbbbbbbb\n  = cccccccccc\n    + dddddddddd\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
@@ -208,9 +172,6 @@ fn experimental_format_math_nests_binary_under_relations() {
 
 #[test]
 fn experimental_binary_continuations_flush_under_operand_no_relation() {
-    // A broken binary chain's continuation `+` rows sit flush under the head
-    // term, not nested deeper. The two-space `math-indent` shifts the whole
-    // block right but never changes the internal operator/operand alignment.
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -225,9 +186,6 @@ fn experimental_binary_continuations_flush_under_operand_no_relation() {
 
 #[test]
 fn experimental_binary_continuations_flush_under_rhs_one_relation() {
-    // The binary terms hang flush under the RHS column (relative 4), plus the
-    // two-space block indent ⇒ column 6. The internal alignment is independent
-    // of `math-indent`.
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -242,10 +200,6 @@ fn experimental_binary_continuations_flush_under_rhs_one_relation() {
 
 #[test]
 fn experimental_relation_continuations_keep_alignment_with_math_indent() {
-    // Relation continuations align under the first `=` (col 2) + block indent
-    // ⇒ column 4; the binary terms sit flush under the RHS (col 4) + block
-    // indent ⇒ column 6. Neither offset depends on `math-indent` beyond the
-    // flat block shift.
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -261,8 +215,6 @@ fn experimental_relation_continuations_keep_alignment_with_math_indent() {
 
 #[test]
 fn experimental_format_math_leaves_fitting_display_untouched() {
-    // The same equation under the default 80-col width is not broken.
-    // Pin `math_indent` to 0 so "untouched" means byte-identical content.
     let cfg = Config {
         math_indent: 0,
         ..math_config(true)
@@ -276,8 +228,6 @@ fn experimental_format_math_leaves_fitting_display_untouched() {
 
 #[test]
 fn experimental_format_math_does_not_break_overwidth_fraction() {
-    // No top-level relation ⇒ nothing to break against; the over-width fraction
-    // stays on one line (like an unbreakable long word in prose reflow).
     let cfg = math_config_width(true, 12);
     let input = "$$\n\\frac{aaaaaaaa}{bbbbbbbb}\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
@@ -288,9 +238,6 @@ fn experimental_format_math_does_not_break_overwidth_fraction() {
 
 #[test]
 fn experimental_format_math_breaks_standalone_binary_chain() {
-    // No relation at all: the first term is the head and each `+ term` aligns
-    // flush under it (the unifying rule — a binary continuation sits under the
-    // first term of its operand sequence).
     let cfg = math_config_width(true, 12);
     let input = "$$\naaaa + bbbb + cccc + dddd\n$$\n";
     let expected = "$$\naaaa\n+ bbbb\n+ cccc\n+ dddd\n$$\n";
@@ -302,9 +249,6 @@ fn experimental_format_math_breaks_standalone_binary_chain() {
 
 #[test]
 fn experimental_format_math_nests_binary_under_single_relation() {
-    // One relation with an over-width binary RHS: the `+` terms hang flush under
-    // the right-hand side (RHS column 4; no second relation to start a
-    // continuation against).
     let cfg = math_config_width(true, 20);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb + cccccccccc\n$$\n";
     let expected = "$$\nA = aaaaaaaaaa\n    + bbbbbbbbbb\n    + cccccccccc\n$$\n";
@@ -314,14 +258,8 @@ fn experimental_format_math_nests_binary_under_single_relation() {
     similar_asserts::assert_eq!(twice, output);
 }
 
-// --- Relation-chain RHS-start alignment (rule "b") ------------------------
-
 #[test]
 fn relation_chain_long_lhs_anchors_under_rhs() {
-    // A wide leading relation (`\gets`, 5 cols) must not drag the continuation
-    // `=` under it. The continuations hang under the head's RHS column — here
-    // column 16 (RHS at relative 14 + the two-space block indent). Fully
-    // deterministic: the author's hand-indentation is recomputed, not preserved.
     let cfg = math_config(true); // default line-width 80, math-indent 2
     let input = "$$\n  \\beta_0 \\gets \\beta_0 + \\frac{4}{n} \\sum_{i = 1}^n (y_i - p_i)\n          = \\beta_0 - \\frac{1}{L_0} \\partial_0 F, \\qquad L_0\n          = 1/4,\n$$\n";
     let expected = "$$\n  \\beta_0 \\gets \\beta_0 + \\frac{4}{n} \\sum_{i = 1}^n (y_i - p_i)\n                = \\beta_0 - \\frac{1}{L_0} \\partial_0 F, \\qquad L_0\n                = 1/4,\n$$\n";
@@ -333,8 +271,6 @@ fn relation_chain_long_lhs_anchors_under_rhs() {
 
 #[test]
 fn relation_chain_uniform_relations_align_under_first() {
-    // A uniform `=` chain (no assignment) aligns continuations under the first
-    // `=` (relative column 2) + block indent ⇒ column 4 — the classic `=` stack.
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -349,8 +285,6 @@ fn relation_chain_uniform_relations_align_under_first() {
 
 #[test]
 fn relation_chain_math_indent_zero_aligns_relations() {
-    // With math-indent 0 the block flushes and the continuation `=` aligns under
-    // the first `=` at column 2 — the anchor is relative to content, not absolute.
     let cfg = math_config_width(true, 20); // math_indent 0
     let input = "$$\nA = bbbbbbbbbb = cccccccccc\n$$\n";
     let expected = "$$\nA = bbbbbbbbbb\n  = cccccccccc\n$$\n";
@@ -362,9 +296,6 @@ fn relation_chain_math_indent_zero_aligns_relations() {
 
 #[test]
 fn hardbreak_equality_chain_aligns_relations() {
-    // An equality chain split across `\\` hard breaks aligns like an implicit
-    // `aligned`: continuations align under the first `=` (column 4), regardless
-    // of width. The `\\` are kept as genuine forced breaks.
     let cfg = math_config(true);
     let input = "$$\nx = a \\\\\n= b \\\\\n= c\n$$\n";
     let expected = "$$\n  x = a \\\\\n    = b \\\\\n    = c\n$$\n";
@@ -376,8 +307,6 @@ fn hardbreak_equality_chain_aligns_relations() {
 
 #[test]
 fn hardbreak_assignment_chain_anchors_under_rhs() {
-    // An assignment-led chain split across `\\` anchors the `=` continuations
-    // under the assignment's RHS (`a` at column 10), not aligned with `\gets`.
     let cfg = math_config(true);
     let input = "$$\nx \\gets a \\\\\n= b \\\\\n= c\n$$\n";
     let expected = "$$\n  x \\gets a \\\\\n          = b \\\\\n          = c\n$$\n";
@@ -389,8 +318,6 @@ fn hardbreak_assignment_chain_anchors_under_rhs() {
 
 #[test]
 fn hardbreak_non_chain_stays_flush() {
-    // `\\` rows with no leading relation are not a chain: each keeps the bare
-    // block indent, no implicit alignment.
     let cfg = math_config(true);
     let input = "$$\na \\\\\nb \\\\\nc\n$$\n";
     let expected = "$$\n  a \\\\\n  b \\\\\n  c\n$$\n";
@@ -402,8 +329,6 @@ fn hardbreak_non_chain_stays_flush() {
 
 #[test]
 fn hardbreak_ampersand_block_not_implicitly_aligned() {
-    // A free `\\` block containing `&` is left to the existing path; the implicit
-    // relation column is not applied (free `&` is not a column separator).
     let cfg = math_config(true);
     let input = "$$\nx &= a \\\\\n&= b\n$$\n";
     let expected = "$$\n  x & = a \\\\\n  & = b\n$$\n";
@@ -415,8 +340,6 @@ fn hardbreak_ampersand_block_not_implicitly_aligned() {
 
 #[test]
 fn hardbreak_overwidth_continuation_nests_under_its_column() {
-    // A continuation row that is itself over-width still wraps, its `+` terms
-    // flush under its own right-hand side (continuation `=` at col 4, `+` at 6).
     let cfg = Config {
         line_width: 24,
         ..math_config(true)
@@ -431,8 +354,6 @@ fn hardbreak_overwidth_continuation_nests_under_its_column() {
 
 #[test]
 fn hardbreak_relation_chain_gate_off_is_not_aligned() {
-    // Gate off: the relation column is never applied — every line just carries
-    // the block indent (verbatim math layout).
     let cfg = math_config(false);
     let input = "$$\nx = a \\\\\n= b \\\\\n= c\n$$\n";
     let expected = "$$\n  x = a \\\\\n  = b \\\\\n  = c\n$$\n";
@@ -466,8 +387,6 @@ moment generating function is well known.
 
 #[test]
 fn experimental_format_math_tightens_scripts() {
-    // Spaces around `_`/`^` are insignificant in TeX; the script markers are
-    // tightened on both sides, and the math-mode group interiors are trimmed.
     let input = "$$\n  H _{ 00}^{-1 }\n$$\n";
     let expected = "$$\n  H_{00}^{-1}\n$$\n";
     let output = format(input, Some(math_config(true)), None);
@@ -478,8 +397,6 @@ fn experimental_format_math_tightens_scripts() {
 
 #[test]
 fn experimental_format_math_trims_math_group_interiors() {
-    // Leading/trailing whitespace just inside a math-mode `{…}` is trimmed,
-    // including nested groups.
     let input = "Inline $x_{ a }$ and ${ { a } }$ end.\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("$x_{a}$"), "got: {output}");
@@ -490,8 +407,6 @@ fn experimental_format_math_trims_math_group_interiors() {
 
 #[test]
 fn experimental_format_math_preserves_text_group_interiors() {
-    // `\text{ … }` is text mode: interior spaces are significant and must
-    // survive, including for groups nested inside the text argument.
     let input = "Inline $\\text{ a }$ and $\\text{a {b} c}$ end.\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("$\\text{ a }$"), "got: {output}");

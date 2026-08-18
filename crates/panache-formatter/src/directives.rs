@@ -68,28 +68,22 @@ impl DirectiveKind {
 /// assert_eq!(parse_directive("<!-- regular comment -->"), None);
 /// ```
 pub fn parse_directive(comment_text: &str) -> Option<Directive> {
-    // Strip HTML comment markers
     let content = comment_text.trim();
 
     if !content.starts_with("<!--") || !content.ends_with("-->") {
         return None;
     }
 
-    // Reject comments where the opening `<!--` and closing `-->` markers
-    // overlap or abut (e.g. `<!--->`); the inner slice would otherwise panic.
     if content.len() < 7 {
         return None;
     }
 
-    // Extract content between <!-- and -->
     let inner = content[4..content.len() - 3].trim();
 
-    // Check for panache directive prefix
     if !inner.starts_with("panache-ignore") {
         return None;
     }
 
-    // Parse the directive
     match inner {
         "panache-ignore-start" => Some(Directive::Start(DirectiveKind::IgnoreBoth)),
         "panache-ignore-end" => Some(Directive::End(DirectiveKind::IgnoreBoth)),
@@ -127,14 +121,12 @@ impl DirectiveTracker {
                 true
             }
             Directive::End(kind) => {
-                // Check if the top of the stack matches
                 if let Some(top) = self.stack.last()
                     && top == kind
                 {
                     self.stack.pop();
                     return true;
                 }
-                // Mismatch or end without start
                 false
             }
         }
@@ -178,8 +170,6 @@ impl Default for DirectiveTracker {
 pub fn extract_directive_from_node(node: &SyntaxNode) -> Option<Directive> {
     use crate::syntax::SyntaxKind;
 
-    // HTML comments can be parsed as COMMENT, HTML_BLOCK, or INLINE_HTML
-    // depending on context (block-level vs inline) and dialect.
     if node.kind() != SyntaxKind::COMMENT
         && node.kind() != SyntaxKind::HTML_BLOCK
         && node.kind() != SyntaxKind::HTML_BLOCK_RAW
@@ -273,8 +263,6 @@ mod tests {
 
     #[test]
     fn test_parse_directive_overlapping_markers() {
-        // Comments where the opening `<!--` and closing `-->` markers overlap
-        // (or abut) must not panic when slicing the inner content.
         assert_eq!(parse_directive("<!--->"), None);
         assert_eq!(parse_directive("<!-->"), None);
         assert_eq!(parse_directive("<!---->"), None);
@@ -282,7 +270,6 @@ mod tests {
 
     #[test]
     fn test_parse_directive_future_extension() {
-        // Future syntax for rule-specific ignores should return None for now
         assert_eq!(
             parse_directive("<!-- panache-ignore-lint heading-hierarchy -->"),
             None
@@ -341,11 +328,9 @@ mod tests {
     fn test_tracker_mismatch() {
         let mut tracker = DirectiveTracker::new();
 
-        // End without start
         let result = tracker.process_directive(&Directive::End(DirectiveKind::IgnoreBoth));
         assert!(!result);
 
-        // Mismatched kinds
         tracker.process_directive(&Directive::Start(DirectiveKind::IgnoreFormat));
         let result = tracker.process_directive(&Directive::End(DirectiveKind::IgnoreLint));
         assert!(!result);

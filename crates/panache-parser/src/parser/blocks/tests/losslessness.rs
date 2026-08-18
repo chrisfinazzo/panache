@@ -63,9 +63,6 @@ fn test_losslessness_fenced_div_open_with_trailing_space() {
 
 #[test]
 fn test_losslessness_fenced_div_open_whitespace_run_before_label() {
-    // The opener emitter used to consume a single space before the label while
-    // detection had trimmed the whole whitespace run, so the leftover run was
-    // re-emitted as a duplicated label suffix (`:::  te` -> `::: tee`).
     for input in [
         ":::  te\nbody\n:::\n\npara\n",
         ":::: \ty\n:::\n::::\n\npara\n",
@@ -243,8 +240,6 @@ fn test_losslessness_triple_underscore_emphasis_preserves_delimiters() {
 
 #[test]
 fn test_losslessness_blockquote_line_with_pipe_does_not_hang() {
-    // Regression: this shape previously triggered a non-progress loop by
-    // misdetecting a line block from blockquote-stripped content.
     let input = "> | When dollars appear it's a sign\n";
     let config = ParserOptions::default();
     let parser = Parser::new(input, &config);
@@ -263,8 +258,6 @@ fn test_losslessness_blockquote_list_fenced_code_indentation() {
 
 #[test]
 fn test_losslessness_hashpipe_block_scalar_in_list_fenced_chunk() {
-    // Regression (#140): continuation metadata lines like `#| fig-alt: |`
-    // must keep their original indentation in indented list contexts.
     let input = "- item\n\n    ```{r}\n    #| fig-cap: |\n    #|   A visual representation.\n    #| fig-alt: |\n    #|   Alt text.\n    plot(1:3)\n    ```\n";
     let config = ParserOptions::default();
     let parser = Parser::new(input, &config);
@@ -274,13 +267,6 @@ fn test_losslessness_hashpipe_block_scalar_in_list_fenced_chunk() {
 
 #[test]
 fn test_losslessness_gfm_reference_definition_and_shortcut_link() {
-    // Regression: GFM is a strict CommonMark superset, so it must recognize
-    // link reference definitions and shortcut reference links. Previously
-    // `gfm_defaults()` left `reference_links`/`shortcut_reference_links` off,
-    // so `[argmin]: url` fell through to a paragraph where
-    // `autolink_bare_uris` rewrote the bare URL into a full `[url](url)` link
-    // — duplicating bytes and breaking losslessness (the formatter then
-    // escaped the `[argmin]` brackets).
     let input = "[argmin]\n\n[argmin]: https://github.com/argmin-rs/argmin\n";
     let tree = parse_blocks_gfm(input);
     assert_eq!(tree.text().to_string(), input, "GFM parse must be lossless");
@@ -301,13 +287,6 @@ fn test_losslessness_multiline_table_blank_rows_and_following_captioned_simple_t
 
 #[test]
 fn test_losslessness_refdef_after_list_item_line() {
-    // Found by the incremental fuzz harness. A list item's first-line text
-    // lives in the item's `ListItemBuffer`, not in the green builder, so a
-    // reference definition emitted on the next line lands *before* it and
-    // swaps the document's bytes: `- a\n[x]: /url\n` round-tripped as
-    // `- [x]: /url\na\n`. Pandoc folds the line into the item's `Plain`
-    // (`Plain [Str "a", SoftBreak, Str "[x]:", Space, Str "/url"]`), the same
-    // rule that already keeps a refdef from interrupting a paragraph.
     let input = "- a\n[x]: /url\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -320,8 +299,6 @@ fn test_losslessness_refdef_after_list_item_line() {
 
 #[test]
 fn test_refdef_after_list_still_claims_top_level_line() {
-    // The guard above must stay narrow: once the list is closed the buffered
-    // item content is gone, so a refdef at top level is still a refdef.
     let input = "- a\n\n[x]: /url\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -334,8 +311,6 @@ fn test_refdef_after_list_still_claims_top_level_line() {
 
 #[test]
 fn test_refdef_after_blank_line_in_list_item() {
-    // Blank-line separated: the buffer has been flushed, so the refdef is a
-    // block of its own inside the item (pandoc's own spec example).
     let input = "- a\n\n  [x]: /url\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -348,13 +323,6 @@ fn test_refdef_after_blank_line_in_list_item() {
 
 #[test]
 fn test_losslessness_setext_underline_after_blockquote_line() {
-    // Found by the incremental fuzz harness. Under the Pandoc dialect a
-    // setext underline claims the preceding line *as raw text*, blockquote
-    // marker included: `> a\n---\n` is `Header 2 [Str ">", Space, Str "a"]`
-    // with no blockquote at all. `parse_line` opened a BLOCK_QUOTE off the
-    // raw marker count anyway and then re-dispatched the stripped content,
-    // where setext ran a second time and re-emitted the marker — so the
-    // 10-byte input produced a 12-byte CST (`> > a\n---\nb\n`).
     let input = "> a\n---\nb\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -371,7 +339,6 @@ fn test_losslessness_setext_underline_after_blockquote_line() {
 
 #[test]
 fn test_losslessness_setext_underline_after_nested_blockquote_line() {
-    // Same rule at depth 2: `Header 2 [Str ">", Space, Str ">", Space, Str "a"]`.
     let input = "> > a\n---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -384,10 +351,6 @@ fn test_losslessness_setext_underline_after_nested_blockquote_line() {
 
 #[test]
 fn test_commonmark_setext_underline_does_not_cross_a_blockquote() {
-    // CommonMark keeps the container boundary: `> a\n---\n` is
-    // `BlockQuote [Para "a"], HorizontalRule` (verified with
-    // `pandoc -f commonmark`), so the setext parser must decline the quoted
-    // line under this dialect and let the blockquote parser take it.
     let input = "> a\n---\nb\n";
     let config = ParserOptions {
         flavor: Flavor::CommonMark,
@@ -409,7 +372,6 @@ fn test_commonmark_setext_underline_does_not_cross_a_blockquote() {
 
 #[test]
 fn test_commonmark_setext_underline_does_not_cross_a_nested_blockquote() {
-    // Same at depth 2: the underline sits outside both quotes.
     let input = "> > a\n---\n";
     let config = ParserOptions {
         flavor: Flavor::CommonMark,
@@ -431,8 +393,6 @@ fn test_commonmark_setext_underline_does_not_cross_a_nested_blockquote() {
 
 #[test]
 fn test_blockquote_survives_a_thematic_break_below_it() {
-    // The guard must stay narrow: with a blank line between them the `---`
-    // is a thematic break and the blockquote is a real blockquote.
     let input = "> a\n\n---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -445,10 +405,6 @@ fn test_blockquote_survives_a_thematic_break_below_it() {
 
 #[test]
 fn test_losslessness_setext_heading_inside_blockquote() {
-    // `SetextHeadingParser::parse_prepared` emitted from `lines.raw_at(..)`
-    // while detection used the stripped lines, so the container prefix was
-    // written twice: once by `parse_line`'s marker emission and again inside
-    // the heading's own text. Pandoc: `BlockQuote [Header 2 [Str "a"]]`.
     let input = "> a\n> ---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -461,12 +417,6 @@ fn test_losslessness_setext_heading_inside_blockquote() {
 
 #[test]
 fn test_losslessness_line_block_in_list_item_with_lazy_pipe_line() {
-    // Found by the incremental fuzz harness. The line-block classifier peeked
-    // with the column-blind strip while the emitter used the whitespace-bounded
-    // one, so on the lazy line ` b |` the peek consumed the `b` and read the
-    // trailing `|` as a line-block marker. Emission then found no marker and hit
-    // `expect("marker presence verified upstream")`. Both walks are
-    // whitespace-bounded now.
     let input = "- x\n\n  | a\n b |\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -475,12 +425,6 @@ fn test_losslessness_line_block_in_list_item_with_lazy_pipe_line() {
 
 #[test]
 fn test_losslessness_marker_line_table_delimiter_in_quoted_nested_list() {
-    // The delimiter line of a marker-line table nested list > quote > list used
-    // to reach the same `expect("marker presence verified upstream")` panic: the
-    // inner item is already closed when `  >   - | -` dispatches, so the
-    // delimiter is never buffered and `- | -` opens a list whose content is a
-    // line block, whose `| ` marker the peek and the emitter disagreed about.
-    // Pinned here because the fix landed for a different input.
     let input = "- > - a | b\n  >   - | -\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -489,10 +433,6 @@ fn test_losslessness_marker_line_table_delimiter_in_quoted_nested_list() {
 
 #[test]
 fn test_losslessness_fenced_div_open_after_list_item_line() {
-    // Same trap as the refdef case: a `:::` opener detected as `Yes` while a
-    // list item's content is still buffered would emit the div *before* the
-    // buffered text. Pandoc folds the line into the item's `Plain`
-    // (`Str "a", SoftBreak, Str "|", SoftBreak, Str ":::", Space, Str "note"`).
     let input = "1. a\n|\n::: note\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -505,9 +445,6 @@ fn test_losslessness_fenced_div_open_after_list_item_line() {
 
 #[test]
 fn test_losslessness_setext_underline_caps_nested_blockquote() {
-    // The capped depth leaves the surplus `>` in the heading's text, so the
-    // marker bytes are re-emitted by the setext parser rather than by the
-    // blockquote path. Losslessness pins that hand-off.
     let input = "> > a\n> ---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -557,49 +494,31 @@ fn assert_pandoc_lossless_without_heading(input: &str) {
 
 #[test]
 fn test_losslessness_setext_underline_after_multiline_paragraph_underline() {
-    // `pandoc -f markdown -t native` gives a single
-    // `Para [a, SoftBreak, b, SoftBreak, ---, SoftBreak, c, SoftBreak, ---]`:
-    // setext content must be a single line, so the first `---` is paragraph
-    // text, and setext never interrupts a paragraph under Pandoc. The textual
-    // lookback saw `b\n---` and let the second underline through as a
-    // "consecutive setext heading" while `a\nb\n---` was still buffered.
     assert_pandoc_lossless_without_heading("a\nb\n---\nc\n---\n");
 }
 
 #[test]
 fn test_losslessness_setext_equals_underline_after_multiline_paragraph() {
-    // Same shape with `=` underlines; pandoc again gives one `Para`.
     assert_pandoc_lossless_without_heading("a\nb\n===\nc\n===\n");
 }
 
 #[test]
 fn test_losslessness_setext_pair_after_unterminated_fence() {
-    // An unterminated fence is paragraph text under Pandoc, so the lookback
-    // matched `x\n---` inside that text. pandoc gives one `Para` starting with
-    // `Str "```"`.
     assert_pandoc_lossless_without_heading("```\nx\n---\ny\n---\n");
 }
 
 #[test]
 fn test_losslessness_setext_underline_after_multiline_paragraph_in_blockquote() {
-    // `BlockQuote [Para [...]]` per pandoc -- the quoted paragraph buffers the
-    // same way, so the reorder happened inside the blockquote.
     assert_pandoc_lossless_without_heading("> a\n> b\n> ---\n> c\n> ---\n");
 }
 
 #[test]
 fn test_losslessness_setext_underline_after_multiline_list_item_content() {
-    // `BulletList [[Plain [...]]]` per pandoc. Here the open buffer is the list
-    // item's, not a paragraph's -- `is_paragraph_open` alone does not see it.
     assert_pandoc_lossless_without_heading("- a\n  b\n  ---\n  c\n  ---\n");
 }
 
 #[test]
 fn test_losslessness_setext_underline_in_quoted_list_item() {
-    // `BlockQuote [BulletList [[Header 2 "Foo"]]]` per pandoc (both
-    // dialects). The underline line's `>` sits in the item buffer as a
-    // structural marker segment; the fold has to see past it and re-emit
-    // it between the heading's text and its underline, byte-for-byte.
     let input = "> - Foo\n>   ---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -613,9 +532,6 @@ fn test_losslessness_setext_underline_in_quoted_list_item() {
 
 #[test]
 fn test_losslessness_setext_underline_in_nested_quoted_list_item() {
-    // `BlockQuote [BlockQuote [BulletList [[Header 2 "Foo"]]]]` per
-    // pandoc. One marker segment per depth level is buffered; all of them
-    // must be re-emitted in push order.
     let input = "> > - Foo\n> >   ---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -629,12 +545,6 @@ fn test_losslessness_setext_underline_in_nested_quoted_list_item() {
 
 #[test]
 fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
-    // One of the live uses of the `follows_setext_heading` escape (see also
-    // `test_consecutive_top_level_setext_headings_still_form_headings` and the
-    // `setext_headings` fixture's metadata-lookalike tail): inside a list item
-    // `has_blank_before` is false even once the item's buffer has been flushed,
-    // so without the escape the second heading would not form. pandoc gives
-    // `BulletList [[Header 2 "a", Header 2 "c"]]`.
     let input = "- a\n  ---\n  c\n  ---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();
@@ -648,20 +558,10 @@ fn test_consecutive_setext_headings_in_list_item_still_form_headings() {
 
 #[test]
 fn test_losslessness_tables_in_blockquote_in_footnote() {
-    // The footnote body's content indent precedes the blockquote marker on
-    // the table's dispatch line, so the core's blockquote opener already
-    // emitted those bytes as WHITESPACE. `emit_or_dispatch_tail` used to
-    // re-emit them as LINE_PREFIX, duplicating the indent
-    // (`    > A    B` round-tripped as `    >     A    B`). All four table
-    // types share the helper, so all four are pinned.
     for input in [
-        // simple
         "[^1]: body\n\n    > A    B\n    > --- ---\n    > x    y\n",
-        // pipe
         "[^1]: body\n\n    > | A | B |\n    > |---|---|\n    > | x | y |\n",
-        // grid
         "[^1]: body\n\n    > +---+---+\n    > | A | B |\n    > +===+===+\n    > | x | y |\n    > +---+---+\n",
-        // multiline
         "[^1]: body\n\n    > ----- -----\n    > A     B\n    > ----- -----\n    > x     y\n    >\n    > ----- -----\n",
     ] {
         let config = ParserOptions::default();
@@ -672,7 +572,6 @@ fn test_losslessness_tables_in_blockquote_in_footnote() {
 
 #[test]
 fn test_consecutive_top_level_setext_headings_still_form_headings() {
-    // pandoc gives three `Header 2`s with no intervening blank lines.
     let input = "a\n---\nc\n---\ne\n---\n";
     let config = ParserOptions::default();
     let tree = Parser::new(input, &config).parse();

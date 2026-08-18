@@ -68,7 +68,6 @@ pub(crate) fn try_parse_admonition_open(content: &str, ext: &Extensions) -> Opti
 
     let (line, _newline) = strip_newline(content);
 
-    // Up to 3 leading spaces, per CommonMark indentation convention.
     let indent_len = line.bytes().take_while(|&b| b == b' ').count();
     if indent_len > 3 {
         return None;
@@ -94,21 +93,16 @@ pub(crate) fn try_parse_admonition_open(content: &str, ext: &Extensions) -> Opti
         return None;
     };
 
-    // Offset of the first byte after the marker, in `content`.
     let after_marker_abs = indent_len + marker_len;
     let after_marker = &line[after_marker_abs..];
 
-    // Skip spaces between the marker and the type/title.
     let lead = after_marker.bytes().take_while(|&b| b == b' ').count();
     let body_abs = after_marker_abs + lead;
     let body = after_marker[lead..].trim_end_matches(' ');
 
-    // A trailing quoted title: `... "title"`.
     let (type_str, type_abs, title_range) = if body.ends_with('"') && body.matches('"').count() >= 2
     {
         let first_q = body.find('"').unwrap();
-        // python-markdown requires a space before the opening quote
-        // (unless the title is the entire body, i.e. no type).
         if first_q > 0 && body.as_bytes()[first_q - 1] != b' ' {
             return None;
         }
@@ -123,7 +117,6 @@ pub(crate) fn try_parse_admonition_open(content: &str, ext: &Extensions) -> Opti
         (body, body_abs, None)
     };
 
-    // The type may only be class words (and the spaces between them).
     if !type_str.chars().all(|c| is_class_char(c) || c == ' ') {
         return None;
     }
@@ -134,7 +127,6 @@ pub(crate) fn try_parse_admonition_open(content: &str, ext: &Extensions) -> Opti
         Some((type_abs, type_abs + type_str.len()))
     };
 
-    // python-markdown admonitions require a type; details do not.
     if marker == AdmonitionMarker::Admonition && type_range.is_none() {
         return None;
     }
@@ -153,7 +145,6 @@ mod tests {
     use super::*;
 
     fn both() -> Extensions {
-        // `Extensions::default()` (Pandoc) leaves both admonition flags off.
         Extensions {
             python_markdown_admonitions: true,
             pymdownx_details: true,
@@ -233,16 +224,13 @@ mod tests {
         assert_eq!(a.indent_len, 3);
         assert_eq!(slice(c, a.type_range.unwrap()), "note");
 
-        // Four spaces is indented code, not an admonition.
         assert!(try_parse_admonition_open("    !!! note\n", &both()).is_none());
     }
 
     #[test]
     fn rejects_non_class_content() {
-        // Trailing prose after the type is not an admonition.
         assert!(try_parse_admonition_open("!!! warning, this is bad.\n", &both()).is_none());
         assert!(try_parse_admonition_open("!!! note.\n", &both()).is_none());
-        // Multi-word all-class is fine (python-markdown treats words as classes).
         assert!(try_parse_admonition_open("!!! note two three\n", &both()).is_some());
     }
 

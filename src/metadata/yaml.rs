@@ -61,7 +61,6 @@ pub(super) fn parse_frontmatter(
     yaml_offset: TextSize,
     doc_path: &Path,
 ) -> Result<DocumentMetadata, YamlError> {
-    // Extract just the YAML content (strip delimiters)
     let yaml_content = strip_yaml_delimiters(yaml_text);
     let content_start = yaml_content_start_offset(yaml_text);
     let doc_base_offset = u32::from(yaml_offset) as usize + content_start;

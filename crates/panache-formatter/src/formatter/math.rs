@@ -90,8 +90,6 @@ pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
     if !opts.enabled {
         return None;
     }
-    // Lone unescaped `$` inside content confuses delimiter handling downstream;
-    // mirror the existing `has_unescaped_single_dollar_in_content` guard.
     if has_unescaped_single_dollar(input) {
         return None;
     }
@@ -101,17 +99,12 @@ pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
             bookdown_equation_labels: opts.bookdown_equation_labels,
         },
     ));
-    // Malformed math (unclosed/mismatched braces or environments) has an
-    // untrustworthy row/column structure — leave it to the caller's verbatim path.
     if !math_diagnostics(&tree).is_empty() {
         return None;
     }
     Some(render::render(&tree, opts))
 }
 
-/// String-level twin of `DisplayMath::has_unescaped_single_dollar_in_content`
-/// (`crates/panache-parser/src/syntax/math.rs`): a `$` not preceded by an odd
-/// run of backslashes and not part of a `$$` pair.
 fn has_unescaped_single_dollar(content: &str) -> bool {
     let chars: Vec<char> = content.chars().collect();
     let mut idx = 0usize;
@@ -170,7 +163,6 @@ mod tests {
 
     #[test]
     fn gate_off_returns_none() {
-        // Gate off ⇒ the caller emits verbatim through its own path.
         let off = MathFormatOptions {
             enabled: false,
             ..opts(MathContext::Display)
@@ -194,12 +186,8 @@ mod tests {
 
     #[test]
     fn malformed_math_bails() {
-        // Unclosed group → diagnostic → bail; the caller emits it verbatim. The
-        // end-to-end verbatim shape (no doubled fence newlines) is covered by the
-        // `math_malformed_delimiter_experimental` golden case.
         let input = "\\frac{1}{2";
         assert_eq!(format_math(input, &opts(MathContext::Inline)), None);
-        // An unclosed `\left` (a `MATH_DELIMITED` lacking `\right`) also bails.
         assert_eq!(format_math("\\left( x", &opts(MathContext::Display)), None);
     }
 
@@ -212,7 +200,6 @@ mod tests {
     #[test]
     fn display_aligns_environment() {
         let input = "\\begin{aligned}\nx &= 1\\\\\ny &= 22\n\\end{aligned}";
-        // The trailing `\\` aligns: the last column pads to its widest cell.
         let expected = "\\begin{aligned}\n  x & = 1  \\\\\n  y & = 22\n\\end{aligned}";
         assert_eq!(fmt(input, MathContext::Display), expected);
         assert_idempotent(input, MathContext::Display);
@@ -220,8 +207,6 @@ mod tests {
 
     #[test]
     fn cell_operator_spacing_applied() {
-        // Operator spacing runs inside each cell: a tight `&=1` is normalized to
-        // `= 1`, so it lines up with an already-spaced `&= 22`.
         let input = "\\begin{aligned}\nx&=1\\\\\ny &= 22\n\\end{aligned}";
         let expected = "\\begin{aligned}\n  x & = 1  \\\\\n  y & = 22\n\\end{aligned}";
         assert_eq!(fmt(input, MathContext::Display), expected);
@@ -233,19 +218,14 @@ mod tests {
         assert_eq!(fmt("a+b", MathContext::Inline), "a + b");
         assert_eq!(fmt("a*b", MathContext::Inline), "a * b");
         assert_eq!(fmt("a=b", MathContext::Inline), "a = b");
-        // Adjacent relation chars stay one spaced unit.
         assert_eq!(fmt("a<=b", MathContext::Inline), "a <= b");
         assert_eq!(fmt("a==b", MathContext::Inline), "a == b");
-        // A relation followed by a sign splits: the sign is unary.
         assert_eq!(fmt("x=-y", MathContext::Inline), "x = -y");
-        // Commands are ordinary operands → the operator between them is binary.
         assert_eq!(
             fmt("\\alpha+\\beta", MathContext::Inline),
             "\\alpha + \\beta"
         );
-        // Operators inside groups are spaced too.
         assert_eq!(fmt("{a+b}", MathContext::Inline), "{a + b}");
-        // A superscripted operand is ordinary, so the trailing `-` is binary.
         assert_eq!(fmt("n^2-1", MathContext::Inline), "n^2 - 1");
         for case in ["a+b", "a<=b", "x=-y", "\\alpha+\\beta", "{a+b}", "n^2-1"] {
             assert_idempotent(case, MathContext::Inline);
@@ -254,17 +234,12 @@ mod tests {
 
     #[test]
     fn inline_keeps_the_definition_colon_glued_to_its_equals() {
-        // `:=` is one relation atom: the space goes before the `:`, never
-        // between it and the `=` (which would read as the nonsense `x : = y`).
         assert_eq!(fmt("x:=y", MathContext::Inline), "x := y");
         assert_eq!(fmt("x := y", MathContext::Inline), "x := y");
         assert_eq!(fmt("\\mu:=\\nu", MathContext::Inline), "\\mu := \\nu");
-        // The fused atom still splits a trailing sign off as unary.
         assert_eq!(fmt("x:=-y", MathContext::Inline), "x := -y");
-        // A lone `:` is an ordinary atom — its spacing is the author's.
         assert_eq!(fmt("x:y", MathContext::Inline), "x:y");
         assert_eq!(fmt("f: A", MathContext::Inline), "f: A");
-        // Only a `:` *before* an `=` fuses; a space between them keeps them apart.
         assert_eq!(fmt("x : = y", MathContext::Inline), "x : = y");
         for case in [
             "x:=y",
@@ -281,17 +256,12 @@ mod tests {
 
     #[test]
     fn inline_keeps_unary_operators_tight() {
-        // Leading unary minus, and one written with a space, both canonicalize tight.
         assert_eq!(fmt("-x", MathContext::Inline), "-x");
         assert_eq!(fmt("- x", MathContext::Inline), "-x");
-        // After an opening delimiter (lumped into the text run) the minus is unary.
         assert_eq!(fmt("f(-x)", MathContext::Inline), "f(-x)");
         assert_eq!(fmt("f( - x)", MathContext::Inline), "f(-x)");
-        // After a relation the minus is unary, but the relation keeps its space.
         assert_eq!(fmt("x = - y", MathContext::Inline), "x = -y");
-        // Inside a script group, after `{` the minus is unary.
         assert_eq!(fmt("e^{- t}", MathContext::Inline), "e^{-t}");
-        // Two minuses (adjacent or spaced) are binary-then-unary: `a - -b`.
         assert_eq!(fmt("a - -b", MathContext::Inline), "a - -b");
         assert_eq!(fmt("a--b", MathContext::Inline), "a - -b");
         for case in [
@@ -303,22 +273,16 @@ mod tests {
 
     #[test]
     fn inline_spaces_command_operators() {
-        // Binary/relation command operators get one space on each side.
         assert_eq!(fmt("a\\cdot b", MathContext::Inline), "a \\cdot b");
         assert_eq!(fmt("a\\leq b", MathContext::Inline), "a \\leq b");
         assert_eq!(fmt("x\\leq y", MathContext::Inline), "x \\leq y");
-        // Already-spaced input is a fixed point.
         assert_eq!(fmt("a \\cdot b", MathContext::Inline), "a \\cdot b");
-        // No author space (a `\` terminates the prior control word) still spaces.
         assert_eq!(
             fmt("\\alpha\\cdot\\beta", MathContext::Inline),
             "\\alpha \\cdot \\beta"
         );
-        // Large operators (Op) are not binary-spaced; ordinary commands keep
-        // their terminating space verbatim.
         assert_eq!(fmt("\\sum x", MathContext::Inline), "\\sum x");
         assert_eq!(fmt("\\alpha x", MathContext::Inline), "\\alpha x");
-        // Delimiter commands (Open/Close) are not spaced.
         assert_eq!(
             fmt("\\left( x \\right)", MathContext::Inline),
             "\\left( x \\right)"
@@ -348,8 +312,6 @@ mod tests {
 
     #[test]
     fn trailing_line_breaks_align() {
-        // The last column pads so the `\\` line up; the final (no-`\\`) row's
-        // last cell is not padded (no trailing whitespace).
         let input = "\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}";
         let expected =
             "\\begin{aligned}\n  x & = 1   \\\\\n  y & = 22  \\\\\n  z & = 333\n\\end{aligned}";
@@ -368,8 +330,6 @@ mod tests {
     #[test]
     fn nested_environment_indents_one_more_level() {
         let input = "\\begin{aligned}\nx &= \\begin{cases} a \\\\ b \\end{cases}\n\\end{aligned}";
-        // The nested env's `&`/`\\` are not top-level, so the outer row is not
-        // split on them; the cases env renders inline within the cell.
         assert_idempotent(input, MathContext::Display);
     }
 
@@ -377,7 +337,6 @@ mod tests {
     fn ampersand_inside_group_is_not_a_column() {
         let input = "\\begin{aligned}\nx &= \\text{a & b} \\\\\ny &= 2\n\\end{aligned}";
         let once = fmt(input, MathContext::Display);
-        // Two columns only: the `&` inside `\text{...}` stays put.
         assert!(once.contains("\\text{a & b}"), "got: {once}");
         assert_idempotent(input, MathContext::Display);
     }
@@ -396,19 +355,14 @@ mod tests {
             ..opts(MathContext::Display)
         };
         let input = "A = bbbbbbbbbb = cccccccccc";
-        // First `=` stays; the second starts a continuation aligned under it
-        // (equality chain ⇒ relations stack under the first relation).
         let expected = "A = bbbbbbbbbb\n  = cccccccccc";
         assert_eq!(fmt_with(input, &narrow), expected);
-        // Re-feeding the broken (multi-line) form recomputes the same layout.
         let once = fmt_with(input, &narrow);
         assert_eq!(fmt_with(&once, &narrow), once);
     }
 
     #[test]
     fn display_leaves_fitting_chain_on_one_line() {
-        // The same content under a generous width is untouched (byte-identical
-        // to the pre-line-breaking behavior).
         let wide = opts(MathContext::Display); // line_width 80
         assert_eq!(
             fmt_with("A = bbbbbbbbbb = cccccccccc", &wide),
@@ -423,8 +377,6 @@ mod tests {
             ..opts(MathContext::Display)
         };
         let input = "A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd";
-        // Relations break first; each over-width segment nests its `+` term one
-        // indent level deeper, under the relation's right-hand side.
         let expected = "A = aaaaaaaaaa\n    + bbbbbbbbbb\n  = cccccccccc\n    + dddddddddd";
         assert_eq!(fmt_with(input, &narrow), expected);
         let once = fmt_with(input, &narrow);
@@ -433,12 +385,6 @@ mod tests {
 
     #[test]
     fn display_binary_on_relation_lhs_hangs_flush() {
-        // A top-level binary operator on the *left* of the relation (`H - H \leq
-        // ...`) must break flush under the head term (offset 0), not under the
-        // relation's right-hand column — that column lies *inside* the
-        // continuation's own text and would shove the `-` operand absurdly far
-        // right (regression: a display equation with an LHS `-` blew up to ~35
-        // leading spaces).
         let narrow = MathFormatOptions {
             line_width: 20,
             ..opts(MathContext::Display)
@@ -452,9 +398,6 @@ mod tests {
 
     #[test]
     fn display_comment_terminating_newline_is_not_joined() {
-        // A `%` comment runs to EOL; the soft newline ending it must remain a row
-        // boundary, or the next line is absorbed into the comment (and lost from
-        // the rendered math). Regression for the logical-row re-join.
         let wide = opts(MathContext::Display);
         let input = "% leading comment\nx = 1";
         assert_eq!(fmt_with(input, &wide), "% leading comment\nx = 1");
@@ -467,13 +410,8 @@ mod tests {
             line_width: 12,
             ..opts(MathContext::Display)
         };
-        // A single over-width fraction with no top-level operator stays one line.
         let frac = "\\frac{aaaaaaaa}{bbbbbbbb}";
         assert_eq!(fmt_with(frac, &narrow), frac);
-        // Relation *and* binary operators buried inside `\left(…\right)` are not
-        // depth-0 break points, so this over-width row has no break candidate and
-        // stays on one line (the broader binary-breaking scope must still respect
-        // delimiter opacity).
         let paren = "\\left( xxxx = yyyy + wwww \\right)";
         let once = fmt_with(paren, &narrow);
         assert!(!once.contains('\n'), "should not break: {once:?}");

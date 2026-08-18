@@ -337,10 +337,6 @@ pub enum LinkKind {
     ShortcutReference,
 }
 
-// ============================================================================
-// Pass 1: Scan
-// ============================================================================
-
 /// Scan `text[start..end]` once, producing a flat IR of events.
 ///
 /// The scan is forward-only and never backtracks: each iteration either
@@ -371,26 +367,8 @@ pub(super) fn build_ir_into(
 
     let mut pos = start;
     let mut text_run_start = start;
-    // Pandoc-only: extent of the current bracket-shape link/image's
-    // opaque range. While `pos < pandoc_bracket_extent`, autolinks /
-    // raw HTML / native spans are NOT recognised — pandoc-native
-    // treats `[link text]` as opaque to those constructs (CommonMark
-    // spec example #526 / #538). The lookahead at `[`/`![` sets this
-    // when a bracket-shape forms a valid link/image; once `pos`
-    // passes the extent, normal scanning resumes. CommonMark
-    // dialect's link-text-vs-autolink ordering is handled by the
-    // dispatcher's `try_parse_inline_link` rejecting outer matches
-    // when the link text contains a valid autolink (a different
-    // mechanism, see `LinkScanContext.skip_autolinks`).
     let mut pandoc_bracket_extent: usize = 0;
 
-    // Pre-computed byte mask: `mask[b]` is `true` iff byte `b` could
-    // start any IR-recognised construct under the current dialect /
-    // extensions. Used to bulk-skip plain bytes between structural
-    // bytes — the per-byte branch chain below only runs at positions
-    // where a construct is actually possible. Non-ASCII bytes
-    // (>= 0x80) are never structural and are skipped together with
-    // ASCII plain text.
     let mask = build_ir_byte_mask(config);
 
     macro_rules! flush_text {
@@ -405,8 +383,6 @@ pub(super) fn build_ir_into(
     }
 
     while pos < end {
-        // Fast-skip plain bytes. `text_run_start` is preserved across
-        // the skip so the next structural-event flush picks them up.
         while pos < end && !mask[bytes[pos] as usize] {
             pos += 1;
         }
@@ -415,11 +391,6 @@ pub(super) fn build_ir_into(
         }
         let b = bytes[pos];
 
-        // Pandoc-only: at `[` or `![`, look ahead to see if this
-        // bracket-shape forms a valid link/image. If so, suppress
-        // autolink / raw HTML / native span recognition until `pos`
-        // passes the bracket-shape's end. Skipped if we're already
-        // inside an enclosing bracket-shape's opaque range.
         if !is_commonmark
             && pos >= pandoc_bracket_extent
             && (b == b'[' || (b == b'!' && pos + 1 < end && bytes[pos + 1] == b'['))
@@ -429,17 +400,12 @@ pub(super) fn build_ir_into(
         }
         let in_pandoc_bracket = !is_commonmark && pos < pandoc_bracket_extent;
 
-        // Backslash escape (§2.4) — including `\\\n` hard line break.
         if b == b'\\'
             && let Some((len, _ch, escape_type)) = try_parse_escape(&text[pos..])
             && pos + len <= end
         {
             let enabled = match escape_type {
                 EscapeType::Literal => is_commonmark || exts.all_symbols_escapable,
-                // CommonMark keeps the backslash as literal text when the line
-                // ending closes the block ("Neither syntax for hard line breaks
-                // works at the end of a paragraph or other block element"),
-                // where pandoc-markdown still reads a `LineBreak`.
                 EscapeType::HardLineBreak => {
                     exts.escaped_line_breaks
                         && !(is_commonmark && hard_breaks::ends_block(text, pos + len, end))
@@ -448,8 +414,6 @@ pub(super) fn build_ir_into(
             };
             if enabled {
                 if escape_type == EscapeType::HardLineBreak {
-                    // The break swallows the whitespace in front of it, so
-                    // the text run stops short of that run.
                     let ws_start = hard_breaks::ws_run_start(bytes, text_run_start, pos);
                     if ws_start > text_run_start {
                         events.push(IrEvent::Text {
@@ -465,7 +429,6 @@ pub(super) fn build_ir_into(
                     text_run_start = pos;
                     continue;
                 }
-                // Only `Literal` and `NonbreakingSpace` reach here.
                 flush_text!();
                 events.push(IrEvent::Construct {
                     start: pos,
@@ -478,7 +441,6 @@ pub(super) fn build_ir_into(
             }
         }
 
-        // Code span (§6.1) — opaque to emphasis and brackets.
         if b == b'`'
             && let Some((len, _, _, _)) = try_parse_code_span(&text[pos..])
             && pos + len <= end
@@ -494,12 +456,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: math spans are opaque to emphasis. The legacy
-        // `parse_until_closer_with_nested_*` skip-list includes inline
-        // math; without recognising it here, delim runs inside `$math$`
-        // would be picked up by the emphasis pass and break losslessness
-        // (the dispatcher's math parser would later re-claim the bytes,
-        // duplicating content).
         if !is_commonmark && let Some(len) = try_pandoc_math_opaque(text, pos, end, config) {
             flush_text!();
             events.push(IrEvent::Construct {
@@ -512,12 +468,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: native span `<span ...>...</span>`. Must come
-        // before the generic autolink/raw-html branches so the open tag
-        // doesn't get claimed as inline HTML. Span content is opaque to
-        // the emphasis pass; emission consumes the event via the IR's
-        // `ConstructPlan`. Suppressed inside Pandoc bracket-shape
-        // link/image text.
         if !is_commonmark
             && !in_pandoc_bracket
             && b == b'<'
@@ -536,10 +486,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Autolink (§6.5) before raw HTML — autolinks are the more
-        // specific shape inside `<...>`. Both are suppressed inside
-        // Pandoc bracket-shape link/image text (pandoc-native treats
-        // link text as opaque to autolinks and raw HTML).
         if b == b'<' && !in_pandoc_bracket {
             if exts.autolinks
                 && let Some((len, _)) = try_parse_autolink(&text[pos..], is_commonmark)
@@ -571,9 +517,6 @@ pub(super) fn build_ir_into(
             }
         }
 
-        // Pandoc-only: inline footnote `^[note]`. Recognized at scan
-        // time so the emphasis pass treats it as opaque (delim runs
-        // inside the footnote can't pair with delim runs outside).
         if !is_commonmark
             && b == b'^'
             && exts.inline_footnotes
@@ -591,12 +534,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: footnote reference `[^id]`. Recognised at scan
-        // time so the emphasis pass treats it as opaque (delim runs
-        // inside the label can't pair with delim runs outside) and the
-        // emission walk dispatches it directly via the IR's
-        // `ConstructPlan`. Must come before the generic bracket-opaque
-        // scan so the dedicated kind wins.
         if !is_commonmark
             && b == b'['
             && pos + 1 < end
@@ -616,12 +553,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: bracketed citation `[@cite]`. Recognised at
-        // scan time so the emphasis pass treats it as opaque (delim
-        // runs inside the citation can't pair with delim runs outside)
-        // and the emission walk dispatches it directly via the IR's
-        // `ConstructPlan`. Must come before the generic bracket-opaque
-        // scan so the dedicated kind wins.
         if !is_commonmark
             && b == b'['
             && exts.citations
@@ -639,11 +570,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: bare citation `@key` or `-@key`. Recognised at
-        // scan time so the emission walk dispatches it directly via
-        // the IR's `ConstructPlan`. Bare citations don't contain
-        // emphasis-eligible content, so opacity is moot here — IR
-        // participation is only for dispatch consolidation.
         if !is_commonmark
             && (b == b'@' || (b == b'-' && pos + 1 < end && bytes[pos + 1] == b'@'))
             && (exts.citations || exts.quarto_crossrefs)
@@ -661,16 +587,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Pandoc-only: bracketed span `[content]{attrs}`. Recognised
-        // at scan time so the emphasis pass treats it as opaque (delim
-        // runs inside the span content can't pair with delim runs
-        // outside) and the emission walk dispatches it directly via
-        // the IR's `ConstructPlan`. Must come before the generic
-        // bracket-opaque scan so the dedicated kind wins.
-        // `try_parse_bracketed_span` requires `]` to be immediately
-        // followed by `{`, so this never shadows inline links
-        // (`[text](url)`) or reference links (`[label][refdef]`) —
-        // those don't have the `{attrs}` suffix.
         if !is_commonmark
             && b == b'['
             && exts.bracketed_spans
@@ -688,12 +604,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Wikilinks `[[url]]`, `[[url|title]]`, `![[url]]`,
-        // `![[url|title]]`. Recognised on either pipe-order extension
-        // and on both dialects (pandoc accepts the extension under both
-        // `markdown+` and `commonmark+`). Must precede the `![` and `[`
-        // bracket scans below so the wikilink shape wins over an
-        // image-bracket or link-bracket open.
         if (b == b'[' || b == b'!')
             && super::wikilinks::any_enabled(config)
             && let Some(span) = super::wikilinks::try_parse_wikilink(text, pos, config)
@@ -710,11 +620,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // `![` opens an image bracket. Recognised whenever any
-        // image-producing extension is on — `inline_images` for the
-        // `![alt](url)` form, or `reference_links` for the
-        // `![alt][label]` reference-image form (e.g. MultiMarkdown
-        // disables `inline_images` but uses reference images).
         if b == b'!'
             && pos + 1 < end
             && bytes[pos + 1] == b'['
@@ -734,10 +639,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // `[` opens a link bracket. Recognised whenever any
-        // link-producing extension is on — `inline_links` for
-        // `[text](url)`, or `reference_links` for `[text][label]` /
-        // `[text]` shortcut form.
         if b == b'[' && (exts.inline_links || exts.reference_links) {
             flush_text!();
             events.push(IrEvent::OpenBracket {
@@ -753,7 +654,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // `]` closes a link/image bracket.
         if b == b']' {
             flush_text!();
             events.push(IrEvent::CloseBracket {
@@ -765,7 +665,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // `*` or `_` delimiter run.
         if b == b'*' || b == b'_' {
             flush_text!();
             let mut run_end = pos;
@@ -787,14 +686,10 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Hard line break: a wide enough trailing whitespace run before a
-        // newline. We detect this when we're sitting on a `\n` (or `\r\n`)
-        // and the preceding bytes within the current text run are whitespace.
         if b == b'\n' || (b == b'\r' && pos + 1 < end && bytes[pos + 1] == b'\n') {
             let nl_len = if b == b'\r' { 2 } else { 1 };
             let (s, wide_enough) = hard_breaks::trailing_ws_run(bytes, text_run_start, pos);
             if wide_enough && !hard_breaks::ends_block(text, pos + nl_len, end) {
-                // Flush text *before* the trailing spaces.
                 if s > text_run_start {
                     events.push(IrEvent::Text {
                         start: text_run_start,
@@ -810,9 +705,6 @@ pub(super) fn build_ir_into(
                 continue;
             }
 
-            // Soft line break: flush preceding text, emit the line ending
-            // as its own event so the emitter can render `NEWLINE` tokens
-            // verbatim.
             flush_text!();
             events.push(IrEvent::SoftBreak {
                 start: pos,
@@ -823,7 +715,6 @@ pub(super) fn build_ir_into(
             continue;
         }
 
-        // Plain byte — advance one UTF-8 char.
         let ch_len = text[pos..]
             .chars()
             .next()
@@ -834,24 +725,11 @@ pub(super) fn build_ir_into(
     flush_text!();
 }
 
-/// Build a 256-entry mask: `mask[b]` is `true` iff byte `b` could start
-/// any IR-recognised construct under the current dialect / extensions.
-///
-/// This is the build-IR-specific superset of "is this byte interesting".
-/// Plain bytes between structural bytes are bulk-skipped via this mask
-/// in the [`build_ir`] hot loop; missing a byte here is a correctness
-/// bug (we'd skip past a real construct), but having extras only costs
-/// us a wasted branch round-trip.
 fn build_ir_byte_mask(config: &ParserOptions) -> [bool; 256] {
     let mut mask = [false; 256];
     let exts = &config.extensions;
     let is_commonmark = config.dialect == crate::options::Dialect::CommonMark;
 
-    // Always structural for IR scanning:
-    //   `\n` / `\r` — soft / hard breaks
-    //   `\\`        — escape, hard line break, backslash math
-    //   `` ` ``     — code span (IR construct)
-    //   `*` / `_`   — emphasis delim runs (IR core)
     mask[b'\n' as usize] = true;
     mask[b'\r' as usize] = true;
     mask[b'\\' as usize] = true;
@@ -859,11 +737,6 @@ fn build_ir_byte_mask(config: &ParserOptions) -> [bool; 256] {
     mask[b'*' as usize] = true;
     mask[b'_' as usize] = true;
 
-    // Brackets: scanned whenever any bracket-shaped construct is
-    // reachable. `]` is structural unconditionally if `[` is — the IR
-    // emits a CloseBracket event regardless of which opener variant
-    // matches. `!` is gated on image-producing extensions; the leading
-    // `!` of `![alt]` is the only image entry point.
     if exts.inline_links
         || exts.reference_links
         || exts.inline_images
@@ -878,30 +751,19 @@ fn build_ir_byte_mask(config: &ParserOptions) -> [bool; 256] {
         mask[b'!' as usize] = true;
     }
 
-    // `<` covers autolinks, raw HTML, and Pandoc native spans.
     if exts.autolinks || exts.raw_html || (!is_commonmark && exts.native_spans) {
         mask[b'<' as usize] = true;
     }
 
-    // `^` covers Pandoc inline footnotes (`^[...]` recognised in IR
-    // under Pandoc dialect). CM dialect inline footnotes go through
-    // the dispatcher, not the IR.
     if !is_commonmark && exts.inline_footnotes {
         mask[b'^' as usize] = true;
     }
 
-    // `@` covers Pandoc bare citation `@key` and `[@cite]`. The leading
-    // `[` of `[@cite]` is already in the mask via the bracket gate;
-    // gating `@` here also covers the bare-citation form.
     if !is_commonmark && (exts.citations || exts.quarto_crossrefs) {
         mask[b'@' as usize] = true;
-        // `-` only matters as the first byte of `-@cite`. Tracking it
-        // here avoids missing the suppress-author bare citation form.
         mask[b'-' as usize] = true;
     }
 
-    // `$` covers Pandoc dollar / GFM math. CM doesn't recognise math
-    // in `build_ir`.
     if !is_commonmark
         && (exts.tex_math_dollars
             || exts.tex_math_gfm
@@ -914,10 +776,6 @@ fn build_ir_byte_mask(config: &ParserOptions) -> [bool; 256] {
     mask
 }
 
-// ============================================================================
-// Flanking (CommonMark §6.2)
-// ============================================================================
-
 fn compute_flanking(
     text: &str,
     pos: usize,
@@ -926,26 +784,11 @@ fn compute_flanking(
     dialect: crate::options::Dialect,
 ) -> (bool, bool) {
     if dialect == crate::options::Dialect::Pandoc {
-        // Pandoc-markdown's recursive-descent emphasis parser does NOT
-        // apply CommonMark §6.2 flanking rules. Instead it gates on:
-        //   - opener: must not be followed by whitespace (Pandoc
-        //     `try_parse_emphasis` line 247 in legacy core.rs).
-        //   - closer: no flanking gate at all (Pandoc-markdown's
-        //     `ender` parser only counts characters; see Markdown.hs
-        //     in pandoc/src/Text/Pandoc/Readers/Markdown.hs).
-        //   - underscore intraword hard rule: `_` adjacent to an
-        //     alphanumeric on either side cannot open / close
-        //     (Pandoc's `intraword_underscores` extension default).
         let prev_char = (pos > 0).then(|| text[..pos].chars().last()).flatten();
         let next_char = text.get(pos + count..).and_then(|s| s.chars().next());
         let followed_by_ws = next_char.is_none_or(|c| c.is_whitespace());
 
         let mut can_open = !followed_by_ws;
-        // Pandoc-markdown's `ender` (in pandoc/Readers/Markdown.hs)
-        // has no flanking restriction on closers — just a count match.
-        // Set can_close unconditionally; the per-pair match logic in
-        // `process_emphasis_in_range_filtered` constrains pairing via
-        // the equal-count rule.
         let mut can_close = true;
 
         if ch == b'_' {
@@ -962,7 +805,6 @@ fn compute_flanking(
         return (can_open, can_close);
     }
 
-    // CommonMark §6.2 flanking.
     let lf = is_left_flanking(text, pos, count);
     let rf = is_right_flanking(text, pos, count);
     if ch == b'*' {
@@ -994,7 +836,6 @@ fn try_pandoc_math_opaque(
     let bytes = text.as_bytes();
     let exts = &config.extensions;
     let b = bytes[pos];
-    // Inline math folds a single newline only under the Pandoc dialect.
     let multiline = config.dialect == crate::options::Dialect::Pandoc;
 
     if exts.tex_math_dollars && b == b'$' {
@@ -1079,7 +920,6 @@ fn try_pandoc_bracket_link_extent(
     let ctx = LinkScanContext::from_options(config);
     let allow_shortcut = exts.shortcut_reference_links;
 
-    // `![...]` images.
     if bytes[pos] == b'!' {
         if pos + 1 >= end || bytes[pos + 1] != b'[' {
             return None;
@@ -1100,10 +940,6 @@ fn try_pandoc_bracket_link_extent(
         return None;
     }
 
-    // `[...]` openers — try in dispatcher order. Footnote refs
-    // (`[^id]`), bracketed citations (`[@cite]`), and bracketed spans
-    // (`[text]{attrs}`) are recognised by their own dedicated branches
-    // in `build_ir` and don't need this lookahead.
     if exts.inline_links
         && let Some((len, _, _, _)) = try_parse_inline_link(&text[pos..], false, ctx)
         && pos + len <= end
@@ -1170,10 +1006,6 @@ fn is_right_flanking(text: &str, run_start: usize, run_len: usize) -> bool {
     next_char.is_none_or(|c| c.is_whitespace() || is_unicode_punct_or_symbol(c))
 }
 
-// ============================================================================
-// Pass 2: Process emphasis (CommonMark §6.2)
-// ============================================================================
-
 /// Run the CommonMark §6.3 `process_emphasis` algorithm over the IR's
 /// delim runs. Mutates the IR in place: matched runs gain entries in their
 /// `matches` vec, unmatched bytes stay implicit (the emission pass treats
@@ -1208,13 +1040,6 @@ pub fn process_emphasis_in_range(
     process_emphasis_in_range_filtered(events, lo, hi, None, dialect);
 }
 
-/// Internal variant of [`process_emphasis_in_range`] with an optional
-/// exclusion bitmap. Event indices for which `excluded[i] == true` are
-/// treated as if their delim run were already fully consumed — used by
-/// [`build_full_plans`] to keep the top-level emphasis pass from pairing
-/// across a resolved bracket pair's boundary (the inner delim runs of
-/// such a pair belong to the link's inner range and were already paired
-/// by the scoped pass).
 fn process_emphasis_in_range_filtered(
     events: &mut [IrEvent],
     lo: usize,
@@ -1227,26 +1052,6 @@ fn process_emphasis_in_range_filtered(
         run_emphasis_pass(events, lo, hi, excluded, dialect, &[], false);
         return;
     }
-    // Pandoc dialect: cascade-then-rerun. Run the standard pass, then
-    // invalidate Emph/Strong pairs whose inner range contains an
-    // unmatched same-char run with both can_open && can_close (Pandoc's
-    // recursive descent would have failed those outer pairs because the
-    // inner content has a stray, ambiguous delimiter the recursive
-    // parser cannot pair). The invalidated pairs go into a "rejected
-    // list" that the next iteration of the standard pass consults to
-    // pick a different opener for the same closer (or reject the
-    // closer altogether). Iterate to a fixed point.
-    //
-    // The rerun (iter 2+) runs in `strict` mode: a candidate pair is
-    // rejected if its inner range contains an unmatched same-char run
-    // with count > pair.count. This mirrors pandoc-markdown's
-    // recursive-descent semantics where, e.g. inside a failed outer
-    // `**...**` Strong, the inner `one c` parser's `option2`
-    // (`string [c,c] >> two c mempty`) greedily consumes a stray `**`
-    // and prevents subsequent `*` runs from pairing as Emph. Without
-    // this gate, `**foo *bar** baz*` would produce Emph[bar** baz]
-    // after the outer Strong invalidation, but pandoc treats it as
-    // all-literal because the inner `**` blocks the Emph match.
     let mut rejected: Vec<(usize, usize)> = Vec::new();
     let max_iters = events.len().saturating_add(2);
     let mut iter = 0;
@@ -1263,8 +1068,6 @@ fn process_emphasis_in_range_filtered(
             break;
         }
     }
-    // Recovery for `***A **B** C***` patterns: synthesise the inner
-    // Strong match the standard delim-stack algorithm can't reach.
     pandoc_inner_strong_recovery(events);
 }
 
@@ -1289,9 +1092,6 @@ fn run_emphasis_pass(
     if lo >= hi {
         return;
     }
-    // Indices of DelimRun events within [lo, hi), in order, that have
-    // not already been fully consumed by an earlier scoped pass and that
-    // are not in the optional exclusion bitmap.
     let mut delim_idxs: Vec<usize> = events[lo..hi]
         .iter()
         .enumerate()
@@ -1312,9 +1112,6 @@ fn run_emphasis_pass(
         return;
     }
 
-    // Working state: count (remaining unmatched chars) and source_start
-    // (first remaining char) per delim run. Indexed by position in
-    // `delim_idxs`.
     let mut count: Vec<usize> = Vec::with_capacity(delim_idxs.len());
     let mut source_start: Vec<usize> = Vec::with_capacity(delim_idxs.len());
     let mut removed: Vec<bool> = vec![false; delim_idxs.len()];
@@ -1326,11 +1123,8 @@ fn run_emphasis_pass(
         }
     }
 
-    // openers_bottom[ch_idx][len%3][can_open] → exclusive lower bound
-    // (an index into `delim_idxs`, or None meaning "no bottom yet").
     let mut openers_bottom: [[[Option<usize>; 2]; 3]; 2] = [[[None; 2]; 3]; 2];
 
-    // First active index, scanning forward.
     let first_active =
         |removed: &[bool]| -> Option<usize> { (0..removed.len()).find(|&i| !removed[i]) };
     let next_active = |removed: &[bool], from: usize| -> Option<usize> {
@@ -1362,7 +1156,6 @@ fn run_emphasis_pass(
         let closer_open_bucket = can_open_c as usize;
         let bottom = openers_bottom[ch_idx][closer_mod][closer_open_bucket];
 
-        // Walk back to find a compatible opener.
         let mut found_opener: Option<usize> = None;
         let mut walk = prev_active(&removed, c);
         while let Some(o) = walk {
@@ -1387,24 +1180,6 @@ fn run_emphasis_pass(
                     && (opener_both || closer_both)
                     && oc_sum.is_multiple_of(3)
                     && !(count[o].is_multiple_of(3) && count[c].is_multiple_of(3));
-                // Pandoc-markdown rejects emph/strong pairs whose counts
-                // disagree in the exactly-(1,2) / (2,1) shape:
-                //   - `**foo*` (2,1): `try_parse_two` looks only for a
-                //     `**` closer; the lone `*` doesn't satisfy that.
-                //   - `*foo**` (1,2): `try_parse_one` encountering `**`
-                //     tries `try_parse_two`; absence of an inner `**`
-                //     closer cascades the outer parse to fail.
-                // Other count combinations DO match (verified against
-                // `pandoc -f markdown`):
-                //   - (1,3) / (3,1) → emph match, opposite-side
-                //     leftover `**` literal.
-                //   - (2,3) / (3,2) → strong match, single `*` literal.
-                //   - (3,3) → STRONG(EM(...)) nested.
-                //   - (1..3, 4+) → match (Pandoc's ender walks the
-                //     closer run for a valid position; algorithm
-                //     consumes leftmost via leftover-as-literal).
-                // Opener count >= 4 is rejected (Pandoc's
-                // `try_parse_emphasis` has no count-4+ dispatch).
                 let pandoc_reject = !is_commonmark
                     && ((count[o] == 1 && count[c] == 2)
                         || (count[o] == 2 && count[c] == 1)
@@ -1414,19 +1189,6 @@ fn run_emphasis_pass(
                     let ce = delim_idxs[c];
                     rejected_pairs.iter().any(|&(ro, rc)| ro == oe && rc == ce)
                 };
-                // Pandoc strict-rerun gate (iter 2+ only): block a
-                // candidate pair if any unmatched same-char run between
-                // its opener and closer has remaining count strictly
-                // greater than the consume rule for this pair.
-                // Mirrors pandoc-markdown's recursive descent where
-                // `one c`'s `option2` (`string [c,c] >> two c`) would
-                // greedily consume a stray higher-count run, blocking
-                // the outer `one c` from finding its `ender c 1` —
-                // e.g. `**foo *bar** baz*` after the outer Strong
-                // invalidates: a naïve rerun pairs ev1 (`*`) ↔ ev3
-                // (`*`) as Emph (consume=1), but pandoc treats the
-                // `**` between as having "consumed" any further
-                // matching, leaving everything literal.
                 let strict_block = strict_pandoc && {
                     let tentative_consume = if !is_commonmark && count[o] >= 3 && count[c] >= 3 {
                         1
@@ -1466,16 +1228,6 @@ fn run_emphasis_pass(
         }
 
         if let Some(o) = found_opener {
-            // Consume rule:
-            //   CommonMark — consume 2 (Strong) when both sides have
-            //     >= 2 chars, else 1 (Emph). For `***x***` (3,3) this
-            //     produces EM(STRONG(...)) because the first match
-            //     consumes 2 from each side (Strong outermost).
-            //   Pandoc — when both sides have >= 3, consume 1 first
-            //     (Emph innermost) leaving 2 + 2 to pair as Strong on
-            //     the second pass. This produces STRONG(EM(...)) for
-            //     `***x***`, matching Pandoc-markdown's recursive
-            //     `try_parse_three` algorithm.
             let consume = if !is_commonmark && count[o] >= 3 && count[c] >= 3 {
                 1
             } else if count[o] >= 2 && count[c] >= 2 {
@@ -1489,13 +1241,10 @@ fn run_emphasis_pass(
                 EmphasisKind::Emph
             };
 
-            // Opener consumes inner-edge (rightmost) chars.
             let opener_match_offset =
                 source_start[o] + count[o] - consume - source_start_event(&events[delim_idxs[o]]);
-            // Closer consumes inner-edge (leftmost) chars.
             let closer_match_offset = source_start[c] - source_start_event(&events[delim_idxs[c]]);
 
-            // Record match on opener.
             if let IrEvent::DelimRun { matches, .. } = &mut events[delim_idxs[o]] {
                 matches.push(DelimMatch {
                     offset_in_run: opener_match_offset as u8,
@@ -1506,7 +1255,6 @@ fn run_emphasis_pass(
                     kind,
                 });
             }
-            // Record match on closer.
             if let IrEvent::DelimRun { matches, .. } = &mut events[delim_idxs[c]] {
                 matches.push(DelimMatch {
                     offset_in_run: closer_match_offset as u8,
@@ -1522,7 +1270,6 @@ fn run_emphasis_pass(
             source_start[c] += consume;
             count[c] -= consume;
 
-            // Remove all openers strictly between o and c.
             let mut between = next_active(&removed, o);
             while let Some(idx) = between {
                 if idx == c {
@@ -1539,7 +1286,6 @@ fn run_emphasis_pass(
                 removed[c] = true;
                 closer_local = next_active(&removed, c);
             }
-            // Else re-process the same closer with reduced count.
         } else {
             openers_bottom[ch_idx][closer_mod][closer_open_bucket] = prev_active(&removed, c);
             if !can_open_c {
@@ -1549,10 +1295,6 @@ fn run_emphasis_pass(
         }
     }
 
-    // No further mutation needed: matches are recorded; remaining bytes
-    // stay implicit literal. Pandoc cascade is invoked by the caller
-    // (`process_emphasis_in_range_filtered`) once per pass so it can
-    // accumulate invalidations into a rejected-pairs list and re-run.
     let _ = (&mut delim_idxs, &mut openers_bottom, min_closer_count);
 }
 
@@ -1571,25 +1313,15 @@ fn pandoc_cascade_invalidate(
     excluded: Option<&[bool]>,
 ) -> Vec<(usize, usize)> {
     let mut invalidated_pairs: Vec<(usize, usize)> = Vec::new();
-    // Early-exit: if there are no `DelimRun` events at all, the cascade
-    // pass is a no-op. Avoids allocating the two scratch vecs below for
-    // every range with no `*`/`_` runs (which is the common case for
-    // ranges that contain only standalone constructs / brackets).
     if !events.iter().any(|e| matches!(e, IrEvent::DelimRun { .. })) {
         return invalidated_pairs;
     }
     let is_excluded = |k: usize| excluded.is_some_and(|ex| ex.get(k).copied() == Some(true));
-    // Reuse two scratch vecs across the inner loop iterations instead
-    // of `.collect()` each time. These are tiny per-paragraph
-    // allocations but the function is called for every Pandoc inline
-    // emphasis pass and shows up in malloc traffic.
     let mut total: Vec<usize> = Vec::with_capacity(events.len());
     let mut consumed: Vec<usize> = Vec::with_capacity(events.len());
     loop {
         total.clear();
         consumed.clear();
-        // Compute total bytes (run length) and consumed bytes (sum of
-        // match lens) per DelimRun event index.
         total.extend(events.iter().map(|e| match e {
             IrEvent::DelimRun { start, end, .. } => end - start,
             _ => 0,
@@ -1599,8 +1331,6 @@ fn pandoc_cascade_invalidate(
             _ => 0,
         }));
 
-        // Find a pair to invalidate. We invalidate one and restart so
-        // the cascade can re-evaluate dependent pairs.
         let mut to_invalidate: Option<(usize, u8)> = None;
         'outer: for opener_idx in 0..events.len() {
             let IrEvent::DelimRun {
@@ -1617,15 +1347,6 @@ fn pandoc_cascade_invalidate(
                 if closer_idx <= opener_idx || closer_idx >= events.len() {
                     continue;
                 }
-                // Scan events strictly between opener and closer for any
-                // DelimRun with the same `ch`, unmatched bytes, AND
-                // both `can_open` and `can_close` (i.e., the run could
-                // have participated in pairing on both sides). A
-                // can_open-only or can_close-only run is a one-sided
-                // fragment (e.g. an isolated `*` after a backslash
-                // escape) that the Pandoc recursive-descent path would
-                // never have tried as a nested-strong opener — those
-                // shouldn't cascade-invalidate the surrounding pair.
                 for k in (opener_idx + 1)..closer_idx {
                     if is_excluded(k) {
                         continue;
@@ -1652,7 +1373,6 @@ fn pandoc_cascade_invalidate(
             break;
         };
 
-        // Look up the partner event/offset before mutating.
         let (closer_idx, opener_offset) = match &events[opener_idx] {
             IrEvent::DelimRun { matches, .. } => {
                 let m = matches[mi as usize];
@@ -1661,12 +1381,9 @@ fn pandoc_cascade_invalidate(
             _ => break,
         };
 
-        // Remove the opener match.
         if let IrEvent::DelimRun { matches, .. } = &mut events[opener_idx] {
             matches.remove(mi as usize);
         }
-        // Remove the corresponding closer match (closer's match has
-        // is_opener=false and partner_offset == opener's offset_in_run).
         if let IrEvent::DelimRun { matches, .. } = &mut events[closer_idx] {
             matches.retain(|m| m.is_opener || m.partner_offset != opener_offset);
         }
@@ -1699,7 +1416,6 @@ fn pandoc_cascade_invalidate(
 /// close at the leftmost two.
 fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
     let n = events.len();
-    // (between_idx, opener_idx, closer_idx, len)
     let mut to_apply: Vec<(usize, usize, usize, u8)> = Vec::new();
 
     for opener_idx in 0..n {
@@ -1747,9 +1463,6 @@ fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
                 continue;
             }
 
-            // Walk backward from closer-1 looking for the rightmost
-            // unmatched same-char run with count >= 2 and
-            // can_close=true.
             for k in ((opener_idx + 1)..closer_idx).rev() {
                 if let IrEvent::DelimRun {
                     ch,
@@ -1777,7 +1490,6 @@ fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
     }
 
     for (between_idx, opener_idx, closer_idx, len) in to_apply {
-        // Find the existing Emph match on the closer side.
         let (closer_emph_match_idx, closer_emph_offset) = {
             let mut found: Option<(usize, u8)> = None;
             if let IrEvent::DelimRun { matches, .. } = &events[closer_idx] {
@@ -1797,7 +1509,6 @@ fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
             }
         };
 
-        // Find the corresponding Emph match on the opener side.
         let opener_emph_match_idx = {
             let mut found: Option<usize> = None;
             if let IrEvent::DelimRun { matches, .. } = &events[opener_idx] {
@@ -1817,22 +1528,15 @@ fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
             }
         };
 
-        // Shift the Emph closer's offset to the right of the new
-        // Strong closer's bytes (Strong takes leftmost `len` bytes,
-        // Emph takes the next byte).
         let new_closer_emph_offset = closer_emph_offset + len;
 
-        // Update closer's Emph offset_in_run.
         if let IrEvent::DelimRun { matches, .. } = &mut events[closer_idx] {
             matches[closer_emph_match_idx].offset_in_run = new_closer_emph_offset;
         }
-        // Update opener's Emph partner_offset to point at the shifted
-        // Emph closer position.
         if let IrEvent::DelimRun { matches, .. } = &mut events[opener_idx] {
             matches[opener_emph_match_idx].partner_offset = new_closer_emph_offset;
         }
 
-        // Add Strong opener match on the between-run.
         if let IrEvent::DelimRun { matches, .. } = &mut events[between_idx] {
             matches.push(DelimMatch {
                 offset_in_run: 0,
@@ -1843,10 +1547,6 @@ fn pandoc_inner_strong_recovery(events: &mut [IrEvent]) {
                 kind: EmphasisKind::Strong,
             });
         }
-        // Add Strong closer match on the closer (at the original
-        // pre-shift Emph-closer position; the bytes that were the
-        // single Emph closer now become the leftmost 2 bytes of the
-        // Strong closer).
         if let IrEvent::DelimRun { matches, .. } = &mut events[closer_idx] {
             matches.push(DelimMatch {
                 offset_in_run: closer_emph_offset,
@@ -1866,10 +1566,6 @@ fn source_start_event(event: &IrEvent) -> usize {
         _ => unreachable!("source_start_event called on non-DelimRun"),
     }
 }
-
-// ============================================================================
-// Pass 3: Process brackets (CommonMark §6.3)
-// ============================================================================
 
 /// Resolve `[`/`![`/`]` markers into link/image nodes per CommonMark §6.3
 /// (with Pandoc-aware variations under `Dialect::Pandoc`).
@@ -1928,11 +1624,9 @@ pub fn process_brackets(
         None => &empty,
     };
     let is_commonmark = dialect == crate::options::Dialect::CommonMark;
-    // Refdef-aware label resolution under both dialects.
     let label_resolves =
         |key_norm: &str| -> bool { !key_norm.is_empty() && labels.contains(key_norm) };
 
-    // Walk forward through events, treating it as a linear scan for `]`.
     let mut i = 0;
     while i < events.len() {
         let close_pos = match &events[i] {
@@ -1943,7 +1637,6 @@ pub fn process_brackets(
             }
         };
 
-        // Find the nearest active OpenBracket before `i`.
         let mut o = match find_active_opener(events, i) {
             Some(o) => o,
             None => {
@@ -1960,15 +1653,7 @@ pub fn process_brackets(
         let text_end = close_pos;
         let after_close = close_pos + 1;
 
-        // 1. Inline link / image.
         if let Some((suffix_end, dest, title)) = try_inline_suffix(text, after_close) {
-            // §6.3 link-in-link rule (CommonMark): if this is a *link*
-            // (not an image), and any earlier active link opener exists,
-            // deactivate them. We also deactivate openers strictly before
-            // `o` here because matching means the inner link wins; the
-            // spec applies this *after* matching. Pandoc skips this —
-            // outer-wins is enforced by the dispatcher's
-            // `suppress_inner_links` flag during LINK-text recursion.
             if !is_image && is_commonmark {
                 deactivate_earlier_link_openers(events, o);
             }
@@ -1982,15 +1667,11 @@ pub fn process_brackets(
                 suffix_end,
                 LinkKind::Inline { dest, title },
             );
-            // Remove the opener from the bracket stack: it has been
-            // matched (active=false will fall out automatically since
-            // resolution is Some).
             mark_opener_resolved(events, o);
             i += 1;
             continue;
         }
 
-        // 2. Full reference link: `[text][label]`.
         let full_ref_suffix = try_full_reference_suffix(text, after_close, allow_spaced);
         if let Some((suffix_end, label_raw)) = &full_ref_suffix {
             let label_norm = normalize_label(label_raw);
@@ -2014,13 +1695,8 @@ pub fn process_brackets(
                 i += 1;
                 continue;
             }
-            // Bracketed but unresolved label: §6.3 says we still treat
-            // `[text][label]` as not-a-link, but the brackets get
-            // consumed as literal text AND the shortcut form is
-            // suppressed (since the `]` is followed by a link label).
         }
 
-        // 3. Collapsed `[]`.
         let link_text = &text[text_start..text_end];
         let link_text_norm = normalize_label(link_text);
         let (is_collapsed, collapsed_suffix_end) =
@@ -2045,16 +1721,7 @@ pub fn process_brackets(
             i += 1;
             continue;
         }
-        // `[text][]` with text not in refdefs — falls through to
-        // literal text; shortcut is suppressed (followed by `[]`).
 
-        // 4. Shortcut form: `[text]` not followed by `[]` or `[label]`.
-        // Per CommonMark §6.3: "A shortcut reference link consists of a
-        // link label that matches a link reference definition elsewhere
-        // in the document and is not followed by [] or a link label."
-        // The full-ref / collapsed shape attempts above suppress the
-        // shortcut even when their labels don't resolve — the bracket
-        // bytes still get consumed as literal text.
         let shortcut_suppressed = full_ref_suffix.is_some() || is_collapsed;
         if !shortcut_suppressed && label_resolves(&link_text_norm) {
             if !is_image && is_commonmark {
@@ -2075,17 +1742,6 @@ pub fn process_brackets(
             continue;
         }
 
-        // No resolution. Under Pandoc, the bracket pair is still a
-        // recognisable reference shape (full / collapsed / shortcut) —
-        // tag the opener with `unresolved_ref` so emission wraps it
-        // in an `UNRESOLVED_REFERENCE` node, and mark the closer
-        // matched so it doesn't fall through to a literal `]` token.
-        // Under CommonMark, behavior unchanged: deactivate the opener,
-        // brackets emit as literal text.
-        //
-        // Empty-component shapes (`[]`, `[][]`) aren't reference
-        // patterns even in spirit — pandoc-native treats them as
-        // literal text — so skip wrapping.
         let unresolved_shape = if !is_commonmark {
             let (end, has_substantive_label) =
                 if let Some((suffix_end, label_raw)) = &full_ref_suffix {
@@ -2185,33 +1841,26 @@ fn commit_resolution(
     }
 }
 
-/// Try to parse `(dest)` or `(dest "title")` inline link suffix starting
-/// at `text[pos]`. Returns `(end_pos_exclusive, dest, title)`.
 fn try_inline_suffix(text: &str, pos: usize) -> Option<(usize, String, Option<String>)> {
     let bytes = text.as_bytes();
     if pos >= bytes.len() || bytes[pos] != b'(' {
         return None;
     }
     let mut p = pos + 1;
-    // Skip leading whitespace.
     while p < bytes.len() && matches!(bytes[p], b' ' | b'\t' | b'\n') {
         p += 1;
     }
-    // Empty `()` — link with empty destination.
     if p < bytes.len() && bytes[p] == b')' {
         return Some((p + 1, String::new(), None));
     }
 
-    // Parse destination.
     let (dest, dest_end) = parse_link_destination(text, p)?;
     p = dest_end;
 
-    // Skip whitespace.
     while p < bytes.len() && matches!(bytes[p], b' ' | b'\t' | b'\n') {
         p += 1;
     }
 
-    // Optional title.
     let mut title = None;
     if p < bytes.len() && matches!(bytes[p], b'"' | b'\'' | b'(') {
         let (t, t_end) = parse_link_title(text, p)?;
@@ -2234,7 +1883,6 @@ fn parse_link_destination(text: &str, start: usize) -> Option<(String, usize)> {
         return None;
     }
     if bytes[start] == b'<' {
-        // <bracketed>
         let mut p = start + 1;
         let begin = p;
         while p < bytes.len() && bytes[p] != b'>' && bytes[p] != b'\n' && bytes[p] != b'<' {
@@ -2250,7 +1898,6 @@ fn parse_link_destination(text: &str, start: usize) -> Option<(String, usize)> {
         let dest = text[begin..p].to_string();
         Some((dest, p + 1))
     } else {
-        // unbracketed: balanced parens, no spaces, no controls
         let mut p = start;
         let mut paren_depth: i32 = 0;
         while p < bytes.len() {
@@ -2310,9 +1957,6 @@ fn parse_link_title(text: &str, start: usize) -> Option<(String, usize)> {
     None
 }
 
-/// Try to parse `[label]` after a `]`. Returns `(suffix_end, label_raw)`.
-/// For the collapsed form `[]`, returns `None` here (handled separately
-/// by `collapsed_marker_span`).
 fn try_full_reference_suffix(
     text: &str,
     pos: usize,
@@ -2359,9 +2003,6 @@ fn try_full_reference_suffix(
     Some((p + 1, label))
 }
 
-/// True when `text[pos..]` opens with the collapsed `[]` marker. Under
-/// `spaced_reference_links`, whitespace before the `[]` is permitted; the
-/// returned `Some(end)` reports the byte position past the closing `]`.
 fn collapsed_marker_span(text: &str, pos: usize, allow_spaced: bool) -> Option<usize> {
     let bytes = text.as_bytes();
     let bracket_pos = if allow_spaced {
@@ -2395,11 +2036,6 @@ fn skip_spaced_ref_gap(bytes: &[u8], pos: usize) -> usize {
     }
     p
 }
-
-// ============================================================================
-// Bracket plan — byte-position-keyed view of resolved brackets, consumed by
-// the existing emission walk in `core::parse_inline_range_impl`.
-// ============================================================================
 
 /// Disposition of a single bracket byte after [`process_brackets`].
 #[derive(Debug, Clone)]
@@ -2558,8 +2194,6 @@ pub fn build_construct_plan(events: &[IrEvent]) -> ConstructPlan {
 /// matching `*em*-@key` → `Emph` + `Str "-"` + `Cite`.
 fn demote_bare_citation_after_emphasis_closer(events: &mut [IrEvent], text: &str) {
     let bytes = text.as_bytes();
-    // Cheap pre-check: skip building the closer set unless a bare
-    // `@`-form citation actually exists (the common prose case has none).
     let has_bare_at = events.iter().any(|e| {
         matches!(
             e,
@@ -2574,9 +2208,6 @@ fn demote_bare_citation_after_emphasis_closer(events: &mut [IrEvent], text: &str
         return;
     }
 
-    // One past the last byte of every resolved *closing* emphasis/strong
-    // marker. A citation whose `@` lands on one of these positions is
-    // glued to a closer and must be demoted.
     let mut closer_ends: Vec<usize> = Vec::new();
     for ev in events.iter() {
         if let IrEvent::DelimRun { start, matches, .. } = ev {
@@ -2698,13 +2329,6 @@ pub fn build_full_plans(
     bundle.excluded.clear();
 
     build_ir_into(text, start, end, config, &mut bundle.events);
-    // §6.3 bracket resolution runs for both dialects. Under CommonMark
-    // it enforces refdef-aware shortcut/collapsed/full-ref resolution
-    // and the §6.3 link-in-link deactivation rule. Under Pandoc it
-    // performs shape-only resolution (any non-empty label resolves) and
-    // skips the deactivation pass — pandoc-native is outer-wins for
-    // nested links and the dispatcher's `suppress_inner_links` flag
-    // suppresses inner LINK emission during LINK-text recursion.
     process_brackets(
         &mut bundle.events,
         text,
@@ -2713,18 +2337,6 @@ pub fn build_full_plans(
         config.extensions.spaced_reference_links,
     );
 
-    // Scoped emphasis pass per resolved bracket pair, innermost first.
-    // We collect (open_idx, close_idx) pairs of resolved brackets and run
-    // emphasis only over the events strictly between them. Innermost-first
-    // ordering matters: an outer link wraps emphasis that wraps an inner
-    // link, and the inner link's inner range must be paired before the
-    // outer's inner range so the top-level pass sees consistent state.
-    // Include both resolved-link bracket pairs and Pandoc unresolved-
-    // reference bracket pairs in the scoping set. The latter wrap into
-    // an `UNRESOLVED_REFERENCE` CST node, which is just as much a tree
-    // boundary for emphasis as a resolved `LINK` — emphasis must not
-    // pair across the wrapper's brackets, otherwise the emission walk
-    // produces a non-tree-shaped CST.
     bundle.bracket_pairs.extend(
         bundle
             .events
@@ -2743,28 +2355,14 @@ pub fn build_full_plans(
                 _ => None,
             }),
     );
-    // Innermost-first: sort by close_idx ascending, then open_idx descending.
     bundle
         .bracket_pairs
         .sort_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)));
-    // Iterate pairs by index so we can hold &mut bundle.events while
-    // reading bundle.bracket_pairs (split borrow on disjoint fields).
     for i in 0..bundle.bracket_pairs.len() {
         let (open_idx, close_idx) = bundle.bracket_pairs[i];
         process_emphasis_in_range(&mut bundle.events, open_idx + 1, close_idx, config.dialect);
     }
 
-    // Pandoc-only degrade pass for unresolved bracket-shape patterns
-    // whose interior left any delim-run byte unmatched after the scoped
-    // emphasis pass. Pandoc-native degrades such brackets to literal `[`
-    // / `]` text — the user's intent was clearly not a reference. The
-    // bracket_pairs entry stays so the inner delims remain in the
-    // top-level exclusion mask (otherwise they'd re-enter pairing and
-    // could form Emph spans with delims outside, which pandoc never
-    // does — see the bug_2_emphasis_crosses_brackets_pandoc fixture).
-    // Flipping `unresolved_ref` to `None` makes `build_bracket_plan`
-    // emit `BracketDispo::Literal` for the bracket bytes; flipping
-    // `CloseBracket.matched` to `false` does the same for the `]`.
     for i in 0..bundle.bracket_pairs.len() {
         let (open_idx, close_idx) = bundle.bracket_pairs[i];
         let is_unresolved = matches!(
@@ -2789,19 +2387,10 @@ pub fn build_full_plans(
         }
     }
 
-    // Top-level emphasis pass: handles delim runs that fall outside any
-    // resolved bracket pair.
     let len = bundle.events.len();
     if bundle.bracket_pairs.is_empty() {
-        // Fast path: no resolved brackets means no exclusion mask needed —
-        // skip the resize-and-fill pass entirely. Common for prose
-        // paragraphs without inline links.
         process_emphasis_in_range_filtered(&mut bundle.events, 0, len, None, config.dialect);
     } else {
-        // Build exclusion bitmap: any delim run whose event index lies
-        // inside a resolved bracket pair is excluded from the top-level
-        // pass. Implements the §6.3 boundary rule: emphasis at the top
-        // level must not pair across a link's brackets.
         bundle.excluded.resize(len, false);
         for &(open_idx, close_idx) in &bundle.bracket_pairs {
             for slot in bundle
@@ -2822,9 +2411,6 @@ pub fn build_full_plans(
         );
     }
 
-    // Pandoc `notAfterString`, delimiter-adjacent case: now that emphasis
-    // has resolved, demote any bare `@key` glued to a resolved closer
-    // (`*em*@key`) to literal text before the construct plan captures it.
     demote_bare_citation_after_emphasis_closer(&mut bundle.events, text);
 
     InlinePlans {
@@ -2871,13 +2457,6 @@ fn range_has_unmatched_delim_bytes(events: &[IrEvent], lo: usize, hi: usize) -> 
     false
 }
 
-/// Thread-local pool of scratch buffers used by [`build_full_plans`].
-///
-/// `build_full_plans` checks out one bundle for the duration of the call
-/// and returns it on drop so the next call (or a recursive nested call
-/// from an inline emitter) reuses the allocations. The pool is
-/// per-thread — the parser is single-threaded — and bounded so a
-/// long-running editor session can't accumulate stale capacity.
 struct ScratchEvents {
     inner: Option<ScratchBundle>,
 }
@@ -2911,10 +2490,6 @@ impl Drop for ScratchEvents {
             bundle.events.clear();
             bundle.bracket_pairs.clear();
             bundle.excluded.clear();
-            // Cap pool depth at 8 (deepest realistic nested-link recursion)
-            // and drop any bundle whose `events` grew past 8K (a single
-            // pathological paragraph shouldn't pin a huge allocation
-            // forever).
             if bundle.events.capacity() <= 8192 {
                 IR_EVENT_POOL.with(|p| {
                     let mut pool = p.borrow_mut();
@@ -2977,7 +2552,6 @@ pub fn build_emphasis_plan(events: &[IrEvent]) -> EmphasisPlan {
                     by_pos.insert(pos, DelimChar::Close);
                 }
             }
-            // Any remaining bytes (not covered by a match) are literal.
             for pos in *start..*end {
                 by_pos.entry(pos).or_insert(DelimChar::Literal);
             }
@@ -3035,7 +2609,6 @@ mod tests {
     fn scan_records_text_and_delim_run() {
         let opts = cm_opts();
         let ir = build_ir("foo *bar*", 0, 9, &opts);
-        // Expect: Text "foo ", DelimRun "*", Text "bar", DelimRun "*"
         assert!(matches!(ir[0], IrEvent::Text { start: 0, end: 4 }));
         assert!(matches!(
             ir[1],
@@ -3100,7 +2673,6 @@ mod tests {
     fn scan_handles_code_span_opacity() {
         let opts = cm_opts();
         let ir = build_ir("a `*x*` b", 0, 9, &opts);
-        // Code span `*x*` should be a Construct, NOT delim runs.
         let has_delim_run = ir.iter().any(|e| matches!(e, IrEvent::DelimRun { .. }));
         assert!(
             !has_delim_run,
@@ -3120,7 +2692,6 @@ mod tests {
         let opts = cm_opts();
         let mut ir = build_ir("*foo*", 0, 5, &opts);
         process_emphasis(&mut ir, opts.dialect);
-        // First DelimRun (open) gets a match.
         let opener = ir
             .iter()
             .find(|e| matches!(e, IrEvent::DelimRun { start: 0, .. }))
@@ -3171,9 +2742,6 @@ mod tests {
 
     #[test]
     fn brackets_shortcut_falls_through_without_refdef() {
-        // CMark example #523 mechanic: `[bar* baz]` is not a refdef, so
-        // it must NOT resolve as a link — the brackets stay literal so
-        // the inner `*` becomes available to the outer emphasis scanner.
         let opts = cm_opts();
         let text = "[bar* baz]";
         let mut ir = build_ir(text, 0, text.len(), &opts);
@@ -3195,16 +2763,11 @@ mod tests {
         let opts = cm_opts();
         let text = "*[bar*](/url)";
         let plans = build_full_plans(text, 0, text.len(), &opts);
-        // The leading `*` (at byte 0) must NOT be matched as an emphasis
-        // opener — there's no closer outside the link, and the inner `*`
-        // (at byte 5) is inside the resolved link's text range so it must
-        // not be paired with byte 0.
         assert!(
             matches!(plans.emphasis.lookup(0), Some(DelimChar::Literal) | None),
             "outer `*` at byte 0 must not pair across link boundary, got {:?}",
             plans.emphasis.lookup(0)
         );
-        // The link `[bar*](/url)` must resolve (opener at byte 1).
         assert!(
             matches!(plans.brackets.lookup(1), Some(BracketDispo::Open { .. })),
             "link [bar*](/url) must resolve at byte 1"
@@ -3296,29 +2859,21 @@ mod tests {
         opts_with_refs.refdef_labels = Some(std::sync::Arc::new(labels));
         let plans = build_full_plans(text, 0, text.len(), &opts_with_refs);
 
-        // Inner `[baz][ref]` opener is at byte 10 — must resolve.
         assert!(
             matches!(plans.brackets.lookup(10), Some(BracketDispo::Open { .. })),
             "inner [baz][ref] must resolve at byte 10, got {:?}",
             plans.brackets.lookup(10)
         );
-        // Outer `[foo ...][ref]` opener is at byte 0 — must NOT resolve
-        // (link-in-link suppression).
         assert!(
             matches!(plans.brackets.lookup(0), Some(BracketDispo::Literal) | None),
             "outer [foo ...][ref] must fall through to literal at byte 0, got {:?}",
             plans.brackets.lookup(0)
         );
-        // Trailing `[ref]` after the outer `]` is at byte 22 — it's a
-        // standalone shortcut reference and must resolve.
         assert!(
             matches!(plans.brackets.lookup(22), Some(BracketDispo::Open { .. })),
             "trailing [ref] must resolve at byte 22, got {:?}",
             plans.brackets.lookup(22)
         );
-        // Emphasis `*...*` at bytes 5 and 20 must pair — the scoped
-        // emphasis pass over the (deactivated) outer bracket's inner
-        // event range pairs these.
         assert!(
             matches!(plans.emphasis.lookup(5), Some(DelimChar::Open { .. })),
             "emphasis opener at byte 5 must pair, got {:?}",
@@ -3333,7 +2888,6 @@ mod tests {
     #[test]
     fn full_plans_bare_citation_after_emphasis_closer_demoted() {
         let opts = pandoc_opts();
-        // `*em*@key`: emphasis `*em*` at [0,4), `@` at byte 4.
         let plans = build_full_plans("*em*@key", 0, 8, &opts);
         assert!(
             plans.constructs.lookup(4).is_none(),
@@ -3347,11 +2901,9 @@ mod tests {
         );
     }
 
-    /// Strong closer variant: `**s**@key` demotes the citation too.
     #[test]
     fn full_plans_bare_citation_after_strong_closer_demoted() {
         let opts = pandoc_opts();
-        // `**s**@key`: strong `**s**` at [0,5), `@` at byte 5.
         let plans = build_full_plans("**s**@key", 0, 9, &opts);
         assert!(
             plans.constructs.lookup(5).is_none(),
@@ -3366,7 +2918,6 @@ mod tests {
     #[test]
     fn full_plans_bare_citation_after_emphasis_opener_kept() {
         let opts = pandoc_opts();
-        // `*@key*`: `@` at byte 1, immediately after the opening `*`.
         let plans = build_full_plans("*@key*", 0, 6, &opts);
         assert!(
             matches!(
@@ -3384,7 +2935,6 @@ mod tests {
     #[test]
     fn full_plans_suppress_author_citation_after_emphasis_kept() {
         let opts = pandoc_opts();
-        // `*em*-@key`: construct at byte 4 (`-@key`).
         let plans = build_full_plans("*em*-@key", 0, 9, &opts);
         assert!(
             matches!(
@@ -3402,7 +2952,6 @@ mod tests {
     #[test]
     fn full_plans_bare_citation_after_unmatched_delim_kept() {
         let opts = pandoc_opts();
-        // `*em*_@key`: `@` at byte 5, preceded by an unmatched `_`.
         let plans = build_full_plans("*em*_@key", 0, 9, &opts);
         assert!(
             matches!(

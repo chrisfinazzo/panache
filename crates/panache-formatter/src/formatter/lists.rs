@@ -22,8 +22,6 @@ impl Formatter {
             match element {
                 NodeOrToken::Token(token) => match token.kind() {
                     SyntaxKind::LINE_PREFIX => {
-                        // A prefix run's `>` byte marks the continuation;
-                        // its indent/space bytes are ignorable either way.
                         if token.text().contains('>') {
                             has_blockquote_marker = true;
                         }
@@ -96,7 +94,6 @@ impl Formatter {
                 && t.kind() == SyntaxKind::LIST_MARKER
             {
                 let marker = t.text().to_string();
-                // Standardize bullet list markers: convert *, +, - to "-"
                 if marker.len() == 1 && matches!(marker.as_str(), "-" | "*" | "+") {
                     return Some("-".to_string());
                 }
@@ -153,31 +150,26 @@ impl Formatter {
         )
     }
 
-    /// Check if a nested list is empty (contains only one item with no text content)
     fn is_empty_nested_list(list_node: &SyntaxNode) -> bool {
         let items: Vec<_> = list_node
             .children()
             .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
             .collect();
 
-        // Must have exactly one item
         if items.len() != 1 {
             return false;
         }
 
         let item = &items[0];
 
-        // Check if item has any text content or nested structures
         for child in item.children_with_tokens() {
             match child {
                 NodeOrToken::Token(t) => {
-                    // Has text content beyond marker/whitespace/newline
                     if matches!(t.kind(), SyntaxKind::TEXT | SyntaxKind::ESCAPED_CHAR) {
                         return false;
                     }
                 }
                 NodeOrToken::Node(n) => {
-                    // Has nested blocks (PLAIN/PARAGRAPH/LIST/etc)
                     if !matches!(
                         n.kind(),
                         SyntaxKind::LIST_MARKER | SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE
@@ -200,12 +192,10 @@ impl Formatter {
             .filter_map(|item| Self::extract_list_marker(&item))
             .collect();
 
-        // Check if any marker is alignable
         if !markers.iter().any(|m| is_alignable_marker(m)) {
             return 0;
         }
 
-        // Return max width of alignable markers
         markers
             .iter()
             .filter(|m| is_alignable_marker(m))
@@ -224,7 +214,6 @@ impl Formatter {
     ) -> usize {
         let marker = Self::extract_list_marker(item_node).unwrap_or_default();
 
-        // Check for task checkbox (adds 4 more characters: "[x] ")
         let has_checkbox = item_node.children_with_tokens().any(|el| {
             if let NodeOrToken::Token(t) = el {
                 t.kind() == SyntaxKind::TASK_CHECKBOX
@@ -240,8 +229,6 @@ impl Formatter {
             four_space_rule,
             tab_width,
         );
-        // Continuation/nested content goes at the hanging column, which under
-        // the four-space rule is decoupled from the marker-relative offset.
         indent.continuation_offset()
     }
 
@@ -250,13 +237,10 @@ impl Formatter {
     pub(super) fn format_list_continuation_paragraph(&mut self, node: &SyntaxNode, indent: usize) {
         let line_width = self.config.line_width.saturating_sub(indent);
         let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
-        // This arm emits the paragraph's lines itself rather than going through
-        // `format_node_sync`, so it needs its own checkpoint for the guard below.
         let para_start = self.output.len();
 
         match wrap_mode {
             WrapMode::Preserve => {
-                // Strip existing indentation and apply list item indentation
                 let escaped = self.config.formatter_extensions.escaped_line_breaks;
                 for line in preserve::preserve_lines(node, escaped) {
                     self.output.push_str(&" ".repeat(indent));
@@ -265,7 +249,6 @@ impl Formatter {
                 }
             }
             WrapMode::Reflow => {
-                // Wrap with list item indentation
                 let lines = self.wrapped_lines_for_paragraph(node, line_width);
                 for line in lines {
                     self.output.push_str(&" ".repeat(indent));
@@ -292,8 +275,6 @@ impl Formatter {
 
     /// Format a List node
     pub(super) fn format_list(&mut self, node: &SyntaxNode, indent: usize) {
-        // Add blank line before top-level lists (indent == 0) that follow content.
-        // Keep one normalized separator between adjacent top-level lists to match Pandoc output.
         if indent == 0
             && self.fenced_div_depth == 0
             && !self.output.is_empty()
@@ -302,13 +283,9 @@ impl Formatter {
             self.output.push('\n');
         }
 
-        // Calculate max marker width for right-alignment
         let max_marker_width = Self::calculate_max_marker_width(node);
         self.max_marker_widths.push(max_marker_width);
 
-        // Decide loose/tight at the *list* level.
-        // Parser may emit PLAIN for most list item text; we treat lists as loose
-        // if there are explicit blank lines between items in the CST.
         let list_children: Vec<_> = node.children().collect();
         let has_blank_between_items = list_children.iter().enumerate().any(|(idx, child)| {
             if child.kind() != SyntaxKind::BLANK_LINE {
@@ -331,10 +308,6 @@ impl Formatter {
                     .children()
                     .any(|item_child| matches!(item_child.kind(), SyntaxKind::BLOCK_QUOTE))
         });
-        // CMark §5.3: a list is loose if any item directly contains two
-        // block-level elements separated by a blank line. The PLAIN+BLANK+PLAIN
-        // shape that the parser emits for `- foo\n\n  bar\n- baz` falls under
-        // this rule; pandoc canonicalizes the writer output to match.
         let has_blank_within_item = list_children.iter().any(|child| {
             if child.kind() != SyntaxKind::LIST_ITEM {
                 return false;
@@ -356,12 +329,6 @@ impl Formatter {
             }
             false
         });
-        // Pandoc also marks a list as loose if any item contains a structural
-        // block (HEADING, CODE_BLOCK, HORIZONTAL_RULE) alongside other content
-        // — even without an intervening blank line. CMark's HTML output has
-        // `<li>` newlines around such blocks and the writer benefits from
-        // matching that visual loosening. HTML_BLOCK is excluded so panache's
-        // own ignore-directive comments inside an item don't flip the list.
         let has_structural_multi_block = list_children.iter().any(|child| {
             if child.kind() != SyntaxKind::LIST_ITEM {
                 return false;
@@ -380,12 +347,6 @@ impl Formatter {
                 )
             })
         });
-        // When source has blank lines between outer items of a list whose
-        // items lead with a nested LIST (the same-line nested-marker shape),
-        // the parser parks the BLANK_LINE inside the *inner* LIST as a
-        // trailing child rather than between the outer items. Treat that
-        // shape as a blank-between-items signal so the outer list renders
-        // loose to match pandoc.
         let has_trailing_blank_in_nested_list = list_children.iter().any(|child| {
             if child.kind() != SyntaxKind::LIST_ITEM {
                 return false;
@@ -426,7 +387,6 @@ impl Formatter {
                 }
                 item_count += 1;
 
-                // Calculate content indent for this list item (marker + space)
                 last_item_content_indent = indent
                     + Self::calculate_list_item_content_indent(
                         &child,
@@ -437,7 +397,6 @@ impl Formatter {
 
                 self.format_node_sync(&child, indent);
 
-                // Add blank line after each item for loose lists (except last)
                 if is_loose
                     && item_count < total_items
                     && !self.output.ends_with("\n\n")
@@ -459,7 +418,6 @@ impl Formatter {
                     }
                 }
             } else if child.kind() == SyntaxKind::BLANK_LINE {
-                // Preserve explicit separators when not treating this list as globally loose.
                 let prev_is_item = child
                     .prev_sibling()
                     .map(|n| n.kind() == SyntaxKind::LIST_ITEM)
@@ -485,21 +443,18 @@ impl Formatter {
                 continue;
             } else if child.kind() == SyntaxKind::PARAGRAPH {
                 if Self::has_continuation_eligible_predecessor(&child) {
-                    // Paragraphs that are siblings of ListItems are continuation content.
                     self.format_list_continuation_paragraph(&child, last_item_content_indent);
                 } else {
                     self.format_node_sync(&child, indent);
                 }
             } else if child.kind() == SyntaxKind::CODE_BLOCK {
                 if Self::has_continuation_eligible_predecessor(&child) {
-                    // Code blocks that are siblings of ListItems are also continuation content.
                     self.format_indented_code_block(&child, last_item_content_indent);
                 } else {
                     self.format_node_sync(&child, indent);
                 }
             } else if child.kind() == SyntaxKind::LIST {
                 if Self::has_continuation_eligible_predecessor(&child) {
-                    // Nested lists emitted as siblings of ListItems should stay continuation content.
                     self.format_node_sync(&child, last_item_content_indent);
                 } else {
                     self.format_node_sync(&child, indent);
@@ -509,7 +464,6 @@ impl Formatter {
             }
         }
 
-        // Pop the max marker width off the stack
         self.max_marker_widths.pop();
 
         if !self.output.ends_with('\n') {
@@ -529,28 +483,21 @@ impl Formatter {
                 rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::LIST_MARKER => {
                     seen_marker = true;
                 }
-                rowan::NodeOrToken::Node(n) if seen_marker => {
-                    match n.kind() {
-                        k if Self::is_item_content_block(k) => {
-                            // Skip PLAIN/PARAGRAPH trailing a lifted leading
-                            // HTML_BLOCK (the Comment/PI trailing-text-split
-                            // shape `- <!-- hi --> trailing`). The marker
-                            // is emitted by the HTML_BLOCK arm; the trailing
-                            // PLAIN runs through the continuation path.
-                            if seen_leading_html_block {
-                                return None;
-                            }
-                            return Some(n);
+                rowan::NodeOrToken::Node(n) if seen_marker => match n.kind() {
+                    k if Self::is_item_content_block(k) => {
+                        if seen_leading_html_block {
+                            return None;
                         }
-                        SyntaxKind::HTML_BLOCK
-                        | SyntaxKind::HTML_BLOCK_RAW
-                        | SyntaxKind::HTML_BLOCK_DIV => {
-                            seen_leading_html_block = true;
-                        }
-                        SyntaxKind::BLANK_LINE => {}
-                        _ => return None,
+                        return Some(n);
                     }
-                }
+                    SyntaxKind::HTML_BLOCK
+                    | SyntaxKind::HTML_BLOCK_RAW
+                    | SyntaxKind::HTML_BLOCK_DIV => {
+                        seen_leading_html_block = true;
+                    }
+                    SyntaxKind::BLANK_LINE => {}
+                    _ => return None,
+                },
                 _ => {}
             }
         }
@@ -642,7 +589,6 @@ impl Formatter {
     }
 
     fn format_list_item_inner(&mut self, node: &SyntaxNode, indent: usize) {
-        // Pre-pass: Process any directive comments to update tracker state
         for child in node.children() {
             if matches!(
                 child.kind(),
@@ -653,21 +599,13 @@ impl Formatter {
             }
         }
 
-        // Compute indent, marker, and checkbox from leading tokens
         let mut marker = String::new();
         let mut checkbox = None;
-        // NOTE: We ignore WHITESPACE tokens for list indentation calculation.
-        // The WHITESPACE tokens are emitted by the parser for losslessness, but the
-        // formatter should use the `indent` parameter (which represents nesting level)
-        // to determine output indentation, not the source indentation from WHITESPACE tokens.
 
         for el in node.children_with_tokens() {
             if let NodeOrToken::Token(t) = el {
                 match t.kind() {
-                    SyntaxKind::WHITESPACE => {
-                        // Skip - we don't accumulate source indentation
-                        // The `indent` parameter determines output indentation
-                    }
+                    SyntaxKind::WHITESPACE => {}
                     SyntaxKind::LIST_MARKER => {
                         marker = self.normalize_bullet_for_output(t.text());
                     }
@@ -679,10 +617,8 @@ impl Formatter {
             }
         }
 
-        // Get max marker width for this list level
         let max_marker_width = self.max_marker_widths.last().copied().unwrap_or(0);
 
-        // Calculate indentation using the utility
         let list_indent = calculate_list_item_indent(
             &marker,
             max_marker_width,
@@ -692,16 +628,6 @@ impl Formatter {
         );
 
         let total_indent = indent;
-        // `hanging` is the column for nested *blocks* (nested lists, continuation
-        // blocks after a blank line); under `four_space_rule` it is a flat tab
-        // stop. `text_continuation` is where the item's *own* lazy-wrapped
-        // paragraph text goes — the list content column, just past the marker,
-        // excluding both the checkbox and the four-space tab stop. Both exclude
-        // the checkbox so children/continuation never land at the code-block
-        // threshold, and both put continuation at the same column as later blocks
-        // (matching pandoc). `content_indent` is only the *first line's* text
-        // column (past the marker and checkbox); it sizes the available width so
-        // the first line fills to `line_width`.
         let hanging = list_indent.hanging_indent(total_indent);
         let text_continuation = total_indent + list_indent.text_continuation_offset();
         let content_indent = total_indent + list_indent.content_offset();
@@ -755,12 +681,6 @@ impl Formatter {
             return;
         }
 
-        // Same-line nested-blockquote case: a LIST_ITEM whose first
-        // non-blank child is a BLOCK_QUOTE (no preceding PLAIN/PARAGRAPH).
-        // Examples: `- > foo`, `1. > bar`. Emit the outer marker without
-        // a trailing newline, then format the BQ at indent=0 so its `>`
-        // marker abuts the outer marker on the same line. Mirrors the
-        // leading-LIST same-line path below.
         if let Some(leading_bq) = first_non_blank_child.as_ref()
             && leading_bq.kind() == SyntaxKind::BLOCK_QUOTE
             && Self::find_content_node(node).is_none()
@@ -774,13 +694,6 @@ impl Formatter {
                 self.output.push_str(cb);
                 self.output.push(' ');
             }
-            // Format the BQ at indent=0 so its first `>` abuts the outer
-            // marker on the same line. Subsequent lines need the outer
-            // item's hanging indent prefix (pandoc emits `  > foo` for
-            // continuation, not `> foo`); without this, re-parsing the
-            // formatter output drops the outer item context. We splice
-            // the indent in post-hoc rather than threading a new arg
-            // through the BQ formatter.
             let bq_start = self.output.len();
             self.format_node_sync(leading_bq, 0);
             if hanging > 0 {
@@ -801,16 +714,6 @@ impl Formatter {
             return;
         }
 
-        // Same-line leading-block case: a LIST_ITEM whose first non-blank child
-        // is a FENCED_DIV, CODE_BLOCK, LINE_BLOCK, or DEFINITION_LIST (no
-        // preceding PLAIN/PARAGRAPH). Examples: `- ::: note`, ``- ```rust``,
-        // `- | a`, `- Term` + `  : def` (the term is the item's own first
-        // content line, so the definition list is the item's leading block).
-        // Without this the item has no content node, so the generic path below
-        // never emits the marker and the block swallows it (issue #439). Emit
-        // the outer marker, then format the block at indent=0 so its first line
-        // abuts the marker; splice the outer item's hanging indent into
-        // subsequent lines. Mirrors the leading-BQ path.
         if let Some(leading_block) = first_non_blank_child.as_ref()
             && matches!(
                 leading_block.kind(),
@@ -832,13 +735,6 @@ impl Formatter {
             }
             let block_start = self.output.len();
             if leading_block.kind() == SyntaxKind::CODE_BLOCK {
-                // A code block on the marker line carries no fence-indent token
-                // (its indent was consumed as the marker's trailing space), so
-                // the shared renderer leaves the list indent embedded in the
-                // content. Render it bare, abut the opening fence to the marker,
-                // then re-indent: dedent the content by its own common indent
-                // and re-apply the hanging column. The closing fence renders at
-                // column 0 and just takes the hanging prefix.
                 let raw = self.format_code_block_to_string(leading_block);
                 let raw = raw.strip_suffix('\n').unwrap_or(&raw);
                 let block_lines: Vec<&str> = raw.split('\n').collect();
@@ -854,16 +750,12 @@ impl Formatter {
                     .unwrap_or(0);
                 for (i, line) in block_lines.iter().enumerate() {
                     if i == 0 {
-                        // Opening fence abuts the marker already emitted above.
                         self.output.push_str(line.trim_start());
                     } else if line.trim().is_empty() {
-                        // Leave blank content lines bare (no trailing spaces).
                     } else if i == last {
-                        // Closing fence renders at column 0; just add hanging.
                         self.output.push_str(&prefix);
                         self.output.push_str(line);
                     } else {
-                        // Content line: dedent its embedded list indent, re-indent.
                         self.output.push_str(&prefix);
                         let cut = content_indent.min(line.len());
                         self.output.push_str(&line[cut..]);
@@ -871,9 +763,6 @@ impl Formatter {
                     self.output.push('\n');
                 }
             } else {
-                // A fenced div's body is re-formatted from child blocks, so
-                // format it at indent 0 and splice the hanging indent into
-                // every subsequent non-blank line.
                 self.format_node_sync(leading_block, 0);
                 if self.output.as_bytes().get(block_start) == Some(&b'\n') {
                     self.output.remove(block_start);
@@ -897,14 +786,6 @@ impl Formatter {
             return;
         }
 
-        // Same-line nested-marker case: a LIST_ITEM whose first non-blank
-        // child is a non-empty nested LIST (no preceding PLAIN/PARAGRAPH).
-        // Examples: `- - foo`, `1. - 2. foo`. Emit the outer marker without
-        // a trailing newline, then format the nested LIST at indent=0 so
-        // its inner LIST_ITEM marker abuts the outer marker on the same
-        // line. `format_list` adds a leading `\n` when called at indent=0
-        // outside a fenced div; strip it post-hoc since we explicitly
-        // *want* the inner LIST flush against the outer marker.
         if let Some(leading_list) = first_non_blank_child.as_ref()
             && leading_list.kind() == SyntaxKind::LIST
             && !Self::is_empty_nested_list(leading_list)
@@ -919,11 +800,6 @@ impl Formatter {
                 self.output.push_str(cb);
                 self.output.push(' ');
             }
-            // Format the inner LIST at indent=0 so its first item's marker
-            // abuts the outer marker on the same line, then splice the outer
-            // item's hanging indent into all subsequent (non-blank) lines so
-            // items 2..N and continuation content sit under the inner marker
-            // column rather than column 0. Mirrors the leading-BQ path above.
             let saved_len = self.output.len();
             self.format_node_sync(leading_list, 0);
             if self.output.as_bytes().get(saved_len) == Some(&b'\n') {
@@ -947,7 +823,6 @@ impl Formatter {
             return;
         }
 
-        // Build source node for wrapping from Plain/PARAGRAPH content node if present.
         let content_node = Self::find_content_node(node);
 
         let content_has_hard_breaks = content_node
@@ -961,7 +836,6 @@ impl Formatter {
 
         let wrap_source = content_node.as_ref();
 
-        // Check if this item contains only an empty nested list (special case formatting)
         let has_only_empty_nested_list = node
             .children()
             .any(|c| c.kind() == SyntaxKind::LIST && Self::is_empty_nested_list(&c))
@@ -987,10 +861,6 @@ impl Formatter {
                 })
                 .unwrap_or_default(),
         };
-        // Pandoc-dialect inlining: if the content_node carries an inline
-        // ignore-format directive (Pandoc keeps `<!-- ... -->` inline rather
-        // than splitting paragraphs), preserve the original content lines
-        // verbatim — wrapping/reflow would lose the intentional spacing.
         let content_has_format_directive = content_node
             .as_ref()
             .map(|content| {
@@ -1013,8 +883,6 @@ impl Formatter {
                         .unwrap_or_default(),
                 )
             }
-            // A format-off directive means "leave these bytes alone", trailing
-            // whitespace included, so this path deliberately does not trim.
             _ if content_has_format_directive => {
                 let source = content_node
                     .as_ref()
@@ -1101,22 +969,17 @@ impl Formatter {
             for (i, text) in sentence_lines.iter().enumerate() {
                 log::trace!("  Line {}: sentence line", i);
                 if i == 0 {
-                    // First line: output indent + marker padding + marker + spaces + checkbox
                     self.output.push_str(&" ".repeat(total_indent));
                     self.output
                         .push_str(&" ".repeat(list_indent.marker_padding));
                     self.output.push_str(&marker);
                     self.output.push_str(&" ".repeat(list_indent.spaces_after));
 
-                    // Output checkbox if present
                     if let Some(ref cb) = checkbox {
                         self.output.push_str(cb);
                         self.output.push(' ');
                     }
                 } else {
-                    // Lazy continuation of the item's paragraph aligns at the
-                    // list content column, not past a task checkbox (which would
-                    // hit the code-block threshold).
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
                 if i > 0 {
@@ -1135,22 +998,17 @@ impl Formatter {
             for (i, line) in lines.iter().enumerate() {
                 log::trace!("  Line {}: {} chars", i, line.len());
                 if i == 0 {
-                    // First line: output indent + marker padding + marker + spaces + checkbox
                     self.output.push_str(&" ".repeat(total_indent));
                     self.output
                         .push_str(&" ".repeat(list_indent.marker_padding));
                     self.output.push_str(&marker);
                     self.output.push_str(&" ".repeat(list_indent.spaces_after));
 
-                    // Output checkbox if present
                     if let Some(ref cb) = checkbox {
                         self.output.push_str(cb);
                         self.output.push(' ');
                     }
                 } else {
-                    // Lazy continuation of the item's paragraph aligns at the
-                    // list content column, not past a task checkbox (which would
-                    // hit the code-block threshold).
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
                 let mut rendered_line = if i > 0 {
@@ -1182,14 +1040,12 @@ impl Formatter {
                 } else {
                     self.output.push_str(&rendered_line);
                 }
-                // Only output newline if this item doesn't have an inline empty nested list
                 if !has_only_empty_nested_list {
                     self.output.push('\n');
                 }
             }
         }
 
-        // Special case: if no lines were wrapped but we have empty nested list, still output marker
         if lines.is_empty() && has_only_empty_nested_list {
             self.output.push_str(&" ".repeat(total_indent));
             self.output
@@ -1198,8 +1054,6 @@ impl Formatter {
             self.output.push(' '); // Space before nested marker
         }
 
-        // Format nested blocks inside this list item aligned to the content column.
-        // Skip Plain/PARAGRAPH nodes that were already processed for word wrapping.
         for child in node.children() {
             match child.kind() {
                 k if Self::is_item_content_block(k) => {
@@ -1207,19 +1061,11 @@ impl Formatter {
                         continue;
                     }
 
-                    // The first PLAIN/PARAGRAPH after the marker is the wrap
-                    // source (already rendered above). Any other PLAIN/PARAGRAPH
-                    // child — whether a continuation after a blank line, or a
-                    // trailing paragraph after an intervening block such as
-                    // HTML_BLOCK — must still be emitted so its content is not
-                    // dropped.
                     let is_content_node = content_node.as_ref() == Some(&child);
                     let in_ignore_region = self.directive_tracker.is_formatting_ignored();
 
                     if !is_content_node || in_ignore_region {
                         let content_indent = list_indent.hanging_indent(total_indent);
-                        // If in ignore region, just call format_node_sync which preserves content
-                        // The indent parameter isn't used when in ignore mode, so we don't add it
                         if in_ignore_region {
                             self.format_node_sync(&child, 0);
                         } else {
@@ -1228,9 +1074,7 @@ impl Formatter {
                     }
                 }
                 SyntaxKind::LIST => {
-                    // Check if this is an empty nested list (only has one item with no content)
                     if Self::is_empty_nested_list(&child) {
-                        // Format inline: output nested marker and newline
                         let nested_marker = Self::extract_list_marker(
                             &child
                                 .children()
@@ -1241,12 +1085,10 @@ impl Formatter {
                         self.output.push_str(&nested_marker);
                         self.output.push('\n');
                     } else {
-                        // Normal nested list: indent on next line
                         self.format_node_sync(&child, list_indent.hanging_indent(total_indent));
                     }
                 }
                 SyntaxKind::CODE_BLOCK => {
-                    // Code blocks in list items need indentation
                     let content_indent = list_indent.hanging_indent(total_indent);
                     self.format_indented_code_block(&child, content_indent);
                 }
@@ -1286,15 +1128,6 @@ impl Formatter {
                     }
                 }
                 SyntaxKind::HORIZONTAL_RULE => {
-                    // CommonMark/Pandoc allow a thematic break as a list item's
-                    // sole content (e.g. `- * * *`). The wrapping pass above
-                    // emits nothing for an item with no PLAIN/PARAGRAPH
-                    // content_node, so emit the marker here and inline the HR
-                    // text on the same line. We re-emit the source HR bytes
-                    // rather than the canonical 80-dash form because `- ----`
-                    // would re-parse as a top-level HR; the source bytes
-                    // (`* * *`, `***`, `___`, …) round-trip safely with any
-                    // bullet/ordered marker.
                     let no_content_emitted = lines.is_empty()
                         && preserve_lines.is_none()
                         && sentence_lines.is_none()
@@ -1336,7 +1169,6 @@ impl Formatter {
                     }
                 }
                 SyntaxKind::BLANK_LINE => {
-                    // Normalize consecutive blank lines within list-item continuation content.
                     if !self.output.ends_with("\n\n") {
                         self.output.push('\n');
                     }
@@ -1344,15 +1176,6 @@ impl Formatter {
                 SyntaxKind::HTML_BLOCK
                 | SyntaxKind::HTML_BLOCK_RAW
                 | SyntaxKind::HTML_BLOCK_DIV => {
-                    // A lifted HTML block (same-line `<div>...</div>`, single-
-                    // line comment, `<pre>foo</pre>`, etc.) can be the LIST_ITEM's
-                    // sole content when the parser's emit-time structural lift
-                    // (`ListItemBuffer::emit_as_block`) replaces the default
-                    // PLAIN/PARAGRAPH wrap. The marker-emit pass above produces
-                    // nothing in that case (no content_node, no lines); emit
-                    // the marker here and inline the HTML block text on the
-                    // same line. Pandoc preserves the list structure when
-                    // formatting these — without this we drop the marker.
                     let no_content_emitted = lines.is_empty()
                         && preserve_lines.is_none()
                         && sentence_lines.is_none()
@@ -1393,23 +1216,6 @@ impl Formatter {
                     }
                 }
                 SyntaxKind::PIPE_TABLE | SyntaxKind::GRID_TABLE => {
-                    // A table can be a LIST_ITEM's sole/first child (the parser
-                    // nests it; e.g. `- | a | b |`). The wrapping pass above
-                    // emits nothing for an item with no PLAIN/PARAGRAPH
-                    // content_node, so re-emit the marker here — otherwise it is
-                    // dropped and the table floats out of the list (and the
-                    // ordered-list re-indent breaks idempotency). The first
-                    // table line sits on the marker line; a bare marker with the
-                    // table indented below would reparse the table as a
-                    // paragraph.
-                    //
-                    // Captioned tables splice too: the parser now nests a
-                    // table-first item's trailing `: cap`/`Table: cap` as the
-                    // table's `TABLE_CAPTION` (matching pandoc), so the whole
-                    // table — caption rendered below by `format_pipe_table` /
-                    // `format_grid_table` at `content_indent` — goes on the
-                    // marker line. The splice strips only the first line's
-                    // indent, so the caption keeps its indentation.
                     let no_content_emitted = lines.is_empty()
                         && preserve_lines.is_none()
                         && sentence_lines.is_none()
@@ -1433,10 +1239,6 @@ impl Formatter {
                             | Some(SyntaxKind::GRID_TABLE)
                     );
                     let content_indent = list_indent.hanging_indent(total_indent);
-                    // The marker prefix occupies exactly `content_indent`
-                    // columns — except under `four_space_rule` (a flat tab
-                    // stop) or a task checkbox (which widens the marker line);
-                    // in those cases the splice would misalign, so fall back.
                     let prefix_width = total_indent
                         + list_indent.marker_padding
                         + marker.len()
@@ -1446,9 +1248,6 @@ impl Formatter {
                         && checkbox.is_none()
                         && prefix_width == content_indent
                     {
-                        // First table line on the marker line. Both `prefix` and
-                        // the table's first line are exactly `content_indent`
-                        // ASCII spaces wide, so splicing is byte-safe.
                         let prefix = format!(
                             "{}{}{}{}",
                             " ".repeat(total_indent),
@@ -1462,15 +1261,6 @@ impl Formatter {
                             }
                             _ => tables::format_grid_table(&child, &self.config, content_indent),
                         };
-                        // The marker prefix replaces the table's own first-line
-                        // indent. `format_pipe_table` normally writes exactly
-                        // `content_indent` spaces there, but it returns a table
-                        // it declines to reformat (surplus cells past the
-                        // delimiter row's column count) byte-for-byte instead,
-                        // and that text carries no indent at all. Strip the
-                        // indent only when it is really there — slicing it off
-                        // blindly ate the first cell of a verbatim table, and
-                        // did it again on every further pass.
                         let first_line_indent = " ".repeat(content_indent);
                         self.output.push_str(&prefix);
                         self.output.push_str(
@@ -1483,7 +1273,6 @@ impl Formatter {
                     }
                 }
                 _ => {
-                    // Other block elements - format with proper indentation
                     let content_indent = list_indent.hanging_indent(total_indent);
                     self.format_node_sync(&child, content_indent);
                 }

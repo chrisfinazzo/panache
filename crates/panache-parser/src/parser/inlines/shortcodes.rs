@@ -17,12 +17,10 @@ use crate::syntax::SyntaxKind;
 pub(crate) fn try_parse_shortcode(text: &str) -> Option<(usize, String, bool)> {
     let bytes = text.as_bytes();
 
-    // Check if we have enough characters for the opening marker
     if bytes.len() < 4 {
         return None;
     }
 
-    // Check for escaped shortcode first: {{{<
     let (is_escaped, marker_len) = if bytes.len() >= 4
         && bytes[0] == b'{'
         && bytes[1] == b'{'
@@ -36,12 +34,10 @@ pub(crate) fn try_parse_shortcode(text: &str) -> Option<(usize, String, bool)> {
         return None;
     };
 
-    // Find the closing marker (>}} or >}}})
     let close_marker = if is_escaped { ">}}}" } else { ">}}" };
     let close_marker_bytes = close_marker.as_bytes();
     let close_marker_len = close_marker_bytes.len();
 
-    // Search for the closing marker
     let mut pos = marker_len;
     let mut brace_depth: i32 = 0; // Track nested braces in content
 
@@ -50,13 +46,11 @@ pub(crate) fn try_parse_shortcode(text: &str) -> Option<(usize, String, bool)> {
             && &bytes[pos..pos + close_marker_len] == close_marker_bytes
             && brace_depth == 0
         {
-            // Found matching close marker with correct brace depth
             let content = &text[marker_len..pos];
             let total_len = pos + close_marker_len;
             return Some((total_len, content.to_string(), is_escaped));
         }
 
-        // Track brace depth to handle nested braces in content
         match bytes[pos] {
             b'{' => brace_depth += 1,
             b'}' => brace_depth = brace_depth.saturating_sub(1),
@@ -66,7 +60,6 @@ pub(crate) fn try_parse_shortcode(text: &str) -> Option<(usize, String, bool)> {
         pos += 1;
     }
 
-    // No matching close marker found
     None
 }
 
@@ -74,21 +67,17 @@ pub(crate) fn try_parse_shortcode(text: &str) -> Option<(usize, String, bool)> {
 pub(crate) fn emit_shortcode(builder: &mut impl InlineSink, content: &str, is_escaped: bool) {
     builder.start_node(SyntaxKind::SHORTCODE.into());
 
-    // Opening marker
     let open_marker = if is_escaped { "{{{<" } else { "{{<" };
     builder.token(SyntaxKind::SHORTCODE_MARKER_OPEN.into(), open_marker);
 
-    // Content (preserved as-is, formatter will normalize)
     builder.start_node(SyntaxKind::SHORTCODE_CONTENT.into());
 
-    // Emit content as TEXT, preserving all whitespace
     if !content.is_empty() {
         builder.token(SyntaxKind::TEXT.into(), content);
     }
 
     builder.finish_node(); // ShortcodeContent
 
-    // Closing marker
     let close_marker = if is_escaped { ">}}}" } else { ">}}" };
     builder.token(SyntaxKind::SHORTCODE_MARKER_CLOSE.into(), close_marker);
 

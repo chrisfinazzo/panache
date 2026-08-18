@@ -9,9 +9,6 @@ fn config() -> Config {
 
 #[test]
 fn issue_396_body_is_not_a_code_block() {
-    // Regression for #396: 4-space-indented admonition content was parsed as
-    // an indented code block, destroying the admonition. It must reflow as a
-    // normal paragraph instead.
     let input = "\
 !!! note
 
@@ -82,9 +79,6 @@ fn marker_line_not_split_under_sentence_wrap() {
 
 #[test]
 fn disabled_by_default_is_unchanged() {
-    // Without the extensions, the `!!!` line stays a literal paragraph and the
-    // 4-space body remains a code block (the default formatter renders it as a
-    // fenced block) — i.e. no admonition handling kicks in.
     let input = "!!! note\n\n    Body line.\n";
     let output = format(input, None, None);
     assert!(

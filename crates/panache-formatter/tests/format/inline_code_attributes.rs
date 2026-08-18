@@ -59,17 +59,14 @@ fn inline_code_attributes_in_wrapping_paragraph() {
     let input =
         "This is a long paragraph with `code`{.python} that should wrap at the configured width.\n";
     let output = format(input, Some(cfg), None);
-    // Should preserve inline code with attributes even when wrapping
     assert!(output.contains("`code`{.python}"));
 }
 
 #[test]
 fn inline_code_space_before_attributes() {
-    // Space between backticks and { should not parse as attributes
     let input = "Code: `test` {.python}.\n";
     let output = format(input, None, None);
     assert!(output.contains("`test`"));
-    // The {.python} should be treated as regular text
     assert!(output.contains("{.python}"));
 }
 
@@ -118,7 +115,6 @@ fn whitespace_only_codespan_stays_idempotent() {
     let first = format(input, None, None);
     let second = format(&first, None, None);
     assert_eq!(first, second);
-    // Two-space code-span content is preserved verbatim (single backtick).
     assert!(first.contains("spaces (`  `)"));
 }
 

@@ -1,12 +1,8 @@
-// Tests for inline parser functionality
-// These tests will be expanded as we implement inline parsing features
-
 #[cfg(test)]
 mod emphasis_tests {
     use crate::syntax::SyntaxKind;
 
     fn parse_inline(input: &str) -> crate::syntax::SyntaxNode {
-        // Use main parse function - now includes inline parsing during block parsing
         crate::parser::parse(input, None)
     }
 
@@ -90,7 +86,6 @@ mod emphasis_tests {
         let input = "This is ***both*** text.";
         let inline_tree = parse_inline(input);
 
-        // Triple emphasis creates nested Strong and Emphasis
         let strong = find_strong(&inline_tree);
         let emphasis = find_emphasis(&inline_tree);
 
@@ -123,7 +118,6 @@ mod emphasis_tests {
 
     #[test]
     fn test_emphasis_with_spaces() {
-        // Spaces around delimiters should prevent emphasis
         let input = "This is * not * italic.";
         let inline_tree = parse_inline(input);
 
@@ -484,14 +478,12 @@ mod escape_tests {
 
     #[test]
     fn test_escape_inside_code_span_not_processed() {
-        // Per spec: "Backslash escapes do not work in verbatim contexts"
         let input = r"`\*code\*`";
         let tree = parse_inline(input);
 
         let code_spans = count_nodes_of_kind(&tree, SyntaxKind::INLINE_CODE);
         assert_eq!(code_spans, 1, "Should create code span");
 
-        // The backslashes should be preserved as-is inside the code span
         let output = tree.to_string();
         assert!(
             output.contains(r"`\*code\*`"),
@@ -510,14 +502,12 @@ mod escape_tests {
 
     #[test]
     fn test_backslash_not_before_escapable() {
-        // Backslash before non-escapable character stays as-is
         let input = r"\a normal text";
         let tree = parse_inline(input);
 
         let escaped = count_nodes_of_kind(&tree, SyntaxKind::ESCAPED_CHAR);
         assert_eq!(escaped, 0, "Should not escape letter 'a'");
 
-        // The backslash should remain in output
         let output = tree.to_string();
         assert!(
             output.contains(r"\a"),
@@ -573,7 +563,6 @@ mod footnote_tests {
 
         let footnotes = find_footnotes(&tree);
         assert_eq!(footnotes.len(), 1);
-        // The footnote should contain the inline elements
         assert!(footnotes[0].contains("*emphasis*"));
         assert!(footnotes[0].contains("`code`"));
     }
@@ -632,7 +621,6 @@ mod footnote_tests {
             inner_refs_in_a_body.len()
         );
 
-        // The outer `[^a]` in the document paragraph still resolves normally.
         let outer_refs: Vec<_> = tree
             .descendants()
             .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_REFERENCE)
@@ -652,9 +640,6 @@ mod footnote_tests {
         let input = "Outer[^a].\n\n[^a]: Body with **bold [^b]** and ~~strike [^b]~~ and [link [^b]](u).\n\n[^b]: B.\n";
         let tree = parse_inline(input);
 
-        // Only the outer `[^a]` should be a FOOTNOTE_REFERENCE; all `[^b]`
-        // references inside the def body's inline wrappers fall through to
-        // TEXT.
         let all_refs: Vec<_> = tree
             .descendants()
             .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_REFERENCE)
@@ -766,10 +751,6 @@ mod bracketed_span_tests {
     }
 }
 
-// ========================================
-// Reference Images Tests
-// ========================================
-
 #[cfg(test)]
 mod reference_tests {
 
@@ -794,7 +775,6 @@ mod reference_tests {
             .find(|n| n.kind() == SyntaxKind::IMAGE_LINK)
             .expect("image node");
 
-        // Should preserve reference syntax
         let text = image.text().to_string();
         assert!(text.contains("![alt text][img-ref]"));
     }
@@ -812,7 +792,6 @@ mod reference_tests {
             .find(|n| n.kind() == SyntaxKind::IMAGE_LINK)
             .expect("image node");
 
-        // Should preserve implicit reference syntax
         let text = image.text().to_string();
         assert!(text.contains("![image ref][]"));
     }
@@ -824,7 +803,6 @@ mod reference_tests {
         let parsed = parse_with_refs(input);
         let para = parsed.first_child().expect("paragraph");
 
-        // Should still parse as an image, but keep original reference syntax
         let text = para.text().to_string();
         assert!(text.contains("![alt][missing-ref]"));
     }
@@ -842,7 +820,6 @@ mod reference_tests {
             .find(|n| n.kind() == SyntaxKind::IMAGE_LINK)
             .expect("image node");
 
-        // Should preserve reference syntax (case insensitivity is for lookup, not formatting)
         let text = image.text().to_string();
         assert!(text.contains("![ALT][MyRef]"));
     }
@@ -932,7 +909,6 @@ mod raw_inline_tests {
 
         let inline_tree = parse_inline_with_config(input, config);
 
-        // Should be treated as regular code span with attributes
         let raw_inlines = find_raw_inline(&inline_tree);
         assert_eq!(raw_inlines.len(), 0);
 
@@ -943,7 +919,6 @@ mod raw_inline_tests {
 
     #[test]
     fn test_code_span_with_regular_class() {
-        // Regular code span with .class should not be treated as raw inline
         let input = "This is `code`{.python} text.";
         let inline_tree = parse_inline(input);
 
@@ -982,11 +957,9 @@ mod raw_inline_tests {
 
     #[test]
     fn test_raw_inline_with_id_not_raw() {
-        // If attributes include ID, it's not a raw inline
         let input = "This is `code`{#myid =html} text.";
         let inline_tree = parse_inline(input);
 
-        // Should be code span, not raw inline (because it has an ID)
         let raw_inlines = find_raw_inline(&inline_tree);
         assert_eq!(raw_inlines.len(), 0);
 
@@ -996,11 +969,9 @@ mod raw_inline_tests {
 
     #[test]
     fn test_raw_inline_with_key_value_not_raw() {
-        // If attributes include key=value, it's not a raw inline
         let input = "This is `code`{=html key=val} text.";
         let inline_tree = parse_inline(input);
 
-        // Should be code span, not raw inline
         let raw_inlines = find_raw_inline(&inline_tree);
         assert_eq!(raw_inlines.len(), 0);
 
@@ -1136,8 +1107,6 @@ mod extension_guard_tests {
 
     #[test]
     fn gfm_flavor_reads_trailing_backslash_as_hard_break() {
-        // `pandoc -f gfm` yields `[Str "foo", LineBreak, Str "bar"]` here,
-        // because GFM inherits CommonMark's backslash hard break.
         let config = ParserOptions {
             flavor: Flavor::Gfm,
             dialect: Dialect::for_flavor(Flavor::Gfm),
@@ -1351,15 +1320,11 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_triple_emphasis_with_nested_strong() {
-        // Issue: ***foo **bar** baz***
-        // Should parse as: EMPH containing STRONG("foo"), text(" bar "), STRONG("baz")
-        // Currently: Fails to parse triple emphasis, treats *** as literal text
         let input = "***foo **bar** baz***";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Should have 1 EMPHASIS node
         let emph_count = count_node_type(&tree, SyntaxKind::EMPHASIS);
         assert_eq!(
             emph_count, 1,
@@ -1367,7 +1332,6 @@ mod complex_emphasis_tests {
             emph_count
         );
 
-        // Should have 2 STRONG nodes inside the EMPHASIS
         let strong_count = count_node_type(&tree, SyntaxKind::STRONG);
         assert_eq!(
             strong_count, 2,
@@ -1375,7 +1339,6 @@ mod complex_emphasis_tests {
             strong_count
         );
 
-        // Should NOT have TEXT nodes containing ***
         let text_nodes = find_text_nodes(&tree);
         for text in &text_nodes {
             assert!(
@@ -1388,20 +1351,11 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_adjacent_strong_delimiters() {
-        // Input: **foo****bar**
-        // Parser behavior: Two separate STRONG nodes (this is correct for CST)
-        // Formatter should merge them to **foobar**
-        //
-        // Note: Pandoc's AST shows Strong[Str "foo", Str "bar"] but that's after
-        // AST normalization. The parser naturally produces two STRONG nodes when
-        // `****` acts as closer + opener.
         let input = "**foo****bar**";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Parser produces 2 STRONG nodes - this is correct CST behavior
-        // The formatter is responsible for merging adjacent emphasis
         let strong_count = count_node_type(&tree, SyntaxKind::STRONG);
         assert_eq!(
             strong_count, 2,
@@ -1412,8 +1366,6 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_triple_emphasis_simple() {
-        // Simple case: ***text***
-        // Should parse as: STRONG > EMPH > text
         let input = "***simple***";
         let tree = parse_inline(input);
 
@@ -1422,35 +1374,25 @@ mod complex_emphasis_tests {
         let emph_count = count_node_type(&tree, SyntaxKind::EMPHASIS);
         let strong_count = count_node_type(&tree, SyntaxKind::STRONG);
 
-        // Should have 1 of each (nested)
         assert_eq!(emph_count, 1, "Expected 1 EMPHASIS node");
         assert_eq!(strong_count, 1, "Expected 1 STRONG node");
     }
 
     #[test]
     fn test_overlapping_delimiters_with_escapes() {
-        // Issue: *foo **bar* baz**
-        // This is a complex case with overlapping boundaries
         let input = "*foo **bar* baz**";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
-
-        // Need to verify Pandoc's exact parsing here
-        // Likely: *foo **bar* (emphasis closes first) + remaining baz**
     }
 
     #[test]
     fn test_emphasis_after_escaped_delimiter() {
-        // Test: \**not bold\**
-        // After \*, should still be able to parse *not bold*
-        // Currently works but formats with extra escaping
         let input = r"\**not bold\**";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Should have ESCAPED_CHAR nodes for \*
         let escaped_count = tree
             .descendants_with_tokens()
             .filter(|n| {
@@ -1463,35 +1405,25 @@ mod complex_emphasis_tests {
             .count();
 
         assert_eq!(escaped_count, 2, "Expected 2 ESCAPED_CHAR nodes");
-
-        // Note: Our current parse is actually reasonable, just formats differently than Pandoc
     }
 
     #[test]
     fn test_triple_emphasis_with_embedded_double() {
-        // More specific test for the triple emphasis bug
-        // Input: ***a **b** c***
-        // The ** around "b" should be parsed as nested STRONG
-        // The *** should find the closing *** at the end
         let input = "***a **b** c***";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Debug: print all node kinds
         for node in tree.descendants() {
             println!("Node: {:?} = {}", node.kind(), node);
         }
 
-        // Should have EMPHASIS wrapping everything
         let emph_count = count_node_type(&tree, SyntaxKind::EMPHASIS);
         assert!(emph_count >= 1, "Should have at least 1 EMPHASIS node");
 
-        // Should have STRONG for "b"
         let strong_count = count_node_type(&tree, SyntaxKind::STRONG);
         assert!(strong_count >= 1, "Should have at least 1 STRONG node");
 
-        // The opening *** should not be treated as TEXT
         let text_nodes = find_text_nodes(&tree);
         let has_triple_star_text = text_nodes.iter().any(|t| t.starts_with("***"));
         assert!(
@@ -1503,18 +1435,11 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_triple_emphasis_pandoc_structure() {
-        // Input: ***foo **bar** baz***
-        // Pandoc parses as: Emph[Strong["foo "], "bar", Strong[" baz"]]
-        // NOT as: Strong[Emph["foo ", Strong["bar"], " baz"]]
-        //
-        // The key is that `**` at position 7 acts as an ender for the `***` opener,
-        // triggering the `ender c 2 >> one c (B.strong <$> contents)` fallback.
         let input = "***foo **bar** baz***";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Find the top-level emphasis/strong structure
         let paragraph = tree.children().find(|n| n.kind() == SyntaxKind::PARAGRAPH);
         assert!(paragraph.is_some(), "Should have PARAGRAPH");
 
@@ -1522,9 +1447,6 @@ mod complex_emphasis_tests {
         let first_child = para.children().next();
         assert!(first_child.is_some(), "PARAGRAPH should have children");
 
-        // According to Pandoc, the outermost element should be EMPHASIS (not STRONG)
-        // because the `***` opener matches with `ender c 2` fallback which produces
-        // `one c (B.strong <$> contents)` = Emph[Strong[...], ...]
         let first_kind = first_child.as_ref().unwrap().kind();
         assert_eq!(
             first_kind,
@@ -1533,7 +1455,6 @@ mod complex_emphasis_tests {
             first_kind
         );
 
-        // Count nested STRONG nodes inside the EMPHASIS
         let emph_node = first_child.unwrap();
         let strong_count: usize = emph_node
             .descendants()
@@ -1548,8 +1469,6 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_nested_emphasis_and_strong() {
-        // Test: **foo *bar* baz**
-        // Should parse as STRONG containing EMPH
         let input = "**foo *bar* baz**";
         let tree = parse_inline(input);
 
@@ -1565,8 +1484,6 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_nested_strong_and_emphasis() {
-        // Test: *foo **bar** baz*
-        // Should parse as EMPH containing STRONG
         let input = "*foo **bar** baz*";
         let tree = parse_inline(input);
 
@@ -1582,14 +1499,11 @@ mod complex_emphasis_tests {
 
     #[test]
     fn test_deeply_nested_emphasis() {
-        // Test: **foo *bar **nested** baz* qux**
-        // Complex nesting: STRONG > EMPH > STRONG
         let input = "**foo *bar **nested** baz* qux**";
         let tree = parse_inline(input);
 
         println!("Tree:\n{:#?}", tree);
 
-        // Should have 2 STRONG nodes and 1 EMPH node
         let strong_count = count_node_type(&tree, SyntaxKind::STRONG);
         let emph_count = count_node_type(&tree, SyntaxKind::EMPHASIS);
 
@@ -1634,7 +1548,6 @@ mod hard_break_tests {
         }
     }
 
-    /// The same run *within* a block still is a hard break.
     #[test]
     fn trailing_spaces_mid_paragraph_are_a_break() {
         for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
@@ -1643,7 +1556,6 @@ mod hard_break_tests {
         }
     }
 
-    /// A single trailing space is a soft break in every dialect.
     #[test]
     fn single_trailing_space_is_not_a_break() {
         for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
@@ -1663,7 +1575,6 @@ mod hard_break_tests {
         }
     }
 
-    /// ... but not when it lands on the last line of the block.
     #[test]
     fn trailing_tab_at_end_of_paragraph_is_not_a_break() {
         for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
@@ -1671,7 +1582,6 @@ mod hard_break_tests {
         }
     }
 
-    /// Whitespace runs that are not at a line ending are ordinary text.
     #[test]
     fn interior_whitespace_is_not_a_break() {
         for dialect in [Dialect::Pandoc, Dialect::CommonMark] {
@@ -1679,7 +1589,6 @@ mod hard_break_tests {
         }
     }
 
-    /// Every byte still has to survive the round trip.
     #[test]
     fn hard_break_edge_cases_stay_lossless() {
         let input = "one\ntwo   \nthree\n\nfour  \n\nfive\t\nsix\n\nseven \neight\n";
@@ -1697,11 +1606,6 @@ mod hard_break_tests {
             .collect()
     }
 
-    /// Whitespace sitting immediately before a backslash hard line break is
-    /// part of the break, not content: both readers report `[Str "foo",
-    /// LineBreak]` for `foo \` + newline, with no `Space` in between. The
-    /// bytes still have to live somewhere, so the break token absorbs them
-    /// the way it already does for the whitespace-only form.
     #[test]
     fn backslash_break_absorbs_the_whitespace_before_it() {
         for dialect in [Dialect::Pandoc, Dialect::CommonMark] {

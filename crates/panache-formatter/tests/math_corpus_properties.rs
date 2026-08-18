@@ -99,7 +99,6 @@ fn corpus_satisfies_math_formatter_properties() {
         };
         let context = context_for(&id);
 
-        // (2) Parser losslessness: the structural CST round-trips the input.
         let green = parse_math_content(
             &input,
             MathParseOptions {
@@ -117,8 +116,6 @@ fn corpus_satisfies_math_formatter_properties() {
             continue;
         }
 
-        // (3) Gate-off returns None: the caller then emits the content verbatim,
-        // so a mis-wired off call site can never change bytes.
         if format_math(&input, &opts(false, context)).is_some() {
             failures.push(format!(
                 "[{id}] gate-off should return None (caller emits verbatim):\n  input:\n{}",
@@ -127,9 +124,6 @@ fn corpus_satisfies_math_formatter_properties() {
             continue;
         }
 
-        // (1) Idempotency: reflowing a reflowed result is a no-op. Non-reflowable
-        // content (malformed / lone `$`) returns None and is emitted verbatim by
-        // the caller, so there is nothing to iterate.
         if let Some(once) = format_math(&input, &opts(true, context)) {
             let twice = format_math(&once, &opts(true, context));
             if twice.as_deref() != Some(once.as_str()) {

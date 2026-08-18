@@ -12,10 +12,6 @@ use crate::parser::inlines::code_spans::pending_code_span_openers;
 use crate::parser::inlines::sink::{InjectedMarker, MarkerInjectingSink};
 use rowan::GreenNodeBuilder;
 
-// ============================================================================
-// ParagraphBuffer - Interleaved buffer for paragraphs with structural markers
-// ============================================================================
-
 /// A segment in the paragraph buffer - either text content or a structural marker.
 #[derive(Debug, Clone)]
 pub(crate) enum ParagraphSegment {
@@ -33,7 +29,6 @@ pub(crate) enum ParagraphSegment {
 }
 
 impl ParagraphSegment {
-    /// Bytes this segment contributes to [`ParagraphBuffer::raw_text`].
     fn raw_len(&self) -> usize {
         match self {
             ParagraphSegment::Text(text) => text.len(),
@@ -176,9 +171,6 @@ impl ParagraphBuffer {
         tail
     }
 
-    /// Get the byte positions where markers should be inserted in the concatenated text.
-    ///
-    /// Returns a list of `(byte_offset, marker)` pairs.
     fn get_marker_positions(&self) -> Vec<(usize, InjectedMarker<'_>)> {
         let mut positions = Vec::new();
         let mut byte_offset = 0;
@@ -228,10 +220,8 @@ impl ParagraphBuffer {
         let marker_positions = self.get_marker_positions();
 
         if marker_positions.is_empty() {
-            // No markers - simple case, just emit inlines
             inline_emission::emit_inlines(builder, &text, config, suppress_footnote_refs);
         } else {
-            // Complex case: emit inlines with markers interspersed
             self.emit_with_markers(
                 builder,
                 &text,
@@ -242,13 +232,6 @@ impl ParagraphBuffer {
         }
     }
 
-    /// Emit inline content with markers at specified byte positions.
-    ///
-    /// The inline parser runs *once* over the full text (so multiline inlines
-    /// like STRONG can span blockquote marker boundaries), emitting straight
-    /// into a [`MarkerInjectingSink`] that splices the `LINE_PREFIX`
-    /// tokens in at the recorded offsets during the same pass — no temporary
-    /// tree is built and replayed.
     fn emit_with_markers(
         &self,
         builder: &mut GreenNodeBuilder<'static>,
@@ -299,7 +282,6 @@ mod paragraph_buffer_tests {
         buffer.push_text(", ");
         buffer.push_text("world!");
         assert_eq!(buffer.get_text_for_parsing(), "Hello, world!");
-        // Should be a single Text segment due to concatenation
         assert_eq!(buffer.segments.len(), 1);
     }
 
@@ -309,7 +291,6 @@ mod paragraph_buffer_tests {
         buffer.push_text("Line 1\n");
         buffer.push_marker(0, true);
         buffer.push_text("Line 2\n");
-        // Should be: Text, Marker, Text
         assert_eq!(buffer.segments.len(), 3);
         assert_eq!(buffer.get_text_for_parsing(), "Line 1\nLine 2\n");
     }

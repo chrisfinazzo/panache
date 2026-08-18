@@ -42,7 +42,6 @@ pub(crate) fn try_parse_target(content: &str) -> Option<Target> {
         return None;
     }
 
-    // The marker is the LAST `)=` on the line so labels may contain `)`.
     let close = rest.rfind(")=")?;
     if close < 2 {
         return None; // empty label `()=`
@@ -153,7 +152,6 @@ mod tests {
     fn target_allows_trailing_whitespace_and_indent() {
         let t = try_parse_target("  (sec:intro)=  \n").unwrap();
         assert_eq!(t.indent_len, 2);
-        // label between `(` and `)=`
         let src = "  (sec:intro)=  \n";
         assert_eq!(&src[t.label.0..t.label.1], "sec:intro");
     }
@@ -196,7 +194,6 @@ mod tests {
         let src = "  + + +\n";
         let b = try_parse_block_break(src).unwrap();
         assert_eq!(b.indent_len, 2);
-        // marker run spans the last `+`
         assert_eq!(&src[b.indent_len..b.marker_end], "+ + +");
         assert_eq!(b.metadata, (b.marker_end, b.marker_end));
     }

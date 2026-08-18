@@ -57,7 +57,6 @@ fn lines_with_prefix(
     let mut current = String::new();
     collect(node, escaped_line_breaks, prefix, &mut lines, &mut current);
 
-    // Mirror `str::lines`: a block ending in a newline has no empty final line.
     if !current.is_empty() {
         lines.push(trim_padding(&current));
     }
@@ -96,8 +95,6 @@ fn collect(
     }
 }
 
-/// Trim only ASCII spaces and tabs. `str::trim_end` would also eat a
-/// non-breaking space, which is content.
 fn trim_padding(line: &str) -> String {
     line.trim_end_matches([' ', '\t']).to_string()
 }

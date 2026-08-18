@@ -22,7 +22,6 @@ pub(crate) fn try_parse_bracketed_span(text: &str) -> Option<(usize, String, Str
         return None;
     }
 
-    // Find the closing bracket, tracking nesting
     let mut pos = 1;
     let mut depth = 1;
     let mut escaped = false;
@@ -40,15 +39,12 @@ pub(crate) fn try_parse_bracketed_span(text: &str) -> Option<(usize, String, Str
             b']' => {
                 depth -= 1;
                 if depth == 0 {
-                    // Found closing bracket, now check for attributes
                     let content = &text[1..pos];
 
-                    // Must be immediately followed by {attributes}
                     if pos + 1 >= text.len() || bytes[pos + 1] != b'{' {
                         return None;
                     }
 
-                    // Find the closing brace for attributes
                     let attr_start = pos + 2;
                     let mut attr_pos = attr_start;
                     let mut attr_escaped = false;
@@ -63,7 +59,6 @@ pub(crate) fn try_parse_bracketed_span(text: &str) -> Option<(usize, String, Str
                         match bytes[attr_pos] {
                             b'\\' => attr_escaped = true,
                             b'}' => {
-                                // Found closing brace
                                 let attributes = &text[attr_start..attr_pos];
                                 let total_len = attr_pos + 1;
                                 return Some((
@@ -77,7 +72,6 @@ pub(crate) fn try_parse_bracketed_span(text: &str) -> Option<(usize, String, Str
                         attr_pos += 1;
                     }
 
-                    // No closing brace found
                     return None;
                 }
             }
@@ -99,20 +93,14 @@ pub(crate) fn emit_bracketed_span(
 ) {
     builder.start_node(SyntaxKind::BRACKETED_SPAN.into());
 
-    // Opening bracket
     builder.token(SyntaxKind::SPAN_BRACKET_OPEN.into(), "[");
 
-    // Content (with recursive inline parsing)
     builder.start_node(SyntaxKind::SPAN_CONTENT.into());
     parse_inline_text(builder, content, config, false, suppress_footnote_refs);
     builder.finish_node(); // SpanContent
 
-    // Closing bracket
     builder.token(SyntaxKind::SPAN_BRACKET_CLOSE.into(), "]");
 
-    // Attributes: structure the Pandoc `{...}` body into ATTR_* children,
-    // wrapping the original source bytes (formatter normalizes on output).
-    // `attributes` is the inner content; reconstruct the full `{...}` slice.
     emit_span_attributes_node(builder, &format!("{{{attributes}}}"));
 
     builder.finish_node(); // BracketedSpan
@@ -164,14 +152,12 @@ mod tests {
 
     #[test]
     fn requires_attributes() {
-        // Without attributes, should not parse
         let result = try_parse_bracketed_span("[text]");
         assert!(result.is_none());
     }
 
     #[test]
     fn requires_immediate_attributes() {
-        // Space between ] and { should not parse
         let result = try_parse_bracketed_span("[text] {.class}");
         assert!(result.is_none());
     }

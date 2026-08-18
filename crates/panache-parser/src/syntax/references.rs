@@ -4,8 +4,6 @@ use super::ast::support;
 use super::links::Link;
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode};
 
-/// Strip a reference title's surrounding `"…"`, `'…'`, or `(…)` delimiters.
-/// Returns the input unchanged when it isn't delimiter-wrapped.
 fn strip_title_delimiters(raw: &str) -> String {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2 {
@@ -285,7 +283,6 @@ impl FootnoteDefinition {
     /// Extracts the content of the footnote definition.
     /// Returns the text content after the `[^id]:` marker.
     pub fn content(&self) -> String {
-        // Skip the definition marker tokens and collect all other content
         self.0
             .children_with_tokens()
             .filter_map(|child| match child {
@@ -311,18 +308,12 @@ impl FootnoteDefinition {
     /// Check if this footnote definition is simple (single paragraph, no complex blocks).
     /// Simple footnotes can be converted to inline style.
     pub fn is_simple(&self) -> bool {
-        // Simple footnote has:
-        // - No blank lines in content (single paragraph)
-        // - No code blocks, lists, or other block elements
         let content = self.content();
 
-        // Check for blank lines (indicates multi-paragraph)
         if content.contains("\n\n") {
             return false;
         }
 
-        // Check for code blocks (need to distinguish from continuation lines)
-        // Code blocks have 8+ spaces (4 for footnote + 4 for code)
         if content
             .lines()
             .skip(1)
@@ -331,7 +322,6 @@ impl FootnoteDefinition {
             return false;
         }
 
-        // Check for list markers in continuation lines (after first line)
         for line in content.lines().skip(1) {
             let trimmed = line.trim_start();
             if trimmed.starts_with("- ")
@@ -348,7 +338,6 @@ impl FootnoteDefinition {
             }
         }
 
-        // Check for list nodes in the CST (handles nested lists reliably).
         if self
             .0
             .descendants()
@@ -390,7 +379,6 @@ impl InlineFootnote {
             .children_with_tokens()
             .filter_map(|child| {
                 if let Some(token) = child.as_token() {
-                    // Skip the start and end markers
                     if token.kind() != SyntaxKind::INLINE_FOOTNOTE_START
                         && token.kind() != SyntaxKind::INLINE_FOOTNOTE_END
                     {
@@ -399,7 +387,6 @@ impl InlineFootnote {
                         None
                     }
                 } else {
-                    // Include nested nodes (emphasis, code, etc.)
                     child.as_node().map(|node| node.text().to_string())
                 }
             })
@@ -423,8 +410,6 @@ mod tests {
             .expect("Should find ReferenceDefinition");
 
         assert_eq!(def.label(), "ref");
-        // url()/destination() now return just the destination, read from the
-        // structured REFERENCE_URL node — no trailing title glommed on.
         assert_eq!(def.url().as_deref(), Some("https://example.com"));
         assert_eq!(def.destination().as_deref(), Some("https://example.com"));
         assert_eq!(def.title().as_deref(), Some("Title"));
@@ -440,9 +425,6 @@ mod tests {
             .find_map(ReferenceDefinition::cast)
             .expect("Should find ReferenceDefinition");
 
-        // url() strips the angle brackets; destination() keeps them so LSP
-        // consumers (extract_first_destination_token, heading_label_from_
-        // destination) can still recover URLs that contain spaces.
         assert_eq!(def.url().as_deref(), Some("https://example.com/path"));
         assert_eq!(
             def.destination().as_deref(),
@@ -554,7 +536,6 @@ mod tests {
 
     #[test]
     fn test_footnote_definition_is_simple() {
-        // Simple single-line
         let input = "[^1]: Simple text.";
         let root = parse(input, None);
         let def = root
@@ -563,7 +544,6 @@ mod tests {
             .unwrap();
         assert!(def.is_simple());
 
-        // Simple with continuation
         let input2 = "[^1]: First line\n    continuation.";
         let root2 = parse(input2, None);
         let def2 = root2
@@ -575,7 +555,6 @@ mod tests {
 
     #[test]
     fn test_footnote_definition_is_complex() {
-        // Multi-paragraph (blank line)
         let input = "[^1]: First para.\n\n    Second para.";
         let root = parse(input, None);
         let def = root
@@ -584,7 +563,6 @@ mod tests {
             .unwrap();
         assert!(!def.is_simple(), "Multi-paragraph should not be simple");
 
-        // With list
         let input2 = "[^1]: Text\n    - Item 1\n    - Item 2";
         let root2 = parse(input2, None);
         let def2 = root2
@@ -593,7 +571,6 @@ mod tests {
             .unwrap();
         assert!(!def2.is_simple(), "Footnote with list should not be simple");
 
-        // With code block
         let input3 = "[^1]: Text\n\n        code block";
         let root3 = parse(input3, None);
         let def3 = root3

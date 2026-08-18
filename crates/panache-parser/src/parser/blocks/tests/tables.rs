@@ -11,7 +11,6 @@ fn commonmark_options() -> ParserOptions {
     }
 }
 
-/// Kinds of `node`'s direct children.
 fn child_kinds(node: &SyntaxNode) -> Vec<SyntaxKind> {
     node.children().map(|child| child.kind()).collect()
 }
@@ -20,7 +19,6 @@ fn first_of(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.descendants().find(|n| n.kind() == kind)
 }
 
-/// Text of every `TABLE_CELL` in the table's header row.
 fn header_cells(node: &SyntaxNode) -> Vec<String> {
     first_of(node, SyntaxKind::TABLE_HEADER)
         .map(|header| {
@@ -33,17 +31,8 @@ fn header_cells(node: &SyntaxNode) -> Vec<String> {
         .unwrap_or_default()
 }
 
-// ---------------------------------------------------------------------------
-// Bodyless pipe tables
-//
-// pandoc's `pipeTable` reads the rows after the delimiter with `many`, so a
-// header plus a delimiter row and nothing else is a complete table.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn pipe_table_without_body_rows_is_a_table() {
-    // pandoc -f markdown on `a | b\n---|---`: a Table whose head carries
-    // `a` and `b` and whose body is empty.
     let input = "a | b\n---|---\n";
     let node = parse_blocks(input);
 
@@ -58,8 +47,6 @@ fn pipe_table_without_body_rows_is_a_table() {
 
 #[test]
 fn bodyless_pipe_table_still_needs_a_delimiter_row() {
-    // Without a delimiter row there is no table at all — the two lines stay
-    // one paragraph, as they were before bodyless tables were recognized.
     let input = "a | b\nc | d\n";
     let node = parse_blocks(input);
 
@@ -69,9 +56,6 @@ fn bodyless_pipe_table_still_needs_a_delimiter_row() {
 
 #[test]
 fn setext_underline_outranks_a_bodyless_pipe_table() {
-    // pandoc -f markdown on `a | b\n---`: Header 2 [Str "a", Space, Str "|",
-    // Space, Str "b"]. `setextHeader` runs before `table` in the reader
-    // order, and the registry mirrors it.
     let input = "a | b\n---\n";
     let node = parse_blocks(input);
 
@@ -88,19 +72,8 @@ fn bodyless_pipe_table_is_recognized_under_gfm() {
     assert_eq!(child_kinds(&node), vec![SyntaxKind::PIPE_TABLE]);
 }
 
-// ---------------------------------------------------------------------------
-// Bodyless pipe tables as a blockquote depth cap
-//
-// `blockQuote` strips exactly one `>` per line and re-parses the rest, and
-// `table` runs before it in pandoc's reader order — so a delimiter row
-// carrying fewer markers than its header line caps the quote and the surplus
-// `>` becomes literal cell text. See `Parser::blockquote_depth_cap`.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn bodyless_pipe_table_caps_nested_blockquote_under_pandoc() {
-    // pandoc -f markdown on `> > a | b\n> ---|---`: BlockQuote [Table …]
-    // with `> a` as the first header cell.
     let input = "> > a | b\n> ---|---\n";
     let node = parse_blocks(input);
 
@@ -127,9 +100,6 @@ fn bodyless_pipe_table_caps_nested_blockquote_under_pandoc() {
 
 #[test]
 fn bodyless_pipe_table_does_not_cap_under_commonmark() {
-    // CommonMark has no pipe tables, so nothing outranks `blockQuote` here
-    // and both markers open real containers — matching
-    // `pandoc -f commonmark`: BlockQuote [BlockQuote [Para …]].
     let input = "> > a | b\n> ---|---\n";
     let node = parse_blocks_with_config(input, &commonmark_options());
 
@@ -138,26 +108,6 @@ fn bodyless_pipe_table_does_not_cap_under_commonmark() {
     assert_eq!(outer.kind(), SyntaxKind::BLOCK_QUOTE);
     assert_eq!(child_kinds(&outer), vec![SyntaxKind::BLOCK_QUOTE]);
 }
-
-// ---------------------------------------------------------------------------
-// Container line runs end at a fenced-div closer
-//
-// pandoc collects a list item's / definition body's / blockquote's raw lines
-// before parsing them as blocks, and that collection runs under
-// `notFollowedByDivCloser`. So a bare `:::` inside an open div ends the run:
-// the fence belongs to the div, and no table scan started inside the
-// container may reach past it. The container-frame bound cannot see this --
-// a closer at column 0 carries no indent to compare.
-//
-// Whether a headered simple table cut off by the closer survives depends
-// on the terminated chain (all probed): pandoc's footer rule
-// (`blanklines`) needs a blank line after the last row, and only a
-// blockquote or footnote body inside the chain supplies one on reparse (a
-// quote's raw gets `"\n\n"` appended, a note's gets `"\n"`). A table
-// sitting directly in the div survives too — nothing between the closer
-// and the div's own content parse loses the blank. A list item or
-// definition body without such a rescue degrades the table to a
-// paragraph.
 
 /// `pandoc -f markdown -t native`: BlockQuote [Table ...], the div closes,
 /// and `after` is a sibling of the div. The closer is never a table row.
@@ -347,17 +297,6 @@ fn note_body_table_in_a_div_survives_the_div_closer() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Container line runs end at a new note marker
-//
-// pandoc collects a footnote's raw lines in `noteBlock`, whose `rawLine`
-// stops at a new note marker reached by `skipNonindentSpaces >> noteMarker`
-// -- at most 3 spaces in the note's *outer* frame. The fence applies to
-// everything nested inside the note (its lines are part of the note's
-// collected raw), but lives in `noteBlock` only: a plain list item's
-// `listLine` has no such guard, and pandoc collects a stray marker there
-// as ordinary content.
-
 fn footnote_definitions(node: &SyntaxNode) -> Vec<SyntaxNode> {
     node.descendants()
         .filter(|n| n.kind() == SyntaxKind::FOOTNOTE_DEFINITION)
@@ -457,22 +396,6 @@ fn note_marker_ends_a_list_item_table_inside_a_footnote_body() {
         table.text()
     );
 }
-
-// ---------------------------------------------------------------------------
-// Container line runs end at a new list start
-//
-// pandoc collects a list item's continuation lines with
-// `listContinuationLine = notFollowedBy blankline >> notFollowedBy'
-// listStart >> ...`, where `listStart` tolerates `nonindentSpaces` (at most
-// 3 columns) in the frame the list was parsed in. So a marker line within
-// that tolerance ends the item's run; one at the item's content column is
-// nested-list content; and one in between is a lazy continuation. A
-// headered simple table cut off by the terminator degrades further:
-// pandoc's footer rule (`blanklines`) needs a blank line after the last
-// row, the item's collected raw ends contiguously without one, and the
-// lines reparse as a paragraph. A blockquote between the item and the
-// table rescues it — pandoc reparses a quote's raw with `"\n\n"` appended,
-// so the blank materializes (all shapes probed).
 
 /// `pandoc -f markdown -t native`: `- next` is a sibling item, and the
 /// contiguous run end fails the table's footer rule, so item 1 holds a
@@ -629,22 +552,6 @@ fn list_marker_within_nonindent_tolerance_ends_the_run() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Container line runs end at an HTML closer (markdown-in-html)
-//
-// Inside markdown-in-html, pandoc guards its line collectors with
-// `notFollowedByHtmlCloser`: a line opening with the close form of the open
-// tag ends a collected run. The open tag lives in a list item's buffer
-// (markdown-in-html is not a stack transition here), and the fence is
-// ordering-gated at that item — its own run is not fenced (pandoc itself
-// slices the closer into the item's own table), only containers pushed
-// above it are. The guard's `htmlTag` skips no whitespace, so the closer
-// fires at up to the item's content column of indent and not one more.
-// Known, deliberate divergence: pandoc wraps the whole item body in a
-// `Div` (the markdown-in-html structural lift); panache keeps the open
-// and close tags as raw siblings — see the allowlist rationale for
-// pandoc-conformance 0464 and TODO.md.
-
 /// `pandoc -f markdown -t native` on `- <div>` + blank + quoted simple
 /// table + `  </div>`: `Div [BlockQuote [Table]]` — the quote's run
 /// stops and the closer belongs to the div. Before this fence the quoted
@@ -794,18 +701,6 @@ fn nested_item_table_degrades_at_the_html_closer() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// The pipe-table row scan ends at container line-run terminators
-//
-// The row loop used to stop only on a blank line or a line without `|`,
-// which let a container-ending line *containing* a pipe — a sibling list
-// start `- e | f`, a new note marker `[^2]: e | f` — be swallowed as a
-// data row. pandoc's line-run collection (`listContinuationLine`,
-// `noteBlock`) ends the run before the table parser ever sees the line.
-// Div closers and HTML closers carry no `|`, so the old gate already
-// stopped there by accident; these pins cover the terminators the gate
-// missed.
-
 /// `pandoc -f markdown -t native`: `- e | f` is a sibling item, never a
 /// pipe-table row.
 #[test]
@@ -900,16 +795,6 @@ fn pipe_table_in_a_footnote_body_ends_at_a_note_marker() {
     assert_eq!(notes.len(), 2, "the second note survives the table scan");
 }
 
-// ---------------------------------------------------------------------------
-// The grid-table scan ends at container line-run terminators
-//
-// Unlike the pipe scan, no terminator can shape-match a grid line: content
-// rows must open with `|`, and separator segments admit no spaces, so a
-// sibling list start, note marker, div closer, or HTML closer always
-// failed the grid-line checks and stopped the scan anyway. The scan still
-// consults `ends_container_lines` so the stop is an invariant, not a
-// coincidence of the current shapes; these pins document the behavior.
-
 /// `pandoc -f markdown -t native`: `- next` is a sibling item after the
 /// grid table, never a row.
 #[test]
@@ -956,16 +841,6 @@ fn grid_table_in_a_fenced_div_ends_at_the_closer() {
         table.text()
     );
 }
-
-// ---------------------------------------------------------------------------
-// Partial (rowspan) grid separators are table structure
-//
-// A row boundary under a rowspan cell shows spaces instead of dashes for
-// the continuing columns (`+   +---+`). Such a line is neither a full
-// separator nor a `|`-leading content row, so the grid scan used to stop
-// there — and in a container the `+` + spaces opening then read as a list
-// marker, so the table's tail parsed as sibling blocks (a nested list, a
-// second table) where pandoc keeps one table.
 
 /// `pandoc -f markdown -t native`: one Table, first-column cell RowSpan 2.
 #[test]
@@ -1076,20 +951,6 @@ fn dedented_partial_separator_still_ends_the_list_item() {
         .collect();
     assert_eq!(items.len(), 2, "the dedented line opens a sibling item");
 }
-
-// ---------------------------------------------------------------------------
-// The multiline-table scan ends at container line-run terminators
-//
-// The scan used to cross container ends hunting for a closing separator:
-// a `:::` div closer, a sibling list start, or a raw blank inside a
-// blockquote was collected (or peeked past) and a closer found beyond it
-// completed the table, swallowing the terminator as a row. pandoc's
-// line-run collection stops at the terminator, so no closer beyond it can
-// complete the shape; the truncated run then reparses as a smaller
-// single-column table, a horizontal rule, or a paragraph. Unmatched `:::`
-// fences and `::: x` openers are ordinary rows in pandoc (probed), so the
-// old `crossed_scope_boundary` guard — any fence, open div or not — is
-// gone entirely.
 
 /// `pandoc -f markdown -t native`: the `:::` closes the div; the
 /// headerless table finds no closer inside it and degrades to
@@ -1265,20 +1126,6 @@ fn sibling_marker_is_no_multiline_closer() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// The forward caption scans end at container line-run terminators
-//
-// The caption-continuation loops used to stop at `line_is_fenced_div_fence`
-// unconditionally — a looser predicate than the seam's: it fired on
-// openers and on `:::` with no div open (both ordinary caption content in
-// pandoc), while a note marker or sibling list start (no fence shape at
-// all) was folded straight into the caption. All shapes probed against
-// `pandoc -f markdown -t native`. One documented divergence stays: when
-// the terminator is a list start contiguous with the caption line, pandoc
-// drops the caption entirely (empty caption, `: cap` reparses as a
-// paragraph); panache treats the terminator like a blank line and keeps
-// the caption (see TODO.md; lossless and idempotent).
-
 /// `pandoc -f markdown -t native`: `[^2]: z` opens the second note; the
 /// caption is `cap` alone.
 #[test]
@@ -1403,17 +1250,6 @@ fn nested_opener_stays_caption_content() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// A closing separator directly before a container terminator closes the
-// table
-//
-// `find_table_end` accepted a closing dash line only when followed by a
-// blank line or EOF, so a headerless table whose closer abuts the end of
-// the enclosing container's line run — the div's `:::`, a sibling list
-// start, a new note marker — failed to parse entirely. pandoc keeps the
-// table in all three shapes (probed): the run ends after the closer, which
-// bounds the table exactly like a blank line would.
-
 /// `pandoc -f markdown -t native`: Div \[Table\] — the closer directly
 /// before `:::` completes the table.
 #[test]
@@ -1473,21 +1309,6 @@ fn table_closer_directly_before_note_marker_completes_the_table() {
         table.text()
     );
 }
-
-// ---------------------------------------------------------------------------
-// The backward caption scan agrees with the forward one
-//
-// `find_caption_before_table` reconstructs, from the table's position, the
-// caption range the dispatcher's forward lookahead just validated. The two
-// must agree on where a caption run ends: after the forward scans moved to
-// `ends_container_lines`, a leftover fence-shape stop in the backward walk
-// let the dispatcher anchor a caption-led table whose parser then refused
-// the caption -- dropping the caption bytes and emitting the table twice
-// (a losslessness break). The backward walk now uses the seam, and the
-// caption-start checks exempt a fence-shaped previous line: when `: cap`
-// is actually block-dispatched below a fence shape, that line was consumed
-// structurally (an opener, or a closed div's closer) -- paragraph laziness
-// otherwise swallows the caption line before dispatch, as pandoc does.
 
 /// `pandoc -f markdown -t native`: the unmatched fence is caption
 /// content (caption `cap ::: mid`). Regression pin for the losslessness
@@ -1550,14 +1371,6 @@ fn caption_directly_under_a_closed_div_captions_the_table() {
         caption.text()
     );
 }
-
-// ---------------------------------------------------------------------------
-// Pipe tables that open a container's body
-//
-// pandoc reparses a container's collected raw lines from the content
-// column (`listLine`, `noteBlock`), so a pipe table is recognized there
-// exactly as it is at top level — including the leading-pipe-less form,
-// whose first line is a bare `a | b` rather than a `|`-fenced row.
 
 /// `pandoc -f markdown -t native`: `BulletList [[Table …]]`. The
 /// marker-line lift used to gate on a leading `|`/`+`/`:` byte, so the
@@ -1657,17 +1470,6 @@ fn footnote_body_after_marker_line_text_keeps_lazy_continuation() {
         "the heading cannot interrupt the marker line's paragraph"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Pipe tables need `nonindentSpaces`
-//
-// pandoc's `pipeTable` opens with `nonindentSpaces` and its `pipeBreak`
-// repeats it, so both the header and the delimiter row must sit within 3
-// columns of the frame they are parsed in. Panache measured neither, so an
-// indented delimiter row still claimed its dispatch line as a header --
-// including a `[^1]: a | b` note marker, which pandoc reads as a note whose
-// (dedented) body is the table.
-// ---------------------------------------------------------------------------
 
 /// `pandoc -f markdown -t native` on `[^1]: a | b` + a 4-column-indented
 /// delimiter and row: `Note [Table …]`. The pipe table cannot start on the
@@ -1830,14 +1632,6 @@ fn indented_pipe_delimiter_in_a_blockquote_is_not_a_table() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Short pipe delimiter rows
-//
-// `try_parse_pipe_separator` needs one dash per cell, which is pandoc's own
-// bound. A two-dash row was recorded as a divergence in TODO.md; it is not
-// one, and these pin that so the claim cannot resurface.
-// ---------------------------------------------------------------------------
-
 /// `pandoc -f markdown -t native` reads one, two, and three dashes per cell
 /// as the same `Table`.
 #[test]
@@ -1859,16 +1653,6 @@ fn short_pipe_delimiter_rows_are_tables() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// A marker-shaped delimiter row under a marker-line table
-//
-// Pandoc collects a list item's lines and reparses them as a document, so a
-// table opened on the marker line claims the delimiter row before anything
-// on it can be read as a list marker: in `a | b\n- | -` the first line is no
-// marker, `pipeTable` takes both lines, and `bulletList` never sees the
-// second. See `Parser::try_buffer_marker_line_table_delimiter`.
-// ---------------------------------------------------------------------------
 
 /// `pandoc -f markdown -t native` on `- a | b` + `  - | -`:
 /// `BulletList [[Table …]]`. Before the gate the `- ` opened a nested bullet
@@ -2029,8 +1813,6 @@ fn delimiter_row_under_a_paragraph_line_stays_a_nested_marker() {
     );
 }
 
-/// A marker-shaped line that is no delimiter row (`+ | +` has no dash) keeps
-/// opening its nested list under both readings.
 #[test]
 fn non_delimiter_marker_line_still_opens_a_nested_list() {
     let node = parse_blocks("- a | b\n  + | +\n");
@@ -2097,16 +1879,6 @@ fn escaped_pipe_alone_does_not_open_a_header_row() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// The delimiter row owns the column count
-//
-// Pandoc's `pipeTable` takes the column count from the delimiter row and
-// pads or truncates every other row to it, with no bound at all on how far
-// the header may overshoot. GFM parts ways: `cmark-gfm` refuses a table
-// whose header does not match the delimiter cell-for-cell, and the whole
-// run stays a paragraph.
-// ---------------------------------------------------------------------------
-
 /// `pandoc -f markdown -t native` on `a | b | c` + `---|---`: a two-column
 /// `Table`, with the surplus header cell and the surplus body cell dropped.
 #[test]
@@ -2140,9 +1912,6 @@ fn pipe_table_columns_come_from_the_delimiter_row() {
     );
 }
 
-/// The other direction: a delimiter row with more cells than the header
-/// pads the header out (`| a | b |` over `---|---|---` is three columns,
-/// the last one empty).
 #[test]
 fn a_longer_delimiter_row_pads_the_header() {
     let input = "a | b\n---|---|---\n1 | 2 | 3\n";
@@ -2217,8 +1986,6 @@ fn gfm_requires_an_exact_column_match() {
     }
 }
 
-/// The matching shape still parses under GFM, so the gate above is about
-/// the mismatch and not about pipe tables in general.
 #[test]
 fn gfm_still_reads_a_matched_pipe_table() {
     let node = parse_blocks_gfm("a|b\n---|---\n1|2\n");

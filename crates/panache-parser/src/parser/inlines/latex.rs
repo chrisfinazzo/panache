@@ -23,48 +23,38 @@ pub(crate) fn try_parse_latex_command(text: &str) -> Option<usize> {
         return None;
     }
 
-    // Check for escaped backslash (\\) - this is a hard line break, not LaTeX
     if bytes.len() > 1 && bytes[1] == b'\\' {
         return None;
     }
 
     let mut pos = 1; // Skip initial backslash
 
-    // Parse command name (letters only)
     let command_start = pos;
     while pos < bytes.len() && bytes[pos].is_ascii_alphabetic() {
         pos += 1;
     }
 
-    // Must have at least one letter in command name
     if pos == command_start {
         return None;
     }
 
-    // Parse optional and required arguments
     while pos < bytes.len() {
         match bytes[pos] {
             b'[' => {
-                // Optional argument in square brackets
                 pos = skip_bracketed_arg(text, pos)?;
             }
             b'{' => {
-                // Required argument in curly braces
                 pos = skip_braced_arg(text, pos)?;
             }
             _ => {
-                // End of command
                 break;
             }
         }
     }
 
-    // Must have consumed at least the backslash and command name
     if pos > 1 { Some(pos) } else { None }
 }
 
-/// Skip a bracketed argument [...], handling nested brackets.
-/// Returns the position after the closing bracket, or None if invalid.
 fn skip_bracketed_arg(text: &str, start: usize) -> Option<usize> {
     let bytes = text.as_bytes();
 
@@ -80,7 +70,6 @@ fn skip_bracketed_arg(text: &str, start: usize) -> Option<usize> {
             b'[' => depth += 1,
             b']' => depth -= 1,
             b'\\' if pos + 1 < bytes.len() => {
-                // Skip escaped character (both the backslash and the next byte)
                 pos += 2;
                 continue;
             }
@@ -92,8 +81,6 @@ fn skip_bracketed_arg(text: &str, start: usize) -> Option<usize> {
     if depth == 0 { Some(pos) } else { None }
 }
 
-/// Skip a braced argument {...}, handling nested braces.
-/// Returns the position after the closing brace, or None if invalid.
 fn skip_braced_arg(text: &str, start: usize) -> Option<usize> {
     let bytes = text.as_bytes();
 
@@ -109,7 +96,6 @@ fn skip_braced_arg(text: &str, start: usize) -> Option<usize> {
             b'{' => depth += 1,
             b'}' => depth -= 1,
             b'\\' if pos + 1 < bytes.len() => {
-                // Skip escaped character (both the backslash and the next byte)
                 pos += 2;
                 continue;
             }
@@ -161,13 +147,11 @@ mod tests {
 
     #[test]
     fn test_no_arguments() {
-        // Command without arguments - valid
         assert_eq!(try_parse_latex_command(r"\LaTeX "), Some(6));
     }
 
     #[test]
     fn test_escaped_backslash() {
-        // \\ is a line break, not LaTeX
         assert_eq!(try_parse_latex_command(r"\\"), None);
     }
 

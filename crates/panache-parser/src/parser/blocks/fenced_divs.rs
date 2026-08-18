@@ -21,7 +21,6 @@ pub(crate) struct DivFenceInfo {
 pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
     let trimmed = strip_leading_spaces(content);
 
-    // Check for fence opening (:::)
     if !trimmed.starts_with(':') {
         return None;
     }
@@ -32,28 +31,17 @@ pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
         return None;
     }
 
-    // Get the part after the colons
     let after_colons = trimmed[colon_count..].trim_start();
 
-    // Check if there are attributes
-    // Attributes can be:
-    // 1. Curly braces: {.class #id key="value"}
-    // 2. Single word (treated as class): classname
-    // 3. Attributes followed by more colons (optional): {.class} :::
-
     let attributes = if after_colons.starts_with('{') {
-        // Find the closing brace
         if let Some(close_idx) = after_colons.find('}') {
             after_colons[..=close_idx].to_string()
         } else {
-            // Unclosed brace, not valid
             return None;
         }
     } else if after_colons.is_empty() {
-        // No attributes - this is a closing fence.
         return None;
     } else {
-        // Single word (treated as class), optionally followed by trailing colons.
         let word_end = after_colons
             .find(|c: char| c.is_whitespace() || c == ':')
             .unwrap_or(after_colons.len());
@@ -67,12 +55,10 @@ pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
             if trailing.chars().any(|c| c != ':') {
                 return None;
             }
-            // Require at least 3 trailing colons when extra content follows the class.
             if trailing.len() < 3 {
                 return None;
             }
         } else {
-            // No whitespace, but trailing colons may be present (e.g. "Warning:::::").
             let trailing_colons = after_colons[first.len()..].trim();
             if !trailing_colons.is_empty() {
                 if trailing_colons.chars().any(|c| c != ':') {
@@ -90,8 +76,6 @@ pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
     Some(DivFenceInfo {
         attributes,
         fence_count: colon_count,
-        // Filled in by the caller, which measures the opener's indent in the
-        // container-prefix-stripped frame (see `FencedDivOpenParser`).
         open_indent_cols: 0,
     })
 }
@@ -111,7 +95,6 @@ pub(crate) fn is_div_closing_fence(content: &str) -> bool {
         return false;
     }
 
-    // Rest of line must be empty (only colons are allowed)
     trimmed[colon_count..].trim().is_empty()
 }
 

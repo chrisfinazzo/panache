@@ -21,19 +21,16 @@ pub(crate) fn format_shortcode(node: &SyntaxNode) -> String {
         match child {
             NodeOrToken::Token(t) => {
                 if t.kind() == SyntaxKind::SHORTCODE_MARKER_OPEN {
-                    // Determine if escaped based on marker
                     is_escaped = t.text() == "{{{<";
                 }
             }
             NodeOrToken::Node(n) if n.kind() == SyntaxKind::SHORTCODE_CONTENT => {
-                // Content is a node containing TEXT tokens
                 content = normalize_shortcode_content(&n.text().to_string());
             }
             _ => {}
         }
     }
 
-    // Build formatted shortcode
     if is_escaped {
         format!("{{{{{{< {} >}}}}}}", content)
     } else {
@@ -41,10 +38,6 @@ pub(crate) fn format_shortcode(node: &SyntaxNode) -> String {
     }
 }
 
-/// Normalize shortcode content by:
-/// 1. Trimming leading/trailing whitespace
-/// 2. Collapsing internal runs of whitespace to single spaces
-/// 3. Preserving quoted strings as-is
 fn normalize_shortcode_content(text: &str) -> String {
     let mut result = String::new();
     let mut in_quotes = false;

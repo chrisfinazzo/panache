@@ -22,11 +22,8 @@ mod scanner;
 #[path = "yaml/validator.rs"]
 mod validator;
 
-pub use events::{project_events, project_events_from_tree};
-// Re-exported crate-internally so the typed YAML AST wrappers in
-// `crate::syntax::yaml_ast` can cook scalar tokens without re-implementing
-// the quote/escape/fold rules. The modules themselves stay private.
 pub(crate) use cooking::cook;
+pub use events::{project_events, project_events_from_tree};
 pub use model::{YamlDiagnostic, YamlParseReport, diagnostic_codes};
 pub use parser::{
     locate_yaml_diagnostic, locate_yaml_diagnostic_ctx, parse_stream, parse_stream_with_prefix,

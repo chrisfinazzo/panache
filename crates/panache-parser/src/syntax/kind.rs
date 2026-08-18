@@ -6,7 +6,6 @@ use rowan::Language;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
-    // Tokens
     WHITESPACE = 0,
     NEWLINE,
     TEXT,
@@ -16,7 +15,6 @@ pub enum SyntaxKind {
     HARD_LINE_BREAK,   // \<newline>
     DIV_MARKER,        // :::
 
-    // YAML tokens (metadata and in-tree YAML CST parser)
     YAML_METADATA_DELIM, // --- or ... (for YAML blocks)
     YAML_KEY,            // YAML mapping key token
     YAML_COLON,          // YAML mapping key-value separator
@@ -32,16 +30,6 @@ pub enum SyntaxKind {
     YAML_DOCUMENT_END,   // YAML document end marker (...)
 
     BLOCK_QUOTE_MARKER, // >
-    // Container-prefix bytes carried INSIDE a content node at a
-    // continuation-line start: list/content indent, `>` markers, and the
-    // whitespace between/after them. A block nested in a container owns
-    // every line after its first, so those lines' prefix bytes land inside
-    // the node for losslessness; this kind tags them so no consumer can
-    // mistake them for content (see `text_without_line_prefixes`). Line 0's
-    // prefix sits *outside* the node as `BLOCK_QUOTE`/`LIST_ITEM` structure
-    // and keeps `BLOCK_QUOTE_MARKER`/`WHITESPACE`. Token boundaries mirror
-    // the legacy tokenization (indent coalesced, bq prefix byte-by-byte);
-    // adjacent LINE_PREFIX tokens form one prefix run.
     LINE_PREFIX,
     ALERT_MARKER,     // [!NOTE], [!TIP], etc.
     IMAGE_LINK_START, // ![
@@ -50,16 +38,8 @@ pub enum SyntaxKind {
     COMMENT_START,    // <!--
     COMMENT_END,      // -->
     ATTRIBUTE,        // {#label} for headings, math, etc.
-    // Structured children of a Pandoc `{...}` ATTRIBUTE. Each wraps the
-    // existing source bytes (markers/quotes included); the projector strips
-    // them. Absent on opaque ATTRIBUTE forms (MMD `[#id]`, raw-inline
-    // `{=format}`, fallback), which keep a single inner ATTRIBUTE token.
-    ATTR_ID,    // #id (token text includes the leading '#')
-    ATTR_CLASS, // .class (token text includes the leading '.')
-    // A bare `-`, pandoc's shorthand for `.unnumbered` (see the "Heading
-    // identifiers" section of the manual). Kept distinct from ATTR_CLASS so the
-    // formatter can re-emit the source spelling while readers project the
-    // `unnumbered` class.
+    ATTR_ID,          // #id (token text includes the leading '#')
+    ATTR_CLASS,       // .class (token text includes the leading '.')
     ATTR_UNNUMBERED,
     ATTR_KEY_VALUE,  // key=value (node grouping the pieces below)
     ATTR_KEY,        // key (token, no '=')
@@ -67,7 +47,6 @@ pub enum SyntaxKind {
     HORIZONTAL_RULE, // --- or *** or ___
     BLANK_LINE,
 
-    // Links and images
     LINK_START,           // [
     LINK,                 // [text](url)
     LINK_TEXT,            // text part of link
@@ -94,7 +73,6 @@ pub enum SyntaxKind {
     REFERENCE_URL,        // url part
     REFERENCE_TITLE,      // "title" part
 
-    // Wikilinks (Pandoc `wikilinks_title_{after,before}_pipe` extensions)
     WIKI_LINK,       // [[url]] or [[url|title]]
     IMAGE_WIKI_LINK, // ![[url]] or ![[url|title]]
     WIKI_LINK_OPEN,  // [[ or ![[
@@ -103,14 +81,12 @@ pub enum SyntaxKind {
     WIKI_LINK_TITLE, // title slot (raw TEXT child, no inline parsing)
     WIKI_LINK_CLOSE, // ]]
 
-    // Math
     INLINE_MATH_MARKER,  // $
     DISPLAY_MATH_MARKER, // $$
     INLINE_MATH,
     DISPLAY_MATH,
     MATH_CONTENT, // wrapper node for parsed TeX math content (subtree root)
 
-    // Math content (structural TeX CST under MATH_CONTENT)
     MATH_GROUP,       // { ... } brace group (node)
     MATH_ENVIRONMENT, // \begin{env} ... \end{env} (node)
     MATH_DELIMITED,   // \left<d> ... \right<d> paired delimiters (node)
@@ -121,30 +97,19 @@ pub enum SyntaxKind {
     MATH_ALIGN,       // & alignment tab
     MATH_SCRIPT,      // ^ or _
     MATH_COMMENT,     // % to end of line (TeX comment)
-    // `+ - * = < >` operator atom; one token per char. Class/precedence are
-    // contextual (unary minus, `\mathbin`) and deferred to the formatter.
     MATH_OPERATOR,
-    // Delimiters and punctuation whose TeX mathcode class is fixed at the
-    // character level (unlike operator class, which is contextual): `( [` open,
-    // `) ]` close, `, ;` punctuation. One token per char. The ambiguous `| . /`
-    // stay in MATH_TEXT — their class needs macro context.
     MATH_OPEN,    // ( or [
     MATH_CLOSE,   // ) or ]
     MATH_PUNCT,   // , or ;
     MATH_TEXT,    // run of ordinary atoms
     MATH_SPACE,   // run of spaces/tabs
     MATH_NEWLINE, // newline within math content
-    // Bookdown equation label `(\#eq:label)`, recognized only when the
-    // `bookdown_equation_references` extension is enabled. A single token over
-    // the whole `(\#eq:...)` span so the indexer/LSP can target it precisely.
     MATH_EQUATION_LABEL,
 
-    // Footnotes
     INLINE_FOOTNOTE_START, // ^[
     INLINE_FOOTNOTE_END,   // ]
     INLINE_FOOTNOTE,       // ^[text]
 
-    // Citations
     CITATION,                // [@key] or @key
     CITATION_MARKER,         // @ or -@
     CITATION_KEY,            // The citation key identifier
@@ -160,22 +125,17 @@ pub enum SyntaxKind {
     CROSSREF_BOOKDOWN_OPEN,  // \@ref(
     CROSSREF_BOOKDOWN_CLOSE, // )
 
-    // Spans
     BRACKETED_SPAN,     // [text]{.class}
     SPAN_CONTENT,       // text inside span
     SPAN_ATTRIBUTES,    // {.class key="val"}
     SPAN_BRACKET_OPEN,  // [
     SPAN_BRACKET_CLOSE, // ]
 
-    // Shortcodes (Quarto)
     SHORTCODE,              // {{< name args >}} or {{{< name args >}}}
     SHORTCODE_MARKER_OPEN,  // {{< or {{{<
     SHORTCODE_MARKER_CLOSE, // >}} or >}}}
     SHORTCODE_CONTENT,      // content between markers
 
-    // Svelte template syntax (mdsvex). Opaque, lossless spans: the content
-    // between the braces is preserved verbatim. The parent kind records the
-    // category (block logic / tag / expression) by leading sigil.
     SVELTE_BLOCK_LOGIC,  // {#if}, {:else}, {/each}, ...
     SVELTE_TAG,          // {@html ...}, {@const ...}, {@debug ...}
     SVELTE_EXPRESSION,   // {expr}
@@ -184,7 +144,6 @@ pub enum SyntaxKind {
     SVELTE_CONTENT,      // verbatim content between the braces
     SVELTE_BLOCK,        // a standalone Svelte span occupying a whole line
 
-    // Code
     INLINE_CODE,
     INLINE_CODE_MARKER,  // ` or `` or ```
     INLINE_CODE_CONTENT, // Literal inline code content
@@ -195,13 +154,11 @@ pub enum SyntaxKind {
     CODE_FENCE_MARKER,   // ``` or ~~~
     CODE_BLOCK,
 
-    // Raw inline spans
     RAW_INLINE,         // `content`{=format}
     RAW_INLINE_MARKER,  // ` markers
     RAW_INLINE_FORMAT,  // format name (html, latex, etc.)
     RAW_INLINE_CONTENT, // raw content
 
-    // Inline emphasis and formatting
     EMPHASIS,           // *text* or _text_
     STRONG,             // **text** or __text__
     STRIKEOUT,          // ~~text~~
@@ -215,10 +172,8 @@ pub enum SyntaxKind {
     SUPERSCRIPT_MARKER, // ^ (for superscript)
     SUBSCRIPT_MARKER,   // ~ (for subscript)
 
-    // Composite nodes
     DOCUMENT,
 
-    // YAML nodes
     YAML_METADATA,
     YAML_METADATA_CONTENT,    // Content lines inside YAML metadata block
     YAML_STREAM, // YAML 1.2 stream wrapper (zero or more YAML_DOCUMENT children + trivia)
@@ -241,14 +196,7 @@ pub enum SyntaxKind {
     PANDOC_TITLE_BLOCK,
     MMD_TITLE_BLOCK,
     FENCED_DIV,
-    // python-markdown admonition (`!!! note`) and pymdownx details
-    // (`???`/`???+`) container block. Content is 4-space indented and
-    // parsed recursively; closes on dedent (like a footnote definition).
     ADMONITION,
-    // MyST directive container (```` ```{name} ```` or, with `colon_fence`,
-    // `:::{name}`). Fence-delimited like a fenced div, but its body is parsed
-    // recursively as markdown and the closer must match the opener's fence
-    // character and count.
     MYST_DIRECTIVE,
     PARAGRAPH,
     PLAIN, // Inline content without paragraph break (tight lists, definition lists, table cells)
@@ -267,52 +215,26 @@ pub enum SyntaxKind {
     COMMENT,
     FIGURE, // Standalone image (Pandoc figure)
 
-    // HTML blocks
     HTML_BLOCK,         // Generic HTML block
     HTML_BLOCK_TAG,     // Opening/closing tags
     HTML_BLOCK_CONTENT, // Content between tags
-    // Pandoc-dialect lift: a matched <div ...>...</div> block.
     HTML_BLOCK_DIV,
-    // Pandoc-dialect lift: a single-construct opaque HTML block that
-    // projects to exactly one `RawBlock "html"` — an HTML comment
-    // (`<!-- -->`), a processing instruction (`<? ?>`), or a verbatim
-    // raw-text element (`<pre>`/`<script>`/`<style>`/`<textarea>`). The
-    // wrapper kind lets the pandoc-native projector route by CST kind
-    // instead of re-sniffing the leading bytes. CommonMark dialect keeps
-    // the opaque HTML_BLOCK shape.
     HTML_BLOCK_RAW,
-    // Structural region inside an HTML opening tag holding the
-    // attribute-list bytes — i.e. everything between the tag name and
-    // the closing `>`, exclusive. Recognized by `AttributeNode::cast`,
-    // so the salsa anchor index sees `id`/`class`/key=val attrs from
-    // `<div id="x">` blocks via the same walk that handles fenced-div
-    // and heading attributes.
     HTML_ATTRS,
 
-    // Inline raw HTML (CommonMark §6.6 / Pandoc raw_html). One node per HTML
-    // tag/comment/declaration/PI/CDATA span; child token holds the verbatim
-    // bytes of the span.
     INLINE_HTML,
     INLINE_HTML_CONTENT,
-    // Pandoc-dialect inline lift: a matched <span ...>...</span> tag pair,
-    // mirroring HTML_BLOCK_DIV at the inline level. The open tag's
-    // attribute region is exposed structurally as HTML_ATTRS so the
-    // existing AttributeNode walk picks up `<span id>` ids automatically.
     INLINE_HTML_SPAN,
 
-    // TeX blocks
     TEX_BLOCK, // Raw tex block (e.g., LaTeX commands)
 
-    // Headings
     HEADING,
     HEADING_CONTENT,
     ATX_HEADING_MARKER,       // leading #####
     SETEXT_HEADING_UNDERLINE, // ===== or -----
 
-    // LaTeX inline commands
     LATEX_COMMAND, // \command{...}
 
-    // Tables
     SIMPLE_TABLE,
     MULTILINE_TABLE,
     PIPE_TABLE,
@@ -324,22 +246,17 @@ pub enum SyntaxKind {
     TABLE_CELL,
     TABLE_CAPTION,
     TABLE_CAPTION_PREFIX, // "Table: ", "table: ", or ": "
-    // Separator-row markers (split out of the coalesced separator TEXT so
-    // alignment/width derivations read structure instead of re-scanning a
-    // string). One `TABLE_SEP_DELIM` covers both `|` and `+`.
     TABLE_SEP_DELIM,      // single column delimiter: `|` (pipe) or `+` (grid)
     TABLE_SEP_DASHES,     // a run of `-`
     TABLE_SEP_EQUALS,     // a run of `=` (grid `+===+` header divider)
     TABLE_SEP_COLON,      // single `:` alignment marker
     TABLE_SEP_WHITESPACE, // interior spaces/tabs between dash runs
 
-    // Code block parts
     CODE_FENCE_OPEN,
     CODE_FENCE_CLOSE,
     CODE_INFO,     // Raw info string (preserved for lossless formatting)
     CODE_LANGUAGE, // Parsed language identifier (r, python, etc.)
 
-    // Chunk options (for executable chunks like {r, echo=TRUE})
     CHUNK_OPTIONS,          // Container for all chunk options
     CHUNK_OPTION,           // Single option (key=value pair)
     CHUNK_OPTION_KEY,       // Option name (e.g., echo, fig.cap)
@@ -352,18 +269,15 @@ pub enum SyntaxKind {
 
     CODE_CONTENT,
 
-    // Div parts
     DIV_FENCE_OPEN,
     DIV_FENCE_CLOSE,
     DIV_INFO,
     DIV_CONTENT,
 
-    // Admonition parts (`!!! type "title"` / `???`/`???+`)
     ADMONITION_MARKER, // `!!!`, `???`, or `???+`
     ADMONITION_TYPE,   // type/class words (e.g. `note`, `danger highlight`)
     ADMONITION_TITLE,  // optional quoted title (e.g. `"Heads up"`)
 
-    // MyST directive parts
     MYST_DIRECTIVE_OPEN,   // opener line node (fence + name + optional argument)
     MYST_DIRECTIVE_CLOSE,  // closer line node (matching fence)
     MYST_DIRECTIVE_FENCE,  // the fence run itself (```` ``` ````, `~~~`, or `:::`)
@@ -375,13 +289,11 @@ pub enum SyntaxKind {
     MYST_DIRECTIVE_OPTION_VALUE, // the option value (e.g. `An image`)
     MYST_DIRECTIVE_BODY,   // verbatim body of a code/math directive (raw, not reflowed)
 
-    // MyST inline role parts (`` {name}`content` ``)
     MYST_ROLE,         // the whole role
     MYST_ROLE_NAME,    // the `{name}` token, braces included
     MYST_ROLE_MARKER,  // the backtick run delimiting the content
     MYST_ROLE_CONTENT, // the literal content between the backticks
 
-    // MyST target / comment / substitution parts
     MYST_TARGET,             // a `(label)=` target line
     MYST_TARGET_LABEL,       // the label between `(` and `)=`
     MYST_COMMENT,            // a `% ...` line comment
@@ -393,11 +305,6 @@ pub enum SyntaxKind {
 
     EMOJI, // :alias:
 
-    // Bracket-shape pattern that did not resolve as a link/image.
-    // Distinct from LINK/IMAGE_LINK so downstream tools (linter, LSP) can
-    // walk a typed wrapper without the parser having to lie about
-    // resolution. `is_image()` on the typed wrapper distinguishes
-    // `[foo]` from `![foo]` shapes.
     UNRESOLVED_REFERENCE,
 }
 

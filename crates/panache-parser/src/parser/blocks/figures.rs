@@ -18,8 +18,6 @@ use crate::parser::inlines::links::{LinkScanContext, try_parse_inline_image};
 /// `text` is the paragraph's accumulated content with container markers
 /// stripped (see `ParagraphBuffer::get_text_for_parsing`).
 pub(in crate::parser) fn paragraph_is_standalone_image(text: &str, config: &ParserOptions) -> bool {
-    // Pandoc-only behavior; CommonMark/GFM keep the image inline within the
-    // paragraph and do not promote it to a figure block.
     if !config.extensions.implicit_figures {
         return false;
     }

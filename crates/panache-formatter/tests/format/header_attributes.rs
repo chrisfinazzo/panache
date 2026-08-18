@@ -77,7 +77,6 @@ fn level_2_heading_with_attributes() {
 fn heading_preserves_whitespace_in_attributes() {
     let input = "# Title {  #id   .class   key=val  }\n";
     let output = format(input, None, None);
-    // Should normalize whitespace
     assert!(output.contains("# Title {#id .class key=\"val\"}"));
 }
 

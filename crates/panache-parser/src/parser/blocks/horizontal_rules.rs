@@ -11,23 +11,11 @@ use crate::parser::utils::helpers::strip_newline;
 /// A horizontal rule is 3 or more `*`, `-`, or `_` characters,
 /// optionally separated by spaces.
 pub fn try_parse_horizontal_rule(line: &str) -> Option<char> {
-    // Per CommonMark §4.1, a thematic break may be indented up to three spaces.
-    // Four or more spaces of indentation makes the line an indented code block
-    // (or, inside a paragraph, plain text continuation), not a thematic break.
     let leading = line.bytes().take_while(|b| *b == b' ').count();
     if leading >= 4 {
         return None;
     }
 
-    // Fast reject before the unicode-aware `trim` below. This runs on every
-    // line of the document (from `HorizontalRuleParser::detect_prepared` and
-    // from the head of `try_parse_list_marker_with`), and `str::trim` walks a
-    // unicode whitespace predicate over both ends. A rule line's first
-    // non-blank byte is always `*`, `-`, or `_`, so an ASCII byte outside that
-    // set can be rejected without trimming. Bytes 0x0b/0x0c are whitespace to
-    // `char::is_whitespace` but not to `u8::is_ascii_whitespace`, so they are
-    // skipped explicitly; a leading non-ASCII byte falls through to the trim
-    // so the unicode behavior is unchanged.
     let bytes = line.as_bytes();
     let mut first = 0;
     while first < bytes.len() && (bytes[first].is_ascii_whitespace() || bytes[first] == 0x0b) {
@@ -42,18 +30,15 @@ pub fn try_parse_horizontal_rule(line: &str) -> Option<char> {
 
     let trimmed = line.trim();
 
-    // Must have at least 3 characters
     if trimmed.len() < 3 {
         return None;
     }
 
-    // Determine which character is being used
     let rule_char = trimmed.chars().next()?;
     if !matches!(rule_char, '*' | '-' | '_') {
         return None;
     }
 
-    // Check that the line only contains the rule character and spaces
     let mut count = 0;
     for ch in trimmed.chars() {
         match ch {
@@ -63,7 +48,6 @@ pub fn try_parse_horizontal_rule(line: &str) -> Option<char> {
         }
     }
 
-    // Must have at least 3 of the rule character
     if count >= 3 { Some(rule_char) } else { None }
 }
 
@@ -71,11 +55,9 @@ pub fn try_parse_horizontal_rule(line: &str) -> Option<char> {
 pub(crate) fn emit_horizontal_rule(builder: &mut GreenNodeBuilder<'static>, line: &str) {
     builder.start_node(SyntaxKind::HORIZONTAL_RULE.into());
 
-    // Strip trailing newline and emit the rule content as-is for losslessness.
     let (line_without_newline, newline_str) = strip_newline(line);
     builder.token(SyntaxKind::HORIZONTAL_RULE.into(), line_without_newline);
 
-    // Emit newline separately if present
     if !newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), newline_str);
     }

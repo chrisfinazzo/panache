@@ -271,9 +271,6 @@ impl Config {
             dialect: self.dialect(),
             extensions: self.parser_extensions.clone(),
             pandoc_compat: self.parser,
-            // The formatter re-parses only for internal checks (idempotency,
-            // code-block handling) where citation-vs-crossref classification
-            // doesn't affect output, so the built-in prefix set suffices here.
             crossref_prefixes: Vec::new(),
             refdef_labels: None,
         }
@@ -335,10 +332,6 @@ impl ConfigBuilder {
 mod schema_tests {
     use super::*;
 
-    /// Assert the emitted JSON Schema exposes exactly the expected lowercase
-    /// wire values (and no PascalCase variant names). Substring checks keep this
-    /// robust to schemars emitting a flat `enum` array vs. a `oneOf`-of-`const`
-    /// shape — the doc comments on some variants become per-value descriptions.
     fn assert_wire_values<T: schemars::JsonSchema>(expected: &[&str]) {
         let s = serde_json::to_string(&schemars::schema_for!(T)).unwrap();
         for value in expected {

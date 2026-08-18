@@ -45,7 +45,6 @@ pub fn emit_inlines(
         text.len()
     );
 
-    // Call the recursive inline parser
     core::parse_inline_text_recursive(builder, text, config, suppress_footnote_refs);
 }
 
@@ -56,7 +55,6 @@ mod tests {
     use crate::syntax::{SyntaxKind, SyntaxNode};
     use rowan::GreenNodeBuilder;
 
-    /// Test that emit_inlines produces correct inline structure.
     #[test]
     fn test_emit_inlines_basic() {
         let config = ParserOptions::default();
@@ -72,7 +70,6 @@ mod tests {
         ];
 
         for text in test_cases {
-            // Build using emit_inlines
             let mut builder_new = GreenNodeBuilder::new();
             builder_new.start_node(SyntaxKind::HEADING_CONTENT.into());
             emit_inlines(&mut builder_new, text, &config, false);
@@ -80,7 +77,6 @@ mod tests {
             let green_new = builder_new.finish();
             let tree_new = SyntaxNode::new_root(green_new);
 
-            // Verify losslessness
             assert_eq!(
                 tree_new.text().to_string(),
                 text,
@@ -90,7 +86,6 @@ mod tests {
         }
     }
 
-    /// Test that emit_inlines handles empty text correctly.
     #[test]
     fn test_emit_inlines_empty() {
         let config = ParserOptions::default();
@@ -101,12 +96,10 @@ mod tests {
         let green = builder.finish();
         let tree = SyntaxNode::new_root(green);
 
-        // Should produce a container with no inline content
         assert_eq!(tree.kind(), SyntaxKind::HEADING_CONTENT);
         assert_eq!(tree.children_with_tokens().count(), 0);
     }
 
-    /// Test that emit_inlines preserves whitespace.
     #[test]
     fn test_emit_inlines_preserves_whitespace() {
         let config = ParserOptions::default();
@@ -119,7 +112,6 @@ mod tests {
         let green = builder.finish();
         let tree = SyntaxNode::new_root(green);
 
-        // Should preserve all whitespace
         assert_eq!(tree.text().to_string(), text);
     }
 }

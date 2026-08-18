@@ -197,10 +197,6 @@ impl ListItemBuffer {
             .collect()
     }
 
-    /// The blockquote prefix bytes each buffered line carries, indexed by
-    /// line of [`Self::get_text_for_parsing`] (whose text has them held
-    /// out). Lines without a marker get an empty entry; the vector is
-    /// short when the trailing lines carry none.
     fn blockquote_prefixes(&self) -> Vec<String> {
         let mut prefixes: Vec<String> = Vec::new();
         if !self
@@ -286,10 +282,6 @@ impl ListItemBuffer {
         if opens > closes { Some(tag_name) } else { None }
     }
 
-    /// The current chunk's unclosed tag if the segments open one, else the
-    /// carried tag adjusted for closes in the current segments. Dialect-free;
-    /// shared by `clear()` (fold into the carried field) and
-    /// [`Self::open_matched_pair_tag`] (read).
     fn combined_unclosed_tag(&self) -> Option<String> {
         if let Some(fresh) = self.segments_unclosed_matched_pair_tag() {
             return Some(fresh);
@@ -337,7 +329,6 @@ impl ListItemBuffer {
         false
     }
 
-    /// Get concatenated text for inline parsing (excludes blank lines).
     fn get_text_for_parsing(&self) -> String {
         let mut result = String::new();
         for segment in &self.segments {
@@ -366,8 +357,6 @@ impl ListItemBuffer {
     /// definition's or outer item's share has not been taken off them yet.
     fn to_paragraph_buffer(&self, gobble: &[usize]) -> ParagraphBuffer {
         let mut paragraph_buffer = ParagraphBuffer::new();
-        // The buffer's first line is the marker line: its leading columns are
-        // owned by the marker and its trailing spaces, already emitted.
         let mut at_line_start = false;
         for segment in &self.segments {
             match segment {
@@ -392,8 +381,6 @@ impl ListItemBuffer {
                     has_trailing_space,
                 } => {
                     paragraph_buffer.push_marker(*leading_spaces, *has_trailing_space);
-                    // The marker segment carries the line's leading columns
-                    // itself, so the text that follows is already stripped.
                     at_line_start = false;
                 }
             }
@@ -429,7 +416,6 @@ impl ListItemBuffer {
             return;
         }
 
-        // Get text and parse inline elements
         let text = self.get_text_for_parsing();
 
         if !text.is_empty() {
@@ -440,12 +426,6 @@ impl ListItemBuffer {
                 && !line.contains('\n')
                 && !line.contains('\r')
             {
-                // Detect against the line with the item's leading indent
-                // stripped (a continuation chunk carries it on its first
-                // line): pandoc measures rule/heading indentation from the
-                // item's content column, so a depth-2 rule (4 leading
-                // columns) must not trip the CommonMark 4-space guard.
-                // Emission keeps the original bytes (lossless).
                 let detect_line = &line[item_indent_prefix_len(line, gobble)..];
                 if let Some(level) = try_parse_atx_heading(detect_line) {
                     emit_atx_heading(builder, &text, level, config);
@@ -457,21 +437,9 @@ impl ListItemBuffer {
                 }
             }
 
-            // Buffered blockquote markers don't block the ATX / HTML lifts
-            // below as long as line 0 carries none (the enclosing quote
-            // emitted that `>` itself, which is the normal shape): the
-            // lifted head is line 0's bytes verbatim, and the trailing
-            // lines' held-out `>` bytes are re-injected — via the
-            // marker-aware paragraph buffer for the ATX split, via
-            // graft-time prefix lines for the HTML lift (mirroring the
-            // table/div lift).
             let bq_prefixes = self.blockquote_prefixes();
             let line0_has_bq = bq_prefixes.first().is_some_and(|p| !p.is_empty());
 
-            // Multi-line case: first line is an ATX heading, rest is plain
-            // continuation. Pandoc treats `- # Heading\n  Some text` as a
-            // list item containing Header + Plain, not a single Plain spanning
-            // both lines.
             if !line0_has_bq && let Some(first_nl) = text.find('\n') {
                 let first_line = &text[..first_nl];
                 let after_first = &text[first_nl + 1..];
@@ -496,10 +464,6 @@ impl ListItemBuffer {
                             suppress_footnote_refs,
                         );
                     } else {
-                        // Marker-holding buffer (`> - # h` / `>   text`):
-                        // route the trailing lines through the paragraph
-                        // buffer so the held-out `>` bytes re-inject at
-                        // their line starts.
                         self.trailing_after_first_line(config)
                             .to_paragraph_buffer(gobble)
                             .emit_with_inlines(builder, config, suppress_footnote_refs);
@@ -509,20 +473,6 @@ impl ListItemBuffer {
                 }
             }
 
-            // Pandoc HTML-block-first-line structural lift: when the buffered
-            // text begins with a matched HTML block (same-line `<div>...</div>`,
-            // single-line comment, `<pre>foo</pre>`, etc.) and the entire
-            // buffer is consumed by that block, reparse and graft the inner
-            // block as a direct LIST_ITEM child. Without this lift, the
-            // dispatcher's inline-HTML path takes over and emits
-            // `Plain[RawInline <tag>, body, RawInline </tag>]` instead of
-            // `Div [...]` or `RawBlock <tag>`.
-            //
-            // Multi-line cases where the close tag lives in a sibling
-            // HTML_BLOCK (because the dispatcher recognizes Pandoc strict-
-            // block close forms as block starts and breaks the buffer) are
-            // not handled here — the gate rejects HTML_BLOCK_DIV with only
-            // one HTML_BLOCK_TAG child. That sub-target stays open.
             if config.dialect == Dialect::Pandoc
                 && !line0_has_bq
                 && try_emit_html_block_lift(
@@ -539,27 +489,11 @@ impl ListItemBuffer {
                 return;
             }
 
-            // Structural block lift for marker-line tables and fenced divs.
-            // Pandoc recognizes `- | a | b |\n  | - | - |` and `- ::: note\n
-            // ...\n  :::` as nested Table / Div; without lifting, the buffer
-            // would emit them as PLAIN with raw `|` / `:` text. Mirrors the
-            // HTML lift above: strip list-item indent from continuation
-            // lines, reparse via the block dispatcher, accept a single root
-            // node whose kind is in the allowlist and that consumes the
-            // whole buffer.
-            //
-            // Unlike the lifts above, this one runs on a buffer holding
-            // blockquote markers too (`> - a | b` / `>   - | -`): the markers
-            // are already held out of `text`, so they only have to be put
-            // back at graft time alongside the item indent.
             if try_emit_table_or_div_lift(builder, &text, config, gobble, &bq_prefixes) {
                 return;
             }
         }
 
-        // Pandoc's `implicit_figures` promotes any block whose whole content
-        // is one image, so an item holding only an image is a `Figure` --- not
-        // `Plain`/`Para`, which is why `use_paragraph` drops out here.
         let block_kind = if paragraph_is_standalone_image(&text, config) {
             SyntaxKind::FIGURE
         } else if use_paragraph {
@@ -608,9 +542,6 @@ impl ListItemBuffer {
         if try_parse_grid_separator(first).is_none() {
             return false;
         }
-        // A trailing *full* separator is excluded: it may be the table's
-        // closing border, after which a partial separator is no longer a
-        // continuation.
         let last = lines.next_back().unwrap_or(first);
         is_grid_content_row(last) || try_parse_grid_partial_separator(last).is_some()
     }
@@ -789,22 +720,6 @@ pub(crate) fn emit_html_block_lift_from_stripped(
         return false;
     }
 
-    // Single-child path: existing same-line / fully-contained lift.
-    // Multi-child path: trailing-text split — the inner dispatcher
-    // produced sibling block(s) after the HTML_BLOCK / HTML_BLOCK_DIV.
-    // Sources:
-    //   - `try_parse_comment_pi_with_trailing_split` for `<!--…--> trail`
-    //     and `<?…?> trail` (HTML_BLOCK + PARAGRAPH).
-    //   - Same-line div / non-div strict-block lift's trailing branch
-    //     for `<div>foo</div>bar` (HTML_BLOCK_DIV + PARAGRAPH) and
-    //     `<form>foo</form>bar` (also HTML_BLOCK + PARAGRAPH after the
-    //     existing strict-block matched-pair lift fires).
-    // The trailing PARAGRAPH is retagged to PLAIN for tight list items
-    // so the item shape matches pandoc (`[RawBlock, Plain[trailing]]`
-    // for tight, `[RawBlock, Para[...]]` for loose). N>2 children would
-    // require Para→Plain SoftBreak fusion across HTML-block boundaries
-    // (0390 blocked); leave those shapes to the inline path until that
-    // gap closes.
     let multi_child_trailing = if children.len() == 1 {
         false
     } else if children.len() == 2
@@ -824,15 +739,6 @@ pub(crate) fn emit_html_block_lift_from_stripped(
             .children()
             .filter(|c| c.kind() == SyntaxKind::HTML_BLOCK_TAG)
             .count();
-        // A matched pair (open + close) always lifts. A single open tag
-        // (unclosed `<div>`, closed implicitly at EOF by pandoc) lifts
-        // only when the caller opts in AND the body was reparsed into
-        // structural children (no `HTML_BLOCK_CONTENT` opaque remainder)
-        // — this mirrors the projector's `div_has_structural_inner`,
-        // which renders such a shape as `Div` with an implicit close.
-        // The list-item / marker-line callers keep the strict `>= 2`
-        // gate: there a single open tag can be a partial matched pair
-        // whose close lands in a following sibling block.
         let ok = html_block_tag_count >= 2
             || (allow_unclosed_div
                 && html_block_tag_count == 1
@@ -859,18 +765,6 @@ pub(crate) fn emit_html_block_lift_from_stripped(
     true
 }
 
-/// Structural lift for pipe tables, grid tables, and fenced divs whose
-/// opener sits on the list-item marker line (or on the first non-blank
-/// continuation line of a buffered list item). Returns `true` when the
-/// buffered text was emitted as a single LIST_ITEM-child block. The
-/// strict single-root + total-end-coverage gate makes "lift failed"
-/// indistinguishable from "buffer is not actually a table/div" — the
-/// caller falls through to its PLAIN/PARAGRAPH wrapper.
-///
-/// `bq_prefixes` are the per-line blockquote marker bytes the buffer held
-/// out of `text` (empty outside a quote); they are re-injected ahead of
-/// the item indent at graft time, which is the order they sit in on a
-/// quoted item's line (`>   | - | - |`).
 fn try_emit_table_or_div_lift(
     builder: &mut GreenNodeBuilder<'static>,
     text: &str,
@@ -878,12 +772,6 @@ fn try_emit_table_or_div_lift(
     gobble: &[usize],
     bq_prefixes: &[String],
 ) -> bool {
-    // A marker-only item (`-` with the block starting on the next line)
-    // buffers the marker line's newline as an empty line 0. Hold it out so
-    // the block's own first line becomes line 0 — and so it is stripped like
-    // the continuation line it is, rather than skipped by the marker-line
-    // convention `strip_list_item_indent` encodes. It is re-emitted as a
-    // NEWLINE token ahead of the grafted block.
     let leading_newline = if text.starts_with("\r\n") {
         "\r\n"
     } else if text.starts_with('\n') {
@@ -892,8 +780,6 @@ fn try_emit_table_or_div_lift(
         ""
     };
     let body = &text[leading_newline.len()..];
-    // Peeling the marker line renumbers the lines, so its (always empty —
-    // the enclosing quote emitted that `>` itself) entry goes with it.
     let bq_prefixes = if leading_newline.is_empty() {
         bq_prefixes
     } else {
@@ -1104,7 +990,6 @@ mod tests {
         let mut buffer = ListItemBuffer::new();
         assert_eq!(buffer.buffered_line_count(), 0);
 
-        // Marker segments contribute nothing.
         buffer.push_text("a | b\n", &config);
         buffer.push_blockquote_marker(0, true);
         buffer.push_blockquote_marker(0, true);
@@ -1114,13 +999,11 @@ mod tests {
         buffer.push_text("  - | -\n", &config);
         assert_eq!(buffer.buffered_line_count(), 2);
 
-        // One multi-line segment is more than one line.
         let mut buffer = ListItemBuffer::new();
         buffer.push_text("a\nb\n", &config);
         assert_eq!(buffer.segment_count(), 1);
         assert_eq!(buffer.buffered_line_count(), 2);
 
-        // A trailing line without a newline counts as one.
         let mut buffer = ListItemBuffer::new();
         buffer.push_text("a\n", &config);
         buffer.push_text("b", &config);

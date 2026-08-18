@@ -27,8 +27,6 @@ fn default_tag_handles() -> TagHandles {
     handles
 }
 
-/// Scan a `YAML_DOCUMENT` for `%TAG` directive lines and merge them into
-/// the default handle map.
 fn collect_tag_handles(doc: &SyntaxNode) -> TagHandles {
     let mut handles = default_tag_handles();
     for tok in doc
@@ -50,15 +48,7 @@ fn collect_tag_handles(doc: &SyntaxNode) -> TagHandles {
     handles
 }
 
-/// Resolve a tag shorthand (e.g. `!!str`, `!yaml!str`, `!e!foo`, `!local`) to
-/// the long-form `<tag:...>` event token, consulting the per-document handle
-/// map. Handles are checked first (so a `%TAG !` directive can override the
-/// primary handle); we fall back to the built-in handling for unknown handles.
 fn resolve_long_tag(tag: &str, handles: &TagHandles) -> Option<String> {
-    // Verbatim tag `!<URI>` (YAML 1.2 §6.8.1): the URI between the angle
-    // brackets is used as-is, bypassing handle resolution. Local verbatim
-    // tags keep their leading `!` (`!<!bar>` → `<!bar>`). Checked before the
-    // handle loop so a registered `!` primary handle can't claim it.
     if let Some(inner) = tag.strip_prefix("!<").and_then(|t| t.strip_suffix('>')) {
         return Some(format!("<{}>", percent_decode_tag(inner)));
     }
@@ -139,10 +129,6 @@ pub fn project_events_from_tree(tree: &SyntaxNode) -> Vec<String> {
     events
 }
 
-/// True when the document holds no content beyond a `DocumentEnd`
-/// marker and surrounding trivia (whitespace, newlines, comments).
-/// Used to distinguish a real (possibly empty) document from a
-/// synthetic doc the v2 builder wrapped around a bare `...`.
 fn doc_is_marker_only(doc: &SyntaxNode) -> bool {
     for el in doc.descendants_with_tokens() {
         if let Some(tok) = el.as_token() {
@@ -159,10 +145,6 @@ fn doc_is_marker_only(doc: &SyntaxNode) -> bool {
     true
 }
 
-/// LX3P: a `[flow]` sequence written as a block-map key lands in the v2 CST
-/// as a YAML_FLOW_SEQUENCE that's a direct child of the YAML_DOCUMENT,
-/// preceding the YAML_BLOCK_MAP that the trailing `:` opens. Returns that
-/// flow-sequence when this shape is present.
 fn flow_seq_preceding_block_map_at_doc_level(
     doc: &SyntaxNode,
     block_map: &SyntaxNode,
@@ -173,10 +155,6 @@ fn flow_seq_preceding_block_map_at_doc_level(
         .find(|n| n.text_range().end() <= block_map_offset)
 }
 
-/// True when a YAML_BLOCK_MAP_ENTRY's KEY wrapper carries no key text —
-/// only structural trivia and the `:` indicator. Used to detect the
-/// implicit-empty-key shape (`: value`) and the LX3P pattern where the
-/// real key lives in a sibling node preceding the map.
 fn block_map_entry_key_is_empty(entry: &SyntaxNode) -> bool {
     let Some(key_node) = entry
         .children()
@@ -184,9 +162,6 @@ fn block_map_entry_key_is_empty(entry: &SyntaxNode) -> bool {
     else {
         return false;
     };
-    // The key text lives in a `YAML_SCALAR` node child or, for the
-    // explicit `?`/tag shapes, a `YAML_KEY`/`YAML_TAG` token — all before
-    // the trailing `:`.
     !key_node
         .children_with_tokens()
         .take_while(|el| el.as_token().map(|t| t.kind()) != Some(SyntaxKind::YAML_COLON))
@@ -210,12 +185,6 @@ fn project_document(doc: &SyntaxNode, out: &mut Vec<String>) {
         .children_with_tokens()
         .filter_map(|el| el.into_token())
         .any(|tok| tok.kind() == SyntaxKind::YAML_DOCUMENT_END);
-    // A v2 builder synthesizes a `YAML_DOCUMENT` around a bare `...`
-    // (or comments preceding it) to keep the marker inside a document
-    // for losslessness. v1 / yaml-test-suite considers such input an
-    // empty stream — no `+DOC`/`-DOC` events. Skip the projection when
-    // the only structural content is a `DocumentEnd` marker (HWV9,
-    // QT73).
     if !has_doc_start && doc_is_marker_only(doc) {
         return;
     }
@@ -226,11 +195,6 @@ fn project_document(doc: &SyntaxNode, out: &mut Vec<String>) {
     });
     let handles = collect_tag_handles(doc);
 
-    // Top-level container detection must look at direct children, not
-    // arbitrary descendants. A `descendants()` walk surfaces the first
-    // BLOCK_SEQUENCE/BLOCK_MAP it finds in document order — which for a
-    // block-map whose values contain nested block-sequences would be the
-    // inner sequence, collapsing the entire map into a bare `+SEQ`.
     if let Some(seq_node) = doc
         .children()
         .find(|n| n.kind() == SyntaxKind::YAML_BLOCK_SEQUENCE)
@@ -242,12 +206,6 @@ fn project_document(doc: &SyntaxNode, out: &mut Vec<String>) {
         .children()
         .find(|n| n.kind() == SyntaxKind::YAML_BLOCK_MAP)
     {
-        // Flow-sequence used as a block-map key (LX3P: `[flow]: block`).
-        // v2 lands the `[flow]` flow-sequence as a sibling preceding the
-        // YAML_BLOCK_MAP (the colon opens an empty-key entry inside the
-        // map), but yaml-test-suite expects `+MAP +SEQ []…-SEQ value -MAP`.
-        // Splice the flow-seq in as the first entry's key when this shape
-        // is present.
         if let Some(flow_seq) = flow_seq_preceding_block_map_at_doc_level(doc, &root_map)
             && let Some(first_entry) = root_map
                 .children()
@@ -302,14 +260,6 @@ fn project_document(doc: &SyntaxNode, out: &mut Vec<String>) {
             SyntaxKind::YAML_FLOW_MAP | SyntaxKind::YAML_FLOW_SEQUENCE
         )
     }) {
-        // A doc-direct flow collection may be preceded by a doc-level
-        // anchor token (`&flowseq [ ... ]`, CN3R). Carry the anchor
-        // onto the open event so `+SEQ [] &flowseq` matches the
-        // expected projection. Looking at `descendants()` (the prior
-        // implementation) is wrong here because it surfaces the
-        // first nested flow_map encountered in document order — for a
-        // `&flowseq [ ... { e: f } ... ]` shape that collapses the
-        // whole document into a bare flow-map projection.
         let anchor = anchor_preceding_node(doc, &flow_collection);
         project_flow_collection_node_with_anchor(
             &flow_collection,
@@ -345,26 +295,14 @@ fn project_document(doc: &SyntaxNode, out: &mut Vec<String>) {
 }
 
 fn scalar_document_value(doc: &SyntaxNode, handles: &TagHandles) -> Option<String> {
-    // `--- |` / `--- >` packs a block-scalar header onto the directive-end
-    // marker line. Detect that pattern first so the folded body (with proper
-    // chomping) is emitted instead of a single-line plain scalar.
     if let Some((indicator, body)) = extract_scalar_doc_block_body(doc) {
         let escaped = escape_block_scalar_text(&body);
         return Some(format!("=VAL {indicator}{escaped}"));
     }
-    // Bare top-level block scalar (no `---` marker) — e.g. a doc that begins
-    // with `>\n …` or `|\n …`. Reuse the same folder; the only difference vs
-    // the directive-end-packed form is the absence of a `YAML_DOCUMENT_START`
-    // sentinel separating the header from the body.
     if let Some((indicator, body)) = extract_top_level_block_body(doc) {
         let escaped = escape_block_scalar_text(&body);
         return Some(format!("=VAL {indicator}{escaped}"));
     }
-    // Skip `%TAG`/`%YAML` directive lines: those are document-level metadata,
-    // not part of the scalar body.
-    // Include WHITESPACE between tokens so a top-level `&anchor body`
-    // joins as `&anchor body`, letting `decompose_scalar` find the
-    // whitespace terminator on the anchor name.
     let text = doc
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -383,7 +321,6 @@ fn scalar_document_value(doc: &SyntaxNode, handles: &TagHandles) -> Option<Strin
         .join("");
     let trimmed_text = text.trim();
     if trimmed_text.is_empty() {
-        // Tagged-but-empty scalar document still emits a `=VAL <tag> :` event.
         let tag_only = doc
             .descendants_with_tokens()
             .filter_map(|el| el.into_token())
@@ -413,16 +350,8 @@ fn scalar_document_value(doc: &SyntaxNode, handles: &TagHandles) -> Option<Strin
             } else {
                 quoted_val_event(trimmed_text)
             };
-            // quoted_val_event returns `=VAL "body` — splice the tag in.
             quoted.replacen("=VAL ", &format!("=VAL {long} "), 1)
         } else {
-            // Plain scalar: fold multi-line continuations the same way the
-            // untagged path does so `!!str\nd\ne` projects as `:d e`. The
-            // folded text may still carry a leading anchor token
-            // (`&a1\nscalar1`, 9KAX) since `fold_plain_document_lines`
-            // keeps YAML_ANCHOR tokens — peel it off so the event renders
-            // as `=VAL &anchor <tag> :body` rather than burying `&anchor`
-            // in the scalar body.
             let folded = fold_plain_document_lines(doc);
             let (anchor, _, body) = decompose_scalar(folded.trim_start(), handles);
             scalar_event(anchor, Some(&long), &escape_block_scalar_text(body))
@@ -433,9 +362,6 @@ fn scalar_document_value(doc: &SyntaxNode, handles: &TagHandles) -> Option<Strin
         quoted_val_event(&text)
     } else {
         let folded = fold_plain_document_lines(doc);
-        // Plain top-level scalars may carry node properties (`&anchor`,
-        // `!tag`) before the actual scalar body; decompose so events project
-        // them in canonical `&anchor <tag> :body` order.
         let (anchor, body_tag, body) = decompose_scalar(folded.trim_start(), handles);
         if anchor.is_some() || body_tag.is_some() {
             scalar_event(anchor, body_tag.as_deref(), &escape_block_scalar_text(body))
@@ -446,15 +372,6 @@ fn scalar_document_value(doc: &SyntaxNode, handles: &TagHandles) -> Option<Strin
     Some(event)
 }
 
-/// Collect a node's scalar source bytes — concatenate every
-/// `YAML_SCALAR` / `YAML_ANCHOR` / `YAML_ALIAS` / `NEWLINE` descendant
-/// token in order. Real directive lines are emitted as `YAML_DIRECTIVE`
-/// tokens and so are already excluded by the kind filter; a scalar
-/// fragment that merely *looks* like a directive (e.g. a `%YAML 1.2`
-/// continuation line of a plain scalar, XLQ9) is genuine content and
-/// kept. The result is the raw multi-line text the [`super::cooking`]
-/// helpers expect when folding a multi-line quoted scalar — usable at the
-/// document level or scoped to a single `YAML_BLOCK_MAP_VALUE`.
 fn collect_scalar_source(node: &SyntaxNode) -> String {
     node.descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -475,13 +392,6 @@ fn plain_val_event(text: &str) -> String {
     format!("=VAL :{}", text.replace('\\', "\\\\"))
 }
 
-/// Fold the YAML-1.2 plain-scalar body of a top-level scalar `YAML_DOCUMENT`
-/// into its canonical value: walk `YAML_SCALAR` and `NEWLINE` tokens in order,
-/// then apply plain-scalar folding — non-empty-line breaks fold to a single
-/// space, runs of `n` empty lines fold to `n` line feeds. Leading/trailing
-/// empty lines are stripped. Real directives are `YAML_DIRECTIVE` tokens
-/// (excluded by the kind filter); a `%`-leading plain-scalar continuation
-/// line (XLQ9) is content and is kept.
 fn fold_plain_document_lines(doc: &SyntaxNode) -> String {
     let raw: String = doc
         .descendants_with_tokens()
@@ -527,10 +437,6 @@ fn fold_plain_document_lines(doc: &SyntaxNode) -> String {
     out
 }
 
-/// Project a flow-collection scalar token, preserving quoted-scalar
-/// classification when the source uses `"..."` or `'...'`. Plain scalars are
-/// folded just like outside flow context. A leading tag shorthand (`!!str`,
-/// `!handle!suffix`, `!local`) is resolved through `handles`.
 fn flow_scalar_event(text: &str, handles: &TagHandles) -> String {
     let trimmed = text.trim();
     if trimmed.starts_with('"') || trimmed.starts_with('\'') {
@@ -539,9 +445,6 @@ fn flow_scalar_event(text: &str, handles: &TagHandles) -> String {
         }
         return quoted_val_event(trimmed);
     }
-    // Alias indicator (`*name`). YAML plain scalars cannot begin with `*`,
-    // so a leading `*` is always an alias reference. The trimmed body
-    // (`*name`) is the alias's serialized form.
     if trimmed.starts_with('*') {
         return format!("=ALI {trimmed}");
     }
@@ -557,12 +460,8 @@ fn flow_scalar_event(text: &str, handles: &TagHandles) -> String {
 /// end of input; otherwise `text` is returned as-is.
 fn split_leading_tag(text: &str) -> Option<(&str, &str)> {
     let rest = text.strip_prefix('!')?;
-    // Verbatim tag `!<URI>`: the URI runs to the closing `>` and may contain
-    // characters (`,`, `:`) that otherwise terminate a shorthand. Span the
-    // whole `!<…>` so the URI isn't truncated at the first comma/colon.
     if let Some(uri) = rest.strip_prefix('<') {
         let close = uri.find('>')?;
-        // `!` + `<` + URI + `>`
         return Some(text.split_at(2 + close + 1));
     }
     let mut i = 0usize;
@@ -622,10 +521,6 @@ fn flow_kv_split(item: &str) -> Option<(usize, usize)> {
                 let next_off = idx + ch.len_utf8();
                 let after_is_break = next_off >= bytes.len()
                     || matches!(bytes[next_off], b' ' | b'\t' | b'\n' | b'\r');
-                // YAML 1.2 §7.4.2: a JSON-like key (here, a quoted scalar)
-                // permits an adjacent value colon with no following space
-                // (`"JSON like":adjacent`, 9MMW). Flow-collection keys are
-                // projected structurally before reaching this text path.
                 let key_is_json_like = item[..idx].trim_end().ends_with(['"', '\'']);
                 if after_is_break || key_is_json_like {
                     return Some((idx, next_off));
@@ -637,14 +532,9 @@ fn flow_kv_split(item: &str) -> Option<(usize, usize)> {
     None
 }
 
-/// Emit events for a single flow-sequence item: either `+MAP {} key val -MAP`
-/// when the item is a flow-map entry (`key: value`, possibly with empty key
-/// or value), or a single `=VAL` for a bare scalar.
 fn project_flow_seq_item(item: &str, handles: &TagHandles, out: &mut Vec<String>) {
     if let Some((colon, after)) = flow_kv_split(item) {
         let raw_key_full = item[..colon].trim();
-        // Strip the explicit-key `?` indicator (followed by whitespace or
-        // end-of-key) when present.
         let raw_key = strip_explicit_key_indicator(raw_key_full);
         let raw_value = item[after..].trim();
         out.push("+MAP {}".to_string());
@@ -661,21 +551,12 @@ fn project_flow_seq_item(item: &str, handles: &TagHandles, out: &mut Vec<String>
         out.push("-MAP".to_string());
     } else if item.trim_start().starts_with('"') || item.trim_start().starts_with('\'') {
         let trimmed = item.trim();
-        // Multi-line quoted scalar inside a flow sequence: apply YAML
-        // 1.2 §7.3 line-folding rules so embedded newlines fold to a
-        // space (or `\n` for blank-line runs) before the event's escape
-        // pass. Without this, joining tokens directly leaves the literal
-        // newline inside the body.
         if trimmed.contains('\n') {
             out.push(quoted_val_event_multi_line(trimmed));
         } else {
             out.push(quoted_val_event(trimmed));
         }
     } else {
-        // Route through `flow_scalar_event` so node properties on a
-        // flow-seq item (`[&item a, b, c]`, 6BFJ) project as
-        // `=VAL &item :a` and alias items (`[*b]`, X38W) project as
-        // `=ALI *b`.
         out.push(flow_scalar_event(&cooking::cook_plain(item), handles));
     }
 }
@@ -700,12 +581,6 @@ fn quoted_val_event(text: &str) -> String {
     }
 }
 
-/// Multi-line quoted scalar projection: applies YAML 1.2 §7.3.2 / §7.3.3 line
-/// folding (single line break → space, blank-line run of `n` blanks → `n`
-/// `\n`s) before escape decoding. Required when a top-level quoted document
-/// spans more than one source line — the single-line `quoted_val_event`
-/// concatenates `YAML_SCALAR` tokens directly and would lose all line
-/// structure.
 fn quoted_val_event_multi_line(raw: &str) -> String {
     let trimmed = raw.trim_start_matches([' ', '\t', '\n']);
     if trimmed.starts_with('\'') {
@@ -717,9 +592,6 @@ fn quoted_val_event_multi_line(raw: &str) -> String {
     }
 }
 
-/// Escape decoded scalar text for the yaml-test-suite event format, where
-/// control characters and structural backslashes are rendered as backslash
-/// escapes (`\n`, `\t`, `\b`, ...).
 fn escape_for_event(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
@@ -767,10 +639,6 @@ fn escape_block_scalar_text(text: &str) -> String {
     out
 }
 
-/// If `value_node` encodes a literal (`|`) or folded (`>`) block scalar,
-/// return the folded scalar body. Headers with explicit chomping (`-` strip,
-/// `+` keep) or indent indicators are recognized; chomping is applied to the
-/// final body. Default chomping is "clip" (single trailing newline).
 fn extract_block_scalar_body(value_node: &SyntaxNode) -> Option<(char, String)> {
     let tokens: Vec<_> = value_node
         .descendants_with_tokens()
@@ -788,15 +656,6 @@ fn extract_block_scalar_body(value_node: &SyntaxNode) -> Option<(char, String)> 
     fold_block_scalar_tokens(&tokens, block_scalar_parent_indent(value_node))
 }
 
-/// Compute the column of the start-of-line for the parent scope of a
-/// block-scalar value, used to anchor explicit indent indicators per
-/// YAML 1.2 §8.1.1.1: when a block-scalar header carries an indentation
-/// indicator `m`, the absolute content indent is `parent_indent + m`.
-///
-/// Walks up to the YAML_BLOCK_MAP_ENTRY (for map values) or treats a
-/// passed YAML_BLOCK_SEQUENCE_ITEM as its own parent. Other shapes
-/// (e.g. top-level YAML_DOCUMENT) fall back to the node's own column,
-/// which is 0 at the document level.
 fn block_scalar_parent_indent(value_node: &SyntaxNode) -> usize {
     let target = match value_node.kind() {
         SyntaxKind::YAML_BLOCK_MAP_VALUE => value_node
@@ -820,11 +679,6 @@ fn column_of_node_start(node: &SyntaxNode) -> usize {
     }
 }
 
-/// Variant of [`extract_block_scalar_body`] that walks a full `YAML_DOCUMENT`
-/// node and applies block-scalar folding to the tokens *after* a
-/// `YAML_DOCUMENT_START` marker. Used for the directive-end-with-payload
-/// pattern (`--- |\n  ab\n  cd\n`) where the block-scalar header is packed
-/// onto the marker line itself rather than being a block-map value.
 fn extract_scalar_doc_block_body(doc: &SyntaxNode) -> Option<(char, String)> {
     let mut started = false;
     let mut tokens = Vec::new();
@@ -940,9 +794,6 @@ fn fold_block_scalar_tokens(
     fold_block_scalar_raw(header_part, &raw, parent_indent)
 }
 
-/// Fold a block scalar from its header line (`|`, `>2-`, …) and the raw body
-/// source that follows the header's trailing newline. `parent_indent` anchors
-/// explicit indent indicators per YAML 1.2 §8.1.1.1.
 fn fold_block_scalar_raw(
     header_part: &str,
     raw: &str,
@@ -1087,13 +938,6 @@ struct BlockBodyLine {
     is_mi: bool,
 }
 
-/// Apply the YAML 1.2 §8.1.3 folded-scalar rules to a sequence of
-/// content-indent-stripped body lines:
-/// - Each leading blank line contributes a single `\n` to the output.
-/// - Between two adjacent non-MI content lines, a single line break folds to
-///   ` `; a run of `n` blank lines folds to `n` `\n` chars.
-/// - When either side of the boundary is more-indented, *all* line breaks
-///   between the two content lines are preserved literally.
 fn fold_greater_lines(lines: &[BlockBodyLine]) -> String {
     let mut out = String::new();
     let mut idx = 0usize;
@@ -1302,10 +1146,6 @@ fn project_flow_map_entries(flow_map: &SyntaxNode, handles: &TagHandles, out: &m
     }
 }
 
-/// Flush an orphan scalar that wasn't followed by a matching
-/// empty-key entry. YAML 1.2 treats this as an implicit-value entry
-/// (`{a, b: c}` ≡ `{a: ~, b: c}`), so the projection emits the key
-/// then an empty value.
 fn flush_pending_orphan(pending: &str, handles: &TagHandles, out: &mut Vec<String>) {
     let trimmed = pending.trim();
     if trimmed.is_empty() {
@@ -1323,8 +1163,6 @@ fn flush_pending_orphan(pending: &str, handles: &TagHandles, out: &mut Vec<Strin
         if stripped.is_empty() {
             out.push("=VAL :".to_string());
         } else {
-            // Resolve a leading anchor/tag/handle on the orphan key the
-            // same way `flow_scalar_event` does for in-entry scalars.
             out.push(flow_scalar_event(stripped, handles));
         }
     }
@@ -1360,13 +1198,6 @@ fn project_flow_map_entry(
             )
         });
 
-    // A flow collection (`[...]` / `{...}`) nested directly inside the
-    // KEY wrapper is a complex key (SBG9 `{[d, e]: f}`) and must project
-    // structurally (`+SEQ [] ... -SEQ`) rather than as slurped scalar
-    // text. With the scanner registering flow-collection-start as a
-    // simple-key candidate, the resulting CST places the collection
-    // node directly under `YAML_FLOW_MAP_KEY` instead of leaving it as
-    // an orphan sibling.
     let key_collection = key_node.children().find(|n| {
         matches!(
             n.kind(),
@@ -1377,24 +1208,12 @@ fn project_flow_map_entry(
         if let Some(ext) = external_key {
             flush_pending_orphan(ext, handles, out);
         }
-        // Pick up an anchor sitting in the KEY wrapper before the
-        // collection (`{ &a [a, &b b]: *b }`, X38W) so the structural
-        // projection carries `&a` on the open event.
         let anchor = anchor_preceding_node(&key_node, &collection);
         project_flow_collection_node_with_anchor(&collection, anchor.as_deref(), handles, out);
         project_flow_map_value(&value_node, handles, out);
         return;
     }
 
-    // Include WHITESPACE / NEWLINE so v2's separately-emitted `?`
-    // (`YAML_KEY`) and key scalar (`YAML_SCALAR`) keep the original
-    // trivia between them, letting `strip_explicit_key_indicator`
-    // recognize the `?<sp>` pattern. v1 emitted both as a single
-    // `YAML_KEY` token so the join was already a no-op there.
-    // Include `YAML_ANCHOR`/`YAML_ALIAS` so node properties on a flow
-    // map key (`{ &c c: d }`, CN3R) and an alias-as-key (`{ *a: v }`,
-    // X38W) survive into the key text — `flow_scalar_event` then
-    // peels the leading `&anchor` or projects the `*alias`.
     let mut raw_key = key_node
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -1413,30 +1232,18 @@ fn project_flow_map_entry(
         .collect::<Vec<_>>()
         .join("");
 
-    // External key prepends only when the entry's own key is empty
-    // (the v2-scanner orphan-merge case): the orphan provides the key
-    // bytes, the entry just contributes the `:` and the value.
     if let Some(ext) = external_key
         && !key_has_content
     {
         raw_key = format!("{ext}{raw_key}");
     } else if let Some(ext) = external_key {
-        // Pending was non-empty but this entry already has a real
-        // key — flush pending as a standalone implicit-value entry
-        // first so neither side gets dropped.
         flush_pending_orphan(ext, handles, out);
     }
 
     if has_explicit_colon {
-        // Strip the explicit-key `?` indicator (`{ ? foo : v }`) from
-        // the projected key text. A bare `? :` entry (key reduces to
-        // empty after stripping) projects to an empty `=VAL :`.
         let key_for_classify = raw_key.trim();
         let stripped_key = strip_explicit_key_indicator(key_for_classify);
         if stripped_key.is_empty() {
-            // Tag-only key (`!!str : bar` in WZ62) — `raw_key` skips
-            // YAML_TAG, so an entry whose key is only a tag arrives
-            // here empty. Pick the YAML_TAG sibling off the KEY node.
             let key_tag = key_node
                 .children_with_tokens()
                 .filter_map(|el| el.into_token())
@@ -1456,11 +1263,6 @@ fn project_flow_map_entry(
                 out.push(quoted_val_event(stripped_key));
             }
         } else {
-            // Multi-line plain key text needs folding before
-            // resolution; flow_scalar_event does it for plain text but
-            // bypasses folding when the input contains explicit tag
-            // bytes — handle the plain branch here so multi-line
-            // orphans collapse to a single line.
             let folded = cooking::cook_plain(stripped_key);
             out.push(flow_scalar_event(&folded, handles));
         }
@@ -1490,13 +1292,7 @@ fn project_flow_map_entry(
     }
 }
 
-/// Project a `YAML_FLOW_MAP_VALUE` node, recursing into nested flow
-/// collections (`+SEQ [] ... -SEQ`, `+MAP {} ... -MAP`) when present so that
-/// multi-line nested flow values like `{ a: [ b, c, { d: [e, f] } ] }`
-/// produce structured event streams instead of one slurped scalar.
 fn project_flow_map_value(value_node: &SyntaxNode, handles: &TagHandles, out: &mut Vec<String>) {
-    // A YAML_TAG sibling decorates the nested flow collection or scalar
-    // that follows (EHF6 `k: !!seq [ a, !!str b]`).
     let decoration_tag = value_node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -1527,14 +1323,6 @@ fn project_flow_map_value(value_node: &SyntaxNode, handles: &TagHandles, out: &m
         return;
     }
 
-    // Include `YAML_COLON` tokens alongside `YAML_SCALAR` so a
-    // plain-scalar value that begins with `:` (e.g. 5T43's
-    // `{ "key"::value }` and 58MP's `{x: :x}` — leading `:` after
-    // the entry's key indicator) carries its colon into the event
-    // body. The scanner emits the leading `:` as a stray Value token
-    // that the v2 builder lands inside the VALUE wrapper; without
-    // collecting `YAML_COLON` here the projection drops it and the
-    // event becomes `=VAL :value` instead of `=VAL ::value`.
     let raw_value = value_node
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -1551,8 +1339,6 @@ fn project_flow_map_value(value_node: &SyntaxNode, handles: &TagHandles, out: &m
         .collect::<Vec<_>>()
         .join("");
     if raw_value.trim().is_empty() {
-        // Tag-only value (`!!str,` in WZ62) — no scalar content but a
-        // YAML_TAG sibling annotates the empty value.
         let tag = value_node
             .children_with_tokens()
             .filter_map(|el| el.into_token())
@@ -1568,20 +1354,10 @@ fn project_flow_map_value(value_node: &SyntaxNode, handles: &TagHandles, out: &m
     out.push(flow_scalar_event(&raw_value, handles));
 }
 
-/// Emit the events for a flow collection node (`+SEQ [] ... -SEQ` or
-/// `+MAP {} ... -MAP`). Shared by flow-map orphan-key projection and
-/// flow-sequence single-pair-map projection so a collection sitting in
-/// key position is projected structurally, not slurped as scalar text.
 fn project_flow_collection_node(node: &SyntaxNode, handles: &TagHandles, out: &mut Vec<String>) {
     project_flow_collection_node_with_anchor(node, None, handles, out);
 }
 
-/// Variant of [`project_flow_collection_node`] that propagates a
-/// caller-extracted anchor (e.g. `&a [a, &b b]`) into the collection's
-/// open event (`+SEQ [] &a`, `+MAP {} &a`). The anchor name is passed
-/// without its leading `&`. A `tag` (already resolved to the long form
-/// `<tag:...>`) is appended after the anchor when the parent decorates
-/// the flow collection (`--- !!map { ... }`, EHF6).
 fn project_flow_collection_node_with_anchor(
     node: &SyntaxNode,
     anchor: Option<&str>,
@@ -1617,11 +1393,6 @@ fn project_flow_collection_node_with_anchor(
     }
 }
 
-/// Walk `container`'s children-with-tokens from the start; return the
-/// anchor name (sans `&`) of any `YAML_ANCHOR` token that sits before
-/// `target` (and is not separated from it by a non-trivia token). Used
-/// to splice a key/value anchor onto a structural projection of a
-/// flow collection (`&a [...]`, `&a { ... }`).
 fn anchor_preceding_node(container: &SyntaxNode, target: &SyntaxNode) -> Option<String> {
     let mut anchor: Option<String> = None;
     for el in container.children_with_tokens() {
@@ -1681,7 +1452,6 @@ fn project_flow_seq_item_pair_value(
                 project_flow_collection_node(&node, handles, out);
                 return;
             }
-            // The value scalar after the colon is a `YAML_SCALAR` node.
             rowan::NodeOrToken::Node(node)
                 if seen_colon && node.kind() == SyntaxKind::YAML_SCALAR =>
             {
@@ -1693,10 +1463,6 @@ fn project_flow_seq_item_pair_value(
     project_inline_scalar(&value_text, handles, out);
 }
 
-/// CST-walking variant of flow-sequence projection. Each
-/// `YAML_FLOW_SEQUENCE_ITEM` may contain a nested `YAML_FLOW_SEQUENCE` /
-/// `YAML_FLOW_MAP`; if neither is present we fall back to the text-based
-/// `project_flow_seq_item` for plain/quoted scalar items.
 fn project_flow_sequence_items_cst(
     flow_seq: &SyntaxNode,
     handles: &TagHandles,
@@ -1706,12 +1472,6 @@ fn project_flow_sequence_items_cst(
         .children()
         .filter(|n| n.kind() == SyntaxKind::YAML_FLOW_SEQUENCE_ITEM)
     {
-        // A flow-sequence item shaped `<collection>: <value>` is an
-        // implicit single-pair map keyed by the collection
-        // (`[ [[b,c]]: d ]`, `[ {JSON: like}: adjacent ]`). Detect a
-        // leading collection node followed by a direct-child colon and
-        // wrap it in `+MAP {} ... -MAP`; scalar-keyed pairs keep the
-        // proven text path (`flow_kv_split`) below.
         if let Some(key_collection) = item.children().next().filter(|n| {
             matches!(
                 n.kind(),
@@ -1732,8 +1492,6 @@ fn project_flow_sequence_items_cst(
             .children()
             .find(|n| n.kind() == SyntaxKind::YAML_FLOW_SEQUENCE)
         {
-            // Propagate an item-level anchor (`[ &g [...] ]`, CN3R-shape)
-            // onto the nested collection's open event.
             let anchor = anchor_preceding_node(&item, &nested_seq);
             project_flow_collection_node_with_anchor(&nested_seq, anchor.as_deref(), handles, out);
             continue;
@@ -1746,19 +1504,6 @@ fn project_flow_sequence_items_cst(
             project_flow_collection_node_with_anchor(&nested_map, anchor.as_deref(), handles, out);
             continue;
         }
-        // Build the item text from scalar/key/colon tokens plus
-        // structural whitespace so an embedded `:` (e.g. an implicit
-        // flow-map entry like `'k' : v` written inside `[...]`, see
-        // 87E4 / L9U5 / LQZ7) survives into `flow_kv_split`. Skipping
-        // colons collapsed the entry into a single `=VAL :scalar` and
-        // hid the `+MAP {} ... -MAP` wrap; preserving them lets
-        // `project_flow_seq_item` recognize the kv pattern.
-        // `YAML_COMMENT` tokens stay excluded so leading/trailing
-        // comments inside multi-line items don't leak into the value.
-        // Include `YAML_ANCHOR`/`YAML_ALIAS` so node properties on a
-        // plain item (`[&item a, b]`, 6BFJ) and bare aliases (`[*b]`,
-        // X38W) survive into the item text — `flow_scalar_event`
-        // (called from `project_flow_seq_item`) then peels them.
         let item_text: String = item
             .descendants_with_tokens()
             .filter_map(|el| el.into_token())
@@ -1781,9 +1526,6 @@ fn project_flow_sequence_items_cst(
     }
 }
 
-/// Project a single scalar (without surrounding `+MAP`/`-MAP`) for an inline
-/// map key or value position. Anchors/tags are decomposed in canonical order;
-/// alias references (`*name`) emit `=ALI`. An empty body emits `=VAL :`.
 fn project_inline_scalar(text: &str, handles: &TagHandles, out: &mut Vec<String>) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -1811,8 +1553,6 @@ fn project_block_sequence_items(
             .children()
             .find(|n| n.kind() == SyntaxKind::YAML_BLOCK_SEQUENCE)
         {
-            // A YAML_TAG / YAML_ANCHOR sibling decorates the nested
-            // sequence (`- !!seq\n - nested`, 57H4).
             let mut suffix = String::new();
             let anchor = item
                 .children_with_tokens()
@@ -1836,9 +1576,6 @@ fn project_block_sequence_items(
             out.push("-SEQ".to_string());
             continue;
         }
-        // Inline-map sequence item: `- key: value` (with optional continuation
-        // lines that the parser captures as a nested YAML_BLOCK_MAP). The full
-        // entry chain lives in the nested map node.
         if let Some(nested_map) = item
             .children()
             .find(|n| n.kind() == SyntaxKind::YAML_BLOCK_MAP)
@@ -1852,10 +1589,6 @@ fn project_block_sequence_items(
             .children()
             .find(|n| n.kind() == SyntaxKind::YAML_FLOW_SEQUENCE)
         {
-            // Walk the CST rather than re-splitting the flow text: only the
-            // CST walker structurally projects items whose key is itself a
-            // flow collection (`[ {JSON: like}:adjacent ]`, 9MMW) or a nested
-            // flow sequence; the text splitter mis-folds those into scalars.
             out.push("+SEQ []".to_string());
             project_flow_sequence_items_cst(&flow_seq, handles, out);
             out.push("-SEQ".to_string());
@@ -1880,12 +1613,6 @@ fn project_block_sequence_items(
             .filter_map(|el| el.into_token())
             .find(|tok| tok.kind() == SyntaxKind::YAML_TAG)
             .map(|tok| tok.text().to_string());
-        // Include WHITESPACE so `&anchor body` joins as `&anchor body`,
-        // letting `decompose_scalar` find the whitespace terminator on
-        // the anchor name, and NEWLINE so a multi-line plain item folds
-        // its line breaks (`x\n  \tx` → `x x`, UV7Q) instead of
-        // concatenating the continuation indentation. See
-        // `project_block_map_entry_value` for the matching rationale.
         let scalar_text = item
             .descendants_with_tokens()
             .filter_map(|el| el.into_token())
@@ -1906,10 +1633,6 @@ fn project_block_sequence_items(
         let event = if scalar_trimmed.starts_with('*') {
             format!("=ALI {scalar_trimmed}")
         } else {
-            // Combine the optional `YAML_TAG` token (already separated from
-            // the scalar text by the parser) with anchors/tags found in the
-            // scalar body, and render the YAML event in canonical
-            // `&anchor <tag> :body` order.
             let item_long_tag = item_tag
                 .as_deref()
                 .and_then(|t| resolve_long_tag(t, handles));
@@ -1928,24 +1651,10 @@ fn project_block_sequence_items(
     }
 }
 
-/// Decompose a node-property + scalar string into `(anchor, long_tag, body)`,
-/// peeling off any leading `&anchor` and tag shorthand in either order
-/// (`&a !!str foo` or `!!str &a foo`). Returns the raw body trimmed.
-/// Build the `+SEQ` open event for a YAML_BLOCK_SEQUENCE, attaching any
-/// document-level node properties (a tag, or a `&anchor` carried by the
-/// block-sequence header line) that precede the first sequence item. The
-/// parser stores those properties as YAML_TAG / YAML_SCALAR siblings of
-/// the YAML_BLOCK_SEQUENCE_ITEM children, in source order.
 fn seq_open_event(seq_node: &SyntaxNode, handles: &TagHandles) -> String {
     let mut anchor: Option<String> = None;
     let mut long_tag: Option<String> = None;
-    // v2 emits anchors/tags as siblings of the YAML_BLOCK_SEQUENCE within
-    // the parent container (e.g. directly under a YAML_DOCUMENT for the
-    // top-level `&anchor\n- a` shape) — not as inner-prefix tokens like
-    // v1. Scan parent siblings preceding the SEQ first.
     absorb_preceding_anchor_and_tag(seq_node, handles, &mut anchor, &mut long_tag);
-    // v1 emits anchors/tags as inner-prefix tokens of the SEQ before the
-    // first BLOCK_SEQUENCE_ITEM. Also walk those for backward compat.
     for child in seq_node.children_with_tokens() {
         if let Some(node) = child.as_node()
             && node.kind() == SyntaxKind::YAML_BLOCK_SEQUENCE_ITEM
@@ -1969,12 +1678,6 @@ fn seq_open_event(seq_node: &SyntaxNode, handles: &TagHandles) -> String {
     event
 }
 
-/// Walk the parent's children and absorb `YAML_TAG`/`YAML_SCALAR` tokens
-/// (carrying a `&...` anchor or `!...` tag) that appear *before* the
-/// `child` node, stopping at `child`. Used by `seq_open_event` /
-/// `map_open_event_for_block_map` to capture v2's emission of leading
-/// anchor/tag tokens at the parent level rather than inside the
-/// container.
 fn absorb_preceding_anchor_and_tag(
     child: &SyntaxNode,
     handles: &TagHandles,
@@ -1998,11 +1701,6 @@ fn absorb_preceding_anchor_and_tag(
     }
 }
 
-/// Inspect a single token for an anchor or tag and update the
-/// respective slot. Recognizes both v1's and v2's emission shape:
-/// - v1 emits anchors as `YAML_SCALAR` tokens whose text starts with `&`.
-/// - v2 emits anchors as `YAML_TAG` tokens (the synthesis of anchor and
-///   tag into a single SyntaxKind), distinguishable by the leading byte.
 fn absorb_anchor_or_tag(
     tok: &SyntaxToken,
     handles: &TagHandles,
@@ -2032,19 +1730,11 @@ fn absorb_anchor_or_tag(
     }
 }
 
-/// Build the `+MAP` open event for a nested YAML_BLOCK_MAP that lives inside
-/// a YAML_BLOCK_MAP_VALUE. Captures any anchor (`&name`) or tag (`!!str`,
-/// `!shorthand`, etc.) tokens that precede the inner block map so that
-/// projected events match patterns like `+MAP &node3` from yaml-test-suite
-/// case 26DV (`top3: &node3` followed by an indented nested block map).
 fn map_open_event_for_value(value_node: &SyntaxNode, handles: &TagHandles) -> String {
     let (anchor, long_tag, _residual) = extract_leading_node_properties(value_node, handles);
     map_open_event_from_props(anchor.as_deref(), long_tag.as_deref())
 }
 
-/// Render a `+MAP` open event from pre-extracted node properties, emitting them
-/// in the canonical yaml-test-suite order: `&anchor` before `<tag>` (matching
-/// [`scalar_event`] and `+MAP &a4 <tag:…>` fixtures).
 fn map_open_event_from_props(anchor: Option<&str>, long_tag: Option<&str>) -> String {
     let mut event = String::from("+MAP");
     if let Some(a) = anchor {
@@ -2058,16 +1748,6 @@ fn map_open_event_from_props(anchor: Option<&str>, long_tag: Option<&str>) -> St
     event
 }
 
-/// Walk the leading children of a node that precedes a nested collection — a
-/// YAML_BLOCK_MAP_VALUE (`key: &a !!map\n …`, BU8L) or a YAML_BLOCK_SEQUENCE_ITEM
-/// (`- !!map\n …`, 6JWB) — stopping at any nested YAML_BLOCK_MAP / YAML_FLOW_MAP
-/// / YAML_FLOW_SEQUENCE. Pulls out the optional anchor (`&name`, ending at
-/// whitespace, comma, or flow-collection closer), the optional resolved tag,
-/// and any residual scalar text that follows the node properties (e.g. the
-/// `*alias1` in 26DV's `&node3 \n  *alias1` scalar, or the fused first key in
-/// `&a !!map\n  a`). Both anchor and tag are peeled from the embedded scalar
-/// text in either order, since the scanner fuses node properties and the first
-/// key into one YAML_SCALAR token rather than emitting a separate YAML_TAG.
 fn extract_leading_node_properties(
     node: &SyntaxNode,
     handles: &TagHandles,
@@ -2086,8 +1766,6 @@ fn extract_leading_node_properties(
         {
             break;
         }
-        // The fused node-property + first-key scalar is a `YAML_SCALAR`
-        // node; peel anchor/tag out of its text and keep the residual.
         if let Some(scalar) = child
             .as_node()
             .filter(|n| n.kind() == SyntaxKind::YAML_SCALAR)
@@ -2146,26 +1824,15 @@ fn extract_leading_node_properties(
     (anchor, long_tag, residual)
 }
 
-/// Build the `+MAP` open event for a YAML_BLOCK_MAP rooted directly under
-/// a YAML_DOCUMENT. Captures any anchor (`&name`) or tag (`!!str`,
-/// `!shorthand`, etc.) tokens that the parser absorbed at the top of the
-/// block map so that documents like `--- !!set\n? a\n? b` project as
-/// `+MAP <tag:yaml.org,2002:set>`.
 fn map_open_event_for_block_map(map_node: &SyntaxNode, handles: &TagHandles) -> String {
     let mut anchor: Option<String> = None;
     let mut long_tag: Option<String> = None;
-    // Mirror `seq_open_event`: scan parent siblings preceding this MAP
-    // first (v2 emission), then the MAP's inner-prefix tokens (v1).
     absorb_preceding_anchor_and_tag(map_node, handles, &mut anchor, &mut long_tag);
     for child in map_node.children_with_tokens() {
         if let Some(node) = child.as_node() {
             if node.kind() == SyntaxKind::YAML_BLOCK_MAP_ENTRY {
                 break;
             }
-            // A `? `-prefixed scalar (now a `YAML_SCALAR` node) is the
-            // first key of the map; stop scanning header tokens there so
-            // we don't pick up entry-level data as document-level
-            // node properties.
             if node.kind() == SyntaxKind::YAML_SCALAR {
                 let text = node.text().to_string();
                 let trimmed = text.trim();
@@ -2215,10 +1882,6 @@ fn decompose_scalar<'a>(
     (anchor, long_tag, rest)
 }
 
-/// Render a scalar event from its decomposed parts: optional anchor,
-/// optional long-form tag (already in `<...>` form), and the scalar body.
-/// Handles plain, double-quoted, and single-quoted bodies; quoted bodies
-/// share the same escape normalization as [`quoted_val_event`].
 fn scalar_event(anchor: Option<&str>, long_tag: Option<&str>, body: &str) -> String {
     let mut prefix = String::new();
     if let Some(a) = anchor {
@@ -2233,14 +1896,9 @@ fn scalar_event(anchor: Option<&str>, long_tag: Option<&str>, body: &str) -> Str
         return format!("=VAL {prefix}:");
     }
     if body.starts_with('"') || body.starts_with('\'') {
-        // Reuse the shared escape/normalization rules; splice the prefix in
-        // place of the leading `=VAL ` token.
         let quoted = quoted_val_event(body);
         return quoted.replacen("=VAL ", &format!("=VAL {prefix}"), 1);
     }
-    // yaml-test-suite events escape `\`, control characters, and embedded
-    // newlines in plain-scalar bodies. Apply that here so callers can pass
-    // raw (or fold-only) text and not pre-escape.
     format!("=VAL {prefix}:{}", escape_for_event(body))
 }
 
@@ -2265,9 +1923,6 @@ fn project_block_map_entries(map_node: &SyntaxNode, handles: &TagHandles, out: &
                     out.push(scalar_event(anchor, body_tag.as_deref(), rest));
                 }
                 idx += 1;
-                // Look ahead for the matching `:value` line. Skip
-                // intervening newlines, whitespace, and comments. Stop at
-                // anything else — that means the value is implicitly null.
                 let mut peek = idx;
                 while peek < children.len() {
                     if let rowan::NodeOrToken::Token(t) = &children[peek] {
@@ -2279,8 +1934,6 @@ fn project_block_map_entries(map_node: &SyntaxNode, handles: &TagHandles, out: &
                             continue;
                         }
                         if t.kind() == SyntaxKind::YAML_COLON {
-                            // Colon found: collect value tokens up to the
-                            // next NEWLINE.
                             let mut value_tag: Option<String> = None;
                             let mut value_text = String::new();
                             let mut value_end = peek + 1;
@@ -2303,7 +1956,6 @@ fn project_block_map_entries(map_node: &SyntaxNode, handles: &TagHandles, out: &
                                         }
                                         value_end += 1;
                                     }
-                                    // The value scalar is a `YAML_SCALAR` node.
                                     rowan::NodeOrToken::Node(vn)
                                         if vn.kind() == SyntaxKind::YAML_SCALAR =>
                                     {
@@ -2339,7 +1991,6 @@ fn project_block_map_entries(map_node: &SyntaxNode, handles: &TagHandles, out: &
                             break;
                         }
                     }
-                    // Non-trivia, non-colon: implicit null value.
                     out.push("=VAL :".to_string());
                     break;
                 }
@@ -2358,11 +2009,6 @@ fn project_block_map_entries(map_node: &SyntaxNode, handles: &TagHandles, out: &
     }
 }
 
-/// Project a YAML_BLOCK_MAP_KEY whose content is a nested collection — the
-/// explicit-key `? <seq-or-map>` shape — into the key position. Mirrors the
-/// nested-collection branches of [`project_block_map_entry_value`]. Returns
-/// `true` when a collection child was found and projected, `false` when the
-/// key is a plain scalar the caller should handle with its token-join logic.
 fn project_block_map_key_collection(
     key_node: &SyntaxNode,
     handles: &TagHandles,
@@ -2377,10 +2023,6 @@ fn project_block_map_key_collection(
                 return true;
             }
             SyntaxKind::YAML_FLOW_SEQUENCE | SyntaxKind::YAML_FLOW_MAP => {
-                // A flow collection in key position may carry an anchor
-                // sitting as a sibling token inside the KEY wrapper
-                // (`&key [a, b]: value`, 6BFJ). Surface it on the open
-                // event so the projection matches `+SEQ [] &key …`.
                 let anchor = anchor_preceding_node(key_node, &child);
                 project_flow_collection_node_with_anchor(&child, anchor.as_deref(), handles, out);
                 return true;
@@ -2407,12 +2049,6 @@ fn project_block_map_entry(entry: &SyntaxNode, handles: &TagHandles, out: &mut V
         .find(|n| n.kind() == SyntaxKind::YAML_BLOCK_MAP_VALUE)
         .expect("value node");
 
-    // Explicit-key (`?`) entry whose key content is a nested collection (block
-    // or flow sequence/map) rather than a scalar. The collection lives as a
-    // child NODE of YAML_BLOCK_MAP_KEY, so the token-join key-text logic below
-    // sees only the `?` indicator and would emit an empty `=VAL :`. Project the
-    // collection in the key position instead. M5DY: block/flow seq keys; V9D5:
-    // nested block-map key.
     if project_block_map_key_collection(&key_node, handles, out) {
         project_block_map_entry_value(&value_node, handles, out);
         return;
@@ -2423,21 +2059,10 @@ fn project_block_map_entry(entry: &SyntaxNode, handles: &TagHandles, out: &mut V
         .filter_map(|el| el.into_token())
         .find(|tok| tok.kind() == SyntaxKind::YAML_TAG)
         .map(|tok| tok.text().to_string());
-    // The key text lives in either a `YAML_KEY` token (v1's emission, used
-    // both for the explicit `?` indicator and for implicit key text) or
-    // a `YAML_SCALAR` token (v2's emission, where wrapper position
-    // carries the role and the explicit `?` is the only `YAML_KEY`).
-    // Concatenate matching tokens — interleave WHITESPACE / NEWLINE so the
-    // explicit `?` and any subsequent key scalar are separated by their
-    // original trivia, letting `strip_explicit_key_indicator` recognize
-    // the `?<sp>` pattern. Stops at the trailing `:` (`YAML_COLON`).
-    // Falls back to empty for the empty-implicit-key shorthand
-    // (`: value` — KEY wrapper holds only the colon).
     let key_text = key_node
         .children_with_tokens()
         .take_while(|el| el.as_token().map(|t| t.kind()) != Some(SyntaxKind::YAML_COLON))
         .filter_map(|el| match el {
-            // The key scalar is a `YAML_SCALAR` node.
             rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::YAML_SCALAR => {
                 Some(n.text().to_string())
             }
@@ -2459,22 +2084,12 @@ fn project_block_map_entry(entry: &SyntaxNode, handles: &TagHandles, out: &mut V
         .join("");
     let key_text = key_text.trim_end().to_string();
 
-    // Strip an explicit-key `?` indicator that precedes the actual key
-    // text. v2 emits the `?` as a `YAML_KEY` token sibling of the
-    // `YAML_SCALAR`, so it ends up in `key_text` after the join above.
-    // v1 wouldn't reach this strip because its v1-shape `YAML_KEY`
-    // token carried only the implicit key body.
     let key_trimmed = strip_explicit_key_indicator(key_text.trim());
     if key_trimmed.starts_with('*') {
         out.push(format!("=ALI {key_trimmed}"));
     } else if key_tag.is_none()
         && let Some((indicator, body)) = extract_block_scalar_body(&key_node)
     {
-        // Explicit-key whose key is itself a literal (`|`) or folded
-        // (`>`) block scalar (5WE3, KK5P complex4).
-        // `extract_block_scalar_body` ignores the `?` indicator (a
-        // `YAML_KEY` token) and the trailing `:` (`YAML_COLON`), folding
-        // only the scalar body — the same path as a block-scalar value.
         out.push(format!(
             "=VAL {indicator}{}",
             escape_block_scalar_text(&body)
@@ -2532,11 +2147,6 @@ fn project_block_map_entry_value(
         return;
     }
 
-    // A flow-sequence value with embedded `:` (an implicit flow-map
-    // entry inside `[...]`, e.g. 87E4 / L9U5 / LQZ7) needs the
-    // CST-walking item projector — the text-based fallback below
-    // strips colons during `value_text` assembly so `flow_kv_split`
-    // never sees them and the entry collapses into one bare scalar.
     if let Some(flow_seq) = value_node
         .children()
         .find(|n| n.kind() == SyntaxKind::YAML_FLOW_SEQUENCE)
@@ -2547,9 +2157,6 @@ fn project_block_map_entry_value(
     }
 
     if let Some((indicator, body)) = extract_block_scalar_body(value_node) {
-        // Tag/anchor siblings of the block scalar (e.g. `!foo >1\n value`,
-        // `!!binary | ...`) decorate the scalar — splice them into the
-        // event in canonical `&anchor <tag> <indicator>body` order.
         let mut prefix = String::new();
         let anchor_text = value_node
             .children_with_tokens()
@@ -2580,14 +2187,6 @@ fn project_block_map_entry_value(
         .filter_map(|el| el.into_token())
         .find(|tok| tok.kind() == SyntaxKind::YAML_TAG)
         .map(|tok| tok.text().to_string());
-    // Include WHITESPACE between scalar-ish tokens so a value like
-    // `&anchor body` joins as `&anchor body` (not `&anchorbody`),
-    // letting `decompose_scalar` find the whitespace terminator on the
-    // anchor name. NEWLINE must be kept too: the scanner splits a
-    // multi-line plain scalar into per-line `YAML_SCALAR_TEXT` leaves
-    // interleaved with `NEWLINE` leaves, and the downstream plain fold
-    // needs those breaks to collapse `e\n  f` to `e f` (A984) rather than
-    // concatenating the continuation indentation into `e  f`.
     let value_text = value_node
         .descendants_with_tokens()
         .filter_map(|el| el.into_token())
@@ -2621,20 +2220,7 @@ fn project_block_map_entry_value(
             .and_then(|t| resolve_long_tag(t, handles));
         let trimmed = value_text.trim();
         if trimmed.starts_with('"') || trimmed.starts_with('\'') {
-            // Multi-line quoted scalar value: rebuild the source text with
-            // newlines intact (parser splits each physical line into its own
-            // YAML_SCALAR token), then run the YAML 1.2 §7.3 line-folding
-            // rules so blank lines fold to `\n` and single breaks fold to
-            // space. Without this, joining YAML_SCALAR tokens directly drops
-            // line structure (yaml-test-suite case XV9V).
             let multi_line_text = collect_scalar_source(value_node);
-            // Strip trailing whitespace/newlines that come AFTER the
-            // closing quote. v2 keeps a single quoted-scalar token so
-            // those bytes are post-value trivia (NEWLINE) — they don't
-            // make the scalar body multi-line. Without this trim, a
-            // single-line quoted with trailing significant whitespace
-            // (J3BT's `"Quoted \t"`) hits the multi-line folder which
-            // strips trailing tabs/spaces from the scalar body.
             let is_multi_line = multi_line_text
                 .trim_end_matches(['\n', '\r', ' ', '\t'])
                 .contains('\n');
@@ -2653,11 +2239,6 @@ fn project_block_map_entry_value(
             let long_tag = value_long_tag.or(body_tag);
             let folded;
             let body_for_event: &str = if body.contains('\n') {
-                // A tag/anchor can precede a multi-line double-quoted value
-                // (`!!binary "\\\n …"`, 565N), so the quoted branch above is
-                // skipped. Enable §7.5 escaped line breaks when the decomposed
-                // body is itself double-quoted; the later `decode_double_quoted`
-                // in `scalar_event` strips the quotes and remaining escapes.
                 let escaped_breaks = body.trim_start().starts_with('"');
                 folded = cooking::fold_quoted_inner(body, escaped_breaks);
                 &folded

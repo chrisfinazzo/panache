@@ -38,13 +38,11 @@ fn test_raw_inline_disabled() {
     let mut config = Config::default();
     config.parser_extensions.raw_attribute = false;
     let output = format(input, Some(config), None);
-    // Should be treated as regular code span with attributes
     assert_eq!(output.trim(), "This is `<a>html</a>`{=html} text.");
 }
 
 #[test]
 fn test_code_span_with_regular_class() {
-    // Regular code span with .class should not be treated as raw inline
     let input = "This is `code`{.python} text.";
     let config = Config::default();
     let output = format(input, Some(config), None);
@@ -75,7 +73,6 @@ fn test_raw_inline_multiple_formats() {
 
 #[test]
 fn test_raw_inline_preservation() {
-    // Test that content is preserved exactly (not reformatted)
     let input = "Raw `  spaced  content  `{=html} here.";
     let config = Config::default();
     let output = format(input, Some(config), None);

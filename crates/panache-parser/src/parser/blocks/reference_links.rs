@@ -116,19 +116,14 @@ pub(crate) fn reference_definition_spans(
     let inner = &text[leading_spaces..];
     let bytes = inner.as_bytes();
 
-    // Must start at beginning of line with [
     if bytes.is_empty() || bytes[0] != b'[' {
         return None;
     }
 
-    // Check if it's a footnote definition [^id]: - not a reference definition
     if bytes.len() >= 2 && bytes[1] == b'^' {
         return None;
     }
 
-    // Find the closing ] for the label. Labels may span lines (CommonMark
-    // §4.7) but a blank line inside the label terminates the attempt. We also
-    // reject unescaped `[` inside the label per spec.
     let mut pos = 1;
     let mut escape_next = false;
 
@@ -184,17 +179,14 @@ pub(crate) fn reference_definition_spans(
 
     pos += 1; // Skip ]
 
-    // Must be followed by :
     if pos >= bytes.len() || bytes[pos] != b':' {
         return None;
     }
     let colon = leading_spaces + pos;
     pos += 1;
 
-    // Skip ws + at most one newline + ws to the URL.
     pos = skip_ws_one_newline(bytes, pos)?;
 
-    // Parse URL
     let url_start = pos;
     let url_is_angle = pos < bytes.len() && bytes[pos] == b'<';
 
@@ -218,11 +210,6 @@ pub(crate) fn reference_definition_spans(
     }
     let url = (leading_spaces + url_start)..(leading_spaces + pos);
 
-    // After URL, try optional title. If a title attempt is malformed but we
-    // had to cross a newline to reach it, fall back to "no title, end of URL
-    // line" — the next line is then parsed independently (e.g.
-    // `[foo]: /url\n"title" ok\n` → ref def `[foo]: /url`, paragraph
-    // `"title" ok`).
     let after_url = pos;
     let url_line_end = consume_to_eol(bytes, after_url);
     let url_line_end_lax = if strict_eol {
@@ -238,10 +225,6 @@ pub(crate) fn reference_definition_spans(
         let crossed_newline = bytes[after_url..title_start]
             .iter()
             .any(|&b| b == b'\n' || b == b'\r');
-        // CommonMark §4.7: when the title is on the same line as the
-        // destination, it must be separated from the destination by at least
-        // one space or tab. `<bar>(baz)` (no whitespace between `>` and `(`)
-        // is therefore not a valid LRD under CommonMark; Pandoc accepts it.
         let cmark_requires_separator = dialect == crate::options::Dialect::CommonMark
             && !crossed_newline
             && title_start == after_url;
@@ -296,8 +279,6 @@ pub(crate) fn reference_definition_spans(
     })
 }
 
-/// Like `consume_to_eol` but returns the end-of-line position regardless of
-/// whether the line had non-whitespace content after the parsed segment.
 fn consume_to_eol_lax(bytes: &[u8], mut pos: usize) -> usize {
     while pos < bytes.len() && bytes[pos] != b'\n' && bytes[pos] != b'\r' {
         pos += 1;
@@ -312,8 +293,6 @@ fn consume_to_eol_lax(bytes: &[u8], mut pos: usize) -> usize {
     pos
 }
 
-/// Skip space/tab from `pos`, then consume one line ending if present.
-/// Returns `None` if non-whitespace is found before the line ending.
 fn consume_to_eol(bytes: &[u8], mut pos: usize) -> Option<usize> {
     while pos < bytes.len() && matches!(bytes[pos], b' ' | b'\t') {
         pos += 1;
@@ -374,7 +353,6 @@ pub fn line_is_mmd_link_attribute_continuation(line: &str) -> bool {
     let mut saw_pair = false;
 
     while pos < len {
-        // Skip inter-token whitespace.
         while pos < len && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
             pos += 1;
         }
@@ -382,7 +360,6 @@ pub fn line_is_mmd_link_attribute_continuation(line: &str) -> bool {
             break;
         }
 
-        // Parse key until '=' or whitespace.
         let key_start = pos;
         while pos < len && bytes[pos] != b'=' && bytes[pos] != b' ' && bytes[pos] != b'\t' {
             pos += 1;
@@ -392,7 +369,6 @@ pub fn line_is_mmd_link_attribute_continuation(line: &str) -> bool {
         }
         pos += 1; // skip '='
 
-        // Parse value (quoted or unquoted), require non-empty value.
         if pos >= len {
             return false;
         }
@@ -423,29 +399,19 @@ pub fn line_is_mmd_link_attribute_continuation(line: &str) -> bool {
     saw_pair
 }
 
-/// Parse an optional title after the URL.
-/// Titles can be in double quotes, single quotes, or parentheses.
-///
-/// Returns `Some(Some(range))` with the title's *outer* byte range (delimiters
-/// included, relative to `bytes`) when a title is found, `Some(None)` if there
-/// is no title, and `None` if a title is started but malformed. On success
-/// `*pos` is advanced past the closing delimiter and any trailing space/tab.
 fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<usize>>> {
     let base_pos = *pos;
 
-    // Skip whitespace (including newlines for multi-line titles)
     while *pos < bytes.len() && matches!(bytes[*pos], b' ' | b'\t' | b'\n' | b'\r') {
         *pos += 1;
     }
 
-    // Check if there's a title
     if *pos >= bytes.len() {
         return Some(None);
     }
 
     let quote_char = bytes[*pos];
     if !matches!(quote_char, b'"' | b'\'' | b'(') {
-        // No title, that's okay
         *pos = base_pos; // Reset position
         return Some(None);
     }
@@ -455,7 +421,6 @@ fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<u
     let open = *pos;
     *pos += 1; // Skip opening quote
 
-    // Find closing quote
     let mut escape_next = false;
     while *pos < bytes.len() {
         if escape_next {
@@ -473,7 +438,6 @@ fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<u
                 *pos += 1; // Skip closing quote
                 let close_end = *pos;
 
-                // Skip trailing whitespace to end of line
                 while *pos < bytes.len() && matches!(bytes[*pos], b' ' | b'\t') {
                     *pos += 1;
                 }
@@ -481,7 +445,6 @@ fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<u
                 return Some(Some(open..close_end));
             }
             b'\n' if quote_char == b'(' => {
-                // Parenthetical titles can span lines
                 *pos += 1;
             }
             _ => {
@@ -490,7 +453,6 @@ fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<u
         }
     }
 
-    // No closing quote found
     None
 }
 
@@ -504,12 +466,10 @@ fn parse_title(bytes: &[u8], pos: &mut usize) -> Option<Option<std::ops::Range<u
 pub fn try_parse_footnote_marker(line: &str) -> Option<(String, usize)> {
     let bytes = line.as_bytes();
 
-    // Must start with [^
     if bytes.len() < 4 || bytes[0] != b'[' || bytes[1] != b'^' {
         return None;
     }
 
-    // Find the closing ] for the ID
     let mut pos = 2;
     while pos < bytes.len() && bytes[pos] != b']' && bytes[pos] != b'\n' && bytes[pos] != b'\r' {
         pos += 1;
@@ -526,13 +486,11 @@ pub fn try_parse_footnote_marker(line: &str) -> Option<(String, usize)> {
 
     pos += 1; // Skip ]
 
-    // Must be followed by :
     if pos >= bytes.len() || bytes[pos] != b':' {
         return None;
     }
     pos += 1;
 
-    // Skip spaces/tabs until content (or end of line)
     while pos < bytes.len() && matches!(bytes[pos], b' ' | b'\t') {
         pos += 1;
     }
@@ -591,9 +549,6 @@ mod tests {
         );
     }
 
-    /// `noteBlock` accepts `nonindentSpaces` before the marker, in whatever
-    /// frame it is reading — column 0 at the top level, the item's content
-    /// column inside a list. A fourth space is an indented code block instead.
     #[test]
     fn footnote_definition_accepts_up_to_three_leading_spaces() {
         for (indent, prefix) in [(0, ""), (1, " "), (2, "  "), (3, "   ")] {
@@ -618,8 +573,6 @@ mod tests {
         );
     }
 
-    /// The same 0..=3 window, measured from the item's content column: `- ` puts
-    /// content at column 2, so columns 2..=5 open a definition and 6 is code.
     #[test]
     fn footnote_definition_indent_window_is_relative_to_the_list_item() {
         for extra in 0..=3 {
@@ -680,7 +633,6 @@ mod tests {
 
     #[test]
     fn test_reference_definition_commonmark_requires_separator_before_title() {
-        // Pandoc: title `(baz)` directly attached after `<bar>` is accepted.
         let pandoc =
             try_parse_reference_definition("[foo]: <bar>(baz)\n", crate::options::Dialect::Pandoc);
         assert_eq!(
@@ -690,17 +642,12 @@ mod tests {
             Some(("bar", Some("baz")))
         );
 
-        // CommonMark: same input is not a valid LRD because the title `(baz)`
-        // is not space-separated from the destination; the parser rejects the
-        // candidate so the dispatcher falls back to a paragraph.
         let cmark = try_parse_reference_definition(
             "[foo]: <bar>(baz)\n",
             crate::options::Dialect::CommonMark,
         );
         assert!(cmark.is_none());
 
-        // CommonMark with a space before the title does parse as an LRD with a
-        // title.
         let cmark_ok = try_parse_reference_definition(
             "[foo]: <bar> (baz)\n",
             crate::options::Dialect::CommonMark,
@@ -729,7 +676,6 @@ mod tests {
             .find(|n| n.kind() == SyntaxKind::REFERENCE_URL)
             .expect("REFERENCE_URL node");
         assert_eq!(url.text().to_string(), "<https://example.com>");
-        // Angle brackets are kept inside the node as their own delimiter tokens.
         assert!(
             url.children_with_tokens()
                 .any(|e| e.kind() == SyntaxKind::LINK_DEST_START)

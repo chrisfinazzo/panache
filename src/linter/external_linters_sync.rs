@@ -62,8 +62,7 @@ pub fn run_linter_sync(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Note: Many linters exit with code 1 when they find issues, so we don't treat that as an error
-    // Only fail if the command truly failed to run
+    // Linters commonly use exit code 1 to report findings.
     if !output.status.success() && stdout.trim().is_empty() && stderr.trim().is_empty() {
         return Err(LinterError::NonZeroExit {
             code: output.status.code().unwrap_or(-1),

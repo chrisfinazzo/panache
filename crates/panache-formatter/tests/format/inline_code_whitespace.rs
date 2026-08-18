@@ -1,9 +1,5 @@
 use panache_formatter::format;
 
-// Code-span content is preserved verbatim: leading/trailing spaces inside the
-// backticks are meaningful and must not be trimmed (regression for the TODO
-// where `  | a | b |` was rewritten to `| a | b |`).
-
 #[test]
 fn preserves_leading_spaces() {
     let input = "text `  | a | b |` more\n";

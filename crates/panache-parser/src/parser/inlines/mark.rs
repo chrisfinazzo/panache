@@ -19,12 +19,10 @@ use crate::syntax::SyntaxKind;
 pub fn try_parse_mark(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with ==
     if bytes.len() < 4 || bytes[0] != b'=' || bytes[1] != b'=' {
         return None;
     }
 
-    // Find the closing ==
     let mut pos = 2;
     let mut found_close = false;
     while pos + 1 < bytes.len() {
@@ -41,12 +39,10 @@ pub fn try_parse_mark(text: &str) -> Option<(usize, &str)> {
 
     let content = &text[2..pos];
 
-    // Content cannot be empty or only whitespace
     if content.trim().is_empty() {
         return None;
     }
 
-    // Pandoc parity: no whitespace immediately inside delimiters.
     if content.starts_with(char::is_whitespace) || content.ends_with(char::is_whitespace) {
         return None;
     }

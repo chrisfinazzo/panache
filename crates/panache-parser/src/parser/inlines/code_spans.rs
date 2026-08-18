@@ -3,7 +3,6 @@ use crate::parser::utils::helpers::backtick_run;
 /// Parsing for inline code spans (`code`)
 use crate::syntax::SyntaxKind;
 
-// Import the attribute parsing from utils
 use crate::parser::utils::attributes::{
     AttributeBlock, emit_attribute_node, try_parse_trailing_attributes,
 };
@@ -17,7 +16,6 @@ use crate::parser::utils::attributes::{
 pub fn try_parse_code_span(
     text: &str,
 ) -> Option<(usize, &str, usize, Option<(AttributeBlock, &str)>)> {
-    // Count opening backticks
     let opening_backticks = text.bytes().take_while(|&b| b == b'`').count();
     if opening_backticks == 0 {
         return None;
@@ -26,18 +24,12 @@ pub fn try_parse_code_span(
     let rest = &text[opening_backticks..];
     let rest_bytes = rest.as_bytes();
 
-    // Look for matching closing backticks. Skip non-backtick bytes via
-    // memchr (compiles to vectorized scan) instead of stepping one
-    // UTF-8 char at a time — `try_parse_code_span` is called on every
-    // `` ` `` byte the dispatcher encounters and scans to end of input
-    // when no closer matches, so the inner skip dominates self-time.
     let mut pos = 0;
     while pos < rest_bytes.len() {
         let next_tick = match rest_bytes[pos..].iter().position(|&b| b == b'`') {
             Some(off) => pos + off,
             None => break,
         };
-        // Count the run of consecutive backticks starting at `next_tick`.
         let mut closing_backticks = 0;
         while next_tick + closing_backticks < rest_bytes.len()
             && rest_bytes[next_tick + closing_backticks] == b'`'
@@ -46,37 +38,30 @@ pub fn try_parse_code_span(
         }
 
         if closing_backticks == opening_backticks {
-            // Found matching close
             let code_content = &rest[..next_tick];
             let after_close = opening_backticks + next_tick + closing_backticks;
 
-            // Check for trailing attributes {#id .class key=value}
             let remaining = &text[after_close..];
-            if remaining.starts_with('{') {
-                // Find the closing brace
-                if let Some(close_brace_pos) = remaining.find('}') {
-                    let attr_text = &remaining[..=close_brace_pos];
-                    // Try to parse as attributes
-                    if let Some((attrs, _)) = try_parse_trailing_attributes(attr_text) {
-                        let total_len = after_close + close_brace_pos + 1;
-                        return Some((
-                            total_len,
-                            code_content,
-                            opening_backticks,
-                            Some((attrs, attr_text)),
-                        ));
-                    }
+            if remaining.starts_with('{')
+                && let Some(close_brace_pos) = remaining.find('}')
+            {
+                let attr_text = &remaining[..=close_brace_pos];
+                if let Some((attrs, _)) = try_parse_trailing_attributes(attr_text) {
+                    let total_len = after_close + close_brace_pos + 1;
+                    return Some((
+                        total_len,
+                        code_content,
+                        opening_backticks,
+                        Some((attrs, attr_text)),
+                    ));
                 }
             }
 
-            // No attributes, just return the code span
             return Some((after_close, code_content, opening_backticks, None));
         }
-        // Skip past this run of backticks and keep searching.
         pos = next_tick + closing_backticks;
     }
 
-    // No matching close found
     None
 }
 
@@ -118,22 +103,18 @@ pub fn emit_code_span(
 ) {
     builder.start_node(SyntaxKind::INLINE_CODE.into());
 
-    // Opening backticks
     builder.token(
         SyntaxKind::INLINE_CODE_MARKER.into(),
         &backtick_run(backtick_count),
     );
 
-    // Code content
     builder.token(SyntaxKind::INLINE_CODE_CONTENT.into(), content);
 
-    // Closing backticks
     builder.token(
         SyntaxKind::INLINE_CODE_MARKER.into(),
         &backtick_run(backtick_count),
     );
 
-    // Emit attributes if present, structured over the raw source bytes.
     if let Some(raw) = attr_text {
         emit_attribute_node(builder, raw);
     }
@@ -227,7 +208,6 @@ mod tests {
 
     #[test]
     fn test_code_span_attributes_must_be_adjacent() {
-        // Space between closing backtick and { should not parse attributes
         let result = try_parse_code_span("`code` {.python}");
         assert_eq!(result, Some((6, "code", 1, None)));
     }

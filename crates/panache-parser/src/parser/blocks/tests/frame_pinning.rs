@@ -29,9 +29,6 @@ use crate::parser::utils::container_stack::{
 };
 use crate::syntax::SyntaxKind;
 
-/// `ParserOptions` for the given dialect, with that dialect's default
-/// flavor and extensions. `from_stack` captures marker-detection bits
-/// off the full options, so the stack-shaped tests build one.
 fn opts(dialect: Dialect) -> ParserOptions {
     let flavor = match dialect {
         Dialect::Pandoc => Flavor::Pandoc,
@@ -45,15 +42,6 @@ fn opts(dialect: Dialect) -> ParserOptions {
     }
 }
 
-/// One `(ops, line)` shape pinned across every prefix-level helper.
-///
-/// The columns have deliberately different semantics — that is the
-/// point. `strip` is the detection-side walk of the ops and
-/// `peek_prefix` the emission-side one; both strip list indent with
-/// `strip_list_indent` (whitespace-only), so they agree on every list
-/// advance and differ only where the line-0 marker rule applies. The
-/// verdict is the authoritative answer, carrying both the tail and
-/// whether the frame was reached.
 struct PinRow {
     name: &'static str,
     ops: &'static [StripOp],
@@ -76,12 +64,6 @@ struct PinRow {
 }
 
 const PINS: &[PinRow] = &[
-    // A tab straddling the item's content column: the line *does* reach
-    // column 2, but a tab has no byte boundary to split on. `strip` and
-    // the emission-side walk both consume the tab whole (they share
-    // `strip_list_indent`); the verdict reports the straddle instead of
-    // deciding, and `next_line_is_definition_marker` reads the marker
-    // behind the tab off it.
     PinRow {
         name: "tab_straddles_list_content_col",
         ops: &[StripOp::ListAdvance(2)],
@@ -96,9 +78,6 @@ const PINS: &[PinRow] = &[
         },
         expected_to_change: "",
     },
-    // An under-indented line keeps its bytes: `strip` stops at the first
-    // non-whitespace byte, exactly as the emission-side walk does, so a
-    // `ListAdvance` can never slice `c ` off as two columns of indent.
     PinRow {
         name: "short_line_content_not_sliced_as_indent",
         ops: &[StripOp::ListAdvance(2)],
@@ -124,14 +103,6 @@ const PINS: &[PinRow] = &[
         verdict: FrameVerdict::Inside { rest: ": def" },
         expected_to_change: "",
     },
-    // The issue_209 shape ([ContentIndent, ListAdvance,
-    // BlockQuoteMarker], a definition body holding a list item holding a
-    // blockquote). The peek/emit pair used to collapse the ops to
-    // scalars applied list → bq → content-indent, leaving the bq marker
-    // behind four spaces when the bq strip ran (only 3 allowed) — the
-    // counterexample to the old "dormant while content_indent == 0"
-    // claim. Both now walk the ops in true stack order, so peek, strip,
-    // and the verdict agree here.
     PinRow {
         name: "issue_209_content_indent_list_bq",
         ops: &[
@@ -147,10 +118,6 @@ const PINS: &[PinRow] = &[
         verdict: FrameVerdict::Inside { rest: "b" },
         expected_to_change: "",
     },
-    // A dash run at column 0 below a definition body has left the body
-    // (a `----` there is the thematic break that closes it): a body
-    // contributes only a `ContentIndent` op, whose shortfall the
-    // graceful strips wave through — only the verdict reports it.
     PinRow {
         name: "short_content_indent_waved_through",
         ops: &[StripOp::ContentIndent(4)],
@@ -166,8 +133,6 @@ const PINS: &[PinRow] = &[
         },
         expected_to_change: "",
     },
-    // `strip_content_indent` degrades gracefully on a short line: it
-    // trims whatever whitespace exists and never reports the shortfall.
     PinRow {
         name: "content_indent_lazy_short_line",
         ops: &[StripOp::ContentIndent(4)],
@@ -218,17 +183,10 @@ fn pinned_prefix_helper_matrix() {
             "{}: resolve",
             row.name
         );
-        // Documentation only; asserted nothing so a planned flip is an
-        // expected-value edit on the row, not a driver change.
         let _ = row.expected_to_change;
     }
 }
 
-/// The tab-straddle shape at the primitive level: one line, one column
-/// target, three different answers. `advance_emitted_marker_columns`
-/// leaves the straddling tab in place (any-char column walk),
-/// `strip_list_indent` (via `byte_index_at_column`) consumes it whole,
-/// and `gobbled_indent_prefix_len` stops before it.
 #[test]
 fn tab_straddle_primitives_disagree() {
     let line = "\t: def";
@@ -250,20 +208,13 @@ fn line_0_list_advance_skips_the_emitted_marker() {
     assert_eq!(ordered.strip_line_0_for_emission("1. x"), "x");
 }
 
-/// Every other `ListAdvance` is an indent strip and stops at the first
-/// non-whitespace byte — including the outer sections' advances on the
-/// dispatch line, where only the *innermost* op names emitted marker
-/// bytes.
 #[test]
 fn list_advance_never_eats_content_bytes() {
-    // Continuation lines and lookahead: `strip` applies every op.
     let prefix = ContainerPrefix::from_ops(&[StripOp::ListAdvance(2)], false);
     assert_eq!(prefix.strip("b |"), "b |");
     assert_eq!(prefix.strip("- x"), "- x");
     assert_eq!(prefix.strip(" b |"), "b |");
 
-    // Line 0 with the marker consumed: the outer advance is indent, the
-    // innermost one is the marker.
     let nested = ContainerPrefix::from_ops(
         &[
             StripOp::ListAdvance(2),
@@ -273,9 +224,6 @@ fn list_advance_never_eats_content_bytes() {
         true,
     );
     assert_eq!(nested.strip_line_0_for_emission("  > - x"), "x");
-    // With the outer indent missing, the outer advance strips nothing
-    // (so the blockquote op finds no marker to consume) rather than
-    // slicing `x ` off as two columns.
     assert_eq!(nested.strip_line_0_for_emission("x > - y"), "> - y");
 }
 
@@ -302,8 +250,6 @@ fn strip_consumes_only_container_prefix_bytes() {
             StripOp::BlockQuoteMarker,
         ],
     ];
-    // Blank lines included: a line terminator is content, so no strip may
-    // claim one even when the line falls short of the frame.
     let lines = [
         "\n",
         "  \n",
@@ -356,7 +302,6 @@ fn split_pieces_captures_whitespace_only_list_indent() {
     );
     assert_eq!(inner, "x");
 
-    // A non-whitespace line claims nothing.
     let (line, inner) = prefix.split_pieces("b > x");
     assert!(line.is_empty());
     assert_eq!(inner, "b > x");
@@ -383,14 +328,6 @@ fn sequential_content_indent_ops_agree_with_summed_strip() {
     }
 }
 
-/// DISAGREES: `from_stack` preserves true stack order (content indent
-/// before the list advance for [Definition, List, ListItem]); the
-/// scalar constructors (`from_scalars`, mirroring `from_ctx`) always
-/// order list → bq → content-indent. Now that every indent strip is
-/// whitespace-only the two agree on a plain indent, but a blockquote
-/// marker still splits them: in stack order the content indent is spent
-/// first and the marker is reached, while the scalar order leaves four
-/// spaces in front of it — more than the three a marker tolerates.
 #[test]
 fn from_stack_and_from_scalars_orderings_diverge() {
     let stack_order = ContainerPrefix::from_ops(
@@ -402,18 +339,11 @@ fn from_stack_and_from_scalars_orderings_diverge() {
         false,
     );
     let scalar_order = ContainerPrefix::from_scalars(1, 2, false, 4, false, Dialect::CommonMark);
-    // Agreement on the shape that used to have the stack order eat `x`
-    // as a faked list indent.
     assert_eq!(stack_order.strip("    x"), "x");
     assert_eq!(scalar_order.strip("    x"), "x");
-    // The ordering itself still shows through.
     assert_eq!(stack_order.strip("      > b"), "b");
     assert_eq!(scalar_order.strip("      > b"), "> b");
 }
-
-// Container builders for the stack-shaped tests. `Paragraph` is
-// deliberately absent: it needs a live `rowan::Checkpoint`, so
-// paragraph-bearing stacks are exercised end to end instead.
 
 fn definition(content_col: usize) -> Container {
     use crate::parser::utils::text_buffer::ParagraphBuffer;
@@ -465,10 +395,6 @@ fn from_stack_definition_above_list_orders_content_indent_first() {
     assert_eq!(p.strip("      a"), "a");
 }
 
-/// The `content_col` convention (documented on `Container`): the sum of
-/// `from_stack`'s per-container `ContentIndent` ops equals the absolute
-/// column `ContainerStack::content_container_indent` computes from the
-/// same stack, for every corpus stack shape.
 #[test]
 fn from_stack_content_indent_ops_sum_to_the_stack_accessor() {
     let stacks: Vec<Vec<Container>> = vec![
@@ -494,15 +420,6 @@ fn from_stack_content_indent_ops_sum_to_the_stack_accessor() {
     }
 }
 
-/// DISAGREES (undocumented `from_ctx` divergence, third of its kind):
-/// `paragraphs::current_content_col` scans for the innermost `ListItem`
-/// *or* `FootnoteDefinition`, so with no list item on the stack it hands
-/// callers a footnote's content width in the "list content column"
-/// slot, while the content-container accessor reports the same width as
-/// content indent -- the one quantity lands in two different frames
-/// depending on which resolver a caller picked. The weak caller is
-/// expected to be retired in refactor(parser): route the caption probe
-/// through the true container frame.
 #[test]
 fn current_content_col_puts_a_footnote_width_in_the_list_slot() {
     use crate::parser::blocks::paragraphs::current_content_col;
@@ -513,8 +430,6 @@ fn current_content_col_puts_a_footnote_width_in_the_list_slot() {
     assert_eq!(current_content_col(&containers), 4);
     assert_eq!(containers.content_container_indent(), 4);
 
-    // With a list item above the footnote both resolvers keep their own
-    // lane: the item column is relative to the footnote frame.
     containers.push(list());
     containers.push(list_item(2));
     assert_eq!(current_content_col(&containers), 2);
@@ -532,14 +447,9 @@ fn lazy_blockquote_gobble_is_dialect_gated() {
     let commonmark = ContainerPrefix::from_stack(&stack, false, &opts(Dialect::CommonMark));
     assert_eq!(pandoc.strip("    deep"), "deep");
     assert_eq!(commonmark.strip("    deep"), "    deep");
-    // A blank line is exempt from the gobble (it ends the quote instead).
     assert_eq!(pandoc.strip("   \n"), "   \n");
 }
 
-/// The caption probe is bounded by the container frame it is called in:
-/// a dash run at column 0 below a definition body (content indent 4)
-/// has left the body, so nothing below it can be the caption's table.
-/// The same dash run *at* the content column still fires.
 #[test]
 fn caption_probe_bounded_by_container_frame() {
     let prefix = ContainerPrefix::from_ops(&[StripOp::ContentIndent(4)], false);
@@ -553,27 +463,14 @@ fn caption_probe_bounded_by_container_frame() {
     assert!(is_caption_followed_by_table(&view, 0));
 }
 
-/// `definition_marker_in_list_frame`'s two production callers feed it
-/// different notions of "the content column" — the dispatcher passes
-/// `ctx.list_indent_info.content_col`, the list-item-break path passes
-/// `paragraphs::current_content_col`, which scans `ListItem` *or*
-/// `FootnoteDefinition` and can hand it a footnote width instead. The
-/// same line parses differently under the two conventions.
 #[test]
 fn definition_marker_frame_depends_on_callers_content_col() {
     let line = "      : def";
-    // Content column 4: the marker sits 2 columns into the item frame,
-    // within the 0-3 allowance. `indent_cols` is absolute (6).
     assert_eq!(
         definition_marker_in_list_frame(line, Some(4)),
         Some((':', 6, 1, 1))
     );
-    // Content column 2: the marker sits 4 columns into the item frame,
-    // past the allowance, and the column-0 fallback also rejects it.
     assert_eq!(definition_marker_in_list_frame(line, Some(2)), None);
-    // A tab straddling the content column: `byte_index_at_column`
-    // consumes the tab whole and the helper re-reads the column it
-    // actually reached, so the dispatch side already sees this marker.
     assert_eq!(
         definition_marker_in_list_frame("\t: def", Some(2)),
         Some((':', 4, 1, 1))
@@ -593,14 +490,6 @@ fn definition_lookahead_sees_marker_behind_straddling_tab() {
     let lines = StrippedLines::new(&raw, 0, &prefix);
     assert_eq!(next_line_is_definition_marker(&lines, 0), Some(0));
 }
-
-// --- End-to-end pins for the Parser-coupled paths -------------------------
-//
-// `content_container_indent_to_strip` and the hand-rolled
-// `leading_indent(x).0 >= content_col` sites are private Parser methods
-// reading live container state; constructing that state by hand would
-// re-derive the logic under test. They are pinned here at the public
-// boundary instead: parse, assert structure, assert losslessness.
 
 fn assert_lossless(input: &str) {
     let tree = parse_blocks(input);
@@ -637,12 +526,6 @@ fn faked_indent_marker_does_not_promote_a_term() {
     assert_lossless(input);
 }
 
-/// A marker at the open definition body's content column belongs to a
-/// *nested* definition list; one dedented below it closes the body and
-/// reads as a sibling definition of the outer term. Pins the
-/// `content_container_indent_to_strip`-based dedent tests in
-/// `definition_marker_over_open_body_block` and
-/// `blank_line_promotes_buffered_definition_term`.
 #[test]
 fn definition_marker_nests_at_content_col_and_siblings_below_it() {
     let nested = "T\n\n:   a\n\n    : b\n";
@@ -694,9 +577,6 @@ fn definition_marker_under_list_item_first_line() {
     assert_lossless(at_content_col);
 }
 
-/// A term/definition pair indented to a footnote body's content column
-/// stays inside the footnote (pins the footnote-frame term lookahead,
-/// which passes raw lines and `FOOTNOTE_INDENT_COLUMNS`).
 #[test]
 fn definition_list_nests_inside_footnote_body() {
     let input = "[^1]: Term\n\n    :   def\n";
@@ -723,7 +603,6 @@ fn definition_list_nests_inside_footnote_body() {
 fn caption_probe_frame_bound_admits_lazy_continuations() {
     let prefix = ContainerPrefix::from_ops(&[StripOp::ContentIndent(4)], false);
 
-    // Header at the content column, separator dedented on the next line.
     let header_sep = [
         "    : cap",
         "",
@@ -735,8 +614,6 @@ fn caption_probe_frame_bound_admits_lazy_continuations() {
     let view = StrippedLines::new(&header_sep, 0, &prefix);
     assert!(is_caption_followed_by_table(&view, 0));
 
-    // Single-column opener at the content column, whose closing dash line
-    // -- which `try_parse_simple_table` does demand -- is dedented.
     let single_col = ["    : cap", "", "    --", "    x", "--"];
     let view = StrippedLines::new(&single_col, 0, &prefix);
     assert!(is_caption_followed_by_table(&view, 0));
@@ -760,8 +637,6 @@ fn div_closer_ends_lines_needs_a_div_on_the_stack() {
     assert!(p(&[fenced_div(0), list(), list_item(2)]));
     assert!(p(&[definition(4), fenced_div(0)]));
     assert!(p(&[fenced_div(0)]));
-    // No div open: a stray `:::` is ordinary content (a table row in
-    // pandoc — probed).
     assert!(!p(&[]));
 }
 
@@ -785,7 +660,6 @@ fn note_marker_bound_needs_a_footnote_on_the_stack() {
     assert_eq!(p(&[footnote(4), Container::BlockQuote {}]), Some(0));
     assert_eq!(p(&[list(), list_item(2), footnote(4)]), Some(1));
     assert_eq!(p(&[footnote(4), list(), list_item(4)]), Some(0));
-    // No footnote on the stack: nothing to fence.
     assert_eq!(p(&[list(), list_item(2)]), None);
     assert_eq!(p(&[definition(4)]), None);
     assert_eq!(p(&[]), None);
@@ -874,7 +748,6 @@ fn list_start_detect_needs_a_list_item_on_the_stack() {
     assert!(p(&[list(), list_item(2)]));
     assert!(p(&[Container::BlockQuote {}, list(), list_item(2)]));
     assert!(p(&[footnote(4), list(), list_item(4)]));
-    // No item run to fence.
     assert!(!p(&[]));
     assert!(!p(&[footnote(4)]));
     assert!(!p(&[definition(4)]));
@@ -1030,9 +903,7 @@ fn html_closer_tag_needs_a_container_above_the_tag_holding_item() {
         p(&[list(), list_item_with_open_tag(2, "<div>"), definition(4)]),
         armed
     );
-    // Nothing above the item: its own run is not fenced.
     assert_eq!(p(&[list(), list_item_with_open_tag(2, "<div>")]), None);
-    // The quote below the item collected its lines before the tag.
     assert_eq!(
         p(&[
             Container::BlockQuote {},
@@ -1041,15 +912,10 @@ fn html_closer_tag_needs_a_container_above_the_tag_holding_item() {
         ]),
         None
     );
-    // No open tag anywhere.
     assert_eq!(p(&[list(), list_item(2), Container::BlockQuote {}]), None);
     assert_eq!(p(&[]), None);
 }
 
-/// The signal survives the mid-item partial flush: the interrupting
-/// block that pushes the container above the item clears the buffer
-/// first, so `clear()` folds the tag into the carried field. A later
-/// chunk consuming the closer drops it again.
 #[test]
 fn html_closer_tag_survives_the_mid_item_flush() {
     use crate::parser::utils::list_item_buffer::ListItemBuffer;

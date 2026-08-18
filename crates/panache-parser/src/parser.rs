@@ -19,7 +19,6 @@ mod block_dispatcher;
 mod core;
 mod verify;
 
-// Re-export main parser
 pub use core::Parser;
 pub use diagnostics::{Diagnostics, SyntaxError, SyntaxErrorSource};
 pub use reparse::{

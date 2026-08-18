@@ -20,8 +20,6 @@ fn footnote_body(input: &str) -> crate::syntax::SyntaxNode {
 
 #[test]
 fn marker_line_table_opens_block() {
-    // Pandoc: `Note [Table …]` — the separator line makes the marker line a
-    // header row.
     let input = "x[^1]\n\n[^1]: a | b\n    ---|---\n";
     let body = footnote_body(input);
     assert!(
@@ -32,7 +30,6 @@ fn marker_line_table_opens_block() {
 
 #[test]
 fn marker_line_hr_opens_block() {
-    // Pandoc: `Note [HorizontalRule]`.
     let input = "x[^1]\n\n[^1]: ***\n";
     let body = footnote_body(input);
     assert!(
@@ -43,7 +40,6 @@ fn marker_line_hr_opens_block() {
 
 #[test]
 fn marker_line_list_opens_block() {
-    // Pandoc: `Note [BulletList [[Plain [Str "li"]]]]`.
     let input = "x[^1]\n\n[^1]: - li\n";
     let body = footnote_body(input);
     assert!(
@@ -54,9 +50,6 @@ fn marker_line_list_opens_block() {
 
 #[test]
 fn marker_line_list_takes_lazy_continuation() {
-    // Pandoc collects the unindented follow-up into the note's raw
-    // (`rawLine` takes any non-blank, non-marker line), so it lazily
-    // continues the list item.
     let input = "x[^1]\n\n[^1]: - li\nlazy\n";
     let body = footnote_body(input);
     let list = find_first(&body, SyntaxKind::LIST).expect("list should open");
@@ -68,7 +61,6 @@ fn marker_line_list_takes_lazy_continuation() {
 
 #[test]
 fn marker_line_blockquote_opens_block() {
-    // Pandoc: `Note [BlockQuote [Para [Str "q"]]]`.
     let input = "x[^1]\n\n[^1]: > q\n";
     let body = footnote_body(input);
     assert!(
@@ -79,11 +71,6 @@ fn marker_line_blockquote_opens_block() {
 
 #[test]
 fn bare_marker_body_blockquote_opens_block() {
-    // Pandoc: `Note [BlockQuote [Para [Str "q"]]]` — the body of a bare
-    // marker is reparsed from scratch, so its first line is quote-startable
-    // even though the marker line above is not blank. Companion of the
-    // marker-line case below; without it the two formatting styles ping-pong
-    // (`[^1]: > q` ⇄ `[^1]:` + indented quote) and idempotency breaks.
     let input = "x[^1]\n\n[^1]:\n    > q\n";
     let body = footnote_body(input);
     assert!(
@@ -94,7 +81,6 @@ fn bare_marker_body_blockquote_opens_block() {
 
 #[test]
 fn marker_line_fence_opens_block() {
-    // Pandoc: `Note [CodeBlock ("",[],[]) "code"]`.
     let input = "x[^1]\n\n[^1]: ```\n    code\n    ```\n";
     let body = footnote_body(input);
     assert!(
@@ -105,9 +91,6 @@ fn marker_line_fence_opens_block() {
 
 #[test]
 fn marker_line_atx_heading_stays_lazy() {
-    // Pandoc: `Note [Para [Str "#", Space, Str "h"]]` — the marker's trailing
-    // space indents the collected raw one column, and pandoc's ATX headers
-    // are margin-anchored.
     let input = "x[^1]\n\n[^1]: # h\n";
     let body = footnote_body(input);
     assert!(
@@ -119,8 +102,6 @@ fn marker_line_atx_heading_stays_lazy() {
 
 #[test]
 fn marker_line_setext_heading_opens_block() {
-    // Pandoc: `Note [Header 1 ("h",[],[]) [Str "h"]]` — setext text tolerates
-    // the one-column indent, unlike ATX.
     let input = "x[^1]\n\n[^1]: h\n    ===\n";
     let body = footnote_body(input);
     assert!(
@@ -131,8 +112,6 @@ fn marker_line_setext_heading_opens_block() {
 
 #[test]
 fn marker_line_line_block_stays_lazy() {
-    // Pandoc keeps `Note [Para [Str "|", …]]` — line blocks are
-    // margin-anchored like ATX headings.
     let input = "x[^1]\n\n[^1]: | line\n    | block\n";
     let body = footnote_body(input);
     assert!(
@@ -143,8 +122,6 @@ fn marker_line_line_block_stays_lazy() {
 
 #[test]
 fn marker_line_fenced_div_stays_lazy() {
-    // Pandoc keeps `Note [Para [Str ":::", …]]` — fenced divs are
-    // margin-anchored.
     let input = "x[^1]\n\n[^1]: ::: note\n    inner\n    :::\n";
     let body = footnote_body(input);
     assert!(
@@ -155,8 +132,6 @@ fn marker_line_fenced_div_stays_lazy() {
 
 #[test]
 fn marker_line_table_in_quoted_footnote_stays_lossless() {
-    // The same dispatch inside a blockquote: continuation lines carry both
-    // the `> ` marker and the note indent.
     let input = "x[^1]\n\n> [^1]: a | b\n>     ---|---\n";
     let tree = parse_blocks(input);
     assert_eq!(tree.text().to_string(), input, "parse must stay lossless");

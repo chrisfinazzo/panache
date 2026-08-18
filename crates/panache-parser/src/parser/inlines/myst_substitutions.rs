@@ -15,7 +15,6 @@ pub(crate) fn try_parse_substitution(text: &str) -> Option<(usize, usize)> {
     if bytes.first() != Some(&b'{') || bytes.get(1) != Some(&b'{') {
         return None;
     }
-    // `{{<` belongs to the shortcode parser.
     if bytes.get(2) == Some(&b'<') {
         return None;
     }

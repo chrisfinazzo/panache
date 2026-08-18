@@ -31,8 +31,6 @@ pub(crate) fn ws_run_start(bytes: &[u8], lower_bound: usize, pos: usize) -> usiz
     scan_back(bytes, lower_bound, pos).0
 }
 
-/// Walk back over spaces and tabs from `pos`, returning where the run starts
-/// and how many columns wide it is. A tab is worth a whole tab stop.
 fn scan_back(bytes: &[u8], lower_bound: usize, pos: usize) -> (usize, usize) {
     let mut start = pos;
     let mut width = 0usize;

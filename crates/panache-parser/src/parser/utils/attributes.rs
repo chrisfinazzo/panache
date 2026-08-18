@@ -34,28 +34,21 @@ pub fn try_parse_trailing_attributes(text: &str) -> Option<(AttributeBlock, &str
 pub fn try_parse_trailing_attributes_with_pos(text: &str) -> Option<(AttributeBlock, &str, usize)> {
     let trimmed = text.trim_end();
 
-    // Must end with }
     if !trimmed.ends_with('}') {
         return None;
     }
 
-    // Find matching opening brace for the trailing attribute block, accounting
-    // for braces inside quoted attribute values.
     let open_brace = find_matching_open_brace_for_trailing_block(trimmed)?;
 
-    // Check if this is a bracketed span like [text]{.class} rather than a heading attribute
-    // If the { is immediately after ] (with optional whitespace), this should be parsed as a span
     let before_brace = &trimmed[..open_brace];
     if before_brace.trim_end().ends_with(']') {
         log::trace!("Skipping attribute parsing for bracketed span: {}", text);
         return None;
     }
 
-    // Parse the content between { and }
     let attr_content = &trimmed[open_brace + 1..trimmed.len() - 1];
     let attr_block = parse_attribute_content(attr_content)?;
 
-    // Get text before attributes (trim the gap, but not an escaped space)
     let before_attrs = trim_attribute_gap(&trimmed[..open_brace]);
 
     Some((attr_block, before_attrs, open_brace))
@@ -86,7 +79,6 @@ fn trim_attribute_gap(before: &str) -> &str {
         return trimmed;
     }
 
-    // Hand the odd backslash back the one character it escapes.
     match before[trimmed.len()..].chars().next() {
         Some(escaped) => &before[..trimmed.len() + escaped.len_utf8()],
         None => trimmed,
@@ -175,11 +167,6 @@ pub struct AttributeSpans {
     pub components: Vec<AttrComponent>,
 }
 
-/// Strip a matching pair of surrounding quotes (`"` or `'`) from an attribute
-/// value's raw bytes, yielding the semantic value. Mirrors the quote handling
-/// in the legacy [`parse_attribute_content`] walk: a leading quote is always
-/// dropped, and a trailing quote of the same kind is dropped when present (so
-/// unterminated quotes keep their tail).
 fn attr_value_string(raw: &str) -> String {
     let bytes = raw.as_bytes();
     if let Some(&q) = bytes.first()
@@ -213,7 +200,6 @@ pub fn decode_html_attr_entities(raw: &str) -> std::borrow::Cow<'_, str> {
     }
     let bytes = raw.as_bytes();
     let mut out: Option<String> = None;
-    // Byte offset up to which `raw` has already been copied into `out`.
     let mut copied = 0usize;
     let mut i = 0usize;
     while i < bytes.len() {
@@ -251,7 +237,6 @@ fn decode_char_reference(raw: &str, start: usize) -> Option<(String, usize)> {
     if body.is_empty() {
         return None;
     }
-    // `end` is just past the `;`.
     let end = start + 1 + semi + 1;
 
     if let Some(digits) = body.strip_prefix('#') {
@@ -272,8 +257,6 @@ fn decode_char_reference(raw: &str, start: usize) -> Option<(String, usize)> {
     if !body.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return None;
     }
-    // The table's `entity` field carries the full `&name;` form, so matching
-    // the source slice keeps the lookup semicolon-required.
     let needle = &raw[start..end];
     entities::ENTITIES
         .iter()
@@ -303,7 +286,6 @@ pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
     let mut have_id = false;
 
     while pos < bytes.len() {
-        // Skip whitespace.
         while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
             pos += 1;
         }
@@ -312,8 +294,6 @@ pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
         }
 
         if bytes[pos] == b'=' {
-            // {=format} raw-attribute marker — recorded as a class whose range
-            // includes the `=` (the string derivation keeps the `=`).
             let start = pos;
             pos += 1; // skip '='
             while pos < bytes.len() && !bytes[pos].is_ascii_whitespace() && bytes[pos] != b'}' {
@@ -328,32 +308,17 @@ pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
             while pos < bytes.len() && !bytes[pos].is_ascii_whitespace() && bytes[pos] != b'}' {
                 pos += 1;
             }
-            // Only the first non-empty identifier counts; later `#…` runs and a
-            // bare `#` are scanned but not recorded (recovered from the gap).
             if !have_id && pos > start + 1 {
                 components.push(AttrComponent::Id(start..pos));
                 have_id = true;
             }
         } else if bytes[pos] == b'-' {
-            // Pandoc's `.unnumbered` shorthand: each `-` is consumed on its own
-            // and the scan resumes immediately after it, so `{---}` is three
-            // `unnumbered` classes and `{-.a}` is `unnumbered` plus `a`.
-            //
-            // Pandoc only accepts the shorthand when whatever follows the run of
-            // hyphens is itself a valid attribute item, and rejects the WHOLE
-            // block otherwise — `{--verbose}` is literal text, not two
-            // `unnumbered` classes plus a stray word. Reproduce that boundary
-            // check here or a heading documenting a CLI flag gets silently
-            // eaten (and rewritten away by the formatter).
             let run_end = pos + bytes[pos..].iter().take_while(|&&b| b == b'-').count();
             let mut word_end = run_end;
             while word_end < bytes.len() && !bytes[word_end].is_ascii_whitespace() {
                 word_end += 1;
             }
             let follower = &content[run_end..word_end];
-            // A `key=value` may follow with no separating space, but a bare
-            // `=format` raw marker may not — pandoc accepts that only as the
-            // whole body.
             let key_len = follower.bytes().take_while(|&b| b != b'=').count();
             let starts_new_item = follower.is_empty()
                 || matches!(bytes[run_end], b'.' | b'#')
@@ -362,7 +327,6 @@ pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
                 components.extend((pos..run_end).map(|i| AttrComponent::Unnumbered(i..i + 1)));
                 pos = run_end;
             } else {
-                // Malformed token: skip it, as the key/value arm below does.
                 pos = word_end;
             }
         } else if bytes[pos] == b'.' {
@@ -375,13 +339,11 @@ pub fn attribute_content_spans(content: &str) -> Option<AttributeSpans> {
                 components.push(AttrComponent::Class(start..pos));
             }
         } else {
-            // key=value
             let key_start = pos;
             while pos < bytes.len() && bytes[pos] != b'=' && !bytes[pos].is_ascii_whitespace() {
                 pos += 1;
             }
             if pos >= bytes.len() || bytes[pos] != b'=' {
-                // Not a valid key=value: skip the token (recovered from the gap).
                 while pos < bytes.len() && !bytes[pos].is_ascii_whitespace() {
                     pos += 1;
                 }
@@ -434,12 +396,10 @@ pub fn parse_attribute_content(content: &str) -> Option<AttributeBlock> {
     for comp in &spans.components {
         match comp {
             AttrComponent::Id(r) => {
-                // Range includes '#'; the scanner guarantees a non-empty tail.
                 identifier = Some(content[r.start + 1..r.end].to_string());
             }
             AttrComponent::Class(r) => {
                 let raw = &content[r.clone()];
-                // `.class` → `class`; `=format` keeps its `=` prefix.
                 match raw.strip_prefix('.') {
                     Some(class) => classes.push(class.to_string()),
                     None => classes.push(raw.to_string()),
@@ -475,9 +435,6 @@ pub fn parse_attribute_content(content: &str) -> Option<AttributeBlock> {
 pub fn parse_html_tag_attributes(tag_text: &str) -> Option<AttributeBlock> {
     let trimmed = tag_text.trim_start();
     let after_lt = trimmed.strip_prefix('<')?;
-    // Find the end of the opening tag at the first `>` not inside a quoted
-    // attribute value. Anything after that `>` (e.g. inline content + close
-    // tag for a same-line `<div id="x">Content</div>`) is irrelevant.
     let bytes = after_lt.as_bytes();
     let mut tag_end = None;
     let mut quote: Option<u8> = None;
@@ -494,9 +451,7 @@ pub fn parse_html_tag_attributes(tag_text: &str) -> Option<AttributeBlock> {
     }
     let tag_end = tag_end?;
     let inner = &after_lt[..tag_end];
-    // Drop any trailing self-closing slash.
     let inner = inner.trim_end().trim_end_matches('/').trim_end();
-    // Drop the tag name (alphanumeric run after `<`).
     let bytes = inner.as_bytes();
     let mut name_end = 0usize;
     while name_end < bytes.len()
@@ -584,10 +539,6 @@ enum HtmlAttrComponent {
     Flag(std::ops::Range<usize>),
 }
 
-/// Strip a matching surrounding quote pair from `[start, end)` of `content`,
-/// returning the inner range. An unterminated opening quote drops just the
-/// opening; unquoted ranges are returned unchanged. Mirrors the quote handling
-/// in [`attr_value_string`].
 fn html_value_inner_range(content: &str, start: usize, end: usize) -> std::ops::Range<usize> {
     let b = content.as_bytes();
     if end > start && (b[start] == b'"' || b[start] == b'\'') {
@@ -600,7 +551,6 @@ fn html_value_inner_range(content: &str, start: usize, end: usize) -> std::ops::
     start..end
 }
 
-/// Whitespace-separated word ranges within `[start, end)` of `content`.
 fn html_word_ranges(content: &str, start: usize, end: usize) -> Vec<std::ops::Range<usize>> {
     let b = content.as_bytes();
     let mut out = Vec::new();
@@ -621,10 +571,6 @@ fn html_word_ranges(content: &str, start: usize, end: usize) -> Vec<std::ops::Ra
     out
 }
 
-/// Scan an HTML attribute body into [`HtmlAttrComponent`]s in source order.
-/// Recognizes `id="x"`, `class="a b"` (split per word), `key="v"`/`key=v`, and
-/// valueless flags. Bytes that aren't part of a component (attribute names,
-/// `=`, quotes, whitespace, `/`) are recovered by the emitter from the gaps.
 fn html_attribute_spans(content: &str) -> Vec<HtmlAttrComponent> {
     let bytes = content.as_bytes();
     let mut i = 0usize;
@@ -844,7 +790,6 @@ pub fn emit_code_info_attrs(
         return false;
     };
 
-    // Leading gap before `{` (e.g. the space in `python {.x}`).
     emit_attribute_gap(builder, &text[..open]);
     builder.token(SyntaxKind::TEXT.into(), "{");
 
@@ -868,8 +813,6 @@ pub fn emit_code_info_attrs(
             AttrComponent::Class(r) => {
                 let is_dot_class = body.as_bytes().get(r.start) == Some(&b'.');
                 if carve_first_class_as_language && !carved && is_dot_class {
-                    // `.python` → `TEXT "."` + `CODE_LANGUAGE "python"`. Slice the
-                    // actual `.` byte rather than synthesizing it.
                     builder.token(SyntaxKind::TEXT.into(), &body[r.start..r.start + 1]);
                     builder.token(SyntaxKind::CODE_LANGUAGE.into(), &body[r.start + 1..r.end]);
                     carved = true;
@@ -891,15 +834,10 @@ pub fn emit_code_info_attrs(
     }
     emit_attribute_gap(builder, &body[cursor..]);
     builder.token(SyntaxKind::TEXT.into(), "}");
-    // Trailing gap after `}`.
     emit_attribute_gap(builder, &text[close + 1..]);
     true
 }
 
-/// Shared structuring core for attribute-bearing nodes. `node_kind` is the outer
-/// wrapper (`ATTRIBUTE`, `DIV_INFO`, …); `opaque_token_kind` is the single token
-/// the non-`{...}`/unrecognized fallback emits (so each caller keeps its prior
-/// opaque shape). The structured `{...}` path is identical across callers.
 fn emit_attribute_node_with_kinds(
     builder: &mut impl InlineSink,
     node_kind: SyntaxKind,
@@ -951,8 +889,6 @@ fn emit_attribute_node_with_kinds(
             builder.token(SyntaxKind::TEXT.into(), "}");
         }
         _ => {
-            // Opaque fallback: keep the whole slice as one token of the
-            // caller's chosen kind, preserving the prior shape.
             builder.token(opaque_token_kind.into(), raw_attr_text);
         }
     }
@@ -960,9 +896,6 @@ fn emit_attribute_node_with_kinds(
     builder.finish_node();
 }
 
-/// Emit the bytes between/around structured attribute components, splitting on
-/// newline boundaries: `\n`/`\r\n`/`\r` → NEWLINE, other whitespace runs →
-/// WHITESPACE, non-whitespace runs → TEXT. Every byte is preserved.
 fn emit_attribute_gap(builder: &mut impl InlineSink, gap: &str) {
     let bytes = gap.as_bytes();
     let mut i = 0;
@@ -1103,7 +1036,6 @@ mod tests {
     /// pinned against `pandoc -f markdown -t native`.
     #[test]
     fn test_bare_hyphen_is_unnumbered_shorthand() {
-        // On its own it makes the block an attribute block, id or not.
         let (attrs, before) = try_parse_trailing_attributes("Heading {-}").unwrap();
         assert_eq!(before, "Heading");
         assert_eq!(attrs.identifier, None);
@@ -1113,13 +1045,10 @@ mod tests {
         assert_eq!(attrs.identifier, Some("hbdl".to_string()));
         assert_eq!(attrs.classes, vec!["unnumbered"]);
 
-        // Source order is preserved among classes.
         let (attrs, _) = try_parse_trailing_attributes("Text {.a - .b}").unwrap();
         assert_eq!(attrs.classes, vec!["a", "unnumbered", "b"]);
     }
 
-    /// The `-` consumes exactly one byte and scanning resumes right after it,
-    /// so it needs no surrounding whitespace and repeats.
     #[test]
     fn test_bare_hyphen_is_single_byte() {
         let (attrs, _) = try_parse_trailing_attributes("Text {---}").unwrap();
@@ -1151,12 +1080,9 @@ mod tests {
     fn test_bare_hyphen_needs_a_following_item() {
         assert!(try_parse_trailing_attributes("Using {--verbose}").is_none());
         assert!(try_parse_trailing_attributes("Text {-x}").is_none());
-        // `=format` is a raw marker, valid only as an entire body.
         assert!(try_parse_trailing_attributes("Text {-=html}").is_none());
     }
 
-    /// A trailing `-` inside an id or class name is part of that name, not the
-    /// shorthand — the scan only reaches the `-` branch at an item boundary.
     #[test]
     fn test_hyphen_inside_id_or_class_is_not_shorthand() {
         let (attrs, _) = try_parse_trailing_attributes("Text {#id- .x}").unwrap();
@@ -1210,9 +1136,6 @@ mod tests {
 
     #[test]
     fn test_parse_html_tag_attributes_inline_content_after_open() {
-        // For a same-line block `<div id="x">Content</div>`, the entire
-        // line is in the HTML_BLOCK_TAG. The parser must terminate at the
-        // first unquoted `>` and ignore the trailing content + close tag.
         let attrs = parse_html_tag_attributes(r#"<div id="anchor-c">Content.</div>"#).unwrap();
         assert_eq!(attrs.identifier.as_deref(), Some("anchor-c"));
     }
@@ -1250,10 +1173,8 @@ mod tests {
             ("Heading\\ {#id}", "Heading\\ "),
             ("Heading\\   {#id}", "Heading\\ "),
             ("Heading\\\t{#id}", "Heading\\\t"),
-            // An escaped backslash does not escape the space after it.
             ("Heading\\\\ {#id}", "Heading\\\\"),
             ("Heading\\\\\\ {#id}", "Heading\\\\\\ "),
-            // Nothing to give back when there is no gap at all.
             ("Heading\\{#id}", "Heading\\"),
             ("Heading {#id}", "Heading"),
         ];
@@ -1282,8 +1203,6 @@ mod tests {
 
     #[test]
     fn emit_attribute_node_is_lossless_over_shapes() {
-        // Interior whitespace, duplicate id, malformed/empty bodies, mixed
-        // quotes, and `=format` must all round-trip byte-for-byte.
         for raw in [
             "{#id}",
             "{.a .b}",
@@ -1331,8 +1250,6 @@ mod tests {
         );
     }
 
-    /// The `-` shorthand gets its own token kind so the formatter can re-emit
-    /// the source spelling while readers project the `unnumbered` class.
     #[test]
     fn emit_attribute_node_tags_bare_hyphen() {
         let node = structured_attr("{#x - .a}");
@@ -1396,7 +1313,6 @@ mod tests {
             2,
             "class=\"a b\" splits into two ATTR_CLASS tokens"
         );
-        // `data-key="v"` and the `hidden` flag are both ATTR_KEY_VALUE nodes.
         assert_eq!(
             node.children()
                 .filter(|n| n.kind() == SyntaxKind::ATTR_KEY_VALUE)
@@ -1427,7 +1343,6 @@ mod tests {
     /// left verbatim. Pinned against `pandoc -f markdown -t native`.
     #[test]
     fn decode_html_attr_entities_named_and_numeric() {
-        // Named, case-sensitive against the HTML5 table.
         assert_eq!(decode_html_attr_entities("a&amp;b"), "a&b");
         assert_eq!(decode_html_attr_entities("a&AMP;b"), "a&b");
         assert_eq!(decode_html_attr_entities("a&lt;b"), "a<b");
@@ -1451,8 +1366,6 @@ mod tests {
         assert_eq!(decode_html_attr_entities("a&amp;amp;b"), "a&amp;b");
     }
 
-    /// Anything that isn't a terminated, recognized reference is untouched,
-    /// and the no-op path borrows rather than allocating.
     #[test]
     fn decode_html_attr_entities_leaves_non_references() {
         for raw in [
@@ -1488,8 +1401,6 @@ mod tests {
         assert_eq!(decode_html_attr_entities("a&#0;b"), "a\0b");
     }
 
-    /// Entities decode in ids, class words, and key/value values — but never
-    /// in the attribute *name*.
     #[test]
     fn html_attribute_list_decodes_entities() {
         let attrs =

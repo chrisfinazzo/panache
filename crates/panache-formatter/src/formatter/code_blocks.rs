@@ -43,7 +43,6 @@ pub(super) fn format_code_block(
     let info_node = match info_node {
         Some(node) => node,
         None => {
-            // No info string, just output basic fence
             let mut final_content = content;
             if !matches!(config.tab_stops, crate::config::TabStopMode::Preserve) {
                 final_content = expand_tabs_with_width(&final_content, config.tab_width);
@@ -59,30 +58,23 @@ pub(super) fn format_code_block(
         }
     };
 
-    // Parse the info string to get block type
     let info_string_raw = info_node.text().to_string();
     let info = InfoString::parse(&info_string_raw);
 
-    // Check if we have formatted version from external formatter
     let mut final_content = content;
     if !matches!(config.tab_stops, crate::config::TabStopMode::Preserve) {
         final_content = expand_tabs_with_width(&final_content, config.tab_width);
     }
 
-    // Determine fence character based on config
     let fence_char = '`';
 
-    // Determine fence length (check for nested fences in content)
     let fence_length = determine_fence_length(&final_content, fence_char);
 
-    // Check if we should use hashpipe format for Quarto executable chunks
     let use_hashpipe = matches!(config.flavor, Flavor::Quarto | Flavor::RMarkdown)
         && matches!(&info.block_type, CodeBlockType::Executable { .. });
 
-    if use_hashpipe {
-        // Try to format as hashpipe with YAML-style options
-        // Falls back to inline format if language comment syntax is unknown
-        if format_code_block_hashpipe(
+    if use_hashpipe
+        && format_code_block_hashpipe(
             node,
             &info_node,
             &final_content,
@@ -90,18 +82,15 @@ pub(super) fn format_code_block(
             fence_length,
             config,
             output,
-        ) {
-            return; // Successfully formatted as hashpipe
-        }
-        // Fall through to traditional inline format for unknown languages
+        )
+    {
+        return;
     }
 
-    // Format the info string based on config and block type (traditional inline)
     let formatted_info = format_info_string(&info_node, &info);
 
     log::trace!("formatted_info = '{}'", formatted_info);
 
-    // Output normalized code block
     for _ in 0..fence_length {
         output.push(fence_char);
     }
@@ -249,12 +238,6 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                 if matches!(t.kind(), SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX)
                     && !has_fence
                 {
-                    // The pre-fence run is the container prefix the parser
-                    // left in the block (`LINE_PREFIX`) followed by the
-                    // fence's own indent (a list item at content column 2
-                    // whose fence is indented one further emits `"  "` then
-                    // `" "`). Both come off the payload, so accumulate rather
-                    // than overwrite.
                     fence_indent.push_str(t.text());
                 }
             }
@@ -290,20 +273,12 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                                 SyntaxKind::LINE_PREFIX
                                     if at_line_start && !t.text().trim().is_empty() =>
                                 {
-                                    // Blockquote continuation marker preserved inside code
-                                    // content for losslessness. Container syntax, not code
-                                    // bytes, so ignore it for formatter output.
                                     saw_blockquote_marker = true;
                                 }
                                 SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX
                                     if at_line_start =>
                                 {
                                     if drop_container_indent {
-                                        // Whole token is container syntax — see
-                                        // `fenced_in_blockquote`. Covers a lazy
-                                        // line gobbled into the quote, whose
-                                        // indent arrives with no marker of its
-                                        // own to hang the strip off.
                                         saw_blockquote_marker = false;
                                     } else if saw_blockquote_marker {
                                         let ws = t.text();
@@ -328,10 +303,6 @@ fn extract_code_block_parts(node: &SyntaxNode) -> (Option<SyntaxNode>, Option<St
                                             &line_indent,
                                             base_indent_cols,
                                         );
-                                        // Only once the prefix token is fully
-                                        // spent does the rest of the budget
-                                        // reach the fence indent still sitting
-                                        // in this line's own text.
                                         if kept.is_empty() && budget > 0 {
                                             text = strip_leading_spaces_budget(text, budget);
                                         }
@@ -407,7 +378,6 @@ fn split_hashpipe_header(content: &str, code_block_node: &SyntaxNode) -> Option<
     ))
 }
 
-/// Determine the minimum fence length needed to avoid conflicts with content
 fn determine_fence_length(content: &str, fence_char: char) -> usize {
     let mut max_sequence = 0;
     let mut current_sequence = 0;
@@ -416,16 +386,11 @@ fn determine_fence_length(content: &str, fence_char: char) -> usize {
         if ch == fence_char {
             current_sequence += 1;
             max_sequence = max_sequence.max(current_sequence);
-        } else if ch == '\n' || ch == '\r' {
-            // Only count fence sequences at start of line as potential conflicts
-            current_sequence = 0;
-        } else if current_sequence > 0 {
-            // Non-fence char, reset
+        } else if ch == '\n' || ch == '\r' || current_sequence > 0 {
             current_sequence = 0;
         }
     }
 
-    // Use at least one more than the longest sequence in content, minimum 3 per spec
     (max_sequence + 1).max(3)
 }
 
@@ -522,9 +487,6 @@ pub(super) fn render_executable_info(language: &str, options: &[ChunkOptionRepr]
                 is_quoted,
             } => {
                 if *is_quoted {
-                    // Re-add quotes. Pick a quote char that won't collide with
-                    // the value contents so we don't produce broken syntax like
-                    // `key="class="cover""` for an original `key='class="cover"'`.
                     let quote = if value.contains('"') && !value.contains('\'') {
                         '\''
                     } else {
@@ -552,7 +514,6 @@ pub(super) fn render_executable_info(language: &str, options: &[ChunkOptionRepr]
     out
 }
 
-/// Format the info string based on block type and config preferences
 fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
     log::trace!(
         "format_info_string: block_type={:?}, raw='{}'",
@@ -561,7 +522,6 @@ fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
     );
     match &info.block_type {
         CodeBlockType::Plain => {
-            // No language, just attributes (if any)
             if info.attributes.is_empty() {
                 String::new()
             } else {
@@ -569,15 +529,7 @@ fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
             }
         }
         CodeBlockType::DisplayShortcut { language } => {
-            // Display block with shortcut syntax
             if info.attributes.is_empty() {
-                // Preserve the full info string, not just the first word.
-                // Only the first word is the language class, but the rest is
-                // meaningful, opaque metadata (e.g. Documenter.jl's
-                // `@example foo`, `jldoctest; setup = :(...)`, `@repl bar`)
-                // that must survive formatting. This bare multi-word form only
-                // reaches the formatter under CommonMark/GFM; the Pandoc
-                // dialect parses it as an inline code span upstream.
                 info.raw.trim().to_string()
             } else {
                 format!(
@@ -588,13 +540,10 @@ fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
             }
         }
         CodeBlockType::DisplayExplicit { classes } => {
-            // Display block with explicit Pandoc syntax
-            // Convert to shortcut form: ```{.python} -> ```python
             if let Some(first_class) = classes.first() {
                 if info.attributes.is_empty() && classes.len() == 1 {
                     first_class.clone()
                 } else {
-                    // Mix shortcut + attributes
                     let mut attrs: Vec<String> =
                         classes.iter().skip(1).map(|c| format!(".{}", c)).collect();
                     attrs.extend(info.attributes.iter().map(|(k, v)| {
@@ -611,7 +560,6 @@ fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
                     }
                 }
             } else {
-                // No classes, just attributes
                 if info.attributes.is_empty() {
                     String::new()
                 } else {
@@ -620,14 +568,10 @@ fn format_info_string(info_node: &SyntaxNode, info: &InfoString) -> String {
             }
         }
         CodeBlockType::Executable { language } => {
-            // Executable chunk: extract options from CST nodes
-            // Always keep as {language} with attributes
             let options = extract_chunk_options_from_cst(info_node);
             render_executable_info(language, &options)
         }
         CodeBlockType::Raw { format } => {
-            // Raw block: always preserve exactly as {=format}
-            // No attributes allowed per Pandoc spec
             format!("{{={}}}", format)
         }
     }
@@ -653,15 +597,12 @@ fn format_code_block_hashpipe(
         _ => unreachable!("hashpipe only for executable chunks"),
     };
 
-    // Classify options into simple (hashpipe) vs complex (inline)
-    // Extract from CST nodes
     let Some(comment_prefix) = hashpipe::get_comment_prefix(language) else {
         return false; // Unknown language - fall back to inline format
     };
     let ((simple, complex), had_content_hashpipe) =
         hashpipe::split_options_from_cst_with_content(info_node, code_block_node);
 
-    // Try to get hashpipe lines - returns None for unknown languages
     let hashpipe_lines = match hashpipe::format_as_hashpipe(
         language,
         &simple,
@@ -672,22 +613,17 @@ fn format_code_block_hashpipe(
         None => return false, // Unknown language - fall back to inline format
     };
 
-    // Open fence with language and any complex options (classes/ids stay on
-    // the fence verbatim; un-hashpipeable key=value pairs ride along as the
-    // comma group).
     for _ in 0..fence_length {
         output.push(fence_char);
     }
     output.push_str(&render_executable_info(language, &complex));
     output.push('\n');
 
-    // Add hashpipe options
     for line in &hashpipe_lines {
         output.push_str(line);
         output.push('\n');
     }
 
-    // Add content, dropping already-parsed leading hashpipe header lines to avoid duplication.
     let body = if had_content_hashpipe {
         split_hashpipe_header(content, code_block_node)
             .map(|(_header, body)| body)
@@ -710,7 +646,6 @@ fn format_code_block_hashpipe(
         output.push_str(&body);
     }
 
-    // Close fence
     for _ in 0..fence_length {
         output.push(fence_char);
     }
@@ -772,10 +707,6 @@ fn strip_leading_hashpipe_blank_markers<'a>(content: &'a str, prefix: &str) -> (
     (&content[idx..], consumed)
 }
 
-/// Format attribute key-value pairs
-///
-/// For executable chunks, preserve unquoted values when they're safe identifiers
-/// (no spaces, no special chars). This preserves R/Julia/Python chunk semantics.
 fn format_attributes(attrs: &[(String, Option<String>)], preserve_unquoted: bool) -> String {
     let separator = if preserve_unquoted {
         ", " // Executable chunks use commas
@@ -788,25 +719,18 @@ fn format_attributes(attrs: &[(String, Option<String>)], preserve_unquoted: bool
         .map(|(k, v)| {
             if let Some(val) = v {
                 if preserve_unquoted {
-                    // For executable chunks, we need to preserve R syntax
-                    // Add quotes if the value contains spaces or commas (needs quoting)
-                    // but don't quote if it already looks like an R expression
                     let needs_quotes = (val.contains(' ') || val.contains(','))
                         && !val.contains('(')
                         && !val.contains('[')
                         && !val.contains('{');
 
                     if needs_quotes {
-                        // Quote and escape
                         let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
                         format!("{}=\"{}\"", k, escaped_val)
                     } else {
-                        // Keep as-is (R expression or simple identifier)
                         format!("{}={}", k, val)
                     }
                 } else {
-                    // For display blocks, always quote
-                    // Escape internal quotes and backslashes
                     let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
                     format!("{}=\"{}\"", k, escaped_val)
                 }
@@ -972,8 +896,6 @@ mod tests {
 
     #[test]
     fn split_hashpipe_header_handles_empty_value_with_indented_list() {
-        // Parse a real Quarto chunk so the embedded HASHPIPE_YAML preamble exists;
-        // the split is driven by that node's line count.
         let input = "```{r}\n#| fig-cap:\n#|   - A\n#|   - B\n```\n";
         let options = ParserOptions {
             flavor: Flavor::Quarto,

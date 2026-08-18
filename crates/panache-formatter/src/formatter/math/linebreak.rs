@@ -89,7 +89,6 @@ use super::operators::{self, AtomClass};
 use super::render;
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
-/// A top-level (depth-0), *spaced* operator break candidate.
 struct Break {
     /// Element index of the atom's first token (where a break lands before it).
     index: usize,
@@ -101,7 +100,6 @@ struct Break {
     class: AtomClass,
 }
 
-/// The first top-level (depth-0) **relation** operator, if any.
 fn first_top_level_relation(elems: &[SyntaxElement]) -> Option<Break> {
     spaced_operator_breaks(elems)
         .into_iter()
@@ -118,8 +116,6 @@ fn first_top_level_relation(elems: &[SyntaxElement]) -> Option<Break> {
 /// relation; an empty row yields 0.
 pub(super) fn rhs_start_column(elems: &[SyntaxElement]) -> usize {
     match first_top_level_relation(elems) {
-        // `..b.end` renders LHS + the whole relation atom (a composite `<=` or
-        // `:=` included); `+ 1` is the normalized space before the RHS.
         Some(b) => {
             render::render_inline(&elems[..b.end])
                 .trim()
@@ -151,11 +147,6 @@ fn relation_column(elems: &[SyntaxElement]) -> usize {
     }
 }
 
-/// Whether the first top-level relation is an **assignment/definition** arrow
-/// (`\gets`, `:=`, …) rather than an equality/comparison. An assignment is a
-/// lead-in — its left-hand side is being *defined*, not equated — so the
-/// equality chain it introduces is anchored under the assignment's right-hand
-/// side, not aligned with the arrow itself.
 fn first_relation_is_assignment(elems: &[SyntaxElement]) -> bool {
     let Some(b) = first_top_level_relation(elems) else {
         return false;
@@ -166,12 +157,8 @@ fn first_relation_is_assignment(elems: &[SyntaxElement]) -> bool {
     match tok.kind() {
         SyntaxKind::MATH_COMMAND => {
             let name = tok.text().strip_prefix('\\').unwrap_or(tok.text());
-            // `\Leftarrow` (⇐, "is implied by") and `\to`/`\rightarrow` (limits,
-            // mappings) are intentionally *not* assignments.
             matches!(name, "gets" | "leftarrow" | "mapsto" | "coloneqq")
         }
-        // A `:=`: the composite relation starts on its `:`, which is the only
-        // way a `MATH_TEXT` token can head a break candidate.
         SyntaxKind::MATH_TEXT => tok.text() == ":",
         _ => false,
     }
@@ -212,8 +199,6 @@ pub(super) fn begins_with_top_level_relation(elems: &[SyntaxElement]) -> bool {
 /// `math-indent` shifts the whole row right (applied by the render layer) but
 /// never changes these internal alignment columns.
 pub(super) fn break_free_row(elems: &[SyntaxElement], line_width: usize) -> Vec<String> {
-    // The unbroken, canonical single-line form — also the exact bytes the old
-    // code emitted, so a row that fits is byte-identical to before.
     let single = render::render_inline(elems).trim().to_string();
     if single.chars().count() <= line_width {
         return vec![single];
@@ -226,32 +211,16 @@ pub(super) fn break_free_row(elems: &[SyntaxElement], line_width: usize) -> Vec<
         .map(|b| b.index)
         .collect();
 
-    // Zero relations: a standalone binary chain. With no relation, the chain's
-    // first term *is* the head, so each `+ term` sits flush under it — the same
-    // rule the relation cases follow (a binary continuation aligns under the
-    // first term of its right-hand side). A row with no top-level binary op
-    // either (e.g. a lone wide `\frac`) falls through `break_binary_segment`'s
-    // empty-`bins` guard and stays on one (over-width) line.
     if rels.is_empty() {
         return break_binary_segment(elems, 0, line_width);
     }
 
-    // Where continuation relations hang: under the first relation for an
-    // equality/comparison chain (the `=` stack), or under the assignment's RHS
-    // when the chain is led by an assignment arrow (`\gets`) — so the equality
-    // chain it introduces lines up with its right-hand side, not the arrow.
     let rel_indent = continuation_anchor(elems);
 
-    // One relation: the whole row is a single segment. It keeps the lone relation
-    // on the opening line; an over-width binary RHS breaks before each `+`, each
-    // term flush under the right-hand side.
     if rels.len() == 1 {
         return break_binary_segment(elems, 0, line_width);
     }
 
-    // ≥ 2 relations: a relation chain. The first relation stays on the opening
-    // line; every later one starts a continuation aligned under the head row's
-    // RHS column. Segment boundaries: [0, rels[1], rels[2], …, len].
     let bounds: Vec<usize> = std::iter::once(0)
         .chain(rels[1..].iter().copied())
         .chain(std::iter::once(elems.len()))
@@ -288,18 +257,9 @@ fn break_binary_segment(
         .map(|b| b.index)
         .collect();
     if bins.is_empty() {
-        // Nothing to break against — leave it (over-width) on one line.
         return vec![format!("{base_pad}{single}")];
     }
 
-    // The operand sequence starts past this segment's own relation, but *only*
-    // when the binary operators being broken sit on the relation's right-hand
-    // side (`a = b + c` ⇒ `+ c` under `b`). When the first top-level binary
-    // operator *precedes* the relation, the run being broken is the left-hand
-    // side, whose head term is at column 0 — hanging it under the relation's RHS
-    // column would push a left-side operand past the very relation it comes
-    // before (`H - H \leq …` ⇒ an absurd indent). A relationless segment (a bare
-    // binary chain) likewise starts at its head term.
     let rhs_offset = match first_top_level_relation(seg) {
         Some(b) if bins[0] > b.index => {
             render::render_inline(&seg[..b.end]).trim().chars().count() + 1
@@ -308,8 +268,6 @@ fn break_binary_segment(
     };
     let bin_pad = " ".repeat(base_indent + rhs_offset);
     let mut out: Vec<String> = Vec::new();
-    // Head: everything before the first binary operator (keeps the leading
-    // relation, e.g. `A = aaaa` or a continuation's `= cccc`).
     let head = render::render_inline(&seg[..bins[0]]).trim().to_string();
     if !head.is_empty() {
         out.push(format!("{base_pad}{head}"));
@@ -317,8 +275,6 @@ fn break_binary_segment(
     for w in 0..bins.len() {
         let start = bins[w];
         let end = bins.get(w + 1).copied().unwrap_or(seg.len());
-        // Seed a closing-operand class so the leading binary operator stays
-        // binary (`+ term`) instead of coercing to a unary sign in isolation.
         let cont = render::render_inline_seeded(&seg[start..end], Some(AtomClass::Close))
             .trim()
             .to_string();
@@ -327,12 +283,6 @@ fn break_binary_segment(
     out
 }
 
-/// Top-level (depth-0) **spaced** operator break candidates, in document order,
-/// each with its coerced [`AtomClass`]. Mirrors the class/coercion bookkeeping of
-/// [`super::render`]'s spacing pass at the top-level element granularity, while
-/// tracking an open/close delimiter depth so only depth-0 operators qualify and
-/// excluding unary (coerced-to-`Ord`) signs. Brace groups and environments are
-/// opaque operand nodes — their interior operators never appear here.
 fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
     let mut out: Vec<Break> = Vec::new();
     let mut depth: i32 = 0;
@@ -355,10 +305,6 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 prev = Some(AtomClass::Punct);
                 i += 1;
             }
-            // A `:` directly followed by an `=` heads a composite `:=` relation
-            // (see [`operators::is_definition_colon`]). The break lands on the
-            // `:` so a chain never splits between the colon and its `=`, and the
-            // atom spans both — the renderer emits them as one unit.
             SyntaxKind::MATH_TEXT
                 if operators::is_definition_colon(
                     el.as_token().map(|t| t.text()).unwrap_or_default(),
@@ -368,8 +314,6 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                         .map(|t| (t.kind(), t.text())),
                 ) =>
             {
-                // The `=` may open a longer operator run (`:=-`); only its first
-                // atom fuses onto the colon, exactly as the renderer does.
                 let mut run = String::new();
                 let mut j = i + 1;
                 while j < elems.len() && elems[j].kind() == SyntaxKind::MATH_OPERATOR {
@@ -397,22 +341,17 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 prev = Some(AtomClass::Ord);
                 i += 1;
             }
-            // `^`/`_` bind tightly and `&` opens a cell — all unary-inducing.
             SyntaxKind::MATH_SCRIPT | SyntaxKind::MATH_ALIGN => {
                 prev = Some(AtomClass::Open);
                 i += 1;
             }
-            // Operand nodes (a `{…}` group or a nested environment).
             SyntaxKind::MATH_GROUP | SyntaxKind::MATH_ENVIRONMENT => {
                 prev = Some(AtomClass::Close);
                 i += 1;
             }
-            // Whitespace and comments are transparent to atom class.
             SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE | SyntaxKind::MATH_COMMENT => {
                 i += 1;
             }
-            // Defensive: a hard break would reset context (shouldn't occur in a
-            // logical row, which is split on `\\`).
             SyntaxKind::MATH_LINE_BREAK => {
                 prev = None;
                 i += 1;
@@ -444,9 +383,6 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 }
                 i += 1;
             }
-            // A maximal run of adjacent operator tokens (one char each) splits
-            // into atoms; each *spaced* atom at depth 0 is a break candidate at
-            // its first token.
             SyntaxKind::MATH_OPERATOR => {
                 let run_start = i;
                 let mut run = String::new();
@@ -467,11 +403,9 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                         });
                     }
                     prev = Some(class);
-                    // Each operator char is exactly one token.
                     char_off += atom.chars().count();
                 }
             }
-            // Anything else (e.g. an equation label) is an ordinary operand.
             _ => {
                 prev = Some(AtomClass::Ord);
                 i += 1;
@@ -487,7 +421,6 @@ mod tests {
     use crate::syntax::SyntaxNode;
     use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 
-    /// Top-level elements of a parsed math content string.
     fn elems(content: &str) -> Vec<SyntaxElement> {
         let node = SyntaxNode::new_root(parse_math_content(content, MathParseOptions::default()));
         node.children_with_tokens().collect()
@@ -514,7 +447,6 @@ mod tests {
 
     #[test]
     fn overwidth_relation_chain_breaks_and_aligns() {
-        // Wide enough that each relation segment fits ⇒ relations only.
         assert_eq!(
             lines("A = bbbbbbbbbb = cccccccccc", 20),
             vec!["A = bbbbbbbbbb", "  = cccccccccc"],
@@ -523,9 +455,6 @@ mod tests {
 
     #[test]
     fn definition_colon_is_one_relation_atom() {
-        // The `:` and its `=` are one break candidate anchored on the `:`, so a
-        // chain never splits them across lines. Being an assignment, the
-        // continuations hang under its right-hand side (`A :=` is 4 cols + 1).
         assert_eq!(
             lines("A := bbbbbbbbbb := cccccccccc", 20),
             vec!["A := bbbbbbbbbb", "     := cccccccccc"],
@@ -534,8 +463,6 @@ mod tests {
 
     #[test]
     fn definition_colon_fused_into_a_text_run_still_pairs() {
-        // `ab:=cd` lexes as `ab` + `:` + `=`; the colon has its own token, so the
-        // composite is found even when the author wrote no space before it.
         assert_eq!(
             lines("ab:=bbbbbbbbbb:=cccccccccc", 20),
             vec!["ab := bbbbbbbbbb", "      := cccccccccc"],
@@ -544,10 +471,6 @@ mod tests {
 
     #[test]
     fn reversed_colon_is_not_a_definition() {
-        // Only a `:` *preceding* an `=` fuses: in `=:` the relation is the `=`
-        // and the trailing `:` an ordinary atom, so the chain is an equality
-        // chain and its continuation stacks under the relation (column 2), not
-        // under an assignment's right-hand side.
         let out = lines("A =: bbbbbbbbbb =: cccccccccc", 20);
         assert_eq!(out.len(), 2);
         assert!(out[0].starts_with("A ="), "{out:?}");
@@ -556,7 +479,6 @@ mod tests {
 
     #[test]
     fn alignment_tracks_the_first_relation_column() {
-        // Prefix `\alpha + \beta` is 14 chars wide ⇒ the `=` sits at column 15.
         let out = lines("\\alpha + \\beta = gggggggggg = dddddddddd", 30);
         assert_eq!(out[0], "\\alpha + \\beta = gggggggggg");
         assert_eq!(out[1], "               = dddddddddd");
@@ -564,8 +486,6 @@ mod tests {
 
     #[test]
     fn overwidth_segments_nest_binary_operators() {
-        // Each relation segment is itself too wide, so its `+` term breaks one
-        // level deeper (under the relation's right-hand side).
         assert_eq!(
             lines("A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd", 20),
             vec![
@@ -587,7 +507,6 @@ mod tests {
 
     #[test]
     fn relations_inside_parens_are_not_break_points() {
-        // The `=` lives inside `(…)`, so there is no depth-0 chain to break.
         let content = "ffffff(xxxxxxxx = yyyyyyyy) zzzzzzzz";
         assert_eq!(rel_indices(content), Vec::<usize>::new());
         assert_eq!(lines(content, 10).len(), 1);
@@ -607,23 +526,18 @@ mod tests {
 
     #[test]
     fn relations_inside_braces_are_opaque() {
-        // The `=` is inside a `\frac` argument group (a node we never descend).
         let content = "\\frac{aaaa = bbbb}{cccc} dddd eeee";
         assert_eq!(rel_indices(content), Vec::<usize>::new());
     }
 
     #[test]
     fn unary_sign_is_not_a_binary_break_point() {
-        // `= -ttttt…`: the `-` is unary (after a relation), so the segment has no
-        // binary break candidate and stays on one (over-width) line.
         let out = lines("A = -tttttttttt = -uuuuuuuuuu", 12);
         assert_eq!(out, vec!["A = -tttttttttt", "  = -uuuuuuuuuu"]);
     }
 
     #[test]
     fn single_relation_breaks_binary_terms() {
-        // One relation, over-width RHS binary chain: each `+ term` sits flush
-        // under the RHS (`rhs_offset = 4`: `A =` is 3 cols + 1 separating space).
         assert_eq!(
             lines("A = aaaaaaaaaa + bbbbbbbbbb + cccccccccc", 20),
             vec!["A = aaaaaaaaaa", "    + bbbbbbbbbb", "    + cccccccccc"],
@@ -632,8 +546,6 @@ mod tests {
 
     #[test]
     fn zero_relation_binary_chain_breaks_flush() {
-        // No relation: the first term is the head, each `+ term` flush under it
-        // (the same rule the relation cases follow — align under the first term).
         assert_eq!(
             lines("aaaa + bbbb + cccc + dddd", 12),
             vec!["aaaa", "+ bbbb", "+ cccc", "+ dddd"],
@@ -642,15 +554,11 @@ mod tests {
 
     #[test]
     fn zero_relation_no_binary_stays_one_line() {
-        // No relation and no top-level binary (the ops live inside the `\frac`
-        // group, opaque) ⇒ the over-width row is left untouched.
         assert_eq!(lines("\\frac{aaaaaaaa}{bbbbbbbb}", 12).len(), 1);
     }
 
     #[test]
     fn zero_relation_leading_unary_sign_is_head() {
-        // A leading `-` coerces to unary (list start), so it joins the head
-        // rather than starting a break.
         assert_eq!(
             lines("-aaaaaaaa + bbbbbbbb + cccccccc", 12),
             vec!["-aaaaaaaa", "+ bbbbbbbb", "+ cccccccc"],

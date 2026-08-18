@@ -17,10 +17,6 @@ use crate::parser::yaml::{
     YamlValidationContext, locate_yaml_diagnostic_ctx, parse_stream_with_prefix,
 };
 
-// Container-prefix primitives live in `container_prefix.rs` (the lower
-// layer that hosts `StrippedLines`); re-export so existing call sites in
-// this module, `tables.rs`, `line_blocks.rs`, and `block_dispatcher.rs`
-// keep their `code_blocks::…` import paths working.
 pub(crate) use super::container_prefix::{
     bq_outer_of_list, emit_blockquote_prefix_tokens, strip_list_indent,
 };
@@ -77,8 +73,6 @@ impl InfoString {
             };
         }
 
-        // In the CommonMark dialect braces are not attributes: the entire info
-        // string is opaque and the first word is the language class.
         if dialect != crate::options::Dialect::Pandoc {
             let language = trimmed.split_whitespace().next().unwrap_or(trimmed);
             return InfoString {
@@ -90,14 +84,12 @@ impl InfoString {
             };
         }
 
-        // Check if it starts with '{' - explicit attribute block
         if let Some(stripped) = trimmed.strip_prefix('{')
             && let Some(content) = stripped.strip_suffix('}')
         {
             return Self::parse_explicit(raw, content);
         }
 
-        // Check for mixed form: python {.numberLines}
         if let Some(brace_start) = trimmed.find('{') {
             let language = trimmed[..brace_start].trim();
             if !language.is_empty() && !language.contains(char::is_whitespace) {
@@ -117,8 +109,6 @@ impl InfoString {
             }
         }
 
-        // Otherwise, it's a shortcut form (just the language name)
-        // Only take the first word as language
         let language = trimmed.split_whitespace().next().unwrap_or(trimmed);
         InfoString {
             raw: raw.to_string(),
@@ -130,33 +120,23 @@ impl InfoString {
     }
 
     fn parse_explicit(raw: &str, content: &str) -> Self {
-        // Check for raw attribute FIRST: {=format}
-        // The content should start with '=' and have only alphanumeric chars after
         let trimmed_content = content.trim();
-        if let Some(format_name) = trimmed_content.strip_prefix('=') {
-            // Validate format name: alphanumeric only, no spaces
-            if !format_name.is_empty()
-                && format_name.chars().all(|c| c.is_alphanumeric())
-                && !format_name.contains(char::is_whitespace)
-            {
-                return InfoString {
-                    raw: raw.to_string(),
-                    block_type: CodeBlockType::Raw {
-                        format: format_name.to_string(),
-                    },
-                    attributes: Vec::new(),
-                };
-            }
+        if let Some(format_name) = trimmed_content.strip_prefix('=')
+            && !format_name.is_empty()
+            && format_name.chars().all(|c| c.is_alphanumeric())
+            && !format_name.contains(char::is_whitespace)
+        {
+            return InfoString {
+                raw: raw.to_string(),
+                block_type: CodeBlockType::Raw {
+                    format: format_name.to_string(),
+                },
+                attributes: Vec::new(),
+            };
         }
 
-        // First, do a preliminary parse to determine block type
-        // Use chunk options parser (comma-aware) for initial detection
         let prelim_attrs = Self::parse_chunk_options(content);
 
-        // First non-ID, non-attribute token determines if it's executable or
-        // display. A run of `-` is pandoc's `.unnumbered` shorthand, not a
-        // language, so ```` ```{-} ```` is a plain code block with that class
-        // rather than an executable chunk in a language named `-`.
         let mut first_lang_token = None;
         for (key, val) in prelim_attrs.iter() {
             if val.is_none() && !key.starts_with('#') && !key.chars().all(|c| c == '-') {
@@ -168,8 +148,6 @@ impl InfoString {
         let first_token = first_lang_token.unwrap_or("");
 
         if first_token.starts_with('.') {
-            // Display block: {.python} or {.haskell .numberLines}
-            // Re-parse with Pandoc-style parser (space-delimited)
             let attrs = Self::parse_pandoc_attributes(content);
 
             let classes: Vec<String> = attrs
@@ -189,15 +167,9 @@ impl InfoString {
                 attributes: non_class_attrs,
             }
         } else if !first_token.is_empty() && !first_token.starts_with('#') {
-            // Executable chunk: {python} or {r}
-            // Use chunk options parser (comma-delimited)
             let attrs = Self::parse_chunk_options(content);
             let lang_index = attrs.iter().position(|(k, _)| k == first_token).unwrap();
 
-            // Check if there's a second bareword (implicit label in R/Quarto chunks)
-            // Pattern: {r mylabel} is equivalent to {r, label=mylabel}.
-            // Skip tokens that are actually class (`.foo`) or id (`#foo`)
-            // attributes — those are not labels.
             let mut has_implicit_label = false;
             let implicit_label_value = if lang_index + 1 < attrs.len() {
                 let (label_key, val) = &attrs[lang_index + 1];
@@ -215,11 +187,9 @@ impl InfoString {
                 .into_iter()
                 .enumerate()
                 .filter(|(i, _)| {
-                    // Remove language token
                     if *i == lang_index {
                         return false;
                     }
-                    // Remove implicit label token (will be added back explicitly)
                     if has_implicit_label && *i == lang_index + 1 {
                         return false;
                     }
@@ -228,7 +198,6 @@ impl InfoString {
                 .map(|(_, attr)| attr)
                 .collect();
 
-            // Add explicit label if we found an implicit one
             if let Some(label_val) = implicit_label_value {
                 final_attrs.insert(0, ("label".to_string(), Some(label_val)));
             }
@@ -241,7 +210,6 @@ impl InfoString {
                 attributes: final_attrs,
             }
         } else {
-            // Just attributes, no language - use Pandoc parser
             let attrs = Self::parse_pandoc_attributes(content);
             InfoString {
                 raw: raw.to_string(),
@@ -258,7 +226,6 @@ impl InfoString {
         let mut chars = content.chars().peekable();
 
         while chars.peek().is_some() {
-            // Skip whitespace
             while matches!(chars.peek(), Some(&' ') | Some(&'\t')) {
                 chars.next();
             }
@@ -267,7 +234,6 @@ impl InfoString {
                 break;
             }
 
-            // Read key
             let mut key = String::new();
             while let Some(&ch) = chars.peek() {
                 if ch == '=' || ch == ' ' || ch == '\t' {
@@ -281,21 +247,17 @@ impl InfoString {
                 break;
             }
 
-            // Skip whitespace
             while matches!(chars.peek(), Some(&' ') | Some(&'\t')) {
                 chars.next();
             }
 
-            // Check for value
             if chars.peek() == Some(&'=') {
                 chars.next(); // consume '='
 
-                // Skip whitespace after '='
                 while matches!(chars.peek(), Some(&' ') | Some(&'\t')) {
                     chars.next();
                 }
 
-                // Read value (might be quoted)
                 let value = if chars.peek() == Some(&'"') {
                     chars.next(); // consume opening quote
                     let mut val = String::new();
@@ -315,7 +277,6 @@ impl InfoString {
                     }
                     val
                 } else {
-                    // Unquoted value - read until space
                     let mut val = String::new();
                     while let Some(&ch) = chars.peek() {
                         if ch == ' ' || ch == '\t' {
@@ -336,14 +297,11 @@ impl InfoString {
         attrs
     }
 
-    /// Parse Quarto/RMarkdown chunk options: {language, option=value, option2=value2}
-    /// Commas are the primary delimiter (R CSV style). Supports unquoted barewords.
     fn parse_chunk_options(content: &str) -> Vec<(String, Option<String>)> {
         let mut attrs = Vec::new();
         let mut chars = content.chars().peekable();
 
         while chars.peek().is_some() {
-            // Skip whitespace and commas
             while matches!(chars.peek(), Some(&' ') | Some(&'\t') | Some(&',')) {
                 chars.next();
             }
@@ -352,7 +310,6 @@ impl InfoString {
                 break;
             }
 
-            // Read key
             let mut key = String::new();
             while let Some(&ch) = chars.peek() {
                 if ch == '=' || ch == ' ' || ch == '\t' || ch == ',' {
@@ -366,21 +323,17 @@ impl InfoString {
                 break;
             }
 
-            // Skip whitespace and commas
             while matches!(chars.peek(), Some(&' ') | Some(&'\t') | Some(&',')) {
                 chars.next();
             }
 
-            // Check for value
             if chars.peek() == Some(&'=') {
                 chars.next(); // consume '='
 
-                // Skip whitespace and commas after '='
                 while matches!(chars.peek(), Some(&' ') | Some(&'\t') | Some(&',')) {
                     chars.next();
                 }
 
-                // Read value (might be quoted)
                 let value = if chars.peek() == Some(&'"') {
                     chars.next(); // consume opening quote
                     let mut val = String::new();
@@ -400,15 +353,12 @@ impl InfoString {
                     }
                     val
                 } else {
-                    // Unquoted value - read until comma, space, or tab at depth 0
-                    // Track nesting depth for (), [], {} and quote state
                     let mut val = String::new();
                     let mut depth = 0; // Track parentheses/brackets/braces depth
                     let mut in_quote: Option<char> = None; // Track if inside ' or "
                     let mut escaped = false; // Track if previous char was backslash
 
                     while let Some(&ch) = chars.peek() {
-                        // Handle escape sequences
                         if escaped {
                             val.push(ch);
                             chars.next();
@@ -423,7 +373,6 @@ impl InfoString {
                             continue;
                         }
 
-                        // Handle quotes
                         if let Some(quote_char) = in_quote {
                             val.push(ch);
                             chars.next();
@@ -433,7 +382,6 @@ impl InfoString {
                             continue;
                         }
 
-                        // Not in a quote - check for quote start
                         if ch == '"' || ch == '\'' {
                             in_quote = Some(ch);
                             val.push(ch);
@@ -441,7 +389,6 @@ impl InfoString {
                             continue;
                         }
 
-                        // Track nesting depth (only when not in quotes)
                         if ch == '(' || ch == '[' || ch == '{' {
                             depth += 1;
                             val.push(ch);
@@ -456,12 +403,10 @@ impl InfoString {
                             continue;
                         }
 
-                        // Check for delimiters - only break at depth 0
                         if depth == 0 && (ch == ' ' || ch == '\t' || ch == ',') {
                             break;
                         }
 
-                        // Regular character
                         val.push(ch);
                         chars.next();
                     }
@@ -480,7 +425,6 @@ impl InfoString {
     /// Legacy function - kept for backward compatibility in mixed-form parsing
     /// For new code, use parse_pandoc_attributes or parse_chunk_options
     fn parse_attributes(content: &str) -> Vec<(String, Option<String>)> {
-        // Default to chunk options parsing (comma-aware)
         Self::parse_chunk_options(content)
     }
 }
@@ -505,7 +449,6 @@ pub(crate) fn try_parse_fence_open(
 ) -> Option<FenceInfo> {
     let trimmed = strip_leading_spaces(content);
 
-    // Check for fence opening (``` or ~~~)
     let (fence_char, fence_count) = if trimmed.starts_with('`') {
         let count = trimmed.chars().take_while(|&c| c == '`').count();
         ('`', count)
@@ -521,7 +464,6 @@ pub(crate) fn try_parse_fence_open(
     }
 
     let info_string_raw = &trimmed[fence_count..];
-    // Strip trailing newline (LF or CRLF) and at most one leading space
     let (info_string_trimmed, _) = strip_newline(info_string_raw);
     let info_string = if let Some(stripped) = info_string_trimmed.strip_prefix(' ') {
         stripped.to_string()
@@ -529,22 +471,10 @@ pub(crate) fn try_parse_fence_open(
         info_string_trimmed.to_string()
     };
 
-    // Backtick-fenced blocks cannot have backticks in the info string.
     if fence_char == '`' && info_string.contains('`') {
         return None;
     }
 
-    // In Pandoc-markdown, a fence info string is valid only as one of:
-    //   `lang`            a single bare language word,
-    //   `{attrs}`         a brace-delimited attribute block, or
-    //   `lang {attrs}`    a single language word plus an attribute block,
-    // with nothing trailing after the attribute block. Anything else — a
-    // multi-word bare info string (```` ```haskell foo ````), a word before
-    // the brace (```` ```a b {.x} ````), or content after the closing brace
-    // (```` ```{.x} foo ````) — is not a code fence: pandoc reads the backtick
-    // run as an inline code span (and a tilde run as plain inline text).
-    // CommonMark and GFM instead take the first word as the language class and
-    // accept the rest, so this restriction is gated to the Pandoc dialect.
     if dialect == crate::options::Dialect::Pandoc {
         let bare = info_string.trim();
         if !bare.is_empty() {
@@ -578,14 +508,6 @@ fn prepare_fence_open_line<'a>(
     bq_outer: bool,
     content_indent: usize,
 ) -> (&'a str, &'a str) {
-    // Strip the active container prefix on line 0 in container-stack
-    // order. Bq markers are always upstream-emitted by the blockquote
-    // dispatch and silently consumed here. The list_content_col indent
-    // is upstream-emitted only on a marker-line dispatch
-    // (`list_marker_consumed_on_line_0=true`); on continuation-line
-    // dispatch it must be emitted here as LINE_PREFIX. Adjacent
-    // prefix-indent emissions are coalesced into one token for
-    // byte-range-equivalent CST stability.
     if let Some(first_line) = first_line_override {
         if bq_depth > 0 && source_line != first_line {
             let stripped = strip_n_blockquote_markers(source_line, bq_depth);
@@ -612,8 +534,6 @@ fn prepare_fence_open_line<'a>(
         if let Some(start) = *pending
             && current_offset > start
         {
-            // List/content indent consumed by the container frame:
-            // prefix, not the fence's own leading whitespace.
             builder.token(
                 SyntaxKind::LINE_PREFIX.into(),
                 &source_line[start..current_offset],
@@ -626,13 +546,6 @@ fn prepare_fence_open_line<'a>(
         if list_content_col == 0 {
             return;
         }
-        // On a marker-line dispatch (`suppress_list=true`), the list
-        // marker bytes have already been emitted upstream and may not
-        // be whitespace (e.g. `- > ```` has a leading `-`). Use
-        // `advance_emitted_marker_columns`, which counts columns
-        // through any char. On continuation lines, the leading bytes ARE
-        // whitespace (the list-content-indent) so use the
-        // whitespace-only `strip_list_indent` to stop at non-whitespace.
         let stripped = if suppress_list {
             advance_emitted_marker_columns(s, list_content_col)
         } else {
@@ -666,7 +579,6 @@ fn prepare_fence_open_line<'a>(
         do_strip_bq(builder, &mut s, &mut pending_ws_start);
     }
 
-    // content_indent (footnote/definition) — always emit (as LINE_PREFIX).
     if content_indent > 0 {
         let indent_bytes = byte_index_at_column(s, content_indent);
         if s.len() >= indent_bytes && indent_bytes > 0 {
@@ -719,9 +631,6 @@ pub(crate) fn compute_hashpipe_preamble_line_count(
             line_idx += 1;
             continue;
         }
-        // A blank `#|` line continues the preamble only when followed by another
-        // prefixed line — i.e. it is a blank interior line of a block scalar
-        // (issue_201). A trailing blank `#|` before body code ends the preamble.
         if is_hashpipe_blank_line(preview_without_newline, prefix)
             && preview(line_idx + 1)
                 .is_some_and(|next| trim_start_spaces_tabs(next).starts_with(prefix))
@@ -735,17 +644,6 @@ pub(crate) fn compute_hashpipe_preamble_line_count(
     line_idx
 }
 
-/// Compute the composite per-line prefix marker for a hashpipe preamble:
-/// the uniform container prefix (blockquote markers / list indent /
-/// content indent) plus any leading whitespace up to and including the
-/// hashpipe comment marker (`prefix`), taken from the first preamble line.
-///
-/// Within a preamble the container prefix is uniform per line, so matching
-/// this composite marker via `strip_prefix` lets the prefix-aware YAML
-/// parser splice a nested (list-/blockquote-indented) cell exactly as a
-/// top-level one, peeling the whole prefix into one `YAML_LINE_PREFIX`
-/// leaf. A non-uniform preamble fails validation and falls back to opaque
-/// tokens.
 fn hashpipe_composite_marker<'a>(
     first_line: &'a str,
     prefix: &str,
@@ -801,12 +699,6 @@ fn is_hashpipe_continuation_line(line_without_newline: &str, prefix: &str) -> bo
     !trim_start_spaces_tabs(after_prefix).is_empty()
 }
 
-/// A bare/blank hashpipe line — the marker followed only by optional whitespace
-/// (e.g. `#|`). Such a line is a valid blank *inside* a block scalar (the
-/// `issue_201` literal-with-blank-line case) or a trailing blank in the preamble,
-/// so it continues the preamble rather than ending it. Without this, the
-/// preamble scan stops at the blank and the parser truncates the block scalar,
-/// embedding only the lines before it.
 fn is_hashpipe_blank_line(line_without_newline: &str, prefix: &str) -> bool {
     let trimmed_start = trim_start_spaces_tabs(line_without_newline);
     let Some(after_prefix) = trimmed_start.strip_prefix(prefix) else {
@@ -832,7 +724,6 @@ pub(crate) fn is_closing_fence(content: &str, fence: &FenceInfo) -> bool {
         return false;
     }
 
-    // Rest of line must be empty
     trimmed[closing_count..].trim().is_empty()
 }
 
@@ -878,8 +769,6 @@ impl ContainerExitScan {
     }
 }
 
-/// Emit chunk options as structured CST nodes while preserving all bytes.
-/// This parses {r, echo=TRUE, fig.cap="text"} into CHUNK_OPTIONS with individual CHUNK_OPTION nodes.
 fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
     if content.trim().is_empty() {
         builder.token(SyntaxKind::TEXT.into(), content);
@@ -892,7 +781,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
     let bytes = content.as_bytes();
 
     while pos < bytes.len() {
-        // Emit leading whitespace/commas as TEXT
         let ws_start = pos;
         while pos < bytes.len() {
             let ch = bytes[pos] as char;
@@ -909,7 +797,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
             break;
         }
 
-        // Check if this is a closing brace
         if bytes[pos] as char == '}' {
             builder.token(SyntaxKind::TEXT.into(), &content[pos..pos + 1]);
             pos += 1;
@@ -919,7 +806,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
             break;
         }
 
-        // Read key
         let key_start = pos;
         while pos < bytes.len() {
             let ch = bytes[pos] as char;
@@ -930,7 +816,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
         }
 
         if pos == key_start {
-            // No key found, emit rest as TEXT
             if pos < bytes.len() {
                 builder.token(SyntaxKind::TEXT.into(), &content[pos..]);
             }
@@ -939,19 +824,15 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
 
         let key = &content[key_start..pos];
 
-        // Check for whitespace before '='
         let ws_before_eq_start = pos;
         while pos < bytes.len() && matches!(bytes[pos] as char, ' ' | '\t') {
             pos += 1;
         }
 
-        // Check if there's a value (=)
         if pos < bytes.len() && bytes[pos] as char == '=' {
-            // Has value - emit as CHUNK_OPTION
             builder.start_node(SyntaxKind::CHUNK_OPTION.into());
             builder.token(SyntaxKind::CHUNK_OPTION_KEY.into(), key);
 
-            // Emit whitespace before '=' if any
             if pos > ws_before_eq_start {
                 builder.token(SyntaxKind::TEXT.into(), &content[ws_before_eq_start..pos]);
             }
@@ -959,7 +840,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
             builder.token(SyntaxKind::TEXT.into(), "=");
             pos += 1; // consume '='
 
-            // Emit whitespace after '='
             let ws_after_eq_start = pos;
             while pos < bytes.len() && matches!(bytes[pos] as char, ' ' | '\t') {
                 pos += 1;
@@ -968,11 +848,9 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
                 builder.token(SyntaxKind::TEXT.into(), &content[ws_after_eq_start..pos]);
             }
 
-            // Parse value (might be quoted)
             if pos < bytes.len() {
                 let quote_char = bytes[pos] as char;
                 if quote_char == '"' || quote_char == '\'' {
-                    // Quoted value
                     builder.token(
                         SyntaxKind::CHUNK_OPTION_QUOTE.into(),
                         &content[pos..pos + 1],
@@ -997,7 +875,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
                         );
                     }
 
-                    // Emit closing quote
                     if pos < bytes.len() && bytes[pos] as char == quote_char {
                         builder.token(
                             SyntaxKind::CHUNK_OPTION_QUOTE.into(),
@@ -1006,7 +883,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
                         pos += 1;
                     }
                 } else {
-                    // Unquoted value - read until comma, space, closing brace, or balanced delimiter
                     let val_start = pos;
                     let mut depth = 0;
 
@@ -1050,8 +926,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
 
             builder.finish_node(); // CHUNK_OPTION
         } else {
-            // No '=' - classify by prefix: '.foo' is a class, '#foo' is an id,
-            // anything else is a chunk label (e.g. `{r mylabel}`).
             let kind = match key.as_bytes().first() {
                 Some(b'.') => SyntaxKind::ATTR_CLASS,
                 Some(b'#') => SyntaxKind::ATTR_ID,
@@ -1069,8 +943,6 @@ fn emit_chunk_options(builder: &mut GreenNodeBuilder<'static>, content: &str) {
     builder.finish_node(); // CHUNK_OPTIONS
 }
 
-/// Helper to parse info string and emit CodeInfo node with parsed components.
-/// This breaks down the info string into its logical parts while preserving all bytes.
 fn emit_code_info_node(
     builder: &mut GreenNodeBuilder<'static>,
     info_string: &str,
@@ -1082,12 +954,8 @@ fn emit_code_info_node(
 
     match &info.block_type {
         CodeBlockType::DisplayShortcut { language } => {
-            // Simple case: python or python {.class}
             builder.token(SyntaxKind::CODE_LANGUAGE.into(), language);
 
-            // Structure a trailing `{...}` attribute block (the language is
-            // already emitted, so no carve). Falls back to one opaque TEXT token
-            // for unrecognized remainders, preserving the prior shape.
             let after_lang = &info_string[language.len()..];
             if !after_lang.is_empty()
                 && !emit_code_info_attrs(builder, after_lang, /* carve */ false)
@@ -1096,11 +964,9 @@ fn emit_code_info_node(
             }
         }
         CodeBlockType::Executable { language } => {
-            // Quarto: {r} or {r my-label, echo=FALSE}
             builder.token(SyntaxKind::TEXT.into(), "{");
             builder.token(SyntaxKind::CODE_LANGUAGE.into(), language);
 
-            // Parse and emit chunk options
             let start_offset = 1 + language.len(); // Skip "{r"
             if start_offset < info_string.len() {
                 let rest = &info_string[start_offset..];
@@ -1108,17 +974,11 @@ fn emit_code_info_node(
             }
         }
         CodeBlockType::DisplayExplicit { .. } => {
-            // Pandoc: `{.python}` or `{#id .haskell .numberLines startFrom="10"}`.
-            // Structure the `{...}` body into ATTR_* children, carving the first
-            // `.class` out as the CODE_LANGUAGE token (language-first semantics).
-            // Falls back to one opaque TEXT token when the body is unrecognized,
-            // preserving the prior shape.
             if !emit_code_info_attrs(builder, info_string, /* carve */ true) {
                 builder.token(SyntaxKind::TEXT.into(), info_string);
             }
         }
         CodeBlockType::Raw { .. } | CodeBlockType::Plain => {
-            // No language, just emit as TEXT
             builder.token(SyntaxKind::TEXT.into(), info_string);
         }
     }
@@ -1153,10 +1013,8 @@ pub(crate) fn parse_fenced_code_block(
     let content_indent = prefix.content_indent();
     let lazy_gobble = prefix.lazy_blockquote_gobble;
 
-    // Start code block
     builder.start_node(SyntaxKind::CODE_BLOCK.into());
 
-    // Opening fence
     let (first_trimmed, _first_inner) = prepare_fence_open_line(
         builder,
         lines[start_pos],
@@ -1174,21 +1032,16 @@ pub(crate) fn parse_fenced_code_block(
         &first_trimmed[..fence.fence_count],
     );
 
-    // Emit any space between fence and info string (for losslessness)
     let after_fence = &first_trimmed[fence.fence_count..];
     if let Some(_space_stripped) = after_fence.strip_prefix(' ') {
-        // There was a space - emit it as WHITESPACE
         builder.token(SyntaxKind::WHITESPACE.into(), " ");
-        // Parse and emit the info string as a structured node
         if !fence.info_string.is_empty() {
             emit_code_info_node(builder, &fence.info_string, Dialect::for_flavor(flavor));
         }
     } else if !fence.info_string.is_empty() {
-        // No space - parse and emit info_string as a structured node
         emit_code_info_node(builder, &fence.info_string, Dialect::for_flavor(flavor));
     }
 
-    // Extract and emit the actual newline from the opening fence line
     let (_, newline_str) = strip_newline(first_trimmed);
     if !newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), newline_str);
@@ -1202,22 +1055,12 @@ pub(crate) fn parse_fenced_code_block(
     while current_pos < lines.len() {
         let line = lines[current_pos];
 
-        // Count blockquote markers to detect leaving the surrounding
-        // blockquote. For bq_outer=true probe the raw line (bq markers
-        // lead); for bq_outer=false strip the list indent first, then
-        // probe the post-list slice. This forward-scan termination has no
-        // `StrippedLines` equivalent, so it stays inline.
         let probe = if bq_outer {
             line
         } else {
             strip_list_indent(line, list_content_col)
         };
         let (line_bq_depth, _) = count_blockquote_markers(probe);
-        // Under Pandoc a non-blank line with fewer `>` markers is gobbled
-        // back into the quote, so it is still fence body. A blank line
-        // carries no markers and ends the scan here, where it also ends the
-        // quote. The prefix strip then de-indents the gobbled line, so the
-        // body sees what pandoc's raw content holds.
         let gobbled_lazily = Dialect::for_flavor(flavor) == crate::options::Dialect::Pandoc
             && bq_depth > 0
             && !line.trim().is_empty();
@@ -1225,9 +1068,6 @@ pub(crate) fn parse_fenced_code_block(
             break;
         }
 
-        // Detection only (emits nothing): the same faithful op walk the
-        // emission path applies via `emit_prefix_at`, so the closing-fence
-        // classification holds at emission time by construction.
         let inner_stripped = window.peek_prefix_at(current_pos);
 
         if is_closing_fence(inner_stripped, &fence) {
@@ -1240,7 +1080,6 @@ pub(crate) fn parse_fenced_code_block(
         current_pos += 1;
     }
 
-    // Add content
     if !content_lines.is_empty() {
         builder.start_node(SyntaxKind::CODE_CONTENT.into());
         let hashpipe_prefix = match InfoString::parse(&fence.info_string).block_type {
@@ -1263,13 +1102,7 @@ pub(crate) fn parse_fenced_code_block(
                 builder.start_node(SyntaxKind::HASHPIPE_YAML_PREAMBLE.into());
                 builder.start_node(SyntaxKind::HASHPIPE_YAML_CONTENT.into());
 
-                // Exact host bytes of the preamble region: the lines retain
-                // their trailing LF/CRLF, so concatenation rebuilds the
-                // source between the open fence and the body exactly.
                 let content: String = content_lines[..prepared_hashpipe_lines].concat();
-                // Composite per-line marker (container prefix + `#|`). Uniform
-                // across the preamble, so a nested cell splices as a top-level
-                // one (see `hashpipe_composite_marker`).
                 let marker = hashpipe_composite_marker(
                     content_lines[0],
                     prefix,
@@ -1284,13 +1117,6 @@ pub(crate) fn parse_fenced_code_block(
                 if let Some((diag, start_off, end_off)) =
                     locate_yaml_diagnostic_ctx(&content, marker, yaml_ctx)
                 {
-                    // Malformed hashpipe YAML: record the syntax error at its
-                    // host position — the parser already computed the verdict,
-                    // so it surfaces the diagnostic here instead of discarding
-                    // it (the linter would otherwise re-parse to recover it).
-                    // `content` is `content_lines[..n]` concatenated and those
-                    // lines are subslices of the host input, so the preamble's
-                    // host start is their pointer offset from line 0.
                     let host_start =
                         content_lines[0].as_ptr() as usize - lines[0].as_ptr() as usize;
                     diags.push(SyntaxError {
@@ -1301,9 +1127,6 @@ pub(crate) fn parse_fenced_code_block(
                         message: diag.message.to_string(),
                         source: SyntaxErrorSource::Yaml,
                     });
-                    // Fall back to opaque line tokens (container prefix + TEXT +
-                    // NEWLINE), preserving the bytes without imposing a
-                    // structure that didn't parse.
                     while line_idx < prepared_hashpipe_lines {
                         let after_indent = window.emit_prefix_at(builder, start_pos + 1 + line_idx);
                         let (line_without_newline, newline_str) = strip_newline(after_indent);
@@ -1316,16 +1139,11 @@ pub(crate) fn parse_fenced_code_block(
                         line_idx += 1;
                     }
                 } else {
-                    // Valid: splice the prefix-aware YAML subtree. Token ranges
-                    // are host ranges directly, the composite prefix peeled into
-                    // `YAML_LINE_PREFIX` trivia. Mirrors the frontmatter
-                    // `emit_yaml_block` validate→splice→fallback pattern.
                     let stream = parse_stream_with_prefix(&content, marker)
                         .green()
                         .to_owned();
                     copy_green_children(builder, &stream);
                 }
-                // Whether spliced or fallback, the preamble lines are consumed.
                 line_idx = prepared_hashpipe_lines;
 
                 builder.finish_node(); // HASHPIPE_YAML_CONTENT
@@ -1348,7 +1166,6 @@ pub(crate) fn parse_fenced_code_block(
         builder.finish_node(); // CodeContent
     }
 
-    // Closing fence (if found)
     if found_closing {
         let closing_stripped = window.emit_prefix_at(builder, current_pos - 1);
         let (closing_without_newline, newline_str) = strip_newline(closing_stripped);
@@ -1433,9 +1250,6 @@ pub(crate) fn parse_fenced_math_block(
     while current_pos < lines.len() {
         let line = lines[current_pos];
 
-        // Forward-scan termination on blockquote depth — stays inline (no
-        // `StrippedLines` equivalent), mirroring `parse_fenced_code_block`
-        // down to the Pandoc lazy-gobble exemption.
         let probe = if bq_outer {
             line
         } else {
@@ -1447,8 +1261,6 @@ pub(crate) fn parse_fenced_math_block(
             break;
         }
 
-        // Detection only (emits nothing): the same faithful op walk the
-        // emission path applies via `emit_prefix_at`.
         let inner_stripped = window.peek_prefix_at(current_pos);
 
         if is_closing_fence(inner_stripped, &fence) {
@@ -1521,17 +1333,12 @@ mod tests {
 
     #[test]
     fn multiword_bare_info_is_not_a_fence_in_pandoc() {
-        // ```haskell foo => inline code span in pandoc-markdown, not a fence.
         assert!(try_parse_fence_open("```haskell foo", Dialect::Pandoc).is_none());
         assert!(try_parse_fence_open("~~~haskell foo", Dialect::Pandoc).is_none());
         assert!(try_parse_fence_open("```@example foo bar", Dialect::Pandoc).is_none());
-        // A single bare word (with surrounding space) is still a valid fence.
         assert!(try_parse_fence_open("```haskell ", Dialect::Pandoc).is_some());
         assert!(try_parse_fence_open("``` haskell", Dialect::Pandoc).is_some());
-        // Braced attribute forms carry their own whitespace and stay valid.
         assert!(try_parse_fence_open("```{.haskell .foo}", Dialect::Pandoc).is_some());
-        // Mixed `lang {attrs}` form (e.g. Quarto's `bash {filename="..."}`)
-        // is valid; extra words or trailing content after the brace are not.
         assert!(try_parse_fence_open("```bash {filename=\"Terminal\"}", Dialect::Pandoc).is_some());
         assert!(try_parse_fence_open("```haskell {.numberLines}", Dialect::Pandoc).is_some());
         assert!(try_parse_fence_open("```haskell {.numberLines} foo", Dialect::Pandoc).is_none());
@@ -1541,8 +1348,6 @@ mod tests {
 
     #[test]
     fn multiword_bare_info_is_a_fence_in_commonmark() {
-        // CommonMark/GFM take the first word as the language class and keep
-        // the rest of the info string, so the fence is still recognized.
         let fence = try_parse_fence_open("```haskell foo", Dialect::CommonMark).unwrap();
         assert_eq!(fence.info_string, "haskell foo");
         assert!(try_parse_fence_open("~~~haskell foo", Dialect::CommonMark).is_some());
@@ -1550,8 +1355,6 @@ mod tests {
 
     #[test]
     fn hashpipe_preamble_includes_blank_line_in_block_scalar() {
-        // A blank `#|` line inside a literal block scalar must stay in the
-        // preamble (issue_201) — otherwise the scalar is truncated.
         let lines = [
             "#| fig-alt: |\n",
             "#|   First paragraph.\n",
@@ -1736,7 +1539,6 @@ mod tests {
 
     #[test]
     fn test_info_string_executable_mixed_commas_spaces() {
-        // R-style with commas and spaces
         let info = InfoString::parse("{r, echo=FALSE, label=\"my chunk\"}");
         assert_eq!(
             info.block_type,
@@ -1794,7 +1596,6 @@ mod tests {
                 classes: vec!["haskell".to_string(), "numberLines".to_string()]
             }
         );
-        // Non-class attributes
         let has_id = info.attributes.iter().any(|(k, _)| k == "#mycode");
         let has_start = info
             .attributes
@@ -1862,9 +1663,7 @@ mod tests {
 
     #[test]
     fn test_info_string_raw_not_combined_with_attrs() {
-        // If there are other attributes with =format, it should not be treated as raw
         let info = InfoString::parse("{=html .class}");
-        // This should NOT be parsed as raw because there's more than one attribute
         assert_ne!(
             info.block_type,
             CodeBlockType::Raw {
@@ -1875,7 +1674,6 @@ mod tests {
 
     #[test]
     fn test_parse_pandoc_attributes_spaces() {
-        // Pandoc display blocks use spaces as delimiters
         let attrs = InfoString::parse_pandoc_attributes(".python .numberLines startFrom=\"10\"");
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], (".python".to_string(), None));
@@ -1885,7 +1683,6 @@ mod tests {
 
     #[test]
     fn test_parse_pandoc_attributes_no_commas() {
-        // Commas in Pandoc attributes should be treated as part of the value
         let attrs = InfoString::parse_pandoc_attributes("#id .class key=value");
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("#id".to_string(), None));
@@ -1895,7 +1692,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_commas() {
-        // Quarto/RMarkdown chunks use commas as delimiters
         let attrs = InfoString::parse_chunk_options("r, echo=FALSE, warning=TRUE");
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1905,7 +1701,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_no_spaces() {
-        // Should handle comma-separated without spaces
         let attrs = InfoString::parse_chunk_options("r,echo=FALSE,warning=TRUE");
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1915,7 +1710,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_mixed() {
-        // Handle both commas and spaces
         let attrs = InfoString::parse_chunk_options("python echo=False, warning=True");
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("python".to_string(), None));
@@ -1925,7 +1719,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_nested_function_call() {
-        // R function calls with nested commas should be treated as single value
         let attrs = InfoString::parse_chunk_options(r#"r pep-cg, dependson=c("foo", "bar")"#);
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1941,7 +1734,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_nested_with_spaces() {
-        // Function call with spaces inside
         let attrs = InfoString::parse_chunk_options(r#"r, cache.path=file.path("cache", "dir")"#);
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1956,7 +1748,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_deeply_nested() {
-        // Multiple levels of nesting
         let attrs = InfoString::parse_chunk_options(r#"r, x=list(a=c(1,2), b=c(3,4))"#);
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1971,7 +1762,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_brackets_and_braces() {
-        // Test all bracket types
         let attrs = InfoString::parse_chunk_options(r#"r, data=df[rows, cols], config={a:1, b:2}"#);
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -1987,8 +1777,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_quotes_with_parens() {
-        // Parentheses inside quoted strings shouldn't affect depth tracking
-        // Note: The parser strips outer quotes from quoted values
         let attrs = InfoString::parse_chunk_options(r#"r, label="test (with parens)", echo=TRUE"#);
         assert_eq!(attrs.len(), 3);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -2001,8 +1789,6 @@ mod tests {
 
     #[test]
     fn test_parse_chunk_options_escaped_quotes() {
-        // Escaped quotes inside string values
-        // Note: The parser strips outer quotes and processes escapes
         let attrs = InfoString::parse_chunk_options(r#"r, label="has \"quoted\" text""#);
         assert_eq!(attrs.len(), 2);
         assert_eq!(attrs[0], ("r".to_string(), None));
@@ -2017,14 +1803,12 @@ mod tests {
 
     #[test]
     fn test_display_vs_executable_parsing() {
-        // Display block should use Pandoc parser (spaces)
         let info1 = InfoString::parse("{.python .numberLines startFrom=\"10\"}");
         assert!(matches!(
             info1.block_type,
             CodeBlockType::DisplayExplicit { .. }
         ));
 
-        // Executable chunk should use chunk options parser (commas)
         let info2 = InfoString::parse("{r, echo=FALSE, warning=TRUE}");
         assert!(matches!(info2.block_type, CodeBlockType::Executable { .. }));
         assert_eq!(info2.attributes.len(), 2);
@@ -2032,7 +1816,6 @@ mod tests {
 
     #[test]
     fn test_info_string_executable_implicit_label() {
-        // {r mylabel} should parse as label=mylabel
         let info = InfoString::parse("{r mylabel}");
         assert!(matches!(
             info.block_type,
@@ -2047,7 +1830,6 @@ mod tests {
 
     #[test]
     fn test_info_string_executable_implicit_label_with_options() {
-        // {r mylabel, echo=FALSE} should parse as label=mylabel, echo=FALSE
         let info = InfoString::parse("{r mylabel, echo=FALSE}");
         assert!(matches!(
             info.block_type,

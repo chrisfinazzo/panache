@@ -29,7 +29,6 @@ const SPEC_FIXTURE_REL: &str = "tests/fixtures/commonmark-spec/spec.txt";
 const ALLOWLIST_REL: &str = "tests/commonmark/allowlist.txt";
 const BLOCKED_REL: &str = "tests/commonmark/blocked.txt";
 const REPORT_REL: &str = "tests/commonmark/report.txt";
-/// Structured sidecar written beside `report.txt` for the conformance skill.
 const REPORT_JSON_REL: &str = "tests/commonmark/report.json";
 const SPEC_VERSION: &str = "0.31.2";
 
@@ -209,7 +208,6 @@ fn commonmark_full_report() {
     fs::write(&report_path, &report)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", report_path.display()));
 
-    // Structured sidecar written beside report.txt for the conformance skill.
     let pass_pct = (pass as f64 / total as f64) * 100.0;
     let sections: Vec<serde_json::Value> = all_sections
         .iter()

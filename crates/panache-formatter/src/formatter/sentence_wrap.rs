@@ -74,9 +74,6 @@ const GERMAN_PROFILE: LanguageProfile = LanguageProfile {
     sentence_starters: &[],
 };
 
-// Conservative starter list; review/extend the contents as real usage surfaces
-// false splits. Entries must be lowercase (candidates are lowercased before the
-// comparison).
 const SPANISH_PROFILE: LanguageProfile = LanguageProfile {
     no_break_abbreviations: &[
         "etc.", "p.ej.", "ej.", "vs.", "cf.", "núm.", "pág.", "págs.", "art.", "cap.", "fig.",
@@ -86,7 +83,6 @@ const SPANISH_PROFILE: LanguageProfile = LanguageProfile {
     sentence_starters: &[],
 };
 
-// Conservative starter list; review/extend as above.
 const FRENCH_PROFILE: LanguageProfile = LanguageProfile {
     no_break_abbreviations: &[
         "etc.", "cf.", "p.ex.", "ex.", "réf.", "fig.", "chap.", "éd.", "vol.",
@@ -320,9 +316,6 @@ pub(super) fn split_sentence_segments(
     let mut current = String::new();
 
     for (idx, segment) in segments.iter().enumerate() {
-        if !current.is_empty() && segment.has_whitespace_after {
-            // spacing is handled when appending previous segment
-        }
         if !current.is_empty()
             && idx > 0
             && segments
@@ -410,7 +403,6 @@ pub(super) fn resolve_lang_string(node: &SyntaxNode, config_lang: Option<&str>) 
         .map(|lang| lang.to_lowercase())
 }
 
-/// Primary language subtag, e.g. `en-gb` -> `en`, `pt_br` -> `pt`.
 fn primary_subtag(lang: &str) -> &str {
     lang.split(['-', '_']).next().unwrap_or(lang)
 }
@@ -421,7 +413,6 @@ fn sentence_language_for(lang: Option<&str>) -> SentenceLanguage {
         Some("de") => SentenceLanguage::German,
         Some("es") => SentenceLanguage::Spanish,
         Some("fr") => SentenceLanguage::French,
-        // "en", unknown languages, and absent metadata fall back to English.
         _ => SentenceLanguage::English,
     }
 }
@@ -589,7 +580,6 @@ mod tests {
             false,
             de
         ));
-        // The English profile doesn't know `bzw.`, so there it ends a sentence.
         assert!(is_sentence_boundary_text(
             "bzw.",
             Some("Next"),
@@ -609,7 +599,6 @@ mod tests {
             false,
             cs
         ));
-        // Mixed case exercises the `to_lowercase()` normalization path.
         assert!(!is_sentence_boundary_text(
             "Např.",
             Some("Next"),
@@ -629,8 +618,6 @@ mod tests {
     #[test]
     fn spanish_non_ascii_abbreviation_matches_via_list() {
         let es = ResolvedProfile::builtin_only(SentenceLanguage::Spanish);
-        // `núm.` is single-period and non-ASCII, so the multi-period heuristic
-        // does not apply; it matches only because it is in the Spanish list.
         assert!(!is_sentence_boundary_text(
             "núm.",
             Some("Next"),
@@ -645,8 +632,6 @@ mod tests {
             false,
             english()
         ));
-        // A bogus non-list, non-ASCII multi-period token still breaks: the
-        // heuristic stays ASCII-only.
         assert!(is_sentence_boundary_text(
             "ñ.ñ.",
             Some("Next"),
@@ -663,7 +648,6 @@ mod tests {
             builtin: SentenceLanguage::English.profile(),
             extra_no_break: &extras,
         };
-        // The user-supplied entry suppresses the break...
         assert!(!is_sentence_boundary_text(
             "zzz.",
             Some("Next"),
@@ -671,7 +655,6 @@ mod tests {
             false,
             profile
         ));
-        // ...the built-in English entry still suppresses...
         assert!(!is_sentence_boundary_text(
             "e.g.",
             Some("Next"),
@@ -679,7 +662,6 @@ mod tests {
             false,
             profile
         ));
-        // ...and an ordinary word still ends the sentence.
         assert!(is_sentence_boundary_text(
             "done.",
             Some("Next"),
@@ -717,7 +699,6 @@ mod tests {
             .expect("paragraph node");
 
         assert_eq!(resolve_lang_string(&paragraph, None).as_deref(), Some("sv"));
-        // Swedish has no built-in profile yet, so it falls back to English.
         assert!(matches!(
             sentence_language_for(Some("sv")),
             SentenceLanguage::English
@@ -736,7 +717,6 @@ mod tests {
             Some("de")
         );
 
-        // Frontmatter wins over the config fallback.
         let tree = parse("---\nlang: cs\n---\n\nText.", None);
         let paragraph = tree
             .descendants()

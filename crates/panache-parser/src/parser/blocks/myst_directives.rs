@@ -65,10 +65,6 @@ fn is_verbatim_directive(name: &str) -> bool {
 }
 
 fn is_name_char(c: char) -> bool {
-    // Directive names are identifiers, optionally domain-qualified
-    // (`py:function`) or versioned (`tab-set+`). Keep this permissive but
-    // anchored to identifier-ish characters so ordinary code fences such as
-    // ```` ```{=html} ```` (leading `=`) fall through to the code-block parser.
     c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | ':' | '.')
 }
 
@@ -84,7 +80,6 @@ pub(crate) fn try_parse_directive_open(content: &str, ext: &Extensions) -> Optio
 
     let (line, _newline) = strip_newline(content);
 
-    // Up to 3 leading spaces (4+ is indented code).
     let indent_len = line.bytes().take_while(|&b| b == b' ').count();
     if indent_len > 3 {
         return None;
@@ -103,7 +98,6 @@ pub(crate) fn try_parse_directive_open(content: &str, ext: &Extensions) -> Optio
         return None;
     }
 
-    // The directive name must immediately follow the fence: `{name}`.
     let after_fence = &rest[fence_count..];
     if !after_fence.starts_with('{') {
         return None;
@@ -136,9 +130,6 @@ pub(crate) struct DirectiveOption {
 }
 
 fn is_option_name_char(c: char) -> bool {
-    // MyST directive option keys are simple identifiers (`alt`, `width`,
-    // `number-lines`, `class`). Unlike directive names they are never
-    // domain-qualified, so `:` is excluded here to anchor the closing colon.
     c.is_alphanumeric() || matches!(c, '_' | '-')
 }
 
@@ -231,15 +222,12 @@ mod tests {
             let d = try_parse_directive_open(&line, &ext_backtick()).unwrap();
             assert!(d.is_verbatim, "{name} should have a verbatim body");
         }
-        // Argument and option-bearing openers keep the flag.
         let d = try_parse_directive_open("```{code-block} python\n", &ext_backtick()).unwrap();
         assert!(d.is_verbatim);
     }
 
     #[test]
     fn toctree_body_is_verbatim() {
-        // `toctree` entries are line-oriented (one document reference per
-        // line); the body must be preserved verbatim, not reflowed as prose.
         let d = try_parse_directive_open("```{toctree}\n", &ext_backtick()).unwrap();
         assert!(d.is_verbatim, "toctree body is a line-oriented entry list");
     }
@@ -264,9 +252,7 @@ mod tests {
     fn plain_code_fence_is_not_a_directive() {
         assert!(try_parse_directive_open("```python\n", &ext_backtick()).is_none());
         assert!(try_parse_directive_open("```\n", &ext_backtick()).is_none());
-        // Raw blocks keep their leading `=` and must fall through.
         assert!(try_parse_directive_open("```{=html}\n", &ext_backtick()).is_none());
-        // Empty braces are not a directive name.
         assert!(try_parse_directive_open("```{}\n", &ext_backtick()).is_none());
     }
 
@@ -315,7 +301,6 @@ mod tests {
         let o = try_parse_directive_option("  :width: 200px\n").unwrap();
         assert_eq!(o.indent_len, 2);
         assert_eq!(o.name_len, "width".len());
-        // Four-plus leading spaces is indented code, not an option.
         assert!(try_parse_directive_option("    :width: 200px\n").is_none());
     }
 
@@ -327,7 +312,6 @@ mod tests {
 
     #[test]
     fn colon_fence_is_not_option() {
-        // Empty key (`:::` -> key between first two colons is empty).
         assert!(try_parse_directive_option(":::\n").is_none());
         assert!(try_parse_directive_option(":::{note}\n").is_none());
     }
@@ -337,11 +321,8 @@ mod tests {
         assert!(is_directive_closing_fence("```\n", b'`', 3));
         assert!(is_directive_closing_fence("````\n", b'`', 3));
         assert!(is_directive_closing_fence("   ```  \n", b'`', 3));
-        // Too few backticks does not close a 4-backtick directive.
         assert!(!is_directive_closing_fence("```\n", b'`', 4));
-        // Trailing content is not a bare closer.
         assert!(!is_directive_closing_fence("```python\n", b'`', 3));
-        // Wrong fence character.
         assert!(!is_directive_closing_fence(":::\n", b'`', 3));
         assert!(is_directive_closing_fence(":::\n", b':', 3));
     }

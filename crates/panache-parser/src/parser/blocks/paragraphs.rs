@@ -11,8 +11,6 @@ use crate::parser::utils::container_stack::{Container, ContainerStack, OpenDispl
 use crate::parser::utils::helpers::trim_end_newlines;
 use crate::parser::utils::text_buffer::ParagraphBuffer;
 
-/// Split a trimmed line into a leading `$$...` run and the rest, if the run
-/// has at least two dollars.
 fn dollar_run(trimmed: &str) -> Option<(usize, &str)> {
     let run_len = trimmed.bytes().take_while(|b| *b == b'$').count();
     if run_len < 2 {
@@ -70,8 +68,6 @@ fn scan_bracket_delimiters(
                     i += 1;
                 }
             }
-            // Callers only pass bracket states; dollars are handled before
-            // this scan and suppress it entirely.
             Some(OpenDisplayMath::Dollars(_)) => return state,
         }
     }
@@ -187,8 +183,6 @@ pub(in crate::parser) fn append_paragraph_line_gobbling(
     held: usize,
     config: &ParserOptions,
 ) {
-    // Buffer the line (with newline for losslessness)
-    // Works for ALL paragraphs including those in blockquotes
     if let Some(Container::Paragraph {
         buffer,
         open_inline_math_envs,
@@ -204,11 +198,6 @@ pub(in crate::parser) fn append_paragraph_line_gobbling(
         }
 
         let line_no_newline = trim_end_newlines(line);
-        // Track display-math delimiter lines (`$$`, and `\[`/`\]` when the
-        // tex-math bracket extensions are on) so we keep multi-line display
-        // math in a single paragraph parse context. This prevents delimiter +
-        // `\begin{...}` forms from being split into PARAGRAPH + TEX_BLOCK
-        // across parse passes.
         update_display_math_state(line_no_newline, open_display_math, config);
         if let Some(env_name) = extract_environment_name(line_no_newline)
             && is_inline_math_environment(env_name)

@@ -61,8 +61,6 @@ pub fn is_inline_math_environment(name: &str) -> bool {
 /// scanner; allocating a `String` per call shows up in profiles when
 /// the doc has many LaTeX-style lines.
 pub fn extract_environment_name(line: &str) -> Option<&str> {
-    // ASCII byte-level leading-whitespace skip; `str::trim_start`
-    // iterates Unicode whitespace which is unnecessary here.
     let bytes = line.as_bytes();
     let mut i = 0;
     while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
@@ -88,26 +86,20 @@ pub fn extract_environment_name(line: &str) -> Option<&str> {
 /// - Line must start with backslash followed by a letter
 /// - If it's a `\begin{env}`, the environment must NOT be an inline math env
 pub fn can_start_raw_block(content: &str, config: &ParserOptions) -> bool {
-    // Must have raw_tex extension enabled
     if !config.extensions.raw_tex {
         return false;
     }
 
-    // Check if it's a \begin{env} line
     if let Some(env_name) = extract_environment_name(content) {
-        // Skip inline math environments - they should be parsed inline in paragraphs
         if is_inline_math_environment(env_name) {
             return false;
         }
-        // Non-math environment: parse as block
         return true;
     }
 
-    // Check if we're at the start of a line with a LaTeX command
     is_latex_command_line(content)
 }
 
-/// Check if a line starts with a LaTeX command (backslash + letter).
 fn is_latex_command_line(line: &str) -> bool {
     let trimmed = line.trim_start();
 
@@ -115,10 +107,8 @@ fn is_latex_command_line(line: &str) -> bool {
         return false;
     }
 
-    // After backslash, must have at least one letter
     let after_backslash = &trimmed[1..];
 
-    // Exclude display math delimiters \[ and \]
     if after_backslash.starts_with('[') || after_backslash.starts_with(']') {
         return false;
     }
@@ -159,12 +149,9 @@ pub fn parse_raw_tex_block(
         return 0;
     }
 
-    // Check if this is an environment
     let lines_consumed = if let Some(env_name) = extract_environment_name(first_line_inner) {
-        // Parse environment: \begin{env}...content...\end{env}
         parse_tex_environment_lines(builder, lines, start_pos, env_name, blockquote_depth)
     } else {
-        // Parse consecutive LaTeX command lines
         parse_tex_command_lines(builder, lines, start_pos, blockquote_depth)
     };
 
@@ -174,7 +161,6 @@ pub fn parse_raw_tex_block(
     lines_consumed
 }
 
-/// Parse consecutive LaTeX command lines.
 fn parse_tex_command_lines(
     builder: &mut GreenNodeBuilder<'static>,
     lines: &[&str],
@@ -190,18 +176,14 @@ fn parse_tex_command_lines(
         let inner =
             crate::parser::blocks::blockquotes::strip_n_blockquote_markers(line, blockquote_depth);
         if !first_line && brace_depth == 0 {
-            // Stop at blank lines
             if inner.trim().is_empty() {
                 break;
             }
 
-            // Stop if not a LaTeX command line
             if !is_latex_command_line(inner) {
                 break;
             }
 
-            // Inside blockquotes, consume one command line at a time so outer parsing
-            // can preserve each line's blockquote markers losslessly.
             if blockquote_depth > 0 {
                 break;
             }
@@ -214,7 +196,6 @@ fn parse_tex_command_lines(
         }
         first_line = false;
 
-        // Emit the line content (strip newline)
         let content = trim_end_newlines(inner);
         builder.token(SyntaxKind::TEXT.into(), content);
 
@@ -232,7 +213,6 @@ fn parse_tex_command_lines(
         first_line = false;
     }
 
-    // Emit final newline if there were any lines
     if lines_consumed > 0 && !lines[start_pos + lines_consumed - 1].trim_end().is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), "\n");
     }
@@ -267,7 +247,6 @@ fn brace_delta(text: &str) -> i32 {
     delta
 }
 
-/// Parse a LaTeX environment from \begin{env} to \end{env}.
 fn parse_tex_environment_lines(
     builder: &mut GreenNodeBuilder<'static>,
     lines: &[&str],
@@ -289,19 +268,16 @@ fn parse_tex_environment_lines(
         }
         first_line = false;
 
-        // Emit the line content (strip newline)
         let content = trim_end_newlines(inner);
         builder.token(SyntaxKind::TEXT.into(), content);
 
         lines_consumed += 1;
 
-        // Check if this line contains the end marker
         if inner.trim_start().starts_with(&end_marker) {
             break;
         }
     }
 
-    // Emit final newline
     if lines_consumed > 0 {
         builder.token(SyntaxKind::NEWLINE.into(), "\n");
     }
@@ -352,7 +328,6 @@ mod tests {
 
         let green = builder.finish();
         let node = SyntaxNode::new_root(green);
-        // The node's text should be the lossless input
         let text = node.text().to_string();
         assert!(
             text.contains("DeclareMathOperator"),

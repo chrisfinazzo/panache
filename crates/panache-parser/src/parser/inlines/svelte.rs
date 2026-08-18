@@ -49,17 +49,14 @@ impl SvelteKind {
 pub(crate) fn try_parse_svelte_template(text: &str) -> Option<(usize, SvelteKind, String)> {
     let bytes = text.as_bytes();
 
-    // Must open with a single `{`.
     if bytes.first() != Some(&b'{') {
         return None;
     }
 
-    // Leave `{{<` (Quarto shortcode opener) to the shortcode probe.
     if bytes.len() >= 3 && bytes[1] == b'{' && bytes[2] == b'<' {
         return None;
     }
 
-    // Scan to the matching `}` at depth 0.
     let mut depth: i32 = 0;
     let mut pos = 0;
     let mut close = None;
@@ -86,7 +83,6 @@ pub(crate) fn try_parse_svelte_template(text: &str) -> Option<(usize, SvelteKind
     Some((total_len, kind, content.to_string()))
 }
 
-/// Classify a span by its first non-whitespace content byte.
 fn classify(content: &str) -> SvelteKind {
     match content.trim_start().as_bytes().first() {
         Some(b'#') | Some(b':') | Some(b'/') => SvelteKind::BlockLogic,
@@ -152,7 +148,6 @@ mod tests {
 
     #[test]
     fn handles_nested_braces_in_expression() {
-        // Object literal: the inner braces must not terminate the span early.
         let (len, kind, content) = try_parse_svelte_template("{ {a: 1} }rest").unwrap();
         assert_eq!(kind, SvelteKind::Expression);
         assert_eq!(content, " {a: 1} ");

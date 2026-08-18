@@ -40,8 +40,6 @@ pub fn classify_value(value: &Option<String>) -> ChunkOptionValue {
     match value {
         None => ChunkOptionValue::Simple(String::new()), // Bare flag like `echo` is treated as true
         Some(v) => {
-            // Parser strips quotes, so we get the inner value
-            // Check if it looks like an R expression
             if is_boolean_literal(v) || is_numeric_literal(v) || is_simple_string(v) {
                 ChunkOptionValue::Simple(v.clone())
             } else {
@@ -51,16 +49,11 @@ pub fn classify_value(value: &Option<String>) -> ChunkOptionValue {
     }
 }
 
-/// Check if a string value is simple enough to be safely formatted.
-///
-/// Returns false for strings that look like R expressions (function calls, operators, variables).
 fn is_simple_string(s: &str) -> bool {
-    // Empty strings are simple
     if s.is_empty() {
         return true;
     }
 
-    // If it contains R expression characters, it's complex
     if s.contains('(')
         || s.contains(')')
         || s.contains('{')
@@ -80,8 +73,6 @@ fn is_simple_string(s: &str) -> bool {
         return false;
     }
 
-    // If it's a single bareword (could be a variable), it's complex
-    // unless it contains spaces or special chars (then it's a string literal)
     if !s.contains(' ')
         && !s.contains('.')
         && !s.contains('/')
@@ -89,11 +80,9 @@ fn is_simple_string(s: &str) -> bool {
         && !s.contains(',')
         && s.chars().all(|c| c.is_alphanumeric() || c == '_')
     {
-        // Looks like a variable name
         return false;
     }
 
-    // Otherwise, treat as simple string (phrases, paths with dots/slashes)
     true
 }
 
@@ -108,7 +97,6 @@ pub fn is_boolean_literal(s: &str) -> bool {
 ///
 /// Accepts: integers (7, -3) and floats (3.14, -2.5, 1e-5)
 pub fn is_numeric_literal(s: &str) -> bool {
-    // Try parsing as f64 to catch integers and floats
     s.parse::<f64>().is_ok()
 }
 
@@ -140,22 +128,18 @@ mod tests {
 
     #[test]
     fn test_is_numeric_literal() {
-        // Integers
         assert!(is_numeric_literal("7"));
         assert!(is_numeric_literal("0"));
         assert!(is_numeric_literal("-3"));
         assert!(is_numeric_literal("100"));
 
-        // Floats
         assert!(is_numeric_literal("3.14"));
         assert!(is_numeric_literal("-2.5"));
         assert!(is_numeric_literal("0.1"));
 
-        // Scientific notation
         assert!(is_numeric_literal("1e5"));
         assert!(is_numeric_literal("1.5e-3"));
 
-        // Not numeric
         assert!(!is_numeric_literal("abc"));
         assert!(!is_numeric_literal("7x"));
         assert!(!is_numeric_literal(""));
@@ -163,17 +147,14 @@ mod tests {
 
     #[test]
     fn test_is_quoted_string() {
-        // Double quotes
         assert!(is_quoted_string("\"hello\""));
         assert!(is_quoted_string("\"with spaces\""));
         assert!(is_quoted_string("\"\""));
 
-        // Single quotes
         assert!(is_quoted_string("'hello'"));
         assert!(is_quoted_string("'with spaces'"));
         assert!(is_quoted_string("''"));
 
-        // Not quoted
         assert!(!is_quoted_string("hello"));
         assert!(!is_quoted_string("\""));
         assert!(!is_quoted_string("'"));

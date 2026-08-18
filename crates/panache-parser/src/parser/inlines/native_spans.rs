@@ -20,32 +20,26 @@ use super::core::parse_inline_text;
 pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)> {
     let bytes = text.as_bytes();
 
-    // Must start with <span
     if !text.starts_with("<span") {
         return None;
     }
 
     let mut pos = 5; // After "<span"
 
-    // Next char must be space, >, or end of tag
     if pos >= text.len() {
         return None;
     }
 
     let next_char = bytes[pos] as char;
     if !matches!(next_char, ' ' | '\t' | '\n' | '\r' | '>') {
-        // Could be <spanx> or something else, not a span tag
         return None;
     }
 
-    // Parse attributes until we find >
     let attr_start = pos;
     while pos < text.len() && bytes[pos] != b'>' {
-        // Handle quoted attributes
         if bytes[pos] == b'"' || bytes[pos] == b'\'' {
             let quote = bytes[pos];
             pos += 1;
-            // Skip until closing quote
             while pos < text.len() && bytes[pos] != quote {
                 if bytes[pos] == b'\\' {
                     pos += 2; // Skip escaped character
@@ -62,27 +56,21 @@ pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)>
     }
 
     if pos >= text.len() {
-        // No closing > found
         return None;
     }
 
-    // Extract attributes
     let attributes = text[attr_start..pos].trim().to_string();
 
-    // Skip the >
     pos += 1;
 
-    // Now find the closing </span>
     let content_start = pos;
     let mut depth = 1;
 
     while pos < text.len() && depth > 0 {
-        // Check for nested <span>
         if bytes
             .get(pos..)
             .is_some_and(|tail| tail.starts_with(b"<span"))
         {
-            // Make sure it's actually a span tag (space or > follows)
             let check_pos = pos + 5;
             if check_pos < text.len() {
                 let ch = bytes[check_pos] as char;
@@ -94,14 +82,12 @@ pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)>
             }
         }
 
-        // Check for closing </span>
         if bytes
             .get(pos..)
             .is_some_and(|tail| tail.starts_with(b"</span>"))
         {
             depth -= 1;
             if depth == 0 {
-                // Found the matching closing tag
                 let content = &text[content_start..pos];
                 let total_len = pos + 7; // Include </span>
                 return Some((total_len, content, attributes));
@@ -110,12 +96,9 @@ pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)>
             continue;
         }
 
-        // Advance by UTF-8 char length so subsequent string slicing stays on
-        // char boundaries.
         pos += text[pos..].chars().next().map_or(1, char::len_utf8);
     }
 
-    // No matching closing tag found
     None
 }
 
@@ -150,10 +133,6 @@ pub(crate) fn emit_native_span(
         return;
     }
 
-    // Legacy CommonMark + native_spans extension path: keep the original
-    // BRACKETED_SPAN shape. (Note: this path collapses multi-whitespace
-    // attribute regions to a single space; it's a pre-existing minor
-    // losslessness divergence not worth diverging the legacy shape for.)
     let attrs_text = open_tag
         .strip_prefix("<span")
         .and_then(|s| s.strip_suffix('>'))
@@ -173,17 +152,8 @@ pub(crate) fn emit_native_span(
     builder.finish_node();
 }
 
-/// Tokenize the open tag of an inline `<span ...>` byte-exactly into:
-/// `TEXT("<span") + (WHITESPACE + HTML_ATTRS{TEXT(attrs)} + WHITESPACE?)?
-/// + TEXT(">")`.
-///
-/// Bytes are byte-identical to the source — only the tokenization
-/// granularity changes so `AttributeNode::cast(HTML_ATTRS)` can read the
-/// attribute region structurally. Mirrors `emit_div_open_tag_tokens`.
 fn emit_span_open_tag_tokens(builder: &mut impl InlineSink, open_tag: &str) {
     let Some(rest) = open_tag.strip_prefix("<span") else {
-        // Defensive — shouldn't happen since try_parse_native_span gates on
-        // <span. Fall back to a single TEXT token to stay lossless.
         builder.token(SyntaxKind::TEXT.into(), open_tag);
         return;
     };
@@ -193,7 +163,6 @@ fn emit_span_open_tag_tokens(builder: &mut impl InlineSink, open_tag: &str) {
         return;
     };
     let bytes = inside.as_bytes();
-    // Split into leading WS, attribute body, trailing WS.
     let leading_ws_end = bytes
         .iter()
         .position(|&b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
@@ -287,7 +256,6 @@ mod tests {
 
     #[test]
     fn test_not_span_no_space_after() {
-        // <spanner> should not be parsed as <span>
         let result = try_parse_native_span("<spanner>text</spanner>");
         assert_eq!(result, None);
     }

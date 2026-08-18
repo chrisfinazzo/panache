@@ -40,8 +40,6 @@ fn manifest_path() -> PathBuf {
         .join("tests/fixtures/math_symbol_classes/symbol-classes.tsv")
 }
 
-/// The `pulldown-latex` `Content` class we expect for a symbol's probe — a
-/// coarse projection of [`Content`] onto the distinctions the table cares about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Oracle {
     BinOp,
@@ -117,12 +115,6 @@ fn load_rows() -> Vec<Row> {
     rows
 }
 
-/// The table's class for a char token. `+ - * = < >` go through
-/// [`operators::classify_operator`]. Delimiters/punctuation (`( ) [ ] , ;`) take
-/// the production path: the parser tokenizes the char into a dedicated `MATH_*`
-/// kind, and [`operators::delimiter_class`] maps that kind to an [`AtomClass`].
-/// This pins both halves at once — the parser's char→kind grouping and the
-/// formatter's kind→class read — against the vendored intent and the oracle.
 fn char_class(token: &str) -> AtomClass {
     match token {
         "+" | "-" | "*" | "=" | "<" | ">" => operators::classify_operator(token),
@@ -134,8 +126,6 @@ fn char_class(token: &str) -> AtomClass {
     }
 }
 
-/// Tokenize a single math char and return its sole token kind (the parser owns
-/// the char→kind grouping for delimiters/punctuation).
 fn sole_token_kind(token: &str) -> SyntaxKind {
     let root = SyntaxNode::new_root(parse_math_content(token, MathParseOptions::default()));
     let kinds: Vec<SyntaxKind> = root
@@ -151,7 +141,6 @@ fn sole_token_kind(token: &str) -> SyntaxKind {
     kinds[0]
 }
 
-/// Project a `pulldown-latex` `Content` event onto an [`Oracle`] class.
 fn classify_content(content: Content<'_>) -> Oracle {
     match content {
         Content::BinaryOp { .. } => Oracle::BinOp,
@@ -166,8 +155,6 @@ fn classify_content(content: Content<'_>) -> Oracle {
             ty: DelimiterType::Close,
             ..
         } => Oracle::Close,
-        // `\middle` fences — no fixture row probes one; surface it as Skip rather
-        // than mislabel it Open/Close.
         Content::Delimiter {
             ty: DelimiterType::Fence,
             ..
@@ -177,8 +164,6 @@ fn classify_content(content: Content<'_>) -> Oracle {
     }
 }
 
-/// Parse the probe `a <token> b` with `pulldown-latex` and return the class of
-/// the single operator event between the two `a`/`b` operands.
 fn oracle_class(token: &str) -> Result<Oracle, String> {
     let probe = format!("a {token} b");
     let storage = Storage::new();
@@ -209,9 +194,6 @@ fn oracle_class(token: &str) -> Result<Oracle, String> {
     }
 }
 
-/// Assertion 1: every fixture row's class matches the live interpretation table.
-/// Catches a retyped class and (via the `Ord`/`None` controls and the lookup
-/// itself) a deleted command.
 #[test]
 fn table_matches_vendored_fixture() {
     let rows = load_rows();
@@ -219,8 +201,6 @@ fn table_matches_vendored_fixture() {
 
     for row in &rows {
         if let Some(name) = row.token.strip_prefix('\\') {
-            // `command_class` never returns `Some(Ord)`; an `Ord` fixture row is
-            // a control asserting the command is absent (defaults to Ord).
             let want = if row.atom_class == AtomClass::Ord {
                 None
             } else {
@@ -253,9 +233,6 @@ fn table_matches_vendored_fixture() {
     );
 }
 
-/// Assertion 2: the class each row *records* is what `pulldown-latex` actually
-/// emits. Grounds the vendored intent in a real LaTeX parser; a non-divergence
-/// mismatch here is a real table bug, not a fixture nit.
 #[test]
 fn oracle_agrees_with_fixture() {
     let rows = load_rows();
@@ -284,9 +261,6 @@ fn oracle_agrees_with_fixture() {
     );
 }
 
-/// Guards against a *vacuously* passing oracle: if `classify_content` collapsed
-/// every symbol to one class, [`oracle_agrees_with_fixture`] would prove nothing.
-/// Pin that binop and relation stay distinguishable.
 #[test]
 fn oracle_distinguishes_atom_classes() {
     let plus = oracle_class("+").expect("`+` probes");
@@ -299,8 +273,6 @@ fn oracle_distinguishes_atom_classes() {
     );
 }
 
-/// Guards against the vendored set being silently gutted: pin a coverage floor
-/// and require every spacing-relevant class to appear.
 #[test]
 fn fixture_pins_table_coverage() {
     let rows = load_rows();

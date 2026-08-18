@@ -8,18 +8,12 @@
 
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode};
 
-/// Strips a single pair of surrounding braces (`{name}` -> `name`).
-///
-/// `MYST_DIRECTIVE_NAME` and `MYST_ROLE_NAME` tokens include their braces; the
-/// wrappers expose the bare identifier. Falls back to the input unchanged when
-/// the braces are absent (defensive; the parser always emits them).
 fn strip_braces(text: &str) -> &str {
     text.strip_prefix('{')
         .and_then(|rest| rest.strip_suffix('}'))
         .unwrap_or(text)
 }
 
-/// Returns the text of the first direct child token of `kind`.
 fn child_token_text(node: &SyntaxNode, kind: SyntaxKind) -> Option<String> {
     node.children_with_tokens()
         .filter_map(|element| element.into_token())
@@ -155,8 +149,6 @@ impl AstNode for MystDirective {
 }
 
 impl MystDirective {
-    /// The opener line node (`MYST_DIRECTIVE_OPEN`), which holds the name and
-    /// argument tokens.
     fn open(&self) -> Option<SyntaxNode> {
         self.0
             .children()

@@ -24,21 +24,15 @@ pub(in crate::parser) fn can_start_blockquote(
     lines: &[&str],
     fenced_divs_enabled: bool,
 ) -> bool {
-    // At start of document, no blank line needed
     if pos == 0 {
         return true;
     }
-    // After a blank line, can start blockquote
     if crate::parser::utils::helpers::is_blank_line(lines[pos - 1]) {
         return true;
     }
-    // First child of a fenced div: the opener line is not blank, but Pandoc
-    // treats the start of a div like the start of the document.
     if opens_fenced_div_at_depth(lines[pos - 1], 0, fenced_divs_enabled) {
         return true;
     }
-    // If we're already in a blockquote, nested blockquotes need blank line too
-    // (blank_before_blockquote extension)
     false
 }
 

@@ -23,7 +23,6 @@ fn apply_edit(text: &str, old: (usize, usize), insert: &str) -> String {
     out
 }
 
-/// Owned green subtrees of the top-level `DOCUMENT` children (nodes only).
 fn blocks(tree: &SyntaxNode) -> Vec<GreenNode> {
     tree.green()
         .children()
@@ -34,8 +33,6 @@ fn blocks(tree: &SyntaxNode) -> Vec<GreenNode> {
         .collect()
 }
 
-/// The address of a green node's shared allocation. Two green handles pointing
-/// at the same allocation (i.e. sharing structure) report the same address.
 fn green_addr(node: &GreenNode) -> usize {
     let data: &GreenNodeData = node;
     data as *const GreenNodeData as usize
@@ -43,7 +40,6 @@ fn green_addr(node: &GreenNode) -> usize {
 
 #[test]
 fn incremental_suffix_retains_prefix_block_identity() {
-    // No headings -> the suffix-window strategy, which retains a genuine prefix.
     let input = "para one\n\npara two\n\npara three\n\npara four\n\npara five\n";
     let old_tree = parse(input, None);
     let old_blocks = blocks(&old_tree);
@@ -66,7 +62,6 @@ fn incremental_suffix_retains_prefix_block_identity() {
         .filter(|block| old_addrs.contains(&green_addr(block)))
         .count();
 
-    // Every block except the edited trailing paragraph must be pointer-shared.
     assert!(
         shared >= new_blocks.len() - 1,
         "expected all-but-one prefix blocks to share Arc identity, got {shared}/{}",
@@ -95,10 +90,6 @@ fn section_window_retains_surrounding_block_identity() {
     let new_blocks = blocks(&inc.tree);
     let old_addrs: std::collections::HashSet<usize> = old_blocks.iter().map(green_addr).collect();
 
-    // The section window reparses the whole edited section (its heading, blank
-    // lines, and body), so those blocks are rebuilt. The guarantee is that
-    // blocks in *other* sections keep their `Arc` identity: the leading `Intro`
-    // section and the trailing `End` section are untouched.
     assert!(
         old_addrs.contains(&green_addr(&new_blocks[0])),
         "the first block (Intro heading) should be pointer-shared"
@@ -135,9 +126,6 @@ fn incremental_and_full_reparse_agree_block_for_block() {
     let inc_blocks = blocks(&inc.tree);
     let full_blocks = blocks(&full);
 
-    // Incremental reparse must produce a tree structurally identical to a full
-    // reparse of the same text, block for block. This is the guarantee that
-    // content-addressed salsa memoization stays correct under either strategy.
     assert_eq!(
         inc_blocks.len(),
         full_blocks.len(),
@@ -154,8 +142,6 @@ fn incremental_and_full_reparse_agree_block_for_block() {
 
 #[test]
 fn unchanged_blocks_compare_equal_across_edit() {
-    // The load-bearing salsa property: editing one block leaves every other
-    // block `==` to its pre-edit counterpart (so per-block memos hit).
     let input = "# Intro\n\nalpha\n\n# Middle\n\nbeta section\n\n# End\n\nomega\n";
     let old_tree = parse(input, None);
     let old_blocks = blocks(&old_tree);
@@ -179,8 +165,6 @@ fn unchanged_blocks_compare_equal_across_edit() {
     );
 }
 
-/// Extract the `$0...$0`-marked range from `marked`, returning the unmarked
-/// text and the byte range the markers delimited.
 fn extract_range(marked: &str) -> (String, (usize, usize)) {
     let start = marked.find("$0").expect("opening $0 marker");
     let rest = &marked[start + 2..];
@@ -235,8 +219,6 @@ fn do_check(before_marked: &str, insert: &str, expected_strategy: &str, reparsed
 
 #[test]
 fn do_check_suffix_window_tail_edit() {
-    // Heading-free document: the suffix strategy restarts at a safe
-    // top-level block boundary and reparses to EOF.
     do_check(
         "para one\n\npara two\n\npara three\n\npara four\n\npara $0five$0\n",
         "FIVE",
@@ -247,18 +229,6 @@ fn do_check_suffix_window_tail_edit() {
 
 #[test]
 fn do_check_suffix_window_reparses_to_eof_from_middle_edit() {
-    // An edit in the middle of a heading-free document reparses everything
-    // from the restart to EOF. The region tier does *not* rescue this one, and
-    // the reason is size rather than shape: the region is one 10-byte
-    // paragraph, but its two neighbours push the region-plus-context past a
-    // quarter of a 60-byte document, and the width bail carries no
-    // small-document exemption (three small parses lose to one, because
-    // `Parser::new` builds a registry each time). `TODO.md` tracks that under
-    // "Incremental Parsing -> Cost ceilings"; if the registry cost goes, this
-    // case is the one that should flip to `region` with a much shorter length.
-    //
-    // `do_check_region_tier_on_an_early_edit` is the same shape at a size where
-    // the tier does win.
     do_check(
         "para one\n\npara $0two$0\n\npara three\n\npara four\n\npara five\n",
         "TWO",
@@ -269,9 +239,6 @@ fn do_check_suffix_window_reparses_to_eof_from_middle_edit() {
 
 #[test]
 fn do_check_section_window_between_headings() {
-    // Edit strictly inside a section body bounded by top-level headings:
-    // only the enclosing section (previous heading to next heading) is
-    // reparsed.
     do_check(
         "# Intro\n\nalpha\n\n# Middle\n\nbeta $0section$0\n\n# End\n\nomega\n",
         "SECTION",
@@ -292,18 +259,6 @@ fn do_check_section_window_last_section_runs_to_eof() {
 
 #[test]
 fn do_check_edit_at_document_start_declines_on_window_size() {
-    // The restart clamps to the document start, so the "suffix" would be the
-    // whole document: correct, but strictly more expensive than the full parse
-    // it duplicates. The window-size cutoff declines before the guard cascade
-    // and the window parse run, so the caller pays that full parse and nothing
-    // else.
-    //
-    // The region tier does not rescue this one either, and for a cost reason
-    // rather than a correctness one: the edited paragraph is 9 bytes of a
-    // 31-byte document, and answering a region costs a fragment parse plus two
-    // boundary parses, so on a document this small three small parses lose to
-    // one. `do_check_region_tier_on_an_early_edit` is the same shape at a size
-    // where the tier wins.
     do_check(
         "$0p$0ara one\n\npara two\n\npara three\n",
         "P",
@@ -312,11 +267,6 @@ fn do_check_edit_at_document_start_declines_on_window_size() {
     );
 }
 
-/// The region tier's structural case: the same early edit as above, on a
-/// document long enough that the window would cover nearly all of it.
-///
-/// The pinned length is the granularity claim this file exists for. A window
-/// here would be the whole 4 KB document; the region is one paragraph.
 #[test]
 fn do_check_region_tier_on_an_early_edit() {
     let mut input = String::from("$0p$0ara one\n\n");
@@ -328,10 +278,6 @@ fn do_check_region_tier_on_an_early_edit() {
 
 #[test]
 fn do_check_fallback_when_restart_would_pass_the_edit() {
-    // Inserting at the blank line after an unterminated fence resolves the
-    // enclosing block to the *following* paragraph, putting the restart
-    // past the edit start; the guard bails to a full reparse rather than
-    // retaining stale pre-edit bytes.
     do_check("```\ncode\n$0$0\npara after\n", "\\", "full_reparse", 22);
 }
 

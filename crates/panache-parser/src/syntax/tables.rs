@@ -61,14 +61,12 @@ pub fn separator_column_segments(separator: &SyntaxNode) -> Vec<Vec<SyntaxToken>
     let toks: Vec<SyntaxToken> = separator_marker_tokens(separator).collect();
     let is_ws = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_WHITESPACE;
     let is_delim = |t: &SyntaxToken| t.kind() == SyntaxKind::TABLE_SEP_DELIM;
-    // Trim leading/trailing interior whitespace (mirrors `raw.trim()`).
     let lo = toks.iter().position(|t| !is_ws(t));
     let hi = toks.iter().rposition(|t| !is_ws(t));
     let inner = match (lo, hi) {
         (Some(lo), Some(hi)) => &toks[lo..=hi],
         _ => &[][..], // whitespace-only: empty inner → one default column below
     };
-    // Drop bounding delimiter runs (`trim_start/end_matches('|')`).
     let lead = inner.iter().take_while(|t| is_delim(t)).count();
     let inner = &inner[lead..];
     let trail = inner.iter().rev().take_while(|t| is_delim(t)).count();
@@ -391,8 +389,6 @@ mod tests {
 
     #[test]
     fn text_without_line_prefixes_drops_item_indent() {
-        // The item indent lives inside the row nodes as line-leading
-        // `WHITESPACE`; line 0's prefix sits outside the table node.
         let input = "- +---+---+\n  | a | b |\n  +===+===+\n  | 1 | 2 |\n  +---+---+\n";
         let tree = crate::parse(input, None);
         let table = tree
@@ -419,10 +415,6 @@ mod tests {
         );
     }
 
-    /// The structural contract behind `text_without_line_prefixes`:
-    /// container-prefix bytes inside a content node carry their own kind,
-    /// so consumers skip by kind instead of guessing at line-leading
-    /// whitespace.
     #[test]
     fn prefix_runs_inside_content_nodes_are_line_prefix_tokens() {
         for input in [
@@ -458,7 +450,6 @@ mod tests {
                     _ => at_line_start = false,
                 }
             }
-            // Four continuation lines carry a prefix each.
             assert!(prefix_tokens >= 4, "expected prefix tokens in {input:?}");
         }
     }

@@ -18,23 +18,19 @@ use crate::syntax::SyntaxKind;
 pub fn try_parse_strikeout(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with ~~
     if bytes.len() < 4 || bytes[0] != b'~' || bytes[1] != b'~' {
         return None;
     }
 
-    // Check that it's not more than 2 tildes at the start (~~~ would be a code fence)
     if bytes.get(2) == Some(&b'~') {
         return None;
     }
 
-    // Find the closing ~~
     let mut pos = 2;
     let mut found_close = false;
 
     while pos + 1 < bytes.len() {
         if bytes[pos] == b'~' && bytes[pos + 1] == b'~' {
-            // Check that there's no third tilde (to avoid ~~text~~~)
             if pos + 2 < bytes.len() && bytes[pos + 2] == b'~' {
                 pos += 1;
                 continue;
@@ -50,15 +46,12 @@ pub fn try_parse_strikeout(text: &str) -> Option<(usize, &str)> {
         return None;
     }
 
-    // Extract content between the delimiters
     let content = &text[2..pos];
 
-    // Content cannot be empty or only whitespace
     if content.trim().is_empty() {
         return None;
     }
 
-    // Content cannot start or end with whitespace (CommonMark-style rule)
     if content.starts_with(char::is_whitespace) || content.ends_with(char::is_whitespace) {
         return None;
     }
@@ -76,15 +69,12 @@ pub fn emit_strikeout(
 ) {
     builder.start_node(SyntaxKind::STRIKEOUT.into());
 
-    // Opening marker
     builder.start_node(SyntaxKind::STRIKEOUT_MARKER.into());
     builder.token(SyntaxKind::STRIKEOUT_MARKER.into(), "~~");
     builder.finish_node();
 
-    // Parse inner content recursively for nested inline elements
     parse_inline_text(builder, inner_text, config, false, suppress_footnote_refs);
 
-    // Closing marker
     builder.start_node(SyntaxKind::STRIKEOUT_MARKER.into());
     builder.token(SyntaxKind::STRIKEOUT_MARKER.into(), "~~");
     builder.finish_node();
@@ -111,10 +101,8 @@ mod tests {
 
     #[test]
     fn test_no_whitespace_inside_delimiters() {
-        // Content cannot start with whitespace
         assert_eq!(try_parse_strikeout("~~ hello~~"), None);
 
-        // Content cannot end with whitespace
         assert_eq!(try_parse_strikeout("~~hello ~~"), None);
     }
 
@@ -131,7 +119,6 @@ mod tests {
 
     #[test]
     fn test_too_many_tildes() {
-        // Three tildes would be code fence
         assert_eq!(try_parse_strikeout("~~~hello~~~"), None);
     }
 

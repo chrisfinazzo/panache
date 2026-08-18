@@ -28,10 +28,8 @@ impl AstNode for Heading {
 impl Heading {
     /// Returns the heading level (1-6).
     pub fn level(&self) -> usize {
-        // Look for ATX_HEADING_MARKER node which contains the token
         for child in self.0.children() {
             if child.kind() == SyntaxKind::ATX_HEADING_MARKER {
-                // Count '#' in the token child
                 for token in child.children_with_tokens() {
                     if let Some(t) = token.as_token()
                         && t.kind() == SyntaxKind::ATX_HEADING_MARKER
@@ -42,9 +40,6 @@ impl Heading {
             }
         }
 
-        // Check for setext underline. The underline is wrapped in a
-        // SETEXT_HEADING_UNDERLINE node containing a like-named token, so
-        // `support::token` (direct token children only) doesn't find it.
         if let Some(text) = self
             .0
             .descendants_with_tokens()
@@ -52,7 +47,6 @@ impl Heading {
             .find(|t| t.kind() == SyntaxKind::SETEXT_HEADING_UNDERLINE)
             .map(|t| t.text().to_string())
         {
-            // Setext headings: '=' is level 1, '-' is level 2
             if text.starts_with('=') { 1 } else { 2 }
         } else {
             1 // Default to level 1

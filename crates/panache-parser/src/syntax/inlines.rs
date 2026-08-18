@@ -162,8 +162,6 @@ mod tests {
 
     #[test]
     fn inline_html_discriminates_comments_from_tags() {
-        // Use <br/> rather than <span>: pandoc-dialect lifts <span>...</span>
-        // to its own INLINE_HTML_SPAN kind, so it wouldn't surface here.
         let input = "Hi <!-- x --> <br/>\n";
         let tree = crate::parse(input, None);
         let spans: Vec<_> = tree.descendants().filter_map(InlineHtml::cast).collect();

@@ -16,8 +16,6 @@ use super::helpers::{find_first, parse_blocks, parse_blocks_with_config};
 use crate::options::{Extensions, ParserOptions};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// Concatenated `INLINE_CODE_CONTENT` of the first code span, i.e. the payload
-/// with any held-out container indent already excluded.
 fn first_code_payload(tree: &SyntaxNode) -> String {
     let code = find_first(tree, SyntaxKind::INLINE_CODE).expect("should find inline code");
     code.children_with_tokens()
@@ -38,8 +36,6 @@ fn admonition_config() -> ParserOptions {
 
 #[test]
 fn footnote_continuation_indent_is_stripped_from_inline_code_content() {
-    // `noteBlock` strips the body's 4-column indent off every continuation
-    // line, so the span reads `x\ny` (pandoc: `Code "x y"`), not `x\n    y`.
     let input = "a[^1]\n\n[^1]: d\n    `x\n    y`\n";
     let tree = parse_blocks(input);
     assert_eq!(first_code_payload(&tree), "x\ny");
@@ -48,8 +44,6 @@ fn footnote_continuation_indent_is_stripped_from_inline_code_content() {
 
 #[test]
 fn footnote_continuation_keeps_surplus_indent_as_payload() {
-    // Only the container's own columns are gobbled; indent past the content
-    // column is content. Pandoc: `Code "x   y"`.
     let input = "a[^1]\n\n[^1]: d\n      `x\n      y`\n";
     let tree = parse_blocks(input);
     assert_eq!(first_code_payload(&tree), "x\n  y");
@@ -58,8 +52,6 @@ fn footnote_continuation_keeps_surplus_indent_as_payload() {
 
 #[test]
 fn footnote_lazy_continuation_keeps_its_whitespace() {
-    // A lazy line never reaches the content column, so pandoc takes nothing
-    // off it and its leading whitespace stays payload.
     let input = "a[^1]\n\n[^1]: d\n  `x\n  y`\n";
     let tree = parse_blocks(input);
     assert_eq!(first_code_payload(&tree), "x\n  y");
@@ -68,8 +60,6 @@ fn footnote_lazy_continuation_keeps_its_whitespace() {
 
 #[test]
 fn footnote_continuation_indent_is_held_out_as_line_prefix() {
-    // The gobbled bytes are re-injected as a `LINE_PREFIX` token rather than
-    // dropped -- that is what keeps the CST byte-lossless.
     let input = "a[^1]\n\n[^1]: d\n    text\n";
     let tree = parse_blocks(input);
     let definition =
@@ -88,8 +78,6 @@ fn footnote_continuation_indent_is_held_out_as_line_prefix() {
 
 #[test]
 fn admonition_continuation_indent_is_stripped_from_inline_code_content() {
-    // Admonitions share the `content_col` machinery, so the same gobble
-    // applies to their 4-space-indented bodies.
     let input = "!!! note \"T\"\n    d\n    `x\n    y`\n";
     let tree = parse_blocks_with_config(input, &admonition_config());
     assert!(

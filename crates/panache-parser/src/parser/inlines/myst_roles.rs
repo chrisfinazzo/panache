@@ -49,8 +49,6 @@ pub(crate) fn try_parse_role(text: &str) -> Option<Role> {
         return None;
     }
 
-    // Scan for a closing backtick run of exactly `fence_len`, treating runs of a
-    // different length as content (code-span semantics).
     let content_start = name_end + fence_len;
     let rest = bytes.get(content_start..)?;
     let mut i = 0;
@@ -135,13 +133,9 @@ mod tests {
 
     #[test]
     fn rejects_non_role() {
-        // No backtick after the name.
         assert!(try_parse_role("{ref} text").is_none());
-        // Empty name.
         assert!(try_parse_role("{}`x`").is_none());
-        // Does not start with `{`.
         assert!(try_parse_role("ref}`x`").is_none());
-        // Unterminated content.
         assert!(try_parse_role("{math}`a^2").is_none());
     }
 

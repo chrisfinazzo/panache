@@ -2504,7 +2504,7 @@ fn lint_loaded_document_with_includes(
     // lint_documents_with_includes) so the salsa cache hits across
     // project_graph and built_in_lint_plan. For included files reuse the handle
     // `load_referenced_files` already registered in the VFS, so the queries can
-    // resolve the document's path from its `FileText` identity (audit §3.3 / G3);
+    // resolve the document's path from its `FileText` identity;
     // mint a fresh (pathless) one only as a last resort.
     let file_text = file_text
         .or_else(|| db.file_text_if_cached(doc_path))

@@ -66,48 +66,37 @@ impl Formatter {
         self.output
     }
 
-    /// Check if a node overlaps with the formatting range
     fn is_in_range(&self, node: &SyntaxNode) -> bool {
         if let Some((range_start, range_end)) = self.range {
             let node_start: usize = node.text_range().start().into();
             let node_end: usize = node.text_range().end().into();
 
-            // Node overlaps with range if it starts before range ends and ends after range starts
             node_start < range_end && node_end > range_start
         } else {
-            // No range specified, format everything
             true
         }
     }
 
-    /// Check if we should process a direct child of DOCUMENT
-    /// When range filtering is active, only process nodes that overlap with the range
     fn should_process_top_level_node(&self, node: &SyntaxNode) -> bool {
-        // If no range specified, process everything
         if self.range.is_none() {
             return true;
         }
 
-        // Always process DOCUMENT node (container)
         if node.kind() == SyntaxKind::DOCUMENT {
             return true;
         }
 
-        // For structural block elements, check if they overlap with the range
         if is_structural_block(node.kind()) {
             return self.is_in_range(node);
         }
 
-        // For non-block elements (tokens), don't include them
         false
     }
 
-    // Delegate to extracted wrapping module
     pub(super) fn format_inline_node(&self, node: &SyntaxNode) -> String {
         inline::format_inline_node(node, &self.config)
     }
 
-    // Delegate to wrapping module
     pub(super) fn wrapped_lines_for_paragraph(
         &self,
         node: &SyntaxNode,
@@ -140,7 +129,6 @@ impl Formatter {
         })
     }
 
-    // Delegate to headings module
     pub(super) fn format_heading(&self, node: &SyntaxNode) -> String {
         headings::format_heading(node, &self.config)
     }
@@ -191,9 +179,6 @@ impl Formatter {
     fn horizontal_rule_text(&self, available_width: usize) -> String {
         match self.config.horizontal_rule_style {
             HorizontalRuleStyle::LineWidth => "-".repeat(available_width.max(3)),
-            // Safe only because rules are always emitted with blank-line
-            // separation; a `---` tight against following text would read as
-            // a YAML metadata delimiter or setext underline on reparse.
             HorizontalRuleStyle::Compact => "---".to_string(),
         }
     }
@@ -262,8 +247,6 @@ impl Formatter {
         let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
         let width = self.config.line_width.saturating_sub(indent);
         match wrap_mode {
-            // `Semantic` joins `Preserve` here: this string-only fallback has no
-            // CST to find sentence boundaries, and `Semantic` ignores width.
             WrapMode::Preserve | WrapMode::Semantic => vec![text.to_string()],
             WrapMode::Reflow | WrapMode::Sentence => {
                 inline_layout::wrap_text_first_fit(text, width)
@@ -271,7 +254,6 @@ impl Formatter {
         }
     }
 
-    // Delegate to code_blocks module
     fn format_code_block(&mut self, node: &SyntaxNode) {
         code_blocks::format_code_block(node, &self.config, &self.formatted_code, &mut self.output);
     }
@@ -401,17 +383,6 @@ impl Formatter {
 
         let indent_str = " ".repeat(indent);
 
-        // For an indented (non-fenced) code block inside a container, the CST
-        // content whitespace embeds the container's content indent *plus* the
-        // 4-space code marker (e.g. `      code` = 2 for the definition body +
-        // 4 for the marker). The inner renderer only strips the 4-space marker,
-        // leaving the container indent in the content; re-prefixing with
-        // `indent` would then double it. Strip the *source* container offset --
-        // not `indent`, which is where the container lands after formatting --
-        // so a container whose indent changes width (`: ` at 2 columns
-        // reformatted to `:   ` at 4) does not shift the code payload. Fenced
-        // blocks already carry their own fence indent and need no extra
-        // normalization.
         let strip_content_columns = (!is_fenced)
             .then(|| Self::container_content_offset(node))
             .filter(|cols| *cols > 0);
@@ -424,7 +395,6 @@ impl Formatter {
             false,
         );
 
-        // Ensure we end with exactly one newline
         if !self.output.ends_with('\n') {
             self.output.push('\n');
         }
@@ -460,8 +430,6 @@ impl Formatter {
         }
     }
 
-    /// Column reached by `container`'s leading whitespace, its `marker` token,
-    /// and the padding that follows the marker.
     fn marker_content_offset(container: &SyntaxNode, marker: SyntaxKind) -> usize {
         let mut col = 0usize;
         let mut saw_marker = false;
@@ -484,8 +452,6 @@ impl Formatter {
         col
     }
 
-    /// Advance a column counter by `s`, tabs rounding up to the next 4-column
-    /// stop.
     fn advance_col(start: usize, s: &str) -> usize {
         let mut col = start;
         for c in s.chars() {
@@ -547,11 +513,6 @@ impl Formatter {
                 if let Some(indent) = leading_indent
                     && !indent.is_empty()
                 {
-                    // Uniformly, including lines that already start indented.
-                    // For a code block this indent is the opening fence's, and
-                    // the payload is rendered relative to the fence — re-adding
-                    // it to the fence lines alone would shift the payload two
-                    // columns down the fence and lose them on the next parse.
                     self.output.push_str(indent);
                 }
                 self.output.push_str(line);
@@ -599,8 +560,6 @@ impl Formatter {
         let mut in_list_item_continuation = false;
         for line in list_output.lines() {
             let trimmed_line = line.trim_start();
-            // A partial (rowspan) grid separator (`+   +---+`) shape-matches
-            // a `+` list marker but is table structure, not a new item.
             let starts_with_list_marker = Self::starts_with_list_marker(trimmed_line)
                 && !tables::is_partial_grid_separator(trimmed_line);
             if trimmed_line.is_empty() {
@@ -614,18 +573,11 @@ impl Formatter {
                     self.output.push('\n');
                     continue;
                 }
-                // A nested BLOCK_QUOTE rendered inside the list arrives with
-                // its own `> ` prefixes; it only needs the base indent.
                 self.output.push_str(base_indent);
                 self.output.push_str(line);
                 in_list_item_continuation = Self::starts_with_list_marker(trimmed_rest)
                     && !tables::is_partial_grid_separator(trimmed_rest);
             } else {
-                // Keep the line's own indentation: the list renderer already
-                // placed nested lists and continuation lines at their items'
-                // content columns. Re-deriving it here (trimming marker
-                // lines, rewriting continuations to a fixed two spaces)
-                // flattened nested lists to quote level -- a meaning change.
                 self.output.push_str(content_prefix);
                 self.output.push_str(line);
                 in_list_item_continuation = starts_with_list_marker
@@ -637,7 +589,6 @@ impl Formatter {
         in_list_item_continuation
     }
 
-    // The large format_node_sync method - keeping it here for now, can extract later
     /// Smart punctuation turns `—`→`---` and `–`→`--`. When a paragraph's
     /// whole content normalizes to dashes, the emitted line re-parses as a
     /// thematic break (or setext underline) — a semantic + idempotency break
@@ -659,9 +610,6 @@ impl Formatter {
         let mut cfg = self.config.clone();
         cfg.formatter_extensions.smart = false;
         let saved = std::mem::replace(&mut self.config, cfg);
-        // Re-dispatch the same node: with smart off the guard short-circuits,
-        // so this cannot recurse. A dash-only paragraph carries no inline
-        // directives, so re-running the dispatcher preamble is a no-op.
         self.format_node_sync(node, indent);
         self.config = saved;
 
@@ -705,8 +653,6 @@ impl Formatter {
         if !Self::preceding_block_is_one_line(&self.output[..start]) {
             return;
         }
-        // Insert before the marker's own leading spaces so the escape lands on
-        // the `:` itself.
         let marker = first[prefix_len..]
             .find(':')
             .expect("marker parsed above")
@@ -714,10 +660,6 @@ impl Formatter {
         self.output.insert(start + marker, '\\');
     }
 
-    /// Byte length of the container prefix an emitted line carries — leading
-    /// spaces plus any run of `>` blockquote markers and the space after each.
-    /// What remains is the line's own content, which is what the parser tests
-    /// for a block marker.
     fn block_prefix_len(line: &str) -> usize {
         let bytes = line.as_bytes();
         let mut i = 0;
@@ -735,19 +677,12 @@ impl Formatter {
                 saw_marker = true;
                 continue;
             }
-            // Only whitespace left: keep it for the marker test, which allows
-            // its own 0-3 columns of indent.
             return if saw_marker { start } else { 0 };
         }
     }
 
-    /// Whether the block immediately above `before` is exactly one line, i.e.
-    /// whether it could be promoted to a definition term.
     fn preceding_block_is_one_line(before: &str) -> bool {
         let is_blank = |line: &str| line[Self::block_prefix_len(line)..].trim().is_empty();
-        // A fenced-div opener ends whatever is above it, so the first line of
-        // a div's body is a block of its own even with no blank between them:
-        // `::: note\nT\n\n: b` promotes `T` on reparse just as `T\n\n: b` does.
         let ends_the_block_above = |line: &str| {
             is_blank(line)
                 || inline_layout::looks_like_div_fence_line(
@@ -755,14 +690,9 @@ impl Formatter {
                 )
         };
         let mut lines = before.lines().rev().skip_while(|l| is_blank(l));
-        // The candidate term line must exist, and the line above it must end
-        // the block above — otherwise the block has more than one line.
         lines.next().is_some() && lines.next().is_none_or(ends_the_block_above)
     }
 
-    /// True if `text` has a line that re-parses as a dash thematic break or a
-    /// dash setext-h2 underline. Smart punctuation only ever emits `-` dashes,
-    /// so those are the only block markers it can manufacture.
     fn produces_dash_block_marker(text: &str) -> bool {
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
@@ -773,7 +703,6 @@ impl Formatter {
             if try_parse_horizontal_rule(line).is_some() {
                 return true;
             }
-            // Setext h2: a `-`-only line directly under a non-blank line.
             if i > 0 && trimmed.chars().all(|c| c == '-') && !lines[i - 1].trim().is_empty() {
                 return true;
             }
@@ -782,8 +711,6 @@ impl Formatter {
     }
 
     pub(super) fn format_node_sync(&mut self, node: &SyntaxNode, indent: usize) {
-        // Check if formatting is ignored - if so, preserve content exactly
-        // Exception: Always process DOCUMENT, COMMENT, and HTML_BLOCK / HTML_BLOCK_DIV nodes (may contain directives)
         if self.directive_tracker.is_formatting_ignored()
             && node.kind() != SyntaxKind::DOCUMENT
             && node.kind() != SyntaxKind::COMMENT
@@ -793,22 +720,12 @@ impl Formatter {
         {
             let text = node.text().to_string();
             self.output.push_str(&text);
-            // Replay any inline directives nested in this verbatim node so the
-            // tracker stays in sync (under Pandoc dialect, an HTML comment that
-            // closes an ignore region inlines into the surrounding paragraph
-            // rather than splitting into a sibling HTML_BLOCK).
             for directive in crate::directives::collect_inline_directives(node) {
                 self.directive_tracker.process_directive(&directive);
             }
             return;
         }
 
-        // Pandoc-dialect inlining: a paragraph or plain block can carry an
-        // ignore directive as inline raw HTML. If any of those directives
-        // affects formatting, output the whole node verbatim (we don't try
-        // to format around inline directives mid-paragraph). Lint-only
-        // directives don't change rendering, so process them upfront and
-        // fall through to the normal render path.
         if matches!(node.kind(), SyntaxKind::PARAGRAPH | SyntaxKind::PLAIN) {
             let inline_directives = crate::directives::collect_inline_directives(node);
             if !inline_directives.is_empty() {
@@ -833,7 +750,6 @@ impl Formatter {
             }
         }
 
-        // Reset blank line counter when we hit a non-blank node
         if node.kind() != SyntaxKind::BLANK_LINE {
             self.consecutive_blank_lines = 0;
         }
@@ -845,7 +761,6 @@ impl Formatter {
                 for el in node.children_with_tokens() {
                     match el {
                         rowan::NodeOrToken::Node(n) => {
-                            // When range filtering is active, only process nodes that overlap
                             if self.should_process_top_level_node(&n) {
                                 self.format_node_sync(&n, indent);
                             }
@@ -859,11 +774,9 @@ impl Formatter {
                                 }
                             }
                             SyntaxKind::ESCAPED_CHAR => {
-                                // Token already includes backslash (e.g., "\*")
                                 self.output.push_str(t.text());
                             }
                             SyntaxKind::NONBREAKING_SPACE => {
-                                // Keep Pandoc escaped-space form for idempotency and losslessness.
                                 self.output.push_str(r"\ ");
                             }
                             SyntaxKind::IMAGE_LINK_START
@@ -879,13 +792,6 @@ impl Formatter {
 
             SyntaxKind::HEADING => {
                 log::trace!("Formatting heading");
-                // Ensure blank line BEFORE the heading when it follows a sibling
-                // block element. Under CommonMark a heading can interrupt a
-                // paragraph (`Foo\n# bar`), so the formatter must separate them
-                // with a blank line for a stable round-trip. Excluded prev kinds
-                // (e.g. fenced-div openers or HTML blocks) either already manage
-                // their own spacing or sit inside ignore regions where extra
-                // blank lines would alter the user's content.
                 if let Some(prev) = node.prev_sibling()
                     && is_block_element(prev.kind())
                     && !self.output.is_empty()
@@ -895,13 +801,6 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
-                // Render the heading line itself via the shared, inline-aware
-                // renderer (smart normalization, inline nodes, attributes). The
-                // surrounding blank-line management stays here because it
-                // depends on document-body siblings. Inside a list item
-                // (nonzero indent), keep the heading at the item's content
-                // column — emitting it at column 0 would end the list on
-                // reparse and eject the rest of the item.
                 self.output.push_str(&" ".repeat(indent));
                 self.output
                     .push_str(&headings::format_heading(node, &self.config));
@@ -918,10 +817,6 @@ impl Formatter {
             }
 
             SyntaxKind::HORIZONTAL_RULE => {
-                // Ensure blank line BEFORE the rule when the previous output ended
-                // with a paragraph line. Without this, output like `Foo\n----\n`
-                // round-trips through the parser as a setext h2 (`<h2>Foo</h2>`),
-                // which breaks idempotency.
                 if !self.output.is_empty()
                     && self.output.ends_with('\n')
                     && !self.output.ends_with("\n\n")
@@ -929,18 +824,12 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
-                // Output normalized horizontal rule using full available width.
-                // Inside a list item (nonzero indent), keep the rule at the
-                // item's content column and shorten it accordingly — emitting
-                // it at column 0 would end the list on reparse and eject the
-                // rest of the item.
                 self.output.push_str(&" ".repeat(indent));
                 self.output.push_str(
                     &self.horizontal_rule_text(self.config.line_width.saturating_sub(indent)),
                 );
                 self.output.push('\n');
 
-                // Ensure blank line after if followed by block element
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && !self.output.ends_with("\n\n")
@@ -951,14 +840,12 @@ impl Formatter {
             }
 
             SyntaxKind::REFERENCE_DEFINITION => {
-                // Output reference definition as-is: [label]: url "title"
                 let text = node.text().to_string();
                 self.output.push_str(text.trim_end());
                 if !self.output.ends_with('\n') {
                     self.output.push('\n');
                 }
 
-                // Ensure blank line after if followed by non-reference block element
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && next.kind() != SyntaxKind::REFERENCE_DEFINITION
@@ -970,9 +857,6 @@ impl Formatter {
             }
 
             SyntaxKind::ADMONITION => {
-                // python-markdown admonition / pymdownx details. Emit the
-                // marker line directly (so it is never wrapped or
-                // sentence-split), then format the body indented 4 spaces.
                 let mut marker = String::new();
                 let mut type_str = String::new();
                 let mut title_str = String::new();
@@ -1006,9 +890,6 @@ impl Formatter {
                 let child_indent = indent + 4;
                 let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
 
-                // Strip leading/trailing blank lines in the body and collapse
-                // interior blank runs to a single separator (canonical compact
-                // form, matching fenced divs).
                 let leading = body
                     .iter()
                     .take_while(|c| c.kind() == SyntaxKind::BLANK_LINE)
@@ -1031,13 +912,6 @@ impl Formatter {
                             continue;
                         }
                         SyntaxKind::PARAGRAPH => {
-                            // Reflow against the indent-adjusted width.
-                            // `format_node_sync` wraps to the full line width
-                            // and only then prepends indent, so it would
-                            // overflow here; reflow manually like footnotes.
-                            // Emitting the lines here rather than through
-                            // `format_node_sync` also means this arm needs its
-                            // own checkpoint for the guard below.
                             let para_start = self.output.len();
                             let available_width =
                                 self.config.line_width.saturating_sub(child_indent);
@@ -1086,8 +960,6 @@ impl Formatter {
             }
 
             SyntaxKind::FOOTNOTE_DEFINITION => {
-                // Format footnote definition with proper indentation
-                // Extract marker and children first
                 let mut marker = String::new();
                 let mut child_blocks = Vec::new();
 
@@ -1112,11 +984,9 @@ impl Formatter {
                     }
                 }
 
-                // Output indent and marker
                 self.output.push_str(&" ".repeat(indent));
                 self.output.push_str(marker.trim_end());
 
-                // Format child blocks with 4-space indentation
                 let child_indent = indent + 4;
                 let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
                 let mut first = true;
@@ -1128,8 +998,6 @@ impl Formatter {
                         continue;
                     }
 
-                    // Preserve explicit blank-line separators between footnote child blocks,
-                    // but do not invent one when source had only a soft continuation.
                     if !first && pending_blank_lines > 0 && !self.output.ends_with("\n\n") {
                         self.output.push('\n');
                     }
@@ -1137,9 +1005,7 @@ impl Formatter {
 
                     if first {
                         first = false;
-                        // First paragraph - check if it can go on same line
                         if child.kind() == SyntaxKind::PARAGRAPH {
-                            // Calculate how much space is available on first line
                             let marker_len = marker.len();
                             let first_line_space = self
                                 .config
@@ -1183,49 +1049,23 @@ impl Formatter {
                                 }
                                 continue;
                             }
-                        } else if child.kind() == SyntaxKind::DEFINITION_LIST {
-                            // Pandoc allows the first content line of a footnote
-                            // body to be a definition-list term, e.g.
-                            // `[^1]: Term\n\n    :   Def`. The TERM node emits
-                            // no leading indent, so it follows the marker+space
-                            // naturally; subsequent DEFINITION lines are
-                            // indented at child_indent by the inner formatter.
-                            self.output.push(' ');
-                            self.format_node_sync(child, child_indent);
-                            continue;
                         } else if matches!(
                             child.kind(),
-                            SyntaxKind::HTML_BLOCK
+                            SyntaxKind::DEFINITION_LIST
+                                | SyntaxKind::HTML_BLOCK
                                 | SyntaxKind::HTML_BLOCK_RAW
                                 | SyntaxKind::HTML_BLOCK_DIV
                         ) {
-                            // A raw HTML block lifted onto the footnote marker
-                            // line (`[^1]: <div>x</div>`) stays on that line
-                            // after the marker + a single space, like the
-                            // paragraph case. Without this the marker's trailing
-                            // WHITESPACE token is dropped and the block collapses
-                            // onto the colon (`[^1]:<div>...`).
                             self.output.push(' ');
                             self.format_node_sync(child, child_indent);
                             continue;
                         }
 
-                        // Every other block kind is rendered indented to
-                        // `child_indent` on its own line (tables, code blocks,
-                        // lists, divs, ...), so the marker line has to be
-                        // terminated first — otherwise the block collapses onto
-                        // the colon (`[^1]:    | a | b |`), which reparses as
-                        // marker-line text rather than the body block it was.
                         self.output.push('\n');
                     }
 
-                    // Format blocks with indentation
                     match child.kind() {
                         SyntaxKind::PARAGRAPH => {
-                            // Handle paragraph with wrapping and indentation.
-                            // This arm emits the lines itself rather than going
-                            // through `format_node_sync`, so it needs its own
-                            // checkpoint for the guard below.
                             let para_start = self.output.len();
                             let available_width =
                                 self.config.line_width.saturating_sub(child_indent);
@@ -1272,28 +1112,21 @@ impl Formatter {
                             self.guard_definition_marker_start(para_start, child_indent);
                         }
                         SyntaxKind::BLANK_LINE => {
-                            // Normalize blank lines to just newlines
                             self.output.push('\n');
                         }
                         SyntaxKind::CODE_BLOCK => {
-                            // Format code blocks as fenced blocks with indentation
-                            // Extract code content, stripping WHITESPACE tokens (indentation)
                             let mut code_lines = Vec::new();
                             for code_child in child.children() {
                                 if code_child.kind() == SyntaxKind::CODE_CONTENT {
-                                    // Build content line by line, skipping WHITESPACE tokens
                                     let mut line_content = String::new();
                                     for token in code_child.children_with_tokens() {
                                         if let NodeOrToken::Token(t) = token {
                                             match t.kind() {
-                                                SyntaxKind::WHITESPACE => {
-                                                    // Skip WHITESPACE (indentation preserved for losslessness)
-                                                }
+                                                SyntaxKind::WHITESPACE => {}
                                                 SyntaxKind::TEXT => {
                                                     line_content.push_str(t.text());
                                                 }
                                                 SyntaxKind::NEWLINE => {
-                                                    // End of line - save it and start new line
                                                     code_lines.push(line_content.clone());
                                                     line_content.clear();
                                                 }
@@ -1301,19 +1134,16 @@ impl Formatter {
                                             }
                                         }
                                     }
-                                    // Don't forget last line if it doesn't end with newline
                                     if !line_content.is_empty() {
                                         code_lines.push(line_content);
                                     }
                                 }
                             }
 
-                            // Strip trailing blank lines from code content
                             while code_lines.last().is_some_and(|l| l.is_empty()) {
                                 code_lines.pop();
                             }
 
-                            // Output fenced code block with footnote indentation
                             self.output.push_str(&" ".repeat(child_indent));
                             self.output.push_str("```\n");
                             for line in code_lines {
@@ -1327,9 +1157,6 @@ impl Formatter {
                             self.output.push_str("```\n");
                         }
                         _ => {
-                            // Other blocks (lists, etc.) - format with indentation
-                            // format_node_sync(child, child_indent) already accounts for indent,
-                            // so we can append its output directly.
                             let saved_output = self.output.clone();
                             self.output.clear();
                             self.format_node_sync(child, child_indent);
@@ -1340,12 +1167,10 @@ impl Formatter {
                     }
                 }
 
-                // If no child blocks, just end with newline
                 if child_blocks.is_empty() {
                     self.output.push('\n');
                 }
 
-                // Add blank line after footnote definition (matching Pandoc's behavior)
                 if let Some(next) = node.next_sibling() {
                     let next_kind = next.kind();
                     if next_kind == SyntaxKind::FOOTNOTE_DEFINITION
@@ -1357,12 +1182,9 @@ impl Formatter {
             }
 
             SyntaxKind::HTML_BLOCK | SyntaxKind::HTML_BLOCK_RAW | SyntaxKind::HTML_BLOCK_DIV => {
-                // Check if this is a directive comment
                 if let Some(directive) = extract_directive_from_node(node) {
-                    // Process the directive to update tracker state
                     self.directive_tracker.process_directive(&directive);
 
-                    // Track when we enter an ignore region to preserve content
                     if matches!(directive, crate::directives::Directive::Start(_))
                         && self.directive_tracker.is_formatting_ignored()
                         && self.ignore_region_start.is_none()
@@ -1371,15 +1193,6 @@ impl Formatter {
                     }
                 }
 
-                // Walk descendants and skip the blockquote prefix an enclosing
-                // BLOCK_QUOTE leaked into the block (parser keeps prefix
-                // tokens inside HTML_BLOCK_CONTENT for losslessness, tagged
-                // `LINE_PREFIX`; the enclosing BLOCK_QUOTE handler re-emits
-                // markers dynamically). Indent-type prefix (a definition
-                // body's content indent) is kept: no enclosing handler
-                // re-adds it here. A structural BLOCK_QUOTE child of this
-                // HTML_BLOCK keeps its own `BLOCK_QUOTE_MARKER` tokens, so
-                // the quote isn't flattened to a paragraph (issue #350).
                 let mut text = String::new();
                 let mut after_marker = false;
                 for el in node.descendants_with_tokens() {
@@ -1388,7 +1201,6 @@ impl Formatter {
                             if t.text().contains('>') {
                                 after_marker = true;
                             } else if after_marker {
-                                // The marker's own padding space.
                                 after_marker = false;
                             } else {
                                 text.push_str(t.text());
@@ -1408,12 +1220,9 @@ impl Formatter {
             SyntaxKind::COMMENT => {
                 let text = node.text().to_string();
 
-                // Check if this is a directive
                 if let Some(directive) = extract_directive_from_node(node) {
-                    // Process the directive to update tracker state
                     self.directive_tracker.process_directive(&directive);
 
-                    // Track when we enter an ignore region to preserve content
                     if matches!(directive, crate::directives::Directive::Start(_))
                         && self.directive_tracker.is_formatting_ignored()
                         && self.ignore_region_start.is_none()
@@ -1422,7 +1231,6 @@ impl Formatter {
                     }
                 }
 
-                // Always output the comment itself
                 self.output.push_str(&text);
                 if !text.ends_with('\n') {
                     self.output.push('\n');
@@ -1430,28 +1238,21 @@ impl Formatter {
             }
 
             SyntaxKind::LATEX_COMMAND => {
-                // Standalone LaTeX commands - preserve exactly as written
                 let text = node.text().to_string();
                 self.output.push_str(&text);
-                // Don't add extra newlines for standalone LaTeX commands
             }
 
             SyntaxKind::TEX_BLOCK => {
                 log::trace!("Formatting TeX block");
-                // Raw blocks (LaTeX commands, etc.) - preserve verbatim
-                // Just output all content as-is
                 for child in node.children_with_tokens() {
                     match child {
                         rowan::NodeOrToken::Token(t) => {
                             self.output.push_str(t.text());
                         }
-                        rowan::NodeOrToken::Node(_) => {
-                            // No child nodes in the simplified structure
-                        }
+                        rowan::NodeOrToken::Node(_) => {}
                     }
                 }
 
-                // Ensure newline at end of raw block
                 if !self.output.ends_with('\n') {
                     self.output.push('\n');
                 }
@@ -1459,13 +1260,6 @@ impl Formatter {
 
             SyntaxKind::BLOCK_QUOTE => {
                 log::trace!("Formatting blockquote");
-                // Determine nesting depth by counting ancestor BlockQuote
-                // nodes (including self), stopping at the nearest LIST_ITEM:
-                // quotes above a list item are re-added by the list
-                // re-prefixing paths (`append_blockquote_prefixed_list_output`
-                // and the same-line marker splice in the list formatter), so
-                // counting past the item emits their markers twice — one
-                // level deeper on every pass.
                 let depth = node
                     .ancestors()
                     .take_while(|ancestor| ancestor.kind() != SyntaxKind::LIST_ITEM)
@@ -1473,14 +1267,10 @@ impl Formatter {
                     .count()
                     .max(1);
 
-                // Prefixes for quoted content and blank quoted lines
                 let base_indent = " ".repeat(indent);
                 let content_prefix = format!("{}{}", base_indent, "> ".repeat(depth)); // includes trailing space
                 let blank_prefix = content_prefix.trim_end().to_string(); // no trailing space
 
-                // Format children (paragraphs, blank lines) with proper > prefix per depth
-                // NOTE: BlockQuoteMarker tokens are in the tree for losslessness, but we ignore
-                // them during formatting and add prefixes dynamically instead.
                 let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
                 let blockquote_children: Vec<_> = node.children().collect();
                 let saved_blockquote_context = self.blockquote_context.clone();
@@ -1490,29 +1280,15 @@ impl Formatter {
 
                 for child in &blockquote_children {
                     match child.kind() {
-                        // Skip BlockQuoteMarker tokens - we add prefixes dynamically
                         SyntaxKind::BLOCK_QUOTE_MARKER => continue,
 
-                        // PLAIN is pandoc's paragraph-demoted-by-RawBlock
-                        // wrapper (`> a` / `> <hr>`); it quotes like a
-                        // paragraph. The fallback arm would emit it without
-                        // the `> ` prefix, breaking losslessness.
                         SyntaxKind::PARAGRAPH | SyntaxKind::PLAIN => {
-                            // This arm emits paragraph lines itself rather
-                            // than going through `format_node_sync`, so it
-                            // needs its own checkpoint for the guard below.
                             let para_start = self.output.len();
                             match wrap_mode {
                                 WrapMode::Preserve => {
-                                    // We write `content_prefix` on every line
-                                    // ourselves, so the tree's own LINE_PREFIX
-                                    // tokens have to come back out.
                                     let escaped =
                                         self.config.formatter_extensions.escaped_line_breaks;
                                     for line in preserve_lines_unprefixed(child, escaped) {
-                                        // An empty quoted line takes the bare
-                                        // marker, so the prefix does not become
-                                        // trailing whitespace itself.
                                         if line.is_empty() {
                                             self.output.push_str(content_prefix.trim_end());
                                         } else {
@@ -1636,7 +1412,6 @@ impl Formatter {
                             self.output.push('\n');
                         }
                         SyntaxKind::HEADING => {
-                            // Format heading with blockquote prefix
                             let heading_text = self.format_heading(child);
                             for line in heading_text.lines() {
                                 self.output.push_str(&content_prefix);
@@ -1652,9 +1427,6 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::LIST => {
-                            // Format list to a temp buffer, then prefix each line.
-                            // We trim list-temp indentation before re-prefixing with `content_prefix`.
-                            // Format at indent 0 here to avoid double-accounting indentation width.
                             let list_output = self.render_to_buffer(child, 0, content_prefix.len());
 
                             let ends_in_list_continuation = self
@@ -1669,7 +1441,6 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::CODE_BLOCK => {
-                            // Format code block to a temp buffer, then prefix each line
                             let code_block_leading_indent = Self::code_block_leading_indent(child);
                             let code_output = self.render_to_buffer(child, indent, 0);
 
@@ -1686,10 +1457,6 @@ impl Formatter {
                         SyntaxKind::HTML_BLOCK
                         | SyntaxKind::HTML_BLOCK_RAW
                         | SyntaxKind::HTML_BLOCK_DIV => {
-                            // Format HTML block contents (LINE_PREFIX tokens
-                            // are stripped by the HTML_BLOCK handler) and re-emit
-                            // the blockquote prefix per line so the output stays
-                            // lossless.
                             let html_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
@@ -1703,7 +1470,6 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::TEX_BLOCK => {
-                            // Keep raw TeX content verbatim, but preserve blockquote prefixes.
                             let tex_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
@@ -1717,10 +1483,6 @@ impl Formatter {
                         | SyntaxKind::GRID_TABLE
                         | SyntaxKind::SIMPLE_TABLE
                         | SyntaxKind::MULTILINE_TABLE => {
-                            // Format the table to a temp buffer, drop the
-                            // self-indent table types apply at the top level,
-                            // then re-emit each line behind the blockquote
-                            // prefix so the table stays inside the quote.
                             let table_output = self.render_to_buffer(child, 0, 0);
 
                             let min_indent = table_output
@@ -1752,14 +1514,6 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::LINE_BLOCK => {
-                            // Format the line block to a temp buffer, then
-                            // re-emit each line behind the blockquote prefix.
-                            // Without this the lines escape the quote (dropping
-                            // the `>` prefix), which reparses as a top-level
-                            // line block -- a losslessness break, and inside a
-                            // list item an idempotency break as well.
-                            // `content_prefix` already carries `base_indent`,
-                            // so format at indent 0 to avoid double-indenting.
                             let line_block_output = self.render_to_buffer(child, 0, 0);
 
                             self.append_blockquote_prefixed_block(
@@ -1773,12 +1527,6 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::DEFINITION_LIST => {
-                            // Format the definition list to a temp buffer, then
-                            // re-emit each line behind the blockquote prefix so
-                            // the list stays inside the quote. Without this the
-                            // definition escapes the blockquote (dropping the
-                            // `>` prefix), which reparses as a top-level
-                            // paragraph -- a lossless/idempotency break.
                             let def_output = self.render_to_buffer(child, indent, 0);
 
                             self.append_blockquote_prefixed_block(
@@ -1792,23 +1540,12 @@ impl Formatter {
                             }
                         }
                         SyntaxKind::BLOCK_QUOTE => {
-                            // A nested blockquote prefixes itself: its depth
-                            // counts every enclosing quote, so it already emits
-                            // `> ` once per level. Re-prefixing here would
-                            // deepen it by one on every format pass.
                             self.format_node_sync(child, indent);
                             if let Some(ctx) = self.blockquote_context.as_mut() {
                                 ctx.in_list_continuation = false;
                             }
                         }
                         _ => {
-                            // Fail closed. Any block kind without an arm above
-                            // is rendered to a temp buffer and re-prefixed line
-                            // by line; emitting it straight into `self.output`
-                            // would drop the `> ` and move the content out of
-                            // the quote entirely -- a losslessness break, not
-                            // merely ugly output. `content_prefix` already
-                            // carries `base_indent`, so render at indent 0.
                             let rendered = self.render_to_buffer(child, 0, content_prefix.len());
 
                             self.append_blockquote_prefixed_nested_block(
@@ -1827,12 +1564,6 @@ impl Formatter {
             }
 
             SyntaxKind::PARAGRAPH => {
-                // A paragraph pressed straight against the list above it is
-                // lazy continuation on reparse: the list swallows it and the
-                // two blocks merge. The parser only leaves them adjacent where
-                // pandoc does — a definition marker dedented out of the item
-                // it followed — so separate them here to keep the round-trip
-                // stable.
                 if indent == 0
                     && node
                         .prev_sibling()
@@ -2021,13 +1752,9 @@ impl Formatter {
             }
 
             SyntaxKind::FIGURE => {
-                // Figure is a standalone image - format the inline content directly
                 log::trace!("Formatting figure");
                 let text = self.format_inline_node(node);
                 let trimmed = text.trim();
-                // A figure as a definition body pulls up onto the `:   `
-                // marker line, exactly like the PLAIN it replaced; indenting
-                // again would double the marker's padding.
                 if indent > 0 && !self.output.ends_with(":   ") {
                     self.output.push_str(&" ".repeat(indent));
                 }
@@ -2036,8 +1763,6 @@ impl Formatter {
             }
 
             SyntaxKind::PLAIN => {
-                // Plain is like PARAGRAPH but for tight contexts (definition lists, table cells)
-                // Apply wrapping with continuation indentation
                 let text = node.text().to_string();
                 log::trace!("Formatting Plain block, text length: {}", text.len());
 
@@ -2098,7 +1823,6 @@ impl Formatter {
                         for (i, line) in lines.iter().enumerate() {
                             if i > 0 {
                                 self.output.push('\n');
-                                // Add continuation indent for wrapped lines
                                 self.output.push_str(&" ".repeat(indent));
                             } else if needs_indent {
                                 self.output.push_str(&" ".repeat(indent));
@@ -2163,7 +1887,6 @@ impl Formatter {
                     }
                     return;
                 }
-                // Add blank line before top-level definition lists
                 if indent == 0 && !self.output.is_empty() && !self.output.ends_with("\n\n") {
                     self.output.push('\n');
                 }
@@ -2187,31 +1910,12 @@ impl Formatter {
 
             SyntaxKind::LINE_BLOCK => {
                 log::trace!("Formatting line block");
-                // Add blank line before line blocks if not at start
                 if !self.output.is_empty() && !self.output.ends_with("\n\n") {
                     self.output.push('\n');
                 }
 
-                // Every emitted line needs the container indent. Dropping it
-                // lets a line block nested in a list item escape to column 0,
-                // where it reparses as a top-level line block that swallows
-                // the following line -- an idempotency break.
                 let line_indent = " ".repeat(indent);
 
-                // Format each line preserving line breaks and leading spaces.
-                // Walk LINE_BLOCK_LINE children-with-tokens so we can skip
-                // leading container-prefix tokens (WHITESPACE,
-                // LINE_PREFIX) that the parser now emits inside
-                // LINE_BLOCK_LINE for nested cases like `- > | foo`. The
-                // outer LIST_ITEM / BLOCK_QUOTE walkers re-emit those
-                // prefixes; if we left them in `content` they'd appear
-                // twice in the output.
-                // A LINE_BLOCK_LINE without a LINE_BLOCK_MARKER is a
-                // continuation of the line above (`| a` + `  b` is the single
-                // line `a b`). Re-emitting it with its own `| ` would split
-                // one line into two, so fold it in — as pandoc's own writer
-                // does. Collect the rendered lines first so the fold is a
-                // plain append instead of surgery on `self.output`.
                 let mut rendered: Vec<String> = Vec::new();
                 for child in node.children() {
                     if child.kind() != SyntaxKind::LINE_BLOCK_LINE {
@@ -2250,9 +1954,6 @@ impl Formatter {
                                 previous.push_str(continuation);
                             }
                         }
-                        // Leading spaces after the marker are significant
-                        // (pandoc renders them as non-breaking spaces), so
-                        // only the trailing side is trimmed.
                         _ => rendered.push(content.trim_end().to_string()),
                     }
                 }
@@ -2260,17 +1961,14 @@ impl Formatter {
                 for line in &rendered {
                     self.output.push_str(&line_indent);
                     if line.trim().is_empty() {
-                        // Empty line block line - just output "|"
                         self.output.push('|');
                     } else {
-                        // Normal line - output "| " followed by content
                         self.output.push_str("| ");
                         self.output.push_str(line);
                     }
                     self.output.push('\n');
                 }
 
-                // Add blank line after if followed by block element
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && !self.output.ends_with("\n\n")
@@ -2310,9 +2008,7 @@ impl Formatter {
 
                 for child in node.children() {
                     match child.kind() {
-                        SyntaxKind::BLANK_LINE => {
-                            // Ignore source blank lines and normalize based on AST structure.
-                        }
+                        SyntaxKind::BLANK_LINE => {}
                         SyntaxKind::TERM => {
                             self.format_node_sync(&child, indent);
                             saw_term = true;
@@ -2337,9 +2033,6 @@ impl Formatter {
             }
 
             SyntaxKind::TERM => {
-                // Format term - emit the rendering indent, then the text. The
-                // term's own source indent is a WHITESPACE token the parser
-                // keeps out of the inlines, so it is not re-emitted here.
                 if indent > 0 && (self.output.is_empty() || self.output.ends_with('\n')) {
                     self.output.push_str(&" ".repeat(indent));
                 }
@@ -2360,32 +2053,19 @@ impl Formatter {
             }
 
             SyntaxKind::DEFINITION => {
-                // Format definition with marker and content
-                // The definition marker itself is at the base indent level
-                // Definition content is indented 4 spaces from the margin
                 let def_indent = indent + 4;
-                // A body whose blocks are held apart by a `:` marker keeps the
-                // source's line breaks: reflowing the block above the marker
-                // down to one line would make it a term, nesting a definition
-                // list where there were two blocks. Same guard a tight list
-                // item takes, and for the same reason — no blank line is
-                // available to separate them with.
                 let saved_wrap = Self::reflow_would_promote_a_definition_term(node)
                     .then(|| self.config.wrap.replace(WrapMode::Preserve));
                 let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
 
-                // Emit base indentation before the marker
                 if indent > 0 {
                     self.output.push_str(&" ".repeat(indent));
                 }
                 self.output.push_str(":   ");
 
-                // Collect children to determine lazy continuation
                 let children: Vec<_> = node.children_with_tokens().collect();
                 let mut first_para_idx = None;
 
-                // Find first paragraph immediately after initial text (lazy continuation)
-                // It's only lazy if there's no BlankLine before it
                 let mut text_idx = None;
                 for (i, child) in children.iter().enumerate() {
                     if let NodeOrToken::Token(tok) = child
@@ -2395,7 +2075,6 @@ impl Formatter {
                     }
                 }
 
-                // Check if there's a paragraph immediately after TEXT+NEWLINE (no BlankLine)
                 if let Some(tidx) = text_idx {
                     for (i, child) in children.iter().enumerate().skip(tidx + 1) {
                         if let NodeOrToken::Node(n) = child {
@@ -2405,7 +2084,6 @@ impl Formatter {
                                     break;
                                 }
                                 SyntaxKind::BLANK_LINE => {
-                                    // BlankLine before paragraph - not lazy
                                     break;
                                 }
                                 _ => {}
@@ -2420,20 +2098,9 @@ impl Formatter {
                             self.output.push_str(tok.text());
                         }
                         NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::NEWLINE => {
-                            // Bare marker (`:` alone on its line, body on the next
-                            // line): drop this newline so the first block pulls up
-                            // onto the `:   ` line, matching pandoc and the
-                            // same-line-marker style used elsewhere. Detected by an
-                            // empty marker line (output still ends with `:   `) with
-                            // a block element immediately after.
                             let bare_marker_pull_up = self.output.ends_with(":   ")
                                 && children.get(i + 1).is_some_and(|next| match next {
                                     NodeOrToken::Node(n) if n.kind() == SyntaxKind::PLAIN => {
-                                        // A heading-shaped PLAIN (`# ...`) is literal
-                                        // inline text in a compact definition; pulling
-                                        // it onto the `:   ` line would reparse as a
-                                        // real ATX heading — a meaning change. Keep it
-                                        // on its own line.
                                         let first_line = n
                                             .text()
                                             .to_string()
@@ -2447,194 +2114,165 @@ impl Formatter {
                                     NodeOrToken::Node(n) => is_block_element(n.kind()),
                                     _ => false,
                                 });
-                            // If next child is the first lazy paragraph, add space instead
                             if first_para_idx.is_some_and(|idx| i + 1 == idx) {
                                 self.output.push(' ');
                             } else if !bare_marker_pull_up {
-                                // A bare marker whose body stays on its own line (e.g.
-                                // a heading-shaped PLAIN that must not pull up) would
-                                // otherwise leave the `:   ` padding as trailing
-                                // whitespace. Drop it back to a lone `:`.
                                 if self.output.ends_with(":   ") {
                                     self.output.truncate(self.output.len() - 3);
                                 }
                                 self.output.push('\n');
                             }
                         }
-                        NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DEFINITION_MARKER => {
-                            // Skip - we already added `:   `
-                        }
-                        NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {
-                            // Skip - we normalize spacing
-                        }
-                        NodeOrToken::Node(n) => {
-                            // Handle continuation content with proper indentation
-                            match n.kind() {
-                                SyntaxKind::CODE_BLOCK => {
-                                    if self.output.ends_with(":   ") {
-                                        self.format_container_code_block(
-                                            n,
-                                            "",
-                                            def_indent,
-                                            true,
-                                            Some(Self::container_content_offset(n)),
-                                            false,
-                                        );
-                                    } else {
-                                        // Add blank line before code block if needed
-                                        if !self.output.ends_with("\n\n") {
-                                            self.output.push('\n');
-                                        }
-                                        self.format_indented_code_block(n, def_indent);
+                        NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DEFINITION_MARKER => {}
+                        NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+                        NodeOrToken::Node(n) => match n.kind() {
+                            SyntaxKind::CODE_BLOCK => {
+                                if self.output.ends_with(":   ") {
+                                    self.format_container_code_block(
+                                        n,
+                                        "",
+                                        def_indent,
+                                        true,
+                                        Some(Self::container_content_offset(n)),
+                                        false,
+                                    );
+                                } else {
+                                    if !self.output.ends_with("\n\n") {
+                                        self.output.push('\n');
                                     }
+                                    self.format_indented_code_block(n, def_indent);
                                 }
-                                SyntaxKind::HEADING => {
-                                    self.output.push_str(&self.format_heading(n));
-                                    self.output.push('\n');
+                            }
+                            SyntaxKind::HEADING => {
+                                self.output.push_str(&self.format_heading(n));
+                                self.output.push('\n');
 
-                                    let has_following_blocks =
-                                        children.iter().skip(i + 1).any(|sib| match sib {
-                                            NodeOrToken::Node(sn) => {
-                                                sn.kind() != SyntaxKind::BLANK_LINE
-                                            }
-                                            _ => false,
-                                        });
-                                    let next_is_blank_line =
-                                        children.get(i + 1).is_some_and(|sib| matches!(
-                                            sib,
-                                            NodeOrToken::Node(sn) if sn.kind() == SyntaxKind::BLANK_LINE
-                                        ));
-                                    if has_following_blocks && !next_is_blank_line {
+                                let has_following_blocks =
+                                    children.iter().skip(i + 1).any(|sib| match sib {
+                                        NodeOrToken::Node(sn) => {
+                                            sn.kind() != SyntaxKind::BLANK_LINE
+                                        }
+                                        _ => false,
+                                    });
+                                let next_is_blank_line = children.get(i + 1).is_some_and(|sib| {
+                                    matches!(
+                                        sib,
+                                        NodeOrToken::Node(sn) if sn.kind() == SyntaxKind::BLANK_LINE
+                                    )
+                                });
+                                if has_following_blocks && !next_is_blank_line {
+                                    self.output.push('\n');
+                                }
+                            }
+                            SyntaxKind::PLAIN => {
+                                if let Some((heading_line, remainder)) =
+                                    self.leading_atx_heading_with_remainder(n)
+                                {
+                                    self.output.push_str(&heading_line);
+                                    self.output.push('\n');
+                                    self.output.push('\n');
+                                    for line in self.wrap_text_for_indent(&remainder, def_indent) {
+                                        self.output.push_str(&" ".repeat(def_indent));
+                                        self.output.push_str(line.trim_start());
                                         self.output.push('\n');
                                     }
+                                } else {
+                                    self.format_node_sync(n, def_indent);
                                 }
-                                SyntaxKind::PLAIN => {
-                                    // Plain block in definition - format inline with potential wrapping
-                                    // Already handled by Plain formatter above
-                                    if let Some((heading_line, remainder)) =
-                                        self.leading_atx_heading_with_remainder(n)
-                                    {
-                                        self.output.push_str(&heading_line);
+                            }
+                            SyntaxKind::PARAGRAPH => {
+                                if first_para_idx == Some(i) {
+                                    let marker_len = ":   ".len();
+                                    let first_line_space =
+                                        self.config.line_width.saturating_sub(indent + marker_len);
+                                    let available_width =
+                                        self.config.line_width.saturating_sub(def_indent);
+                                    let widths = [first_line_space, available_width];
+
+                                    let lines = match wrap_mode {
+                                        WrapMode::Preserve => preserve_lines(
+                                            n,
+                                            self.config.formatter_extensions.escaped_line_breaks,
+                                        ),
+                                        WrapMode::Reflow => {
+                                            self.wrapped_lines_for_paragraph_with_widths(n, &widths)
+                                        }
+                                        WrapMode::Sentence => self.sentence_lines_for_paragraph(n),
+                                        WrapMode::Semantic => self.semantic_lines_for_paragraph(n),
+                                    };
+
+                                    if !lines.is_empty() {
+                                        self.output.push_str(&lines[0]);
                                         self.output.push('\n');
-                                        self.output.push('\n');
-                                        for line in
-                                            self.wrap_text_for_indent(&remainder, def_indent)
-                                        {
+                                        for line in lines.iter().skip(1) {
                                             self.output.push_str(&" ".repeat(def_indent));
                                             self.output.push_str(line.trim_start());
                                             self.output.push('\n');
                                         }
-                                    } else {
-                                        self.format_node_sync(n, def_indent);
                                     }
-                                }
-                                SyntaxKind::PARAGRAPH => {
-                                    if first_para_idx == Some(i) {
-                                        // First paragraph - lazy continuation (inline, wrapped)
-                                        let marker_len = ":   ".len();
-                                        let first_line_space = self
-                                            .config
-                                            .line_width
-                                            .saturating_sub(indent + marker_len);
-                                        let available_width =
-                                            self.config.line_width.saturating_sub(def_indent);
-                                        let widths = [first_line_space, available_width];
-
-                                        let lines = match wrap_mode {
-                                            WrapMode::Preserve => preserve_lines(
-                                                n,
-                                                self.config
-                                                    .formatter_extensions
-                                                    .escaped_line_breaks,
-                                            ),
-                                            WrapMode::Reflow => self
-                                                .wrapped_lines_for_paragraph_with_widths(
-                                                    n, &widths,
-                                                ),
-                                            WrapMode::Sentence => {
-                                                self.sentence_lines_for_paragraph(n)
-                                            }
-                                            WrapMode::Semantic => {
-                                                self.semantic_lines_for_paragraph(n)
-                                            }
-                                        };
-
-                                        if !lines.is_empty() {
-                                            self.output.push_str(&lines[0]);
-                                            self.output.push('\n');
-                                            for line in lines.iter().skip(1) {
-                                                self.output.push_str(&" ".repeat(def_indent));
-                                                self.output.push_str(line.trim_start());
-                                                self.output.push('\n');
-                                            }
-                                        }
-                                    } else {
-                                        // Subsequent paragraphs - indented continuation
-                                        if !self.output.ends_with("\n\n") {
-                                            self.output.push('\n');
-                                        }
-                                        self.format_list_continuation_paragraph(n, def_indent);
-                                    }
-                                }
-                                SyntaxKind::BLANK_LINE => {
-                                    // Normalize blank lines in definitions to just newlines
-                                    // (strip trailing whitespace)
-                                    let is_before_first_para =
-                                        first_para_idx.is_some_and(|idx| i < idx);
-
-                                    if !is_before_first_para {
+                                } else {
+                                    if !self.output.ends_with("\n\n") {
                                         self.output.push('\n');
                                     }
+                                    self.format_list_continuation_paragraph(n, def_indent);
                                 }
-                                SyntaxKind::LIST => {
-                                    let start = self.output.len();
-                                    self.format_node_sync(n, def_indent);
+                            }
+                            SyntaxKind::BLANK_LINE => {
+                                let is_before_first_para =
+                                    first_para_idx.is_some_and(|idx| i < idx);
 
-                                    if self.output[..start].ends_with(":   ")
-                                        && self.output[start..].starts_with(&" ".repeat(def_indent))
-                                    {
-                                        self.output.drain(start..start + def_indent);
-                                    }
+                                if !is_before_first_para {
+                                    self.output.push('\n');
                                 }
-                                SyntaxKind::BLOCK_QUOTE => {
-                                    if self.output.ends_with(":   ") {
-                                        let mut pieces: Vec<String> = Vec::new();
-                                        let block_text = n.text().to_string();
-                                        for line in block_text.lines() {
-                                            let trimmed = line.trim_start();
-                                            let content =
-                                                if let Some(rest) = trimmed.strip_prefix('>') {
-                                                    rest.trim_start()
-                                                } else {
-                                                    trimmed
-                                                };
-                                            if !content.is_empty() {
-                                                pieces.push(content.to_string());
-                                            }
-                                        }
+                            }
+                            SyntaxKind::LIST => {
+                                let start = self.output.len();
+                                self.format_node_sync(n, def_indent);
 
-                                        self.output.push_str("> ");
-                                        self.output.push_str(&pieces.join(" "));
-                                        self.output.push('\n');
-
-                                        if let Some(next_non_blank) =
-                                            node.children().skip(i + 1).find(|sibling| {
-                                                sibling.kind() != SyntaxKind::BLANK_LINE
-                                            })
-                                            && is_block_element(next_non_blank.kind())
-                                            && !self.output.ends_with("\n\n")
+                                if self.output[..start].ends_with(":   ")
+                                    && self.output[start..].starts_with(&" ".repeat(def_indent))
+                                {
+                                    self.output.drain(start..start + def_indent);
+                                }
+                            }
+                            SyntaxKind::BLOCK_QUOTE => {
+                                if self.output.ends_with(":   ") {
+                                    let mut pieces: Vec<String> = Vec::new();
+                                    let block_text = n.text().to_string();
+                                    for line in block_text.lines() {
+                                        let trimmed = line.trim_start();
+                                        let content = if let Some(rest) = trimmed.strip_prefix('>')
                                         {
-                                            self.output.push('\n');
+                                            rest.trim_start()
+                                        } else {
+                                            trimmed
+                                        };
+                                        if !content.is_empty() {
+                                            pieces.push(content.to_string());
                                         }
-                                    } else {
-                                        self.format_node_sync(n, def_indent);
                                     }
-                                }
-                                _ => {
+
+                                    self.output.push_str("> ");
+                                    self.output.push_str(&pieces.join(" "));
+                                    self.output.push('\n');
+
+                                    if let Some(next_non_blank) = node
+                                        .children()
+                                        .skip(i + 1)
+                                        .find(|sibling| sibling.kind() != SyntaxKind::BLANK_LINE)
+                                        && is_block_element(next_non_blank.kind())
+                                        && !self.output.ends_with("\n\n")
+                                    {
+                                        self.output.push('\n');
+                                    }
+                                } else {
                                     self.format_node_sync(n, def_indent);
                                 }
                             }
-                        }
+                            _ => {
+                                self.format_node_sync(n, def_indent);
+                            }
+                        },
                         _ => {}
                     }
                 }
@@ -2651,7 +2289,6 @@ impl Formatter {
                 let formatted = tables::format_simple_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
 
-                // Ensure blank line after if followed by block element
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && !self.output.ends_with("\n\n")
@@ -2661,13 +2298,11 @@ impl Formatter {
             }
 
             SyntaxKind::MULTILINE_TABLE => {
-                // Format multiline table with proper alignment and column widths
                 let formatted = tables::format_multiline_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
             }
 
             SyntaxKind::PIPE_TABLE => {
-                // Format pipe table with proper alignment
                 let formatted = tables::format_pipe_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
             }
@@ -2682,18 +2317,15 @@ impl Formatter {
                     }
                     return;
                 }
-                // Format grid table with proper alignment and borders
                 let formatted = tables::format_grid_table(node, &self.config, indent);
                 self.output.push_str(&formatted);
             }
 
             SyntaxKind::INLINE_MATH => {
-                // Check if this is display math (has DisplayMathMarker)
                 let is_display_math = node.children_with_tokens().any(|t| {
                     matches!(t, NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DISPLAY_MATH_MARKER)
                 });
 
-                // Get the actual content (TEXT token, not node)
                 let content = node
                     .children_with_tokens()
                     .find_map(|c| match c {
@@ -2704,7 +2336,6 @@ impl Formatter {
                     })
                     .unwrap_or_default();
 
-                // Get original marker to determine input format
                 let original_marker = node
                     .children_with_tokens()
                     .find_map(|t| match t {
@@ -2718,11 +2349,9 @@ impl Formatter {
                     })
                     .unwrap_or_else(|| "$".to_string());
 
-                // Determine output format based on config
                 use crate::config::MathDelimiterStyle;
                 let (open, close) = match self.config.math_delimiter_style {
                     MathDelimiterStyle::Preserve => {
-                        // Keep original format
                         if is_display_math {
                             match original_marker.as_str() {
                                 "\\[" => (r"\[", r"\]"),
@@ -2739,7 +2368,6 @@ impl Formatter {
                         }
                     }
                     MathDelimiterStyle::Dollars => {
-                        // Normalize to dollars
                         if is_display_math {
                             ("$$", "$$")
                         } else {
@@ -2747,7 +2375,6 @@ impl Formatter {
                         }
                     }
                     MathDelimiterStyle::Backslash => {
-                        // Normalize to single backslash
                         if is_display_math {
                             (r"\[", r"\]")
                         } else {
@@ -2756,7 +2383,6 @@ impl Formatter {
                     }
                 };
 
-                // Output formatted math
                 if is_display_math {
                     self.output.push_str(open);
                     self.output.push(' ');
@@ -2802,9 +2428,6 @@ impl Formatter {
                         false
                     });
                 if opening_has_trailing_inline_text {
-                    // Preserve malformed one-line div text verbatim to keep parser shape stable
-                    // across format passes. Trimming can shift boundary ownership of following
-                    // blank lines and break idempotency.
                     self.output.push_str(&node.text().to_string());
                     if !self.output.ends_with('\n') {
                         self.output.push('\n');
@@ -2821,10 +2444,6 @@ impl Formatter {
                     .take_while(|child| child.kind() == SyntaxKind::BLANK_LINE)
                     .count();
 
-                // Preserve malformed one-line divs verbatim. Patterns like
-                // `::: {.callout} inline :::` can parse as an opening fence with
-                // trailing text but no body/closing node; normalizing them creates
-                // unstable nesting and loses inline content.
                 if !has_close && !has_content {
                     if let Some(open) = fenced_div.opening_fence() {
                         self.output
@@ -2864,7 +2483,6 @@ impl Formatter {
                 let colons = ":".repeat(opening_colons);
 
                 let attributes = fenced_div.info_text();
-                // Emit normalized opening fence
                 if !has_close && !has_content {
                     self.output.push_str(&" ".repeat(indent));
                     if let Some(attrs) = &attributes
@@ -2888,10 +2506,8 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
-                // Increment depth for nested content
                 self.fenced_div_depth += 1;
 
-                // Process content
                 let content_children: Vec<_> = node
                     .children()
                     .filter(|child| {
@@ -2928,8 +2544,6 @@ impl Formatter {
                         {
                             continue;
                         }
-                        // Collapse runs of blank lines to a single separator,
-                        // matching how blank lines are normalised at the document level.
                         if !prev_was_blank {
                             self.output.push('\n');
                             prev_was_blank = true;
@@ -2954,16 +2568,8 @@ impl Formatter {
                     }
                 }
 
-                // Decrement depth after processing content
                 self.fenced_div_depth -= 1;
 
-                // Keep a blank line between a trailing horizontal rule and the
-                // closing fence. A rule glued to `:::` is a trap for the
-                // compact `---` spelling (#417): a `---` line followed by
-                // non-blank text opens a YAML metadata block in both panache
-                // and pandoc, swallowing the fence. Checked against the last
-                // non-blank child (not the emitted BLANK_LINE nodes, which the
-                // trailing-blank trim above drops) so both passes agree.
                 let last_non_blank_kind = content_children
                     .iter()
                     .rev()
@@ -2976,7 +2582,6 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
-                // Emit closing fence using the opener's colon count.
                 if !self.output.ends_with('\n') {
                     self.output.push('\n');
                 }
@@ -2984,17 +2589,12 @@ impl Formatter {
                 self.output.push_str(&":".repeat(opening_colons));
                 self.output.push('\n');
 
-                // Reset blank line tracking so outer blocks don't suppress separation.
                 self.consecutive_blank_lines = 0;
 
-                // Ensure blank line after if followed by block element
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && !self.output.ends_with("\n\n")
                 {
-                    // In list items, keep separator for continuation block content
-                    // (e.g. list marker or paragraph) but avoid adding extra space
-                    // before nested structural blocks that already manage spacing.
                     let needs_separator = if in_list_item {
                         matches!(
                             next.kind(),
@@ -3011,14 +2611,10 @@ impl Formatter {
             }
 
             SyntaxKind::INLINE_MATH_MARKER => {
-                // Output inline math as $...$ or $$...$$ (on the same line)
                 self.output.push_str(node.text().to_string().trim());
             }
 
             SyntaxKind::DISPLAY_MATH => {
-                // Display math ($$...$$) - format on separate lines
-                // Even though it's parsed as inline, it should display as block-level
-
                 let Some(display_math) = DisplayMath::cast(node.clone()) else {
                     self.output.push_str(&node.text().to_string());
                     return;
@@ -3026,7 +2622,6 @@ impl Formatter {
 
                 let math_content = Some(display_math.content());
 
-                // Default to $$ if markers not found
                 let opening_value = display_math
                     .opening_marker()
                     .unwrap_or_else(|| "$$".to_string());
@@ -3037,7 +2632,6 @@ impl Formatter {
                 let closing_from_tree = closing_value.as_str();
                 let is_environment = display_math.is_environment_form();
 
-                // Apply delimiter style preference
                 use crate::config::MathDelimiterStyle;
                 let (open, close) = if is_environment {
                     (opening, closing_from_tree)
@@ -3054,8 +2648,6 @@ impl Formatter {
                 if is_environment {
                     self.output.push_str(open);
                     if let Some(content) = math_content {
-                        // Experimental gate: reformat the bare environment body
-                        // (align `&`, indent, normalize `\\`); else verbatim.
                         let opts = MathFormatOptions::from_config(
                             &self.config,
                             MathContext::EnvironmentBody,
@@ -3079,12 +2671,10 @@ impl Formatter {
                     return;
                 }
 
-                // Opening fence
                 self.output.push('\n');
                 self.output.push_str(open);
                 self.output.push('\n');
 
-                // Math content
                 if let Some(content) = math_content {
                     let opts = MathFormatOptions::from_config(&self.config, MathContext::Display);
                     match math::format_math(&content, &opts) {
@@ -3103,7 +2693,6 @@ impl Formatter {
                     }
                 }
 
-                // Closing fence
                 self.output.push_str(close);
                 self.output.push('\n');
             }
@@ -3111,32 +2700,25 @@ impl Formatter {
             SyntaxKind::CODE_BLOCK => {
                 log::trace!("Formatting code block");
 
-                // Add blank line before code block if it follows a paragraph
-                // This matches Pandoc's formatting behavior
                 if let Some(prev_sibling) = node.prev_sibling()
                     && prev_sibling.kind() == SyntaxKind::PARAGRAPH
+                    && !self.output.ends_with("\n\n")
+                    && !self.output.ends_with("\n \n")
                 {
-                    // Only add blank line if we don't already have one
-                    if !self.output.ends_with("\n\n") && !self.output.ends_with("\n \n") {
-                        self.output.push('\n');
-                    }
+                    self.output.push('\n');
                 }
 
-                // Normalize code blocks to use backticks
                 self.format_code_block(node);
             }
 
             SyntaxKind::YAML_METADATA
             | SyntaxKind::PANDOC_TITLE_BLOCK
             | SyntaxKind::MMD_TITLE_BLOCK => {
-                // Preserve these blocks as-is
                 let text = node.text().to_string();
                 self.output.push_str(&text);
-                // Ensure these blocks end with appropriate spacing
                 if !text.ends_with('\n') {
                     self.output.push('\n');
                 }
-                // Ensure blank line after if followed by block element.
                 if let Some(next) = node.next_sibling()
                     && is_block_element(next.kind())
                     && !self.output.ends_with("\n\n")
@@ -3147,13 +2729,9 @@ impl Formatter {
             }
 
             SyntaxKind::BLANK_LINE => {
-                // BlankLine nodes preserve exact whitespace in the CST for losslessness
-                // But when formatting, we normalize to just newlines (no trailing spaces)
-                // Drop blank lines at beginning of document output.
                 if self.output.is_empty() {
                     return;
                 }
-                // Limit consecutive blank lines to 1
                 if self.consecutive_blank_lines < 1 {
                     self.output.push('\n');
                     self.consecutive_blank_lines += 1;
@@ -3161,7 +2739,6 @@ impl Formatter {
             }
 
             SyntaxKind::EMPHASIS => {
-                // Normalize emphasis to always use single asterisks
                 self.output.push('*');
                 for child in node.children_with_tokens() {
                     match child {
@@ -3177,7 +2754,6 @@ impl Formatter {
             }
 
             SyntaxKind::STRONG => {
-                // Normalize strong emphasis to always use double asterisks
                 self.output.push_str("**");
                 for child in node.children_with_tokens() {
                     match child {
@@ -3193,7 +2769,6 @@ impl Formatter {
             }
 
             SyntaxKind::STRIKEOUT => {
-                // Format strikeout with tildes
                 self.output.push_str("~~");
                 for child in node.children_with_tokens() {
                     match child {
@@ -3209,7 +2784,6 @@ impl Formatter {
             }
 
             SyntaxKind::SUPERSCRIPT => {
-                // Format superscript with carets
                 self.output.push('^');
                 for child in node.children_with_tokens() {
                     match child {
@@ -3225,7 +2799,6 @@ impl Formatter {
             }
 
             SyntaxKind::SUBSCRIPT => {
-                // Format subscript with tildes
                 self.output.push('~');
                 for child in node.children_with_tokens() {
                     match child {
@@ -3241,11 +2814,6 @@ impl Formatter {
             }
 
             SyntaxKind::MYST_DIRECTIVE => {
-                // Emit the fence lines (opener with name/argument, and the
-                // closer) verbatim — normalizing the fence run would break
-                // nesting. The leading option block (`:key: value` lines) is
-                // emitted in canonical form right after the opener; the body is
-                // formatted recursively as markdown.
                 let mut open_text: Option<String> = None;
                 let mut close_text: Option<String> = None;
                 let mut options = Vec::new();
@@ -3277,18 +2845,7 @@ impl Formatter {
                     self.output.push('\n');
                 }
 
-                // Verbatim-bodied directives (`{code}`, `{code-block}`,
-                // `{code-cell}`, `{math}`): the body is literal code/math, parsed
-                // as a single raw `MYST_DIRECTIVE_BODY` node. Emit it byte-for-byte
-                // -- never reflow -- so indentation and line breaks survive. The
-                // option block is still canonicalized above. No separator is
-                // injected: any blank line between the options and the body is
-                // already captured inside the body node.
                 if let Some(body_node) = verbatim_body {
-                    // Substitute external-formatter output for the body when
-                    // available, keyed by (directive argument, body text) -- the
-                    // same key the collector used. The substituted text is
-                    // emitted verbatim (no reflow), like the unformatted body.
                     let body_text = code_blocks::extract_myst_directive_parts(node)
                         .and_then(|(language, body)| {
                             self.formatted_code.get(&(language, body)).cloned()
@@ -3304,8 +2861,6 @@ impl Formatter {
                     return;
                 }
 
-                // Strip leading/trailing blank lines; collapse interior runs to
-                // a single separator (canonical compact form, like fenced divs).
                 let leading = body
                     .iter()
                     .take_while(|c| c.kind() == SyntaxKind::BLANK_LINE)
@@ -3317,9 +2872,6 @@ impl Formatter {
                     .count();
                 let end = body.len().saturating_sub(trailing).max(leading);
 
-                // Separate the option block from the body with exactly one blank
-                // line. Both the blank-separated and adjacent inputs converge
-                // here, keeping the result idempotent and readable.
                 if !options.is_empty() && leading < end {
                     self.output.push('\n');
                 }
@@ -3354,7 +2906,6 @@ impl Formatter {
             | SyntaxKind::MYST_COMMENT
             | SyntaxKind::MYST_BLOCK_BREAK
             | SyntaxKind::SVELTE_BLOCK => {
-                // Single-line leaf blocks: emit verbatim with a trailing newline.
                 self.output
                     .push_str(node.text().to_string().trim_end_matches('\n'));
                 self.output.push('\n');
@@ -3362,7 +2913,6 @@ impl Formatter {
             }
 
             _ => {
-                // Fallback: append node text (should be rare with children_with_tokens above)
                 self.output.push_str(&node.text().to_string());
             }
         }
@@ -3414,7 +2964,6 @@ pub(super) fn normalize_attribute_text(attr_text: &str) -> String {
     let mut key_values: Vec<String> = Vec::new();
     for comp in &spans.components {
         match comp {
-            // Ranges include the `#` / `.` / `=` marker byte.
             AttrComponent::Id(r) => id = inner[r.clone()].to_string(),
             AttrComponent::Class(r) | AttrComponent::Unnumbered(r) => {
                 classes.push(&inner[r.clone()])
@@ -3444,9 +2993,6 @@ pub(super) fn normalize_attribute_text(attr_text: &str) -> String {
     out
 }
 
-/// Strip a matching pair of surrounding quotes from an attribute value's source
-/// bytes. Mirrors the parser's `attr_value_string`: a leading quote is always
-/// dropped, a trailing quote of the same kind only when present.
 fn strip_attr_value_quotes(raw: &str) -> &str {
     match raw.as_bytes().first() {
         Some(&q @ (b'"' | b'\'')) => {

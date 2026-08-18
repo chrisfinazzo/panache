@@ -22,14 +22,12 @@ fn assert_idempotent(input: &str, config: &Config) -> String {
 fn builtin_german_profile_keeps_abbreviation_on_one_line() {
     let input = "Erstens bzw. zweitens ist wichtig. Zweiter Satz folgt.\n";
 
-    // With `lang: de`, the built-in German profile treats `bzw.` as a non-break.
     let de = assert_idempotent(input, &cfg(Some("de"), BTreeMap::new()));
     assert_eq!(
         de,
         "Erstens bzw. zweitens ist wichtig.\nZweiter Satz folgt.\n"
     );
 
-    // Without a language, English rules apply and `bzw.` ends a sentence.
     let en = assert_idempotent(input, &cfg(None, BTreeMap::new()));
     assert_eq!(
         en,
@@ -45,7 +43,6 @@ fn flat_default_bucket_applies_regardless_of_language() {
     let out = assert_idempotent(input, &cfg(None, abbreviations));
     assert_eq!(out, "Alpha foo. beta gamma.\nDelta.\n");
 
-    // Without the config, `foo.` is a plain sentence end.
     let bare = assert_idempotent(input, &cfg(None, BTreeMap::new()));
     assert_eq!(bare, "Alpha foo.\nbeta gamma.\nDelta.\n");
 }
@@ -55,11 +52,9 @@ fn per_language_bucket_only_applies_to_matching_language() {
     let input = "Třeba např. tohle platí. Druhá věta.\n";
     let abbreviations = BTreeMap::from([("cs".to_string(), vec!["např.".to_string()])]);
 
-    // `lang: cs` picks up the Czech bucket.
     let cs = assert_idempotent(input, &cfg(Some("cs"), abbreviations.clone()));
     assert_eq!(cs, "Třeba např. tohle platí.\nDruhá věta.\n");
 
-    // `lang: de` does not see the `cs` bucket, so `např.` ends a sentence.
     let de = assert_idempotent(input, &cfg(Some("de"), abbreviations));
     assert_eq!(de, "Třeba např.\ntohle platí.\nDruhá věta.\n");
 }
@@ -67,7 +62,6 @@ fn per_language_bucket_only_applies_to_matching_language() {
 #[test]
 fn region_subtag_selects_primary_language_bucket() {
     let input = "Erstens bzw. zweitens ist wichtig. Zweiter Satz folgt.\n";
-    // `de-AT` should fold to the built-in German profile.
     let out = assert_idempotent(input, &cfg(Some("de-AT"), BTreeMap::new()));
     assert_eq!(
         out,

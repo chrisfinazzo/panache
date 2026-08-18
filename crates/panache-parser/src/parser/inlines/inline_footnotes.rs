@@ -17,19 +17,16 @@ use crate::options::ParserOptions;
 pub(crate) fn try_parse_inline_footnote(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with ^[
     if bytes.len() < 3 || bytes[0] != b'^' || bytes[1] != b'[' {
         return None;
     }
 
-    // Find the closing ]
     let mut pos = 2;
     let mut bracket_depth = 1; // Already opened one bracket
 
     while pos < bytes.len() {
         match bytes[pos] {
             b'\\' => {
-                // Skip escaped character
                 pos += 2;
                 continue;
             }
@@ -40,16 +37,9 @@ pub(crate) fn try_parse_inline_footnote(text: &str) -> Option<(usize, &str)> {
             b']' => {
                 bracket_depth -= 1;
                 if bracket_depth == 0 {
-                    // Pandoc does not read `^[...]` as an inline note when a
-                    // `[` or `(` immediately follows the closing bracket: the
-                    // bracket run is consumed as a link label instead, leaving
-                    // `^` as literal text. This holds even when what follows
-                    // cannot form a valid link (`^[note](` is all literal), so
-                    // the check is unconditional rather than a lookahead parse.
                     if matches!(bytes.get(pos + 1), Some(b'[') | Some(b'(')) {
                         return None;
                     }
-                    // Found the closing bracket
                     let content = &text[2..pos];
                     return Some((pos + 1, content));
                 }
@@ -61,7 +51,6 @@ pub(crate) fn try_parse_inline_footnote(text: &str) -> Option<(usize, &str)> {
         }
     }
 
-    // No closing bracket found
     None
 }
 
@@ -80,13 +69,10 @@ pub(crate) fn emit_inline_footnote(
 ) {
     builder.start_node(SyntaxKind::INLINE_FOOTNOTE.into());
 
-    // Opening marker
     builder.token(SyntaxKind::INLINE_FOOTNOTE_START.into(), "^[");
 
-    // Parse the content recursively for nested inline elements
     parse_inline_text(builder, content, config, false, suppress_footnote_refs);
 
-    // Closing marker
     builder.token(SyntaxKind::INLINE_FOOTNOTE_END.into(), "]");
 
     builder.finish_node();
@@ -97,12 +83,10 @@ pub(crate) fn emit_inline_footnote(
 pub(crate) fn try_parse_footnote_reference(text: &str) -> Option<(usize, String)> {
     let bytes = text.as_bytes();
 
-    // Must start with [^
     if bytes.len() < 4 || bytes[0] != b'[' || bytes[1] != b'^' {
         return None;
     }
 
-    // Find the closing ]
     let mut pos = 2;
     while pos < bytes.len() && bytes[pos] != b']' && bytes[pos] != b'\n' && bytes[pos] != b'\r' {
         pos += 1;
@@ -183,7 +167,6 @@ mod tests {
 
     #[test]
     fn test_inline_footnote_multiline() {
-        // Inline footnotes can span multiple lines in the source
         let result = try_parse_inline_footnote("^[This is\na multiline\nnote]");
         assert_eq!(result, Some((27, "This is\na multiline\nnote")));
     }
@@ -194,16 +177,11 @@ mod tests {
         assert_eq!(result, Some((25, "Contains `code` inside")));
     }
 
-    // Pandoc refuses to read `^[...]` as an inline note when a `[` or `(`
-    // follows the closing bracket: the label is consumed as a link label
-    // instead, so `^` degrades to literal text. Verified against
-    // `pandoc -f markdown -t native`.
     #[test]
     fn test_not_inline_footnote_followed_by_bracket() {
         assert_eq!(try_parse_inline_footnote("^[note][x]"), None);
         assert_eq!(try_parse_inline_footnote("^[note][x](u)"), None);
         assert_eq!(try_parse_inline_footnote("^[note][]"), None);
-        // Even a `[` that cannot start a valid label suppresses the note.
         assert_eq!(try_parse_inline_footnote("^[note][ x"), None);
         assert_eq!(try_parse_inline_footnote("^[note]["), None);
     }
@@ -212,14 +190,12 @@ mod tests {
     fn test_not_inline_footnote_followed_by_paren() {
         assert_eq!(try_parse_inline_footnote("^[note](u)"), None);
         assert_eq!(try_parse_inline_footnote("^[note]()"), None);
-        // Unterminated destination still suppresses the note under pandoc.
         assert_eq!(try_parse_inline_footnote("^[note](u"), None);
         assert_eq!(try_parse_inline_footnote("^[note]("), None);
     }
 
     #[test]
     fn test_inline_footnote_followed_by_other_punctuation() {
-        // Only `[` and `(` are special; everything else still parses.
         assert_eq!(try_parse_inline_footnote("^[note]x"), Some((7, "note")));
         assert_eq!(try_parse_inline_footnote("^[note]!"), Some((7, "note")));
         assert_eq!(try_parse_inline_footnote("^[note]*em*"), Some((7, "note")));
@@ -227,10 +203,6 @@ mod tests {
             try_parse_inline_footnote("^[note] [x](u)"),
             Some((7, "note"))
         );
-        // A following attribute block suppresses the note in pandoc too
-        // (`[note]{.cls}` becomes a Span), but deciding that requires
-        // pandoc's attribute-validity rules, which panache models more
-        // loosely today. Pinned as current behavior, not as parity.
         assert_eq!(
             try_parse_inline_footnote("^[note]{.cls}"),
             Some((7, "note"))
@@ -239,11 +211,9 @@ mod tests {
 
     #[test]
     fn test_footnote_reference_with_crlf() {
-        // Footnote reference IDs should not span lines with CRLF
         let input = "[^foo\r\nbar]";
         let result = try_parse_footnote_reference(input);
 
-        // Should fail to parse because ID contains line break
         assert_eq!(
             result, None,
             "Should not parse footnote reference with CRLF in ID"
@@ -252,11 +222,9 @@ mod tests {
 
     #[test]
     fn test_footnote_reference_with_lf() {
-        // Footnote reference IDs should not span lines with LF either
         let input = "[^foo\nbar]";
         let result = try_parse_footnote_reference(input);
 
-        // Should fail to parse because ID contains line break
         assert_eq!(
             result, None,
             "Should not parse footnote reference with LF in ID"

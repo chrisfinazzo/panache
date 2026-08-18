@@ -48,8 +48,6 @@ fn superscript_not_confused_with_footnote() {
 
 #[test]
 fn superscript_with_unescaped_internal_whitespace_is_not_superscript() {
-    // Pandoc rejects unescaped whitespace inside superscript content;
-    // panache mirrors this by leaving the carets as literal text.
     let input = "Something^some text^ here.\n";
     let output = format(input, None, None);
     assert!(output.contains("^some text^"));
@@ -70,6 +68,5 @@ fn superscript_in_paragraph() {
     let input = "This is a long paragraph with x^2^ superscript that should wrap at the configured line width.";
     let output = format(input, Some(cfg), None);
 
-    // Should preserve superscript even with wrapping
     assert!(output.contains("x^2^"));
 }

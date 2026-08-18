@@ -19,34 +19,23 @@ use crate::syntax::SyntaxKind;
 pub fn try_parse_subscript(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with ~
     if bytes.is_empty() || bytes[0] != b'~' {
         return None;
     }
 
-    // Pandoc fallback: when strikeout (`~~text~~`) doesn't match, `~~` is
-    // consumed as an empty Subscript (`Subscript []`), with the second `~`
-    // closing the first. Probed against `pandoc -f markdown` for
-    // `~~unclosed`, `*x ~~y*`, `a ~~b`, `~~ a ~~`. Dispatch order in
-    // `inlines/core.rs` runs strikeout before subscript so a real
-    // strikeout (`~~hello~~`) is not misinterpreted as two empty
-    // subscripts.
     if bytes.len() > 1 && bytes[1] == b'~' {
         return Some((2, ""));
     }
 
-    // Content cannot start with whitespace
     if bytes.len() > 1 && bytes[1].is_ascii_whitespace() {
         return None;
     }
 
-    // Find the closing ~
     let mut pos = 1;
     let mut found_close = false;
 
     while pos < bytes.len() {
         if bytes[pos] == b'~' {
-            // Make sure it's not part of ~~
             if pos + 1 < bytes.len() && bytes[pos + 1] == b'~' {
                 return None;
             }
@@ -60,23 +49,16 @@ pub fn try_parse_subscript(text: &str) -> Option<(usize, &str)> {
         return None;
     }
 
-    // Extract content between the delimiters
     let content = &text[1..pos];
 
-    // Content cannot be empty or only whitespace
     if content.trim().is_empty() {
         return None;
     }
 
-    // Content cannot end with whitespace
     if content.ends_with(char::is_whitespace) {
         return None;
     }
 
-    // Pandoc rule: subscripted text cannot contain unescaped whitespace.
-    // To include a space, source must escape it as `\ `. Verified against
-    // `pandoc -f markdown` for `~x y~` → not a subscript, `~x\ y~` →
-    // Subscript with NBSP-joined content.
     if contains_unescaped_whitespace(content) {
         return None;
     }
@@ -111,15 +93,12 @@ pub fn emit_subscript(
 ) {
     builder.start_node(SyntaxKind::SUBSCRIPT.into());
 
-    // Opening marker
     builder.start_node(SyntaxKind::SUBSCRIPT_MARKER.into());
     builder.token(SyntaxKind::SUBSCRIPT_MARKER.into(), "~");
     builder.finish_node();
 
-    // Parse inner content recursively for nested inline elements
     parse_inline_text(builder, inner_text, config, false, suppress_footnote_refs);
 
-    // Closing marker
     builder.start_node(SyntaxKind::SUBSCRIPT_MARKER.into());
     builder.token(SyntaxKind::SUBSCRIPT_MARKER.into(), "~");
     builder.finish_node();
@@ -145,18 +124,13 @@ mod tests {
 
     #[test]
     fn test_no_whitespace_inside_delimiters() {
-        // Content cannot start with whitespace
         assert_eq!(try_parse_subscript("~ text~"), None);
 
-        // Content cannot end with whitespace
         assert_eq!(try_parse_subscript("~text ~"), None);
     }
 
     #[test]
     fn test_empty_content() {
-        // `~~` is consumed as an empty Subscript (pandoc strikeout-fallback);
-        // a single space between tildes is still rejected as a degenerate
-        // form (pandoc: `~ ~` → plain text).
         assert_eq!(try_parse_subscript("~~"), Some((2, "")));
         assert_eq!(try_parse_subscript("~ ~"), None);
     }
@@ -169,14 +143,6 @@ mod tests {
 
     #[test]
     fn test_double_tilde_unclosed_is_empty_subscript() {
-        // Pandoc strikeout-fallback: when `~~text~~` would otherwise match
-        // strikeout, the dispatch order in `inlines/core.rs` ensures
-        // strikeout fires first. When strikeout would not match (no closing
-        // `~~`), `~~` is consumed as an empty Subscript, leaving the rest
-        // of the input for downstream parsing. Probed against pandoc:
-        // `~~unclosed` → `Subscript [] , Str "unclosed"`. The standalone
-        // `try_parse_subscript("~~text~~")` now returns the empty form;
-        // real strikeout matching is the dispatcher's responsibility.
         assert_eq!(try_parse_subscript("~~text~~"), Some((2, "")));
         assert_eq!(try_parse_subscript("~~unclosed"), Some((2, "")));
     }
@@ -189,8 +155,6 @@ mod tests {
 
     #[test]
     fn test_internal_whitespace_rejected() {
-        // Pandoc rejects unescaped internal whitespace in subscripts;
-        // backslash-escaped spaces are accepted.
         assert_eq!(try_parse_subscript("~some text~"), None);
         assert_eq!(
             try_parse_subscript("~some\\ text~"),
@@ -205,7 +169,6 @@ mod tests {
 
     #[test]
     fn test_subscript_before_strikeout_marker() {
-        // If there's a subscript followed by another ~, it should work
         assert_eq!(try_parse_subscript("~x~ ~"), Some((3, "x")));
     }
 }

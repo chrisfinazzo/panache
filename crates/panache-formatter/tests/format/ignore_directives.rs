@@ -14,11 +14,9 @@ This paragraph should be formatted normally with proper wrapping.
 
     let output = format_with_defaults(input);
 
-    // The ignore region should be preserved exactly
     assert!(output.contains("This    has    weird     spacing"));
     assert!(output.contains("and  should   be  preserved"));
 
-    // The normal paragraph should be formatted
     assert!(output.contains("This paragraph should be formatted normally with proper wrapping."));
 }
 
@@ -34,11 +32,9 @@ fn test_ignore_both() {
 
     let output = format_with_defaults(input);
 
-    // Content in ignore region should be preserved
     assert!(output.contains("# Heading    with    weird   spacing"));
     assert!(output.contains("- List  item  with   spacing"));
 
-    // Normal content should be formatted
     assert!(output.contains("# Normal heading"));
 }
 
@@ -94,7 +90,6 @@ Content
 
     let output = format_with_defaults(input);
 
-    // Directives themselves should be preserved
     assert!(output.contains("<!-- panache-ignore-format-start -->"));
     assert!(output.contains("<!-- panache-ignore-format-end -->"));
 }
@@ -112,11 +107,8 @@ This is a very long line that should be wrapped because it is not in an ignore r
 
     let output = format(input, Some(cfg), None);
 
-    // Long line in ignore region should NOT be wrapped
     assert!(output.contains("This is a very long line that would normally be wrapped but should not be wrapped because it is in an ignore region"));
 
-    // Long line outside ignore region SHOULD be wrapped (split across multiple lines)
-    // Check that no single line contains the entire long text
     let has_full_line = output
         .lines()
         .any(|l| l.contains("This is a very long line that should be wrapped because it is not in an ignore region and exceeds the line width"));
@@ -138,7 +130,6 @@ Normal paragraph.
 
     let output = format_with_defaults(input);
 
-    // Regular comments should pass through
     assert!(output.contains("<!-- This is a regular comment -->"));
     assert!(output.contains("<!-- Another regular comment -->"));
     assert!(output.contains("Normal paragraph."));
@@ -153,7 +144,6 @@ This    should    be     formatted
 
     let output = format_with_defaults(input);
 
-    // ignore-lint should NOT prevent formatting
     assert!(!output.contains("This    should    be     formatted"));
     assert!(output.contains("This should be formatted"));
 }
@@ -170,7 +160,6 @@ def   foo():
 
     let output = format_with_defaults(input);
 
-    // Code block in ignore region should be preserved exactly
     assert!(output.contains("def   foo():"));
     assert!(output.contains("    return   42"));
 }

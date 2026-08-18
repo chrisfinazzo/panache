@@ -6,7 +6,6 @@ use rowan::GreenNodeBuilder;
 /// Helper to emit a line's text and newline tokens separately.
 /// Lines from split_lines_inclusive contain trailing newlines (LF or CRLF) that must be separated.
 pub(crate) fn emit_line_tokens(builder: &mut GreenNodeBuilder<'static>, line: &str) {
-    // Handle both CRLF and LF line endings
     if let Some(text) = line.strip_suffix("\r\n") {
         builder.token(SyntaxKind::TEXT.into(), text);
         builder.token(SyntaxKind::NEWLINE.into(), "\r\n");
@@ -14,7 +13,6 @@ pub(crate) fn emit_line_tokens(builder: &mut GreenNodeBuilder<'static>, line: &s
         builder.token(SyntaxKind::TEXT.into(), text);
         builder.token(SyntaxKind::NEWLINE.into(), "\n");
     } else {
-        // No trailing newline (last line of input)
         builder.token(SyntaxKind::TEXT.into(), line);
     }
 }
@@ -66,10 +64,6 @@ pub(crate) fn emit_separator_tokens(builder: &mut GreenNodeBuilder<'static>, lin
                 builder.token(SyntaxKind::TABLE_SEP_WHITESPACE.into(), &content[start..i]);
             }
             _ => {
-                // Unexpected byte (the block detector validated this is a
-                // separator, but stay lossless and total): accumulate the run
-                // of unrecognized bytes and emit as TEXT. Advance by whole
-                // chars so we never split a multibyte sequence.
                 let start = i;
                 while i < bytes.len()
                     && !matches!(bytes[i], b'|' | b'+' | b':' | b'-' | b'=' | b' ' | b'\t')
@@ -130,8 +124,6 @@ pub(crate) fn trim_end_newlines(s: &str) -> &str {
             break;
         }
     }
-    // SAFETY: we only stripped ASCII `\n` / `\r` bytes from the end, so the
-    // remaining prefix is still valid UTF-8 ending on a char boundary.
     unsafe { std::str::from_utf8_unchecked(&bytes[..end]) }
 }
 
@@ -149,7 +141,6 @@ pub(crate) fn trim_start_spaces_tabs(s: &str) -> &str {
             break;
         }
     }
-    // SAFETY: only ASCII bytes stripped from the start.
     unsafe { std::str::from_utf8_unchecked(&bytes[start..]) }
 }
 
@@ -178,12 +169,9 @@ pub(crate) fn trim_end_spaces_tabs(s: &str) -> &str {
             break;
         }
     }
-    // SAFETY: only ASCII bytes stripped from the end.
     unsafe { std::str::from_utf8_unchecked(&bytes[..end]) }
 }
 
-/// Backing store for [`backtick_run`] and [`space_run`]. Sized so every
-/// delimiter run a real document carries is served from the static.
 const BACKTICK_POOL: &str = "````````````````````````````````````````````````````````````````";
 const SPACE_POOL: &str = "                                                                ";
 
@@ -226,12 +214,10 @@ pub(crate) fn split_lines_inclusive(input: &str) -> Vec<&str> {
     let mut i = 0;
     while i < len {
         if bytes[i] == b'\n' {
-            // Found LF, include it in the line
             lines.push(&input[start..=i]);
             start = i + 1;
             i += 1;
         } else if bytes[i] == b'\r' && i + 1 < len && bytes[i + 1] == b'\n' {
-            // Found CRLF, include both in the line
             lines.push(&input[start..=i + 1]);
             start = i + 2;
             i += 2;
@@ -240,7 +226,6 @@ pub(crate) fn split_lines_inclusive(input: &str) -> Vec<&str> {
         }
     }
 
-    // Add remaining text if any (last line without newline)
     if start < len {
         lines.push(&input[start..]);
     }
@@ -276,7 +261,6 @@ mod tests {
         assert_eq!(trim_end_newlines("foo"), "foo");
         assert_eq!(trim_end_newlines(""), "");
         assert_eq!(trim_end_newlines("\n"), "");
-        // Non-ASCII byte sequences stay intact.
         assert_eq!(trim_end_newlines("föö\n"), "föö");
     }
 
@@ -294,7 +278,6 @@ mod tests {
 
     #[test]
     fn test_emit_separator_tokens_reconstruction() {
-        // Concatenation of token texts must byte-equal the input.
         for line in [
             "|:--|--:|:-:|\n",
             "+------+:----:+------+\n",
@@ -327,7 +310,6 @@ mod tests {
                 (NEWLINE, "\n".to_string()),
             ],
         );
-        // Grid `===` divider and interior whitespace in a simple separator.
         assert_eq!(
             separator_tokens("--- ---\n"),
             vec![

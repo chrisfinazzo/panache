@@ -63,7 +63,6 @@ fn parse_html_comment(text: &str) -> Option<usize> {
     if !text.starts_with("<!--") {
         return None;
     }
-    // Special degenerate forms: <!--> and <!--->
     if text.as_bytes().get(4) == Some(&b'>') {
         return Some(5);
     }
@@ -225,8 +224,6 @@ fn is_attr_name_cont(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b':' || b == b'-'
 }
 
-/// Skip "spaces, tabs, and up to one line ending". Returns the new index.
-/// Always succeeds (returns at least `start`).
 fn skip_ws_with_optional_lf(bytes: &[u8], start: usize) -> usize {
     let mut i = start;
     let mut saw_lf = false;
@@ -256,8 +253,6 @@ fn skip_ws_with_optional_lf(bytes: &[u8], start: usize) -> usize {
     i
 }
 
-/// Like `skip_ws_with_optional_lf`, but requires consuming at least one
-/// whitespace character (or one line ending).
 fn skip_ws_required_with_optional_lf(bytes: &[u8], start: usize) -> Option<usize> {
     let after = skip_ws_with_optional_lf(bytes, start);
     if after == start { None } else { Some(after) }
@@ -268,10 +263,6 @@ mod tests {
     use super::*;
 
     fn matches(input: &str, expected_len: usize) {
-        // CommonMark dialect: full CommonMark §6.6 recognition (incl. CDATA
-        // and declarations). The byte-level recognizer assertions below
-        // are dialect-shared except for `cdata` and `declaration`, which
-        // are CommonMark-only and use `matches_cm` explicitly.
         assert_eq!(
             try_parse_inline_html(input, Dialect::CommonMark),
             Some(expected_len),
@@ -365,7 +356,6 @@ mod tests {
     #[test]
     fn cdata() {
         matches_cm("<![CDATA[a]]>", 13);
-        // Pandoc-markdown does not recognize bare CDATA as inline raw HTML.
         no_match_pandoc("<![CDATA[a]]>");
     }
 
@@ -373,8 +363,6 @@ mod tests {
     fn declaration() {
         matches_cm("<!ELEMENT br EMPTY>", 19);
         matches_cm("<!DOCTYPE html>", 15);
-        // Pandoc-markdown does not recognize bare declarations as inline
-        // raw HTML — the bytes fall through to plain text.
         no_match_pandoc("<!ELEMENT br EMPTY>");
         no_match_pandoc("<!DOCTYPE html>");
     }

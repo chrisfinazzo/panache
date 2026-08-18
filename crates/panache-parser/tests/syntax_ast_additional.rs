@@ -8,10 +8,6 @@ use panache_parser::syntax::{
     SimpleTable, TableCaption,
 };
 
-// ============================================================================
-// Tests for syntax/tables.rs - additional table type methods
-// ============================================================================
-
 #[test]
 fn grid_table_caption_and_rows() {
     let input = r#"+---------+---------+
@@ -30,12 +26,10 @@ Table: Grid table caption"#;
         .find_map(GridTable::cast)
         .expect("Should find GridTable");
 
-    // Test caption extraction
     let caption = grid.caption().expect("Should have caption");
     let caption_text = caption.text();
     assert!(caption_text.contains("Grid table caption"));
 
-    // Test rows
     assert_eq!(grid.rows().count(), 2, "Should have 2 data rows");
 }
 
@@ -54,11 +48,9 @@ Table: Simple table caption"#;
         .find_map(SimpleTable::cast)
         .expect("Should find SimpleTable");
 
-    // Test caption
     let caption = simple.caption();
     assert!(caption.is_some(), "Should have caption");
 
-    // Test rows
     assert!(simple.rows().next().is_some(), "Should have rows");
 }
 
@@ -80,11 +72,9 @@ Table: Multiline table caption"#;
         .find_map(MultilineTable::cast)
         .expect("Should find MultilineTable");
 
-    // Test caption
     let caption = multiline.caption();
     assert!(caption.is_some(), "Should have caption");
 
-    // Test rows
     assert!(multiline.rows().next().is_some(), "Should have rows");
 }
 
@@ -106,10 +96,6 @@ Table: Plain caption text"#;
     assert_eq!(text, "Plain caption text");
 }
 
-// ============================================================================
-// Tests for syntax/lists.rs - List and ListItem wrappers
-// ============================================================================
-
 #[test]
 fn list_item_is_loose() {
     let input = "- First item\n\n- Second item\n";
@@ -123,8 +109,6 @@ fn list_item_is_loose() {
     assert!(list.is_loose(), "List should be loose");
     assert!(!list.is_compact(), "List should not be compact");
 
-    // Check list items - note: loose lists still contain PLAIN nodes in items
-    // The "looseness" is determined by BLANK_LINE nodes between items
     assert_eq!(list.items().count(), 2);
 }
 
@@ -144,10 +128,6 @@ fn list_item_is_compact() {
     assert!(item.is_compact(), "Item in compact list should be compact");
     assert!(!item.is_loose(), "Item in compact list should not be loose");
 }
-
-// ============================================================================
-// Tests for syntax/references.rs - ReferenceDefinition wrapper
-// ============================================================================
 
 #[test]
 fn reference_definition_label() {
@@ -177,10 +157,6 @@ fn reference_definition_link() {
     assert!(link.is_some(), "Should have link child");
 }
 
-// ============================================================================
-// Tests for syntax/citations.rs - Citation wrapper
-// ============================================================================
-
 #[test]
 fn citation_key_texts() {
     let input = "Some text [@doe2020; @smith2021] more text.";
@@ -193,7 +169,6 @@ fn citation_key_texts() {
 
     let key_texts = citation.key_texts();
     assert_eq!(key_texts.len(), 2);
-    // Note: CITATION_KEY tokens don't include the @ marker
     assert!(key_texts.contains(&"doe2020".to_string()));
     assert!(key_texts.contains(&"smith2021".to_string()));
 }
@@ -211,17 +186,11 @@ fn citation_keys() {
     let keys = citation.keys();
     assert_eq!(keys.len(), 3);
 
-    // Test CitationKey::text() method
-    // Note: keys don't include @ marker (that's separate)
     let key_texts: Vec<_> = keys.iter().map(|k| k.text()).collect();
     assert!(key_texts.contains(&"key1".to_string()));
     assert!(key_texts.contains(&"key2".to_string()));
     assert!(key_texts.contains(&"key3".to_string()));
 }
-
-// ============================================================================
-// Additional edge case tests for comprehensive coverage
-// ============================================================================
 
 #[test]
 fn citation_with_single_key() {
@@ -235,7 +204,6 @@ fn citation_with_single_key() {
 
     let keys = citation.keys();
     assert_eq!(keys.len(), 1);
-    // Citation keys don't include @ marker
     assert_eq!(keys[0].text(), "singlekey");
 }
 
@@ -251,10 +219,6 @@ fn empty_list_items() {
 
     assert_eq!(list.items().count(), 2, "Should have 2 items even if empty");
 }
-
-// ============================================================================
-// Tests for FootnoteDefinition edge cases
-// ============================================================================
 
 #[test]
 fn footnote_definition_is_simple_with_continuation() {

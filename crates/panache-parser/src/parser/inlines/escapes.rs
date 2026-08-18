@@ -10,7 +10,6 @@ use crate::syntax::SyntaxKind;
 
 /// Check if a character can be escaped according to Pandoc's all_symbols_escapable
 fn is_escapable(ch: char) -> bool {
-    // Per spec: any punctuation or space character
     ch.is_ascii_punctuation() || ch.is_whitespace()
 }
 
@@ -22,14 +21,12 @@ pub fn try_parse_escape(text: &str) -> Option<(usize, char, EscapeType)> {
     }
 
     if text.len() < 2 {
-        // Backslash at end of input - not an escape
         return None;
     }
 
     let next_char = text[1..].chars().next()?;
 
     if !is_escapable(next_char) {
-        // Not an escapable character
         return None;
     }
 
@@ -64,19 +61,15 @@ pub fn emit_escape(
 ) {
     match escape_type {
         EscapeType::NonbreakingSpace => {
-            // Preserve source bytes for losslessness while still tagging the
-            // semantic token kind as NONBREAKING_SPACE.
             builder.token(SyntaxKind::NONBREAKING_SPACE.into(), "\\ ");
         }
         EscapeType::HardLineBreak => {
-            // Emit as a special hard line break token - include backslash for losslessness
             builder.token(
                 SyntaxKind::HARD_LINE_BREAK.into(),
                 &format!("{leading_ws}\\\n"),
             );
         }
         EscapeType::Literal => {
-            // Emit the full escape sequence (backslash + character) for losslessness
             let mut s = String::new();
             s.push('\\');
             s.push(ch);
@@ -127,7 +120,6 @@ mod tests {
 
     #[test]
     fn test_not_escape_letter() {
-        // Letters cannot be escaped in Pandoc
         let result = try_parse_escape(r"\a");
         assert_eq!(result, None);
     }
@@ -140,7 +132,6 @@ mod tests {
 
     #[test]
     fn test_escape_all_punctuation() {
-        // Test the common Markdown punctuation
         for ch in r#"`*_{}[]()>#+-.!"#.chars() {
             let input = format!(r"\{}", ch);
             let result = try_parse_escape(&input);
@@ -151,18 +142,15 @@ mod tests {
 
     #[test]
     fn test_is_escapable() {
-        // Punctuation
         assert!(is_escapable('*'));
         assert!(is_escapable('`'));
         assert!(is_escapable('['));
         assert!(is_escapable('!'));
 
-        // Space/whitespace
         assert!(is_escapable(' '));
         assert!(is_escapable('\n'));
         assert!(is_escapable('\t'));
 
-        // Not escapable
         assert!(!is_escapable('a'));
         assert!(!is_escapable('Z'));
         assert!(!is_escapable('5'));

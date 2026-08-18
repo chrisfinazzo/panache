@@ -52,9 +52,6 @@ fn yaml_metadata_block_disabled_does_not_parse_yaml_metadata() {
 
 #[test]
 fn gfm_restricts_yaml_metadata_to_document_start() {
-    // Pandoc's gfm reader only recognizes YAML metadata as document-leading
-    // frontmatter; mid-document `---`/`key: value`/`---` parses as a
-    // thematic break plus a setext heading.
     let tree =
         parse_blocks_gfm("First paragraph.\n\n---\ntitle: Mid Doc\n---\n\nLast paragraph.\n");
     assert!(
@@ -78,8 +75,6 @@ fn gfm_parses_document_start_yaml_metadata() {
 
 #[test]
 fn pandoc_parses_mid_document_yaml_metadata() {
-    // Pandoc's markdown reader accepts YAML metadata anywhere in the
-    // document when preceded by a blank line.
     let tree = parse_blocks("First paragraph.\n\n---\ntitle: Mid Doc\n---\n\nLast paragraph.\n");
     assert!(
         find_first(&tree, SyntaxKind::YAML_METADATA).is_some(),

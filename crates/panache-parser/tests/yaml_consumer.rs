@@ -27,7 +27,6 @@ fn oracle_path() -> PathBuf {
     manifest_dir().join("../../scripts/yaml-oracle/oracle.json")
 }
 
-/// One oracle record (subset of the fields we assert on).
 struct OracleCase {
     id: String,
     yaml12: String,
@@ -90,19 +89,16 @@ fn consumer_rejections_are_sound_against_oracle() {
 
     let mut checked = 0usize;
     for case in &cases {
-        // Frontmatter is single-document; multi-doc cases can't occur there.
         if case.multidoc {
             continue;
         }
         let input = case_input(&case.id);
 
-        // Isolate the Pool-2 effect: only consider cases the substrate accepts.
         if rejects(&input, substrate) {
             continue;
         }
         checked += 1;
 
-        // Pandoc frontmatter = {libyaml}; ground truth = pandoc_direct.
         if rejects(&input, pandoc_fm) {
             assert!(
                 is_err(&case.pandoc_direct),
@@ -113,7 +109,6 @@ fn consumer_rejections_are_sound_against_oracle() {
             );
         }
 
-        // Quarto frontmatter = {libyaml, jsyaml}; rejects iff either does.
         if rejects(&input, quarto_fm) {
             assert!(
                 is_err(&case.pandoc_direct) || is_err(&case.jsyaml),
@@ -125,7 +120,6 @@ fn consumer_rejections_are_sound_against_oracle() {
             );
         }
 
-        // RMarkdown frontmatter = {libyaml, R-yaml}; rejects iff either does.
         if rejects(&input, rmd_fm) {
             assert!(
                 is_err(&case.pandoc_direct) || is_err(&case.ryaml),
@@ -137,7 +131,6 @@ fn consumer_rejections_are_sound_against_oracle() {
             );
         }
 
-        // RMarkdown hashpipe = {R-yaml}; ground truth = ryaml.
         if rejects(&input, rmd_hp) {
             assert!(
                 is_err(&case.ryaml),
@@ -154,11 +147,8 @@ fn consumer_rejections_are_sound_against_oracle() {
     );
 }
 
-/// Coverage: the implicit-empty-key family is rejected under every real flavor,
-/// and stays accepted under the lenient flavors and the substrate.
 #[test]
 fn implicit_empty_key_rejected_by_real_consumers() {
-    // `: a` — a block mapping entry whose key is empty.
     let body = ": a\n";
     let fm = |flavor| rejects(body, YamlValidationContext::frontmatter(flavor));
 
@@ -173,7 +163,6 @@ fn implicit_empty_key_rejected_by_real_consumers() {
         "quarto hashpipe rejects empty key"
     );
 
-    // Lenient + substrate accept it (valid YAML 1.2).
     assert!(!fm(Flavor::CommonMark), "commonmark frontmatter is lenient");
     assert!(
         !rejects(body, YamlValidationContext::substrate()),
@@ -203,10 +192,8 @@ fn one_line_explicit_empty_key_rejected_by_real_consumers() {
         YamlValidationContext::hashpipe(Flavor::Quarto)
     ));
 
-    // Substrate keeps the 1.2 verdict (M2N8/00 is a valid suite case).
     assert!(!rejects(&same_line, YamlValidationContext::substrate()));
 
-    // The `:`-on-its-own-line form is accepted by every consumer.
     for body in ["?\n: x\n", "- ?\n  : x\n", "? a\n: x\n"] {
         for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
             assert!(
@@ -239,7 +226,6 @@ fn flow_empty_key_and_normal_key_accepted() {
 fn duplicate_key_rejected_by_jsyaml_and_ryaml() {
     let body = "a: 1\na: 2\n";
 
-    // js-yaml (Quarto) and R-yaml (RMarkdown) consumers reject.
     assert!(rejects(
         body,
         YamlValidationContext::frontmatter(Flavor::Quarto)
@@ -257,13 +243,11 @@ fn duplicate_key_rejected_by_jsyaml_and_ryaml() {
         "rmarkdown hashpipe (knitr/R yaml) rejects duplicate keys"
     );
 
-    // Pandoc/libyaml accepts (last value wins).
     assert!(!rejects(
         body,
         YamlValidationContext::frontmatter(Flavor::Pandoc)
     ));
 
-    // Substrate keeps the 1.2 verdict (duplicate keys are valid YAML 1.2).
     assert!(!rejects(body, YamlValidationContext::substrate()));
 }
 
@@ -303,9 +287,6 @@ fn oracle_matches_live_fixture_verdicts() {
     }
 }
 
-/// Walk the fixture tree exactly like the suite harness (`tests/yaml.rs`):
-/// top-level `in.yaml` cases plus numbered subcases under 4-char hashed
-/// parents; `name/` and `tags/` symlink indexes are skipped.
 fn collect_fixture_verdicts(root: &Path, out: &mut BTreeMap<String, String>) {
     for entry in fs::read_dir(root).expect("read fixture root") {
         let path = entry.expect("dir entry").path();

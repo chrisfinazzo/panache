@@ -13,56 +13,53 @@ mod schema_helpers;
 /// Configuration for an external code formatter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FormatterConfig {
-    /// Command to execute (e.g., "black", "air", "rustfmt")
+    /// Command to execute, such as `black`, `air`, or `rustfmt`.
     pub cmd: String,
-    /// Arguments to pass to the command (e.g., ["-", "--line-length=80"])
+    /// Arguments passed to the command.
     pub args: Vec<String>,
-    /// Whether the formatter reads from stdin (true) or requires a file path (false)
+    /// Whether the formatter reads from standard input.
     pub stdin: bool,
 }
 
-/// NEW: Language → Formatter mapping value (single formatter or chain)
+/// One formatter or a sequence of formatters for a language.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum FormatterValue {
-    /// Single formatter: r = "air"
+    /// A single formatter.
     Single(String),
-    /// Multiple formatters (sequential): python = ["isort", "black"]
+    /// Formatters run sequentially.
     Multiple(Vec<String>),
 }
 
-/// NEW: Named formatter definition (formatters.NAME sections in new format)
-/// OLD: Language-specific formatter config (formatters.LANG sections in old format)
+/// A named formatter definition from `[formatters.<name>]`.
 ///
-/// In new format, if the definition name matches a built-in preset, unspecified fields
-/// will inherit from that preset. This allows partial overrides like:
+/// Definitions named after a built-in preset inherit unspecified fields:
 ///
 /// ```toml
 /// [formatters.air]
-/// args = ["format", "--custom"]  # Overrides args, inherits cmd/stdin from built-in "air"
+/// args = ["format", "--custom"]
 /// ```
 ///
-/// Additionally, you can modify arguments incrementally using `prepend-args` and `append-args`:
+/// Arguments can also be modified with `prepend-args` and `append-args`:
 ///
 /// ```toml
 /// [formatters.air]
-/// append-args = ["-i", "2"]  # Adds args to end: ["format", "{}", "-i", "2"]
+/// append-args = ["-i", "2"]
 /// ```
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct FormatterDefinition {
-    /// Reference to a built-in preset (e.g., "air", "black") - OLD FORMAT ONLY
-    /// In new format, presets are referenced directly in [formatters] mapping
+    /// Legacy reference to a built-in preset.
     pub preset: Option<String>,
-    /// Custom command to execute (None = inherit from preset if name matches)
+    /// Custom command, or the preset command when omitted.
     pub cmd: Option<String>,
-    /// Arguments to pass (None = inherit from preset if name matches)
+    /// Arguments, or the preset arguments when omitted.
     pub args: Option<Vec<String>>,
-    /// Arguments to prepend to base args (from preset or explicit args)
+    /// Arguments prepended to the base arguments.
     pub prepend_args: Option<Vec<String>>,
-    /// Arguments to append to base args (from preset or explicit args)
+    /// Arguments appended to the base arguments.
     pub append_args: Option<Vec<String>>,
-    /// Whether the formatter reads from stdin (None = inherit from preset if name matches)
+    /// Whether the formatter reads from standard input.
     pub stdin: Option<bool>,
 }
 
@@ -70,13 +67,9 @@ pub struct FormatterDefinition {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 struct RawFormatterConfig {
-    /// Preset name (e.g., "air", "ruff") - mutually exclusive with cmd
     preset: Option<String>,
-    /// Command to execute
     cmd: Option<String>,
-    /// Arguments to pass to the command
     args: Option<Vec<String>>,
-    /// Whether the formatter reads from stdin
     stdin: bool,
 }
 
@@ -98,14 +91,12 @@ impl<'de> Deserialize<'de> for FormatterConfig {
     {
         let raw = RawFormatterConfig::deserialize(deserializer)?;
 
-        // Check mutual exclusivity of preset and cmd
         if raw.preset.is_some() && raw.cmd.is_some() {
             return Err(serde::de::Error::custom(
                 "FormatterConfig: 'preset' and 'cmd' are mutually exclusive - use one or the other",
             ));
         }
 
-        // If preset is specified, resolve it
         if let Some(preset_name) = raw.preset {
             let preset = get_formatter_preset(&preset_name).ok_or_else(|| {
                 let available = formatter_preset_names().join(", ");
@@ -121,15 +112,12 @@ impl<'de> Deserialize<'de> for FormatterConfig {
                 stdin: preset.stdin,
             })
         } else if let Some(cmd) = raw.cmd {
-            // Custom configuration
             Ok(FormatterConfig {
                 cmd,
                 args: raw.args.unwrap_or_default(),
                 stdin: raw.stdin,
             })
         } else {
-            // No preset and no cmd - return empty config
-            // This can happen with Default::default()
             Ok(FormatterConfig {
                 cmd: String::new(),
                 args: raw.args.unwrap_or_default(),
@@ -149,8 +137,7 @@ impl Default for FormatterConfig {
     }
 }
 
-/// Get a built-in formatter preset by name.
-/// Returns None if the preset doesn't exist.
+/// Returns a built-in formatter preset by name.
 fn get_formatter_preset(name: &str) -> Option<FormatterConfig> {
     formatter_presets::get_formatter_preset(name)
 }
@@ -628,43 +615,13 @@ fn default_blank_lines() -> BlankLines {
     BlankLines::Collapse
 }
 
-/// Resolve a single formatter name to a FormatterConfig.
+/// Resolves a formatter name from user definitions or built-in presets.
 ///
-/// Resolve a formatter name to a FormatterConfig.
-///
-/// Resolution order:
-/// 1. Check if it's a named definition in formatter_definitions
-///    - If name matches a built-in preset, inherit unspecified fields from preset
-///    - If name doesn't match preset, require full cmd specification
-/// 2. Fall back to built-in preset (no custom definition)
-/// 3. Error if neither found
-///
-/// # Examples
-///
-/// ```toml
-/// # Partial override - inherits cmd/stdin from built-in "air"
-/// [formatters.air]
-/// args = ["format", "--custom"]
-///
-/// # Append args to preset - final: ["format", "{}", "-i", "2"]
-/// [formatters.air]
-/// append_args = ["-i", "2"]
-///
-/// # Full custom - no preset match, requires cmd
-/// [formatters.custom-fmt]
-/// cmd = "my-formatter"
-/// args = ["--flag"]
-/// ```
 fn resolve_formatter_name(
     name: &str,
     formatter_definitions: &HashMap<String, FormatterDefinition>,
 ) -> Result<FormatterConfig, String> {
-    // Check for named definition first
     if let Some(definition) = formatter_definitions.get(name) {
-        // Named definition exists - resolve it
-
-        // NEW FORMAT: preset field not allowed in named definitions
-        // (Use direct preset reference in [formatters] mapping instead)
         if definition.preset.is_some() {
             return Err(format!(
                 "Formatter '{}': 'preset' field not allowed in named definitions. Use [formatters] mapping instead (e.g., `lang = \"{}\"`).",
@@ -672,36 +629,26 @@ fn resolve_formatter_name(
             ));
         }
 
-        // Try to load built-in preset as base (if name matches)
         let preset = get_formatter_preset(name);
 
-        // Build config by applying overrides to preset (or requiring cmd if no preset)
         match (preset, &definition.cmd) {
-            // Case 1: Preset exists - use as base and apply overrides
             (Some(mut base_config), _) => {
-                // Override cmd if specified
                 if let Some(cmd) = &definition.cmd {
                     base_config.cmd = cmd.clone();
                 }
-                // Override args if specified
                 if let Some(args) = &definition.args {
                     base_config.args = args.clone();
                 }
-                // Override stdin if specified
                 if let Some(stdin) = definition.stdin {
                     base_config.stdin = stdin;
                 }
 
-                // Apply prepend_args and append_args modifiers
                 apply_arg_modifiers(&mut base_config.args, definition);
 
                 Ok(base_config)
             }
-            // Case 2: No preset, but cmd specified - full custom formatter
             (None, Some(cmd)) => {
                 let mut args = definition.args.clone().unwrap_or_default();
-
-                // Apply prepend_args and append_args modifiers
                 apply_arg_modifiers(&mut args, definition);
 
                 Ok(FormatterConfig {
@@ -710,14 +657,12 @@ fn resolve_formatter_name(
                     stdin: definition.stdin.unwrap_or(true),
                 })
             }
-            // Case 3: No preset, no cmd - error
             (None, None) => Err(format!(
                 "Formatter '{}': must specify 'cmd' field (not a known preset)",
                 name
             )),
         }
     } else {
-        // Not a named definition - check built-in presets
         get_formatter_preset(name).ok_or_else(|| {
             format!(
                 "Unknown formatter '{}': not a named definition or built-in preset. \
@@ -728,25 +673,20 @@ fn resolve_formatter_name(
     }
 }
 
-/// Apply prepend_args and append_args modifiers to an argument list.
-///
-/// Modifiers are applied in order: prepend_args + base_args + append_args
-/// If no base args exist, they're treated as empty (user responsibility).
+/// Applies argument modifiers around the base argument list.
 fn apply_arg_modifiers(args: &mut Vec<String>, definition: &FormatterDefinition) {
-    // Prepend args if specified
     if let Some(prepend) = &definition.prepend_args {
         let mut new_args = prepend.clone();
         new_args.append(args);
         *args = new_args;
     }
 
-    // Append args if specified
     if let Some(append) = &definition.append_args {
         args.extend_from_slice(append);
     }
 }
 
-/// Resolve a language's formatter value (single or multiple) to a list of FormatterConfigs.
+/// Resolves the formatter chain for a language.
 fn resolve_language_formatters(
     lang: &str,
     value: &FormatterValue,
@@ -757,7 +697,6 @@ fn resolve_language_formatters(
         FormatterValue::Multiple(names) => names.iter().map(|s| s.as_str()).collect(),
     };
 
-    // Resolve each formatter name
     formatter_names
         .into_iter()
         .map(|name| {
@@ -894,7 +833,7 @@ fn resolve_formatter_table(
     let mut mappings = HashMap::new();
     let mut definitions = HashMap::new();
 
-    // First pass: separate mappings from definitions
+    // Definitions must be collected before language mappings can be resolved.
     for (key, value) in table {
         match &value {
             toml::Value::String(_) | toml::Value::Array(_) => {
@@ -930,7 +869,6 @@ fn resolve_formatter_table(
         }
     }
 
-    // Second pass: resolve mappings using definitions
     let mut resolved = HashMap::new();
     for (lang, value) in mappings {
         match resolve_language_formatters(&lang, &value, &definitions) {

@@ -26,7 +26,6 @@ fn image_with_full_attributes() {
     let input = "![Figure 1](fig1.png){#fig-1 .large width=\"80%\" height=\"auto\"}\n";
     let output = format(input, None, None);
     eprintln!("Output: {}", output);
-    // The formatter normalizes quotes correctly, check without escaped quotes
     assert!(output.contains("![Figure 1](fig1.png){#fig-1 .large"));
     assert!(output.contains("width="));
     assert!(output.contains("80%"));
@@ -44,7 +43,6 @@ fn image_without_attributes() {
 
 #[test]
 fn multiple_images_with_attributes() {
-    // Use very long line width to avoid wrapping
     let cfg = panache_formatter::ConfigBuilder::default()
         .line_width(200)
         .build();
@@ -67,17 +65,14 @@ fn image_attributes_in_paragraph() {
 
 #[test]
 fn image_space_before_attributes() {
-    // Space between ) and { should not parse as attributes
     let input = "![test](img.png) {.large}\n";
     let output = format(input, None, None);
     assert!(output.contains("![test](img.png)"));
-    // The {.large} should be treated as regular text
     assert!(output.contains("{.large}"));
 }
 
 #[test]
 fn image_in_implicit_figure() {
-    // Image alone in paragraph (implicit figure in Pandoc conversion)
     let input = "![Figure caption](figure.png){#fig-1 .wide}\n";
     let output = format(input, None, None);
     assert!(output.contains("![Figure caption](figure.png){#fig-1 .wide}"));
@@ -105,6 +100,5 @@ fn image_attributes_with_wrapping() {
         .build();
     let input = "This is a long paragraph with an ![embedded image](img.png){.small} that should wrap at the configured width.\n";
     let output = format(input, Some(cfg), None);
-    // Should preserve image with attributes even when wrapping
     assert!(output.contains("![embedded image](img.png){.small}"));
 }

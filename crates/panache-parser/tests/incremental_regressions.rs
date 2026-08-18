@@ -33,22 +33,11 @@ fn assert_full_parse_lossless(input: &str) {
     );
 }
 
-// Fuzz find: snippet lazy_list, seed 2654436281, single edit #30 (minimized).
-// A reference definition on the line after a list item's text is emitted
-// *before* the buffered item text, reordering the document's bytes:
-// "- a\n[x]: /url\n" round-trips as "- [x]: /url\na\n". Through
-// `panache format` the refdef line and the item text swap places. Fixed by
-// `fix(parser): keep refdefs from interrupting list items`.
 #[test]
 fn full_parse_lossless_refdef_after_list_item_line() {
     assert_full_parse_lossless("- a\n[x]: /url\n");
 }
 
-// Fuzz find: small.qmd, seed 12648430, single edit #75 (minimized).
-// A line-block marker (`| `) as indented list-item continuation, followed
-// by a lazy line with a trailing pipe, panics the block parser outright:
-// "marker presence verified upstream" in `blocks/line_blocks.rs`. Fixed by
-// `fix(parser): match line-block peek to emitted prefix`.
 #[test]
 fn full_parse_must_not_panic_on_line_block_in_list_item() {
     let input = "- x\n\n  | a\n b |\n";
@@ -56,33 +45,11 @@ fn full_parse_must_not_panic_on_line_block_in_list_item() {
     assert_eq!(tree.text().to_string(), input);
 }
 
-// Fuzz find: snippet lazy_blockquote, seed 1374496257, batch #0 (minimized).
-// A `---` line directly after a blockquote line duplicates the quote
-// marker: "> a\n---\nb\n" round-trips as "> > a\n---\nb\n". Through
-// `panache format` the input becomes "> ## > a\nb" - marker duplicated and
-// the thematic break folded into a setext heading. Fixed by
-// `fix(parser): let setext claim a quoted line at top level`; pandoc reads
-// the input as a top-level `Header 2 [Str ">", Space, Str "a"]`.
 #[test]
 fn full_parse_lossless_thematic_break_after_blockquote() {
     assert_full_parse_lossless("> a\n---\nb\n");
 }
 
-// Fuzz finds: snippets mid_document_yaml / hashpipe / fenced_code, pandoc and
-// quarto tiers (minimized). A setext underline directly after a setext
-// heading took the `follows_setext_heading` escape in
-// `SetextHeadingParser::detect_prepared` and returned `Yes` while the next
-// paragraph was still buffered, which breaks the block-dispatch contract at
-// `core.rs`: the heading is emitted *before* the buffered bytes, reordering
-// the CST. Debug builds tripped the contract's `debug_assert!`; release
-// builds silently produced the reordering, so both shapes are pinned as
-// losslessness failures. Pandoc-dialect only -- CommonMark folds the open
-// paragraph into the heading instead. Fixed by
-// `fix(parser): gate the setext-after-setext escape`, which suppresses the
-// escape while a paragraph or a list item's content is open. Gating rather
-// than returning `YesCanInterrupt` is what the fix had to be: the core's
-// `Yes`-with-open-paragraph arm is load-bearing for CommonMark's multi-line
-// setext fold, and interrupting would flush the paragraph out from under it.
 #[test]
 fn full_parse_lossless_setext_underline_after_setext_heading() {
     assert_full_parse_lossless("a\nb\n---\nc\n---\n");
@@ -100,13 +67,6 @@ fn check_incremental(before: &str, old_edit: (usize, usize), insert: &str) {
     check_incremental_via(before, old_edit, insert, None);
 }
 
-/// [`check_incremental`], asserting *which* strategy ran.
-///
-/// A reproducer whose document is small or whose window is wide gets declined
-/// by the guard cascade and falls back to a full parse, at which point the
-/// oracle compares a full parse against itself and the test passes without
-/// exercising anything. Any case pinning a *splice* bug names its strategy so
-/// that it fails loudly instead of going quiet.
 fn check_incremental_strategy(
     before: &str,
     old_edit: (usize, usize),
@@ -153,101 +113,41 @@ fn check_incremental_via(
     );
 }
 
-// Fuzz find: snippet unterminated_fence, seed 2654436537, single edit #153.
-// Inserting at the blank line between an unterminated fence and the next
-// paragraph produced a restart offset *after* the insertion point, so the
-// splice retained stale bytes and dropped the inserted `\`. Fixed by the
-// restart <= edit-start guard in `reparse_ranges`.
 #[test]
 fn insertion_at_blank_line_after_unterminated_fence() {
     check_incremental("```\ncode\n\npara after\n", (9, 9), "\\");
 }
 
-// Fuzz find: snippet use_before_refdef, tier pandoc, seed 1374497537,
-// batch #43, chain step #1 (minimized). A suffix starting with a lone `:`
-// reaches *backward* across the seam's blank line and promotes the retained
-// paragraph into a definition-list `TERM`; parsed standalone it is only a
-// paragraph, so the splice had two blocks where a full parse has one
-// `DEFINITION_LIST`. Pandoc allows a blank line between term and definition,
-// which is why blank-line separation does not decouple them. Fixed by pairing
-// `last_retained_block_is_paragraph` with
-// `first_nonblank_line_is_definition_marker`.
 #[test]
 fn definition_marker_suffix_after_a_retained_paragraph() {
     check_incremental("see [x] and [foo] here\n\nmore prose\n", (24, 35), ":");
 }
 
-// The `~` spelling of the same marker, which the list-continuation guard's
-// character set does not cover.
 #[test]
 fn tilde_definition_marker_suffix_after_a_retained_paragraph() {
     check_incremental("term line\n\nmore prose\n", (11, 22), "~ definition\n");
 }
 
-// Found by an exhaustive sweep of the definition-list seam while retiring
-// `first_block_has_trailing_definition_marker` (below), which was the only
-// guard keyed on a retained `DEFINITION_LIST` -- a shape no case pinned. The
-// coupling is stronger than the retained-*paragraph* one above: pandoc pairs a
-// term with any number of definitions, so consecutive items join into a single
-// `DEFINITION_LIST` node and a marker in the window reaches back into the
-// retained list. Standalone the window is its own list, so the splice had two
-// adjacent `DEFINITION_LIST`s where a full parse has one. Fixed by pairing a
-// retained `DEFINITION_LIST` with `has_definition_marker_line`.
 #[test]
 fn definition_marker_suffix_after_a_retained_definition_list() {
     check_incremental("term\n\n: definition\n\nmore prose\n", (20, 24), "~");
 }
 
-// The same coupling with the marker *not* leading the window: appending a lone
-// `:` at EOF makes `more prose` a term, so the window opens a definition list
-// whose marker is on its second line. This is why the guard scans the whole
-// window rather than its first non-blank line.
 #[test]
 fn definition_list_grown_below_a_retained_definition_list() {
     check_incremental("term\n\n: definition\n\nmore prose\n", (31, 31), ":");
 }
 
-// Fuzz find: snippet pipe_table, tier pandoc, seed 2654434233, single edit
-// #244 (minimized). The same `:` line after a *table* is that table's
-// caption rather than a definition term, so the retained table grows to
-// swallow the seam.
 #[test]
 fn caption_marker_suffix_after_a_retained_table() {
     check_incremental("| a | b |\n|---|---|\n| 1 | 2 |\n\npara\n", (31, 35), ":");
 }
 
-// Fuzz find: snippet hr_vs_setext, tier pandoc, seed 1374499073, batch #72
-// (minimized). The mirror image of the two above: `---` is a multiline-table
-// border as well as a thematic break, so suffix content can turn the
-// *retained* rule into the top rule of a table spanning the seam.
-// `prefix_fence_state_is_stable` cannot carry this one -- dash runs are far
-// too common for a parity count -- so the guard is on the retained block kind.
 #[test]
 fn suffix_content_can_reinterpret_a_retained_thematic_break() {
     check_incremental("- a\n\n---\n\n- b\n", (12, 13), "---\nk: v\n---\n");
 }
 
-// Fuzz find: medium_quarto.qmd, seed 12648174, single edit #15.
-// A 22-byte deletion inside a `:::` callout body (swallowing the
-// `{download="hello.qmd"}` attribute and the line break before the `:::`
-// closer) made the section-window reparse diverge from a full parse: the
-// window was parsed as a standalone document, and the mangled div context
-// leaked across the window boundary. Fixed by parsing the section tail to
-// EOF and re-adopting the old suffix only on structural equality.
-//
-// The reproducer is *synthetic*, not the corpus bytes: `medium_quarto.qmd` is
-// gitignored and `benches/documents/download.sh` no longer produces it, so a
-// corpus-reading test fails on every clean checkout. What it reconstructs is
-// the shape from the fuzz case -- a deletion that glues a callout's closing
-// `:::` onto its content line, leaving the div unterminated so it swallows
-// everything below the window -- with enough prose above the section heading
-// to keep the window under the size cutoff. The strategy it pins is
-// `suffix_window`: the section window is *chosen*, and then the fix's
-// structural-equality check refuses to re-adopt the old suffix (the
-// unterminated div now swallows the section below it), degrading to a
-// wholesale suffix splice. Pinning that is what keeps the case honest --
-// a fallback to a full parse would compare a full parse against itself,
-// and a `section_window` result would mean the leak was re-adopted.
 fn callout_document() -> String {
     let mut doc = String::from("---\ntitle: Callouts\n---\n\n# Overview\n\n");
     for i in 0..40 {
@@ -256,8 +156,6 @@ fn callout_document() -> String {
         ));
     }
     doc.push_str("## Downloads\n\n::: {.callout-note}\nGrab the [example](hello.qmd){download=\"hello.qmd\"}\n:::\n\nTrailing prose inside the edited section.\n\n");
-    // A section *below* the window is what makes this case a leak rather than
-    // a reparse to EOF: the unterminated div has somewhere to escape to.
     doc.push_str("## Afterword\n\nProse the mangled div must not swallow.\n");
     doc
 }
@@ -266,8 +164,6 @@ fn callout_document() -> String {
 fn section_window_divergence_on_mangled_div_in_callout() {
     let before = callout_document();
     let attr = before.find("{download=").expect("attribute present");
-    // 22 bytes: all but the opening brace of `{download="hello.qmd"}`, plus
-    // the newline that separates it from the `:::` closer.
     let old_edit = (attr + 1, attr + 1 + 22);
     assert!(
         before[old_edit.0..old_edit.1].ends_with("\"}\n"),

@@ -36,9 +36,6 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
                     match element {
                         NodeOrToken::Token(t) => {
                             if t.kind() == SyntaxKind::NEWLINE {
-                                // Collapse internal newlines (multi-line setext
-                                // content like `Foo\nBar\n---`) to a single
-                                // space so the heading re-emits as one ATX line.
                                 if !content.ends_with(' ') {
                                     content.push(' ');
                                 }
@@ -66,8 +63,6 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
         }
     }
 
-    // The parser splits the closing run off into its own marker token, so
-    // whatever is left is content; only surrounding whitespace goes.
     let content = content.trim();
 
     let mut out = "#".repeat(level);
@@ -75,15 +70,6 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
         out.push(' ');
         out.push_str(content);
     }
-    // A closing run is decoration and normally dropped --- except when it is
-    // load-bearing, i.e. when the content it leaves in front of the line ending
-    // would read back as decoration itself. pandoc reads a heading's attribute
-    // block only *after* the run, so the run is what keeps a trailing `{...}`
-    // in the content out of the attributes: `# foo {#id} #` is `Header 1
-    // (foo-id) [Str "foo", Space, Str "{#id}"]`, and dropping the run would
-    // rewrite the id to `id`. A content hash at the end of the line is the same
-    // story one level down: the `#` in `# foo # #` is content, but alone on the
-    // line it closes the heading instead.
     if content_reads_as_decoration(content, &config.parser_options()) {
         out.push_str(" #");
     }

@@ -42,11 +42,6 @@ fn default_style_still_expands_to_line_width() {
     assert_eq!(out, "------------\n");
 }
 
-// `---` doubles as a YAML metadata delimiter: a *tight* `---\nkey: value\n---`
-// is consumed as a metadata block (matching pandoc), even mid-document. The
-// compact style is only safe because the formatter guarantees blank lines
-// around rules, which breaks that reading. These tests pin the invariant.
-
 #[test]
 fn compact_rule_before_yaml_shaped_paragraph_is_idempotent() {
     let input = "a\n\n***\n\nkey: value\n";
@@ -76,8 +71,6 @@ fn compact_rule_at_top_of_file_does_not_become_frontmatter() {
 
 #[test]
 fn compact_rule_adjacent_to_text_in_blockquote_is_idempotent() {
-    // Blockquotes don't get a blank line after the rule; the output must
-    // still be a fixed point (no YAML/setext reinterpretation inside).
     let input = "> a\n>\n> ***\n> key: value\n";
     let out = format(input, Some(compact_config()), None);
     assert!(out.contains("> ---\n"), "compact rule missing: {out:?}");
@@ -86,9 +79,6 @@ fn compact_rule_adjacent_to_text_in_blockquote_is_idempotent() {
 
 #[test]
 fn compact_rule_interrupting_paragraph_gains_blank_lines_under_gfm() {
-    // Under GFM a thematic break interrupts a paragraph, and a `---` directly
-    // under text would be a setext underline; blank-line separation must
-    // prevent both readings on the second pass.
     let input = "a\n***\nkey: value\n";
     let expected = "a\n\n---\n\nkey: value\n";
     let out = format(input, Some(compact_gfm_config()), None);

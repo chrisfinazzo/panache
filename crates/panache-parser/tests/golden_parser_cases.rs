@@ -17,7 +17,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Find a file with given base name and any supported extension.
 fn find_file_with_extension(dir: &Path, base: &str) -> Option<PathBuf> {
     for ext in &["md", "qmd", "Rmd", "svx"] {
         let path = dir.join(format!("{}.{}", base, ext));
@@ -28,7 +27,6 @@ fn find_file_with_extension(dir: &Path, base: &str) -> Option<PathBuf> {
     None
 }
 
-/// Load parser options from test case directory if parser-options.toml exists.
 fn load_test_parser_options(dir: &Path) -> Option<ParserOptions> {
     let config_path = dir.join("parser-options.toml");
     if !config_path.exists() {
@@ -57,8 +55,6 @@ fn load_test_parser_options(dir: &Path) -> Option<ParserOptions> {
         options.extensions = Extensions::for_flavor(flavor);
     }
 
-    // `pandoc-compat` pins a case to the target it was written against, for
-    // shapes a later pandoc stopped producing at all.
     if let Some(compat_str) = value.get("pandoc-compat").and_then(toml::Value::as_str) {
         options.pandoc_compat = match compat_str {
             "3.7" => PandocCompat::V3_7,
@@ -82,7 +78,6 @@ fn load_test_parser_options(dir: &Path) -> Option<ParserOptions> {
     Some(options)
 }
 
-/// Run parser-only checks for a single golden case.
 fn run_golden_case(case_name: &str) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -158,10 +153,6 @@ macro_rules! golden_test_cases {
     };
 }
 
-// Generate test functions for each case directory.
-// To add a new test case:
-// 1. Create a new directory under crates/panache-parser/tests/fixtures/cases/
-// 2. Add the directory name to this list
 golden_test_cases!(
     adjacent_simple_then_pipe_table_captions,
     alerts,

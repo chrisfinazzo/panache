@@ -32,9 +32,6 @@ fn apply_edit(text: &str, old: (usize, usize), insert: &str) -> String {
     out
 }
 
-/// Replace the first occurrence of `find` with `insert`, reparse
-/// incrementally, and assert the strategy, the error count, and — the point of
-/// the file — that the spliced errors equal a full parse's.
 fn check(input: &str, find: &str, insert: &str, expected_strategy: &str, expected_errors: usize) {
     let (old_tree, old_errors) = parse_with_errors(input, None);
     let start = input
@@ -65,11 +62,6 @@ fn check(input: &str, find: &str, insert: &str, expected_strategy: &str, expecte
     );
 }
 
-// --- suffix window ------------------------------------------------------
-
-/// Malformed frontmatter stays in the *retained prefix*: nothing in the
-/// reparsed window can re-derive it, so it exists only in `old_errors`. This
-/// is the case a splice that dropped the prefix bucket would fail.
 #[test]
 fn suffix_window_unchanged_error_in_the_retained_prefix() {
     check(
@@ -116,17 +108,12 @@ fn suffix_window_carries_prefix_error_while_introducing_a_window_error() {
     );
 }
 
-// --- section window -----------------------------------------------------
-
 const SECTIONS: &str =
     "# One\n\npara one\n\n## Two\n\n---\ntitle: ok\n---\n\npara two\n\n# Three\n\npara three\n";
 
 const SECTIONS_BROKEN: &str =
     "# One\n\npara one\n\n## Two\n\n---\ntitle: [\n---\n\npara two\n\n# Three\n\npara three\n";
 
-/// The edit is in the last section, so the window runs from `# Three` to EOF
-/// and the malformed block two sections above it is prefix-bucket: carried,
-/// never re-derived.
 #[test]
 fn section_window_unchanged_error_before_the_window() {
     check(
@@ -148,11 +135,6 @@ fn section_window_error_fixed_inside_the_window() {
     check(SECTIONS_BROKEN, "[", "ok", "section_window", 0);
 }
 
-// --- full-parse bail ----------------------------------------------------
-
-/// The refdef guard bails on a `]:` near the edit. A bail is a plain full
-/// parse, so its errors are correct by construction — but only if the bail
-/// path actually reports them rather than returning an empty vector.
 #[test]
 fn full_reparse_bail_still_reports_errors() {
     check(
@@ -186,18 +168,6 @@ fn full_reparse_bail_reports_an_error_the_edit_fixes() {
     );
 }
 
-// --- region tier --------------------------------------------------------
-//
-// The region tier is the only strategy with a *third* bucket. Both window
-// strategies parse from their window start to EOF, so every error downstream of
-// the seam is re-derived by the window parse and nothing survives to be moved.
-// A bounded region leaves a live suffix, whose errors are carried *and shifted*
-// by the edit delta -- which is why none of the cases above can express what
-// the three below do.
-
-/// Pad `input` so that every window the cascade could choose leaves more than
-/// the 85% cutoff downstream, which is what routes an early edit past the
-/// window tiers and into the region tier.
 fn with_trailing_filler(input: &str) -> String {
     let mut out = String::from(input);
     assert!(out.ends_with("\n\n"), "filler must start on a blank line");
@@ -207,12 +177,6 @@ fn with_trailing_filler(input: &str) -> String {
     out
 }
 
-/// The third bucket, end to end: an error *before* the region is carried with
-/// its offsets untouched, and an error *after* it moves by the edit delta.
-///
-/// A merge that forgot to shift the trailing error would still produce the
-/// right *count*, which is why this file compares the whole vector against a
-/// full parse rather than counting.
 #[test]
 fn region_carries_an_error_before_it_and_shifts_one_after_it() {
     let input =
@@ -220,16 +184,12 @@ fn region_carries_an_error_before_it_and_shifts_one_after_it() {
     check(&input, "Alpha", "Alpha and then some more", "region", 2);
 }
 
-/// An error the edit *introduces* inside the region. The `---` delimiters are
-/// pairing lines, but they sit inside the region and the edit leaves them
-/// alone, so the long-range guard admits it.
 #[test]
 fn region_reports_an_error_the_edit_introduces_inside_it() {
     let input = with_trailing_filler("Intro para.\n\n---\nkey: ok\n---\n\n");
     check(&input, "ok", "[", "region", 1);
 }
 
-/// And one it fixes.
 #[test]
 fn region_reports_an_error_the_edit_fixes_inside_it() {
     let input = with_trailing_filler("Intro para.\n\n---\nkey: [\n---\n\n");

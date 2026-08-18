@@ -22,8 +22,6 @@ use panache_parser::parser::yaml::{
 
 const PREFIX: &str = "#|";
 
-/// Replicates the production `normalize_hashpipe_input` baseline: strip
-/// `#|` plus at most one following space from each line, join with `\n`.
 fn strip_baseline(input: &str) -> String {
     input
         .lines()
@@ -35,8 +33,6 @@ fn strip_baseline(input: &str) -> String {
         .join("\n")
 }
 
-/// Each case: a label and a `#|`-prefixed payload. The label names the
-/// scanner accounting path the shape stresses.
 const CORPUS: &[(&str, &str)] = &[
     ("single_line_map", "#| echo: true\n#| warning: false\n"),
     ("no_space_after_marker", "#|echo: true\n#|warning: false\n"),
@@ -52,26 +48,18 @@ const CORPUS: &[(&str, &str)] = &[
     ("tag_value", "#| transform: !expr 1 + 1\n"),
     ("flow_collection", "#| layout: [[1, 1], [1]]\n"),
     ("blank_line_between_keys", "#| a: 1\n#|\n#| b: 2\n"),
-    // Multi-line plain scalar continuation: stresses the plain-scalar
-    // continuation column check.
     (
         "plain_multiline_value",
         "#| fig-cap: Comparing ROC\n#|   and PR curve\n",
     ),
-    // Single-quoted multi-line scalar: stresses the flow-scalar
-    // continuation skip.
     (
         "quoted_multiline_value",
         "#| fig-cap: 'Comparing ROC (left) and PR curve (right) for a random forest\n#|   trained on a task.'\n",
     ),
-    // Literal block scalar with an interior blank line: stresses the
-    // block-scalar content loop and the blank `#|` line.
     (
         "literal_block_scalar_blank_line",
         "#| fig-alt: |\n#|   First paragraph.\n#|\n#|   Second paragraph.\n",
     ),
-    // Folded block scalar with auto-detected indent: stresses
-    // `auto_detect_block_scalar_indent` under a prefix.
     (
         "folded_block_scalar",
         "#| desc: >\n#|   long folded\n#|   text here\n",
@@ -113,17 +101,8 @@ fn prefix_aware_validation_agrees_with_baseline() {
     }
 }
 
-/// A *composite* prefix — a container prefix (list indent, blockquote
-/// marker) prepended to `#|` — parses identically to the top-level case.
-/// Within a hashpipe preamble the container prefix is uniform per line, and
-/// the prefix machinery matches the marker via length-agnostic `strip_prefix`
-/// and resets the column, so a longer marker needs no scanner/builder change.
-/// This is what lets the host (step 4b) splice list- and blockquote-nested
-/// hashpipe cells through the same prefix-aware path as top-level cells, with
-/// the whole prefix peeled into one opaque `YAML_LINE_PREFIX` leaf.
 #[test]
 fn composite_prefix_matches_stripped_baseline() {
-    // (label, composite marker, prefixed input, expected stripped baseline)
     let cases: &[(&str, &str, &str, &str)] = &[
         (
             "list_indent_single_line_map",

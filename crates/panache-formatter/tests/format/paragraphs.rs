@@ -58,10 +58,6 @@ fn standalone_presentation_pause_stays_idempotent_with_wrapping() {
     assert!(first.contains("\n\n. . .\n\n"));
 }
 
-// A mid-sentence `+` conjunction must survive reflow without being reparsed as
-// a bullet-list marker when it lands at column 1 on a wrapped line. Formatting
-// must be idempotent: re-formatting the wrapped output must not insert a blank
-// line or convert the continuation line into a list.
 #[test]
 fn plus_conjunction_at_wrapped_line_start_is_idempotent() {
     let input = "Övrig blandad inkomst (inkomst från fåmansföretag, aktiv + passiv ej pensionsgrundande inkomst) redovisas.\n";
@@ -71,8 +67,6 @@ fn plus_conjunction_at_wrapped_line_start_is_idempotent() {
     assert!(!first.contains("\n\n"), "no list interruption: {first:?}");
 }
 
-// A `-` before a year inside emphasis must not be reinterpreted as a list
-// marker. The sentence fits on one line, so it stays unchanged and idempotent.
 #[test]
 fn dash_before_year_in_emphasis_is_idempotent() {
     let input = "*Se \"Registerbaserade arbetsmarknadsstatistiken - 2004\".*\n";
@@ -82,7 +76,6 @@ fn dash_before_year_in_emphasis_is_idempotent() {
     similar_asserts::assert_eq!(second, first);
 }
 
-// Guard: a genuine bullet list still formats (and stays) a list.
 #[test]
 fn genuine_bullet_list_stays_a_list() {
     let input = "- a\n- b\n";
@@ -101,10 +94,6 @@ fn gfm_config(line_width: usize) -> Config {
     }
 }
 
-// Under the CommonMark dialect (gfm/commonmark) a list interrupts a paragraph
-// with no blank line, so a `+` conjunction reflowed to column 1 becomes a list
-// marker and the second pass inserts a blank line. Reflow must keep the marker
-// off the line start; format twice must equal format once.
 #[test]
 fn plus_conjunction_reflow_is_idempotent_under_gfm() {
     let input = "Näringsinkomst netto egenavgift Övrig blandad inkomst (inkomst från fåmansföretag, aktiv + passiv ej pensionsgrundande inkomst)\n";
@@ -112,7 +101,6 @@ fn plus_conjunction_reflow_is_idempotent_under_gfm() {
     let first = format(input, Some(config.clone()), None);
     let second = format(&first, Some(config), None);
     similar_asserts::assert_eq!(first, second);
-    // The `+` must not land at column 1 (which would parse as a list item).
     assert!(
         !first.lines().any(|l| l.starts_with("+ ")),
         "marker reflowed to line start: {first:?}"
@@ -120,7 +108,6 @@ fn plus_conjunction_reflow_is_idempotent_under_gfm() {
     assert!(!first.contains("\n\n"), "no list interruption: {first:?}");
 }
 
-// Guard: a genuine bullet list under gfm still formats as a list.
 #[test]
 fn genuine_bullet_list_stays_a_list_under_gfm() {
     let input = "- a\n- b\n";

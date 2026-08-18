@@ -118,7 +118,6 @@ pub(in crate::parser) struct ListItemEmissionInput<'a> {
 /// also present), so the `String` cost is moved off the no-match path.
 fn try_parse_roman_numeral(text: &str, uppercase: bool) -> Option<usize> {
     let bytes = text.as_bytes();
-    // Take while ASCII char is one of `IVXLCDM` (case-folded).
     let mut count = 0usize;
     while count < bytes.len() {
         let b = bytes[count];
@@ -137,8 +136,6 @@ fn try_parse_roman_numeral(text: &str, uppercase: bool) -> Option<usize> {
         return None;
     }
 
-    // For single-character numerals, only accept the most common ones to avoid
-    // ambiguity with alphabetic list markers (a-z, A-Z).
     if count == 1 {
         let upper = bytes[0] & !0x20;
         if !matches!(upper, b'I' | b'V' | b'X') {
@@ -146,8 +143,6 @@ fn try_parse_roman_numeral(text: &str, uppercase: bool) -> Option<usize> {
         }
     }
 
-    // Reject sequences of >= 4 consecutive same chars (case-insensitive).
-    // Also reject doubled V/L/D (only ever appear once in valid Romans).
     let mut run_byte = 0u8;
     let mut run_len = 0usize;
     for &b in &bytes[..count] {
@@ -165,8 +160,6 @@ fn try_parse_roman_numeral(text: &str, uppercase: bool) -> Option<usize> {
         }
     }
 
-    // Validate subtractive notation: V/L/D can never precede a larger
-    // numeral; I, X, C only precede the next two larger units.
     fn val(upper: u8) -> u32 {
         match upper {
             b'I' => 1,
@@ -296,28 +289,19 @@ pub(crate) fn try_parse_list_marker_with(
     detect: ListMarkerDetect,
     open_alpha_hint: OpenListHint,
 ) -> Option<ListMarkerMatch> {
-    // Trailing newlines should not block bare-marker detection; the line `*\n`
-    // is a bare bullet marker and the post-marker text is logically empty.
     let line = trim_end_newlines(line);
     let (_indent_cols, indent_bytes) = leading_indent(line);
     let trimmed = &line[indent_bytes..];
 
-    // A thematic-break line is never a list marker: pandoc's
-    // `bulletListStart` runs `notFollowedBy' hrule` and CommonMark 4.1 gives
-    // the break precedence, so `- - -` and `* * *` resolve toward the rule.
-    // Tested at any indent --- a deeper spaced run is a rule inside the
-    // enclosing item (or indented code), still never a marker.
     if crate::parser::blocks::horizontal_rules::try_parse_horizontal_rule(trimmed).is_some() {
         return None;
     }
 
-    // Try bullet markers (including task lists)
     if let Some(ch) = trimmed.chars().next()
         && matches!(ch, '*' | '+' | '-')
     {
         let after_marker = &trimmed[1..];
 
-        // Check for task list: [ ] or [x] or [X]
         let trimmed_after = after_marker.trim_start();
         let is_task = trimmed_after.starts_with('[')
             && trimmed_after.len() >= 3
@@ -327,7 +311,6 @@ pub(crate) fn try_parse_list_marker_with(
             )
             && trimmed_after.chars().nth(2) == Some(']');
 
-        // Must be followed by whitespace (or be task list)
         if after_marker.starts_with(' ')
             || after_marker.starts_with('\t')
             || after_marker.is_empty()
@@ -345,7 +328,6 @@ pub(crate) fn try_parse_list_marker_with(
         }
     }
 
-    // Try ordered markers
     if detect.fancy_lists
         && let Some(after_marker) = trimmed.strip_prefix("#.")
         && (after_marker.starts_with(' ')
@@ -363,17 +345,14 @@ pub(crate) fn try_parse_list_marker_with(
         });
     }
 
-    // Try example lists: (@) or (@label)
     if detect.example_lists
         && let Some(rest) = trimmed.strip_prefix("(@")
     {
-        // Check if it has a label or is just (@)
         let label_end = rest
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
             .count();
 
-        // Must be followed by ')'
         if rest.len() > label_end && rest.chars().nth(label_end) == Some(')') {
             let label = if label_end > 0 {
                 Some(rest[..label_end].to_string())
@@ -400,10 +379,8 @@ pub(crate) fn try_parse_list_marker_with(
         }
     }
 
-    // Try parenthesized markers: (2), (a), (ii)
     if let Some(rest) = trimmed.strip_prefix('(') {
         if detect.fancy_lists {
-            // Try decimal: (2)
             let digit_count = rest.chars().take_while(|c| c.is_ascii_digit()).count();
             if digit_count > 0
                 && rest.len() > digit_count
@@ -432,11 +409,7 @@ pub(crate) fn try_parse_list_marker_with(
             }
         }
 
-        // Try fancy lists if enabled (parenthesized markers)
         if detect.fancy_lists {
-            // Try Roman numerals first (to avoid ambiguity with letters i, v, x, etc.)
-
-            // Try lowercase Roman: (ii)
             if let Some(len) = try_parse_roman_numeral(rest, false)
                 && rest.len() > len
                 && rest.as_bytes()[len] == b')'
@@ -469,7 +442,6 @@ pub(crate) fn try_parse_list_marker_with(
                 }
             }
 
-            // Try uppercase Roman: (II)
             if let Some(len) = try_parse_roman_numeral(rest, true)
                 && rest.len() > len
                 && rest.as_bytes()[len] == b')'
@@ -502,7 +474,6 @@ pub(crate) fn try_parse_list_marker_with(
                 }
             }
 
-            // Try lowercase letter: (a)
             if let Some(ch) = rest.chars().next()
                 && ch.is_ascii_lowercase()
                 && rest.len() > 1
@@ -528,7 +499,6 @@ pub(crate) fn try_parse_list_marker_with(
                 }
             }
 
-            // Try uppercase letter: (A)
             if let Some(ch) = rest.chars().next()
                 && ch.is_ascii_uppercase()
                 && rest.len() > 1
@@ -556,11 +526,8 @@ pub(crate) fn try_parse_list_marker_with(
         }
     }
 
-    // Try decimal numbers: 1. or 1)
     let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
     if digit_count > 0 && trimmed.len() > digit_count {
-        // CommonMark restricts ordered list markers to 1-9 digits (spec §5.2).
-        // Pandoc-markdown accepts arbitrary digit counts.
         if detect.dialect == crate::Dialect::CommonMark && digit_count > 9 {
             return None;
         }
@@ -573,8 +540,6 @@ pub(crate) fn try_parse_list_marker_with(
             Some(')') => (ListDelimiter::RightParen, digit_count + 1),
             _ => return None,
         };
-        // CommonMark §5.2: decimal `1)` markers are part of the core grammar.
-        // Pandoc-markdown gates `)`-style ordered markers behind `fancy_lists`.
         if style == ListDelimiter::RightParen
             && !detect.fancy_lists
             && detect.dialect != crate::Dialect::CommonMark
@@ -602,11 +567,7 @@ pub(crate) fn try_parse_list_marker_with(
         }
     }
 
-    // Try fancy lists if enabled (non-parenthesized)
     if detect.fancy_lists {
-        // Try Roman numerals first, as they may overlap with letters
-
-        // Try lowercase Roman: i. or ii)
         if let Some(len) = try_parse_roman_numeral(trimmed, false)
             && trimmed.len() > len
             && let delim = trimmed.as_bytes()[len]
@@ -646,7 +607,6 @@ pub(crate) fn try_parse_list_marker_with(
             }
         }
 
-        // Try uppercase Roman: I. or II)
         if let Some(len) = try_parse_roman_numeral(trimmed, true)
             && trimmed.len() > len
             && let delim = trimmed.as_bytes()[len]
@@ -667,11 +627,6 @@ pub(crate) fn try_parse_list_marker_with(
             let marker_len = len + 1;
 
             let after_marker = &trimmed[marker_len..];
-            // Pandoc: single-character uppercase Roman (I, V, X, L, C, D, M)
-            // followed by `.` requires two spaces, to avoid confusion with
-            // initials like "I. M. Pei". Multi-character romans (II., XII.,
-            // …) and the right-paren form (I)) only need one space. See
-            // pandoc/src/Text/Pandoc/Readers/Markdown.hs `orderedListStart`.
             let min_spaces = if delim == b'.' && len == 1 { 2 } else { 1 };
             let (effective_cols, _) = leading_indent_from(after_marker, _indent_cols + marker_len);
 
@@ -695,7 +650,6 @@ pub(crate) fn try_parse_list_marker_with(
             }
         }
 
-        // Try lowercase letter: a. or a)
         if let Some(ch) = trimmed.chars().next()
             && ch.is_ascii_lowercase()
             && trimmed.len() > 1
@@ -726,7 +680,6 @@ pub(crate) fn try_parse_list_marker_with(
             }
         }
 
-        // Try uppercase letter: A. or A)
         if let Some(ch) = trimmed.chars().next()
             && ch.is_ascii_uppercase()
             && trimmed.len() > 1
@@ -741,7 +694,6 @@ pub(crate) fn try_parse_list_marker_with(
             let marker_len = 2;
 
             let after_marker = &trimmed[marker_len..];
-            // Special rule: uppercase letter with period needs 2 spaces minimum
             let min_spaces = if delim == '.' { 2 } else { 1 };
             let (effective_cols, _) = leading_indent_from(after_marker, _indent_cols + marker_len);
 
@@ -766,11 +718,6 @@ pub(crate) fn try_parse_list_marker_with(
 
 pub(crate) fn markers_match(a: &ListMarker, b: &ListMarker, dialect: crate::Dialect) -> bool {
     match (a, b) {
-        // CommonMark §5.3: bullet list markers `-`, `+`, `*` are *distinct*
-        // bullet types — switching from one to another starts a new list.
-        // Pandoc-markdown treats them as interchangeable: any bullet
-        // continues an open bullet list. Verified with pandoc against
-        // `- foo\n- bar\n+ baz\n` (#301).
         (ListMarker::Bullet(ca), ListMarker::Bullet(cb)) => match dialect {
             crate::Dialect::CommonMark => ca == cb,
             _ => true,
@@ -842,7 +789,6 @@ pub(in crate::parser) fn emit_list_item(
 ) -> (usize, String) {
     builder.start_node(SyntaxKind::LIST_ITEM.into());
 
-    // Emit leading indentation for lossless parsing
     if item.indent_bytes > 0 {
         builder.token(
             SyntaxKind::WHITESPACE.into(),
@@ -872,9 +818,6 @@ pub(in crate::parser) fn emit_list_item(
     );
     let content_start = item.indent_bytes + item.marker_len + item.spaces_after_bytes;
 
-    // Extract text content to be buffered (instead of emitting it directly).
-    // If the item starts with a task checkbox, emit it as a dedicated token so it
-    // doesn't get parsed as a link.
     let text_to_buffer = if content_start < item.content.len() {
         let rest = &item.content[content_start..];
         if is_task_checkbox(rest) {
@@ -928,7 +871,6 @@ mod tests {
         let mut config = ParserOptions::default();
         config.extensions.fancy_lists = true;
 
-        // Test lowercase alpha period
         assert!(
             try_parse_list_marker("a. item", &config, OpenListHint::None).is_some(),
             "a. should parse"
@@ -942,7 +884,6 @@ mod tests {
             "c. should parse"
         );
 
-        // Test lowercase alpha right paren
         assert!(
             try_parse_list_marker("a) item", &config, OpenListHint::None).is_some(),
             "a) should parse"
@@ -997,9 +938,6 @@ mod tests {
 
     #[test]
     fn hint_ignored_in_commonmark_dialect() {
-        // CommonMark doesn't enable fancy_lists, so `i.` isn't recognized as
-        // an ordered marker at all in that dialect. The hint must not change
-        // that outcome.
         let config = ParserOptions {
             dialect: crate::Dialect::CommonMark,
             extensions: crate::options::Extensions {
@@ -1017,7 +955,6 @@ mod tests {
     #[test]
     fn uppercase_i_classified_as_alpha_with_upper_alpha_hint() {
         let config = ParserOptions::default();
-        // Uppercase + period requires 2 spaces (the I.M.Pei rule).
         let m = try_parse_list_marker("I.  foo", &config, OpenListHint::UpperAlpha).unwrap();
         assert!(
             matches!(
@@ -1077,8 +1014,6 @@ mod tests {
 
     #[test]
     fn open_list_hint_at_indent_returns_none_when_indent_differs() {
-        // Protects nested-roman-inside-alpha: an `i.` at indent 3 must NOT
-        // be reclassified against the outer alpha at indent 0.
         use crate::parser::utils::container_stack::{Container, ContainerStack};
         let mut stack = ContainerStack::new();
         stack.stack.push(Container::List {
@@ -1131,7 +1066,6 @@ mod tests {
             has_blank_between_items: false,
         });
         stack.stack.push(Container::BlockQuote {});
-        // Inside the blockquote at indent 0: the outer alpha must not leak in.
         assert_eq!(open_list_hint_at_indent(&stack, 0), OpenListHint::None);
     }
 }
@@ -1142,7 +1076,6 @@ fn markers_match_fancy_lists() {
     use ListMarker::*;
     use OrderedMarker::*;
 
-    // Same type and style should match
     let a_period = Ordered(LowerAlpha {
         letter: 'a',
         style: Period,
@@ -1169,7 +1102,6 @@ fn markers_match_fancy_lists() {
         "i. and ii. should match"
     );
 
-    // Different styles should not match
     let a_paren = Ordered(LowerAlpha {
         letter: 'a',
         style: RightParen,
@@ -1183,13 +1115,11 @@ fn markers_match_fancy_lists() {
 #[test]
 fn markers_match_bullet_dialect_split() {
     use ListMarker::*;
-    // Pandoc: any bullet matches any bullet (same list).
     assert!(markers_match(
         &Bullet('-'),
         &Bullet('+'),
         crate::Dialect::Pandoc
     ));
-    // CommonMark: bullets match only when the marker character is the same.
     assert!(markers_match(
         &Bullet('-'),
         &Bullet('-'),
@@ -1212,7 +1142,6 @@ fn detects_complex_roman_numerals() {
     let mut config = ParserOptions::default();
     config.extensions.fancy_lists = true;
 
-    // Test various Roman numerals
     assert!(
         try_parse_list_marker("iv. item", &config, OpenListHint::None).is_some(),
         "iv. should parse"
@@ -1248,13 +1177,11 @@ fn detects_example_list_markers() {
     let mut config = ParserOptions::default();
     config.extensions.example_lists = true;
 
-    // Test unlabeled example
     assert!(
         try_parse_list_marker("(@) item", &config, OpenListHint::None).is_some(),
         "(@) should parse"
     );
 
-    // Test labeled examples
     assert!(
         try_parse_list_marker("(@foo) item", &config, OpenListHint::None).is_some(),
         "(@foo) should parse"
@@ -1268,7 +1195,6 @@ fn detects_example_list_markers() {
         "(@test-123) should parse"
     );
 
-    // Test with extension disabled
     let disabled_config = ParserOptions {
         extensions: crate::options::Extensions {
             example_lists: false,
@@ -1309,8 +1235,6 @@ fn deep_ordered_prefers_nearest_enclosing_indent_over_nearest_below() {
         has_blank_between_items: false,
     });
 
-    // With deep ordered drift (indent 7), we should keep the enclosing level
-    // (base indent 8), not re-associate to the nearest lower sibling level (6).
     assert_eq!(
         find_matching_list_level(
             &containers,
@@ -1367,30 +1291,25 @@ fn parses_nested_bullet_list_from_single_marker() {
 
     let config = ParserOptions::default();
 
-    // Test all three bullet marker combinations as nested lists
     for (input, desc) in [("- *\n", "- *"), ("- +\n", "- +"), ("- -\n", "- -")] {
         let tree = parse(input, Some(config.clone()));
 
-        // tree IS the DOCUMENT node
         assert_eq!(
             tree.kind(),
             SyntaxKind::DOCUMENT,
             "{desc}: root should be DOCUMENT"
         );
 
-        // Should have a LIST as first child of DOCUMENT
         let outer_list = tree
             .children()
             .find(|n| n.kind() == SyntaxKind::LIST)
             .unwrap_or_else(|| panic!("{desc}: should have outer LIST node"));
 
-        // Outer list should have a LIST_ITEM
         let outer_item = outer_list
             .children()
             .find(|n| n.kind() == SyntaxKind::LIST_ITEM)
             .unwrap_or_else(|| panic!("{desc}: should have outer LIST_ITEM"));
 
-        // Outer list item should contain a nested LIST (not PLAIN with TEXT)
         let nested_list = outer_item
             .children()
             .find(|n| n.kind() == SyntaxKind::LIST)
@@ -1401,13 +1320,11 @@ fn parses_nested_bullet_list_from_single_marker() {
                 )
             });
 
-        // Nested list should have a LIST_ITEM
         let nested_item = nested_list
             .children()
             .find(|n| n.kind() == SyntaxKind::LIST_ITEM)
             .unwrap_or_else(|| panic!("{desc}: nested LIST should have LIST_ITEM"));
 
-        // Nested list item should be empty (no PLAIN or TEXT content)
         let has_plain = nested_item
             .children()
             .any(|n| n.kind() == SyntaxKind::PLAIN);
@@ -1417,8 +1334,6 @@ fn parses_nested_bullet_list_from_single_marker() {
         );
     }
 }
-
-// Helper functions for list management in Parser
 
 /// Check if we're in any list.
 pub(in crate::parser) fn in_list(containers: &ContainerStack) -> bool {
@@ -1475,8 +1390,6 @@ pub(in crate::parser) fn innermost_content_col(containers: &ContainerStack) -> O
             Container::ListItem { content_col, .. } | Container::Definition { content_col, .. } => {
                 Some(*content_col)
             }
-            // A blockquote re-bases columns, so an item outside it cannot be
-            // compared against a marker indent measured inside it.
             Container::BlockQuote { .. } => Some(usize::MAX),
             _ => None,
         })
@@ -1503,8 +1416,6 @@ pub(in crate::parser) fn marker_start_number(marker: &ListMarker) -> Option<u32>
     }
 }
 
-/// Parse a Roman numeral, case-insensitively. Only used to answer "is this
-/// start value 1?", so an unparseable numeral yielding `None` is harmless.
 fn roman_to_number(numeral: &str) -> Option<u32> {
     let value = |c: char| match c.to_ascii_lowercase() {
         'i' => Some(1),
@@ -1521,7 +1432,6 @@ fn roman_to_number(numeral: &str) -> Option<u32> {
     if digits.is_empty() {
         return None;
     }
-    // Subtractive notation: a digit smaller than the one after it is negated.
     let total = digits
         .iter()
         .enumerate()
@@ -1623,7 +1533,6 @@ pub(in crate::parser) fn band_fence_level(
     if dialect != crate::Dialect::Pandoc {
         return None;
     }
-    // (list level, its open item's content col), innermost first.
     let mut levels: SmallVec<[(usize, usize); 4]> = SmallVec::new();
     let mut open_item_col: Option<usize> = None;
     for (i, c) in containers.stack.iter().enumerate().rev() {
@@ -1641,8 +1550,6 @@ pub(in crate::parser) fn band_fence_level(
             _ => {}
         }
     }
-    // At or past the innermost content column the marker is nested
-    // content, not a fence.
     if levels.first().is_none_or(|(_, cc)| indent_cols >= *cc) {
         return None;
     }
@@ -1679,20 +1586,12 @@ pub(in crate::parser) fn find_matching_list_level(
     indent_cols: usize,
     dialect: crate::Dialect,
 ) -> Option<usize> {
-    // Search from deepest (last) to shallowest (first)
-    // But for shallow items (0-3 indent), prefer matching at the closest base indent
     let mut best_match: Option<(usize, usize, bool)> = None; // (index, distance, base_leq_indent)
 
     let is_deep_ordered = matches!(marker, ListMarker::Ordered(_)) && indent_cols >= 4;
     let mut best_above_match: Option<(usize, usize)> = None; // (index, delta = base - indent), ordered deep only
 
     for (i, c) in containers.stack.iter().enumerate().rev() {
-        // BlockQuote acts as a list-continuation barrier. A list outside a
-        // BlockQuote can't be continued from inside the BlockQuote — opening
-        // a BlockQuote starts a new container "world". Without this stop,
-        // `- intro\n\n  > - 0:` matches the outer `-` list and closes the
-        // freshly-opened BlockQuote (issue #292). Pandoc-native treats the
-        // inner list as a child of the BlockQuote.
         if matches!(c, Container::BlockQuote { .. }) {
             break;
         }
@@ -1704,10 +1603,6 @@ pub(in crate::parser) fn find_matching_list_level(
             && markers_match(marker, list_marker, dialect)
         {
             let matches = if indent_cols >= 4 && *base_indent_cols >= 4 {
-                // Deep indentation:
-                // - bullets stay directional to preserve nesting boundaries
-                // - ordered markers allow small symmetric drift to keep
-                //   marker-width-aligned lists (i./ii./iii.) at one level
                 match (marker, list_marker) {
                     (ListMarker::Ordered(_), ListMarker::Ordered(_)) => {
                         indent_cols.abs_diff(*base_indent_cols) <= 3
@@ -1715,10 +1610,6 @@ pub(in crate::parser) fn find_matching_list_level(
                     _ => indent_cols >= *base_indent_cols && indent_cols <= base_indent_cols + 3,
                 }
             } else if indent_cols >= 4 || *base_indent_cols >= 4 {
-                // One shallow, one deep:
-                // - ordered markers still allow symmetric drift so aligned roman
-                //   markers (e.g. 3/4/5 spaces for i./ii./iii.) stay at one level
-                // - bullets remain directional to preserve nesting boundaries
                 match (marker, list_marker) {
                     (ListMarker::Ordered(_), ListMarker::Ordered(_)) => {
                         indent_cols.abs_diff(*base_indent_cols) <= 3
@@ -1726,8 +1617,6 @@ pub(in crate::parser) fn find_matching_list_level(
                     _ => false,
                 }
             } else {
-                // Both at shallow indentation (0-3)
-                // Allow items within 3 spaces
                 indent_cols.abs_diff(*base_indent_cols) <= 3
             };
 
@@ -1735,9 +1624,6 @@ pub(in crate::parser) fn find_matching_list_level(
                 let distance = indent_cols.abs_diff(*base_indent_cols);
                 let base_leq_indent = *base_indent_cols <= indent_cols;
 
-                // For deep ordered lists, avoid "nearest below" re-association caused by
-                // formatter alignment shifts (e.g. i./ii./iii. becoming 6/7/8-space indents).
-                // Prefer matching the nearest enclosing level whose base indent is >= current.
                 if is_deep_ordered
                     && matches!(
                         (marker, list_marker),
@@ -1761,7 +1647,6 @@ pub(in crate::parser) fn find_matching_list_level(
                     best_match = Some((i, distance, base_leq_indent));
                 }
 
-                // If we found an exact match, return immediately
                 if distance == 0 {
                     return Some(i);
                 }
@@ -1785,12 +1670,10 @@ pub(in crate::parser) fn start_nested_list(
     indent_to_emit: Option<&str>,
     config: &ParserOptions,
 ) -> ListItemFinish {
-    // Emit the indent if needed
     if let Some(indent_str) = indent_to_emit {
         builder.token(SyntaxKind::WHITESPACE.into(), indent_str);
     }
 
-    // Start nested list
     builder.start_node(SyntaxKind::LIST.into());
     containers.push(Container::List {
         marker: marker.clone(),
@@ -1798,7 +1681,6 @@ pub(in crate::parser) fn start_nested_list(
         has_blank_between_items: false,
     });
 
-    // Add the nested list item
     let (content_col, text_to_buffer) = emit_list_item(builder, item, config);
     finish_list_item_with_optional_nested(
         containers,
@@ -1828,7 +1710,6 @@ pub(in crate::parser) fn is_content_nested_bullet_marker(
     let (text_part, _) = strip_newline(remaining);
     let trimmed = text_part.trim();
 
-    // Check if it's exactly one of the bullet marker characters
     if trimmed.len() == 1 {
         let ch = trimmed.chars().next().unwrap();
         if matches!(ch, '*' | '+' | '-') {
@@ -1848,10 +1729,8 @@ pub(in crate::parser) fn add_list_item_with_nested_empty_list(
     nested_marker: char,
     config: &ParserOptions,
 ) {
-    // First, emit the outer list item (just marker + whitespace)
     builder.start_node(SyntaxKind::LIST_ITEM.into());
 
-    // Emit leading indentation for lossless parsing
     if item.indent_bytes > 0 {
         builder.token(
             SyntaxKind::WHITESPACE.into(),
@@ -1873,18 +1752,14 @@ pub(in crate::parser) fn add_list_item_with_nested_empty_list(
         }
     }
 
-    // Now start the nested list inside this item
     builder.start_node(SyntaxKind::LIST.into());
 
-    // Add empty list item to the nested list
     builder.start_node(SyntaxKind::LIST_ITEM.into());
     builder.token(SyntaxKind::LIST_MARKER.into(), &nested_marker.to_string());
 
-    // Extract and emit the newline from original content (lossless)
     let content_start = item.indent_bytes + item.marker_len + item.spaces_after_bytes;
     if content_start < item.content.len() {
         let remaining = &item.content[content_start..];
-        // Skip the nested marker character (1 byte) and get the newline
         if remaining.len() > 1 {
             let (_, newline_str) = strip_newline(&remaining[1..]);
             if !newline_str.is_empty() {
@@ -1896,7 +1771,6 @@ pub(in crate::parser) fn add_list_item_with_nested_empty_list(
     builder.finish_node(); // Close nested LIST_ITEM
     builder.finish_node(); // Close nested LIST
 
-    // Push container for the outer list item
     let content_col = list_item_content_col(
         item.indent_cols,
         item.marker_len,
@@ -1936,10 +1810,6 @@ pub(in crate::parser) fn add_list_item(
     )
 }
 
-/// Finish a list item by either buffering its content or, when the buffered
-/// content begins with another list marker followed by content, recursively
-/// opening a nested LIST with another LIST_ITEM. Pushes the appropriate
-/// containers onto the stack so the caller doesn't need to.
 fn finish_list_item_with_optional_nested(
     containers: &mut ContainerStack,
     builder: &mut GreenNodeBuilder<'static>,
@@ -1948,29 +1818,13 @@ fn finish_list_item_with_optional_nested(
     virtual_marker_space: bool,
     config: &ParserOptions,
 ) -> ListItemFinish {
-    // A line whose content is a thematic break (e.g. `* * *`) takes precedence
-    // over being parsed as a sequence of nested list markers. Both dialects
-    // agree: `- * * *` is a list item containing a thematic break, not a
-    // chain of bullets.
     let buffered_is_thematic_break =
         super::horizontal_rules::try_parse_horizontal_rule(trim_end_newlines(&text_to_buffer))
             .is_some();
 
-    // Recursive same-line nested list emission applies to both dialects:
-    // pandoc-markdown and CommonMark agree on the nested LIST_ITEM shape
-    // for `- - foo`, `1. - 2. foo`, etc. (verified via `pandoc -f markdown
-    // -t native` and `pandoc -f commonmark -t native`). The companion
-    // formatter arm in `format_list_item` handles the LIST-first-child
-    // shape so the round-trip stays idempotent.
-
     if !buffered_is_thematic_break
         && let Some(inner_match) =
             try_parse_list_marker(&text_to_buffer, config, OpenListHint::None)
-        // Everything this branch emits is a sublist of the item being
-        // finished, so pandoc 3.10's start-at-1 rule applies unconditionally
-        // here — no container-stack lookup needed. `- 2. foo` and `1. - 2. foo`
-        // keep the marker as item text instead.
-        // CommonMark keeps nesting these, so the gate is dialect-scoped.
         && !(config.dialect != crate::Dialect::CommonMark
             && config
                 .effective_pandoc_compat()
@@ -1980,26 +1834,19 @@ fn finish_list_item_with_optional_nested(
         let inner_content_start = inner_match.marker_len + inner_match.spaces_after_bytes;
         let after_inner =
             trim_end_newlines(text_to_buffer.get(inner_content_start..).unwrap_or(""));
-        // Recurse only when there is real content after the inner marker.
-        // The bare-inner-marker case (e.g. `- *`) is handled by the existing
-        // `add_list_item_with_nested_empty_list` path.
         if !after_inner.is_empty() {
-            // Push outer ListItem with empty buffer.
             containers.push(Container::ListItem {
                 content_col,
                 buffer: ListItemBuffer::new(),
                 marker_only: false, // The nested LIST counts as real content.
                 virtual_marker_space,
             });
-            // Open nested LIST inside the outer LIST_ITEM.
             builder.start_node(SyntaxKind::LIST.into());
             containers.push(Container::List {
                 marker: inner_match.marker.clone(),
                 base_indent_cols: content_col,
                 has_blank_between_items: false,
             });
-            // Emit nested LIST_ITEM via emit_list_item, then recurse on its
-            // content for further-nested same-line markers.
             let inner_item = ListItemEmissionInput {
                 content: text_to_buffer.as_str(),
                 marker_len: inner_match.marker_len,
@@ -2011,9 +1858,6 @@ fn finish_list_item_with_optional_nested(
             };
             let (inner_content_col, inner_text_to_buffer) =
                 emit_list_item(builder, &inner_item, config);
-            // Recursive call is for nested same-line markers (`- - foo`);
-            // the inner content doesn't begin with `>` so no BqDispatch can
-            // propagate up. Discard the result.
             let _ = finish_list_item_with_optional_nested(
                 containers,
                 builder,
@@ -2026,17 +1870,7 @@ fn finish_list_item_with_optional_nested(
         }
     }
 
-    // Same-line blockquote marker inside a list item: `1. > Blockquote`
-    // opens a BLOCK_QUOTE inside the LIST_ITEM, with the post-marker text
-    // becoming the first line of the blockquote's paragraph. Both
-    // CommonMark and Pandoc-markdown agree on this shape (verified via
-    // `pandoc -f commonmark` and `pandoc -f markdown`). The companion
-    // arm in `format_list_item` emits the LIST_MARKER and the BLOCK_QUOTE
-    // contents on the same output line so the round-trip stays
-    // idempotent.
     if !buffered_is_thematic_break && text_to_buffer.starts_with('>') {
-        // Push outer ListItem with empty buffer; the inner BLOCK_QUOTE
-        // counts as real content so `marker_only` is false.
         containers.push(Container::ListItem {
             content_col,
             buffer: ListItemBuffer::new(),
@@ -2044,10 +1878,6 @@ fn finish_list_item_with_optional_nested(
             virtual_marker_space,
         });
 
-        // The whole run of markers opens, one BLOCK_QUOTE each, the way the
-        // same run does at the top level: `- > > a` and `- >> a` are both
-        // `BlockQuote [BlockQuote [Para …]]` under `-f markdown` and
-        // `-f commonmark`. Each marker takes at most one space with it.
         let mut remaining = text_to_buffer.as_str();
         let mut content_offset = 0;
         while let Some(after_marker) = remaining.strip_prefix('>') {
@@ -2067,12 +1897,6 @@ fn finish_list_item_with_optional_nested(
 
         let trimmed = trim_end_newlines(remaining);
 
-        // If the BlockQuote content begins with another list marker
-        // followed by real content, recursively open a nested LIST inside
-        // the BLOCK_QUOTE. Both Pandoc-markdown and CommonMark agree:
-        // `- > - foo` produces
-        // `BulletList [BlockQuote [BulletList [[Plain "foo"]]]]`
-        // (verified via `pandoc -f markdown` and `pandoc -f commonmark`).
         let inner_is_thematic_break =
             super::horizontal_rules::try_parse_horizontal_rule(trimmed).is_some();
         if !inner_is_thematic_break
@@ -2084,9 +1908,6 @@ fn finish_list_item_with_optional_nested(
                 let bq_content_col = content_col + content_offset;
                 builder.start_node(SyntaxKind::LIST.into());
                 containers.push(Container::List {
-                    // Raw-line frame: marker matching walks the whole ladder,
-                    // so this level has to stay distinguishable from the
-                    // enclosing list's own `base_indent_cols`.
                     marker: inner_match.marker.clone(),
                     base_indent_cols: bq_content_col,
                     has_blank_between_items: false,
@@ -2096,22 +1917,12 @@ fn finish_list_item_with_optional_nested(
                     marker_len: inner_match.marker_len,
                     spaces_after_cols: inner_match.spaces_after_cols,
                     spaces_after_bytes: inner_match.spaces_after_bytes,
-                    // Blockquote-content frame, unlike the list above: an
-                    // item's `content_col` is only ever compared against
-                    // continuation lines, which reach the container checks
-                    // with the quote prefix already stripped -- the same
-                    // frame `> - a | b` records. A raw-line column here reads
-                    // the next quoted line as dedented out of the item and
-                    // closes it a line early. `remaining` starts at the inner
-                    // marker, so that frame's origin is 0.
                     indent_cols: 0,
                     indent_bytes: 0,
                     virtual_marker_space: inner_match.virtual_marker_space,
                 };
                 let (inner_content_col, inner_text_to_buffer) =
                     emit_list_item(builder, &inner_item, config);
-                // Same as above: inner content doesn't start with `>` so no
-                // BqDispatch can propagate.
                 let _ = finish_list_item_with_optional_nested(
                     containers,
                     builder,
@@ -2124,21 +1935,11 @@ fn finish_list_item_with_optional_nested(
             }
         }
 
-        // If there is content after `> `, hand it back to the caller so the
-        // parser's block dispatcher can recognize block-level constructs
-        // (HTML blocks, ATX headings, fenced code, …) instead of wrapping
-        // the first line in a stray paragraph. Subsequent lines continue
-        // via the parser's main loop (lazy continuation handles the
-        // no-marker continuation line in cases like #292).
         if !trimmed.is_empty() {
             return ListItemFinish::BqDispatch {
                 content: remaining.to_string(),
             };
         }
-        // Marker-only quote (`- >`): nothing downstream will emit this line's
-        // newline, since the buffer that normally carries it was bypassed. The
-        // quote's content is empty, so the newline goes in the same
-        // `BLANK_LINE` shape a bare `>` gets at the top level.
         if !remaining.is_empty() {
             builder.start_node(SyntaxKind::BLANK_LINE.into());
             builder.token(SyntaxKind::BLANK_LINE.into(), remaining);

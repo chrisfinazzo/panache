@@ -89,7 +89,6 @@ mod tests {
         let input = "Click [here](https://example.com).";
         let tree = parse(input, Some(ParserOptions::default()));
 
-        // Find link using typed wrapper
         let link = tree
             .descendants()
             .find_map(Link::cast)

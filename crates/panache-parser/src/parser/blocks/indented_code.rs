@@ -54,13 +54,11 @@ pub(crate) fn parse_indented_code_block(
     builder.start_node(SyntaxKind::CODE_CONTENT.into());
 
     let mut current_pos = start_pos;
-    // Total indent needed: base (e.g., footnote) + 4 for code
     let code_indent = base_indent + 4;
 
     while current_pos < lines.len() {
         let line = lines[current_pos];
 
-        // Strip exactly the enclosing blockquote depth; deeper markers remain as content.
         let (line_bq_depth, _) = count_blockquote_markers(line);
         let inner = if bq_depth > 0 {
             strip_n_blockquote_markers(line, bq_depth)
@@ -68,14 +66,11 @@ pub(crate) fn parse_indented_code_block(
             line
         };
 
-        // If blockquote depth decreases, code block ends (we've left the blockquote)
         if line_bq_depth < bq_depth {
             break;
         }
 
-        // Blank lines need look-ahead: only include if next non-blank line continues the code
         if inner.trim().is_empty() {
-            // Check if code continues after this blank line
             let mut look_pos = current_pos + 1;
             let mut continues = false;
             while look_pos < lines.len() {
@@ -125,7 +120,6 @@ pub(crate) fn parse_indented_code_block(
             continue;
         }
 
-        // Check if line is indented enough (base_indent + 4 for code)
         let (indent_cols, indent_bytes) = leading_indent(inner);
         if indent_cols < code_indent {
             break;
@@ -144,17 +138,13 @@ pub(crate) fn parse_indented_code_block(
             }
         }
 
-        // For losslessness: emit ALL indentation as WHITESPACE, then emit remaining content
-        // The formatter can decide how to handle the indentation
         if indent_bytes > 0 {
             let indent_str = &inner[..indent_bytes];
             builder.token(SyntaxKind::WHITESPACE.into(), indent_str);
         }
 
-        // Get the content after the indentation
         let content = &inner[indent_bytes..];
 
-        // Split off trailing newline if present (from split_inclusive)
         let (content_without_newline, newline_str) = strip_newline(content);
 
         if !content_without_newline.is_empty() {

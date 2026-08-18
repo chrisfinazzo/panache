@@ -18,18 +18,12 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 /// free: an indented item's marker column already encodes its depth.
 pub fn continuation_indent_at(root: &SyntaxNode, text: &str, offset: usize) -> Option<usize> {
     let text_size = rowan::TextSize::try_from(offset).ok()?;
-    // Left-biased: read the line the newline was typed *after*, not the new
-    // (empty) line to its right.
     let token = root.token_at_offset(text_size).left_biased()?;
 
-    // Innermost enclosing list item.
     let item = token
         .parent_ancestors()
         .find(|node| node.kind() == SyntaxKind::LIST_ITEM)?;
 
-    // The item's own marker is the first `LIST_MARKER` in document order within
-    // it; markers of nested lists belong to deeper `LIST_ITEM`s and appear only
-    // after this item's first-line content.
     let marker = item
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
@@ -39,10 +33,6 @@ pub fn continuation_indent_at(root: &SyntaxNode, text: &str, offset: usize) -> O
     let line_start = text[..marker_start].rfind('\n').map_or(0, |i| i + 1);
     let marker_column = text[line_start..marker_start].chars().count();
 
-    // `has_checkbox` is irrelevant here: `text_continuation_offset` excludes the
-    // checkbox by design (continuation aligns under the marker content, not past
-    // the checkbox), so pass `false`. `four_space_rule`/`tab_width` are likewise
-    // inert for `text_continuation_offset`.
     let indent = calculate_list_item_indent(marker.text(), 0, false, false, 4);
     Some(marker_column + indent.text_continuation_offset())
 }
@@ -128,22 +118,14 @@ pub(super) fn calculate_list_item_indent(
     four_space_rule: bool,
     tab_width: usize,
 ) -> ListItemIndent {
-    // Determine if this marker should be right-aligned
     let is_alignable = is_alignable_marker(marker);
 
-    // Calculate marker padding (for right-alignment)
     let marker_padding = if is_alignable && max_marker_width > 0 {
         max_marker_width.saturating_sub(marker.len())
     } else {
         0
     };
 
-    // Spaces after marker (minimum 1, or 2 for uppercase letter markers like "A.")
-    // The `four_space_rule` extension does NOT change marker spacing: the marker
-    // keeps its normal trailing space and only continuation/nested content moves
-    // to a flat tab stop (see `continuation_offset`). Padding the marker so the
-    // first line also lands on that tab stop (pandoc's `-   a` / `1.  a` style)
-    // is a separate formatting choice we may add as its own knob later.
     let spaces_after = if marker.len() == 2
         && marker.starts_with(|c: char| c.is_ascii_uppercase())
         && marker.ends_with('.')
@@ -153,7 +135,6 @@ pub(super) fn calculate_list_item_indent(
         1
     };
 
-    // Task checkbox width ("[x] " = 4 characters)
     let checkbox_width = if has_checkbox { 4 } else { 0 };
 
     ListItemIndent {
@@ -177,25 +158,18 @@ pub(super) fn calculate_list_item_indent(
 /// - Example lists ((@) or (@label))
 /// - Numeric markers (unless they contain letters)
 pub(super) fn is_alignable_marker(marker: &str) -> bool {
-    // Don't align example lists (they start with '(@')
     if marker.starts_with("(@") {
         return false;
     }
 
-    // Don't align bullet lists
     if marker.len() == 1 && (marker == "-" || marker == "*" || marker == "+") {
         return false;
     }
 
-    // Align all ordered list styles with letters or Roman numerals:
-    // Period: a., i., A., I.
-    // Right-paren: a), i), A), I)
-    // Parens: (a), (i), (A), (I)
     if marker.len() < 2 {
         return false;
     }
 
-    // Check if the marker contains a letter (handles all three delimiter styles)
     marker.chars().any(|c| c.is_alphabetic())
 }
 
@@ -225,7 +199,6 @@ mod tests {
 
     #[test]
     fn test_roman_numeral_with_alignment() {
-        // "i." in a list where max width is 4 (e.g., "iv.")
         let indent = calculate_list_item_indent("i.", 4, false, false, 4);
         assert_eq!(indent.marker_padding, 2); // Pad "i." to align with "iv."
         assert_eq!(indent.marker_width, 2);
@@ -251,8 +224,6 @@ mod tests {
 
     #[test]
     fn four_space_rule_keeps_bullet_marker_spacing_but_nests_at_tab_stop() {
-        // The marker keeps its single trailing space (`- a`); only continuation
-        // and nested content move to the flat tab stop.
         let indent = calculate_list_item_indent("-", 0, false, true, 4);
         assert_eq!(indent.spaces_after, 1);
         assert_eq!(indent.content_offset(), 2); // first-line content stays at col 2
@@ -271,8 +242,6 @@ mod tests {
 
     #[test]
     fn four_space_rule_wide_marker_nests_at_flat_tab_stop() {
-        // "100." overhangs the tab stop; children still sit at a flat tab-width
-        // (col 4), never rounded up.
         let indent = calculate_list_item_indent("100.", 0, false, true, 4);
         assert_eq!(indent.spaces_after, 1);
         assert_eq!(indent.content_offset(), 5);
@@ -282,7 +251,6 @@ mod tests {
 
     #[test]
     fn test_is_alignable_marker() {
-        // Should align
         assert!(is_alignable_marker("i."));
         assert!(is_alignable_marker("iv."));
         assert!(is_alignable_marker("a."));
@@ -291,7 +259,6 @@ mod tests {
         assert!(is_alignable_marker("(a)"));
         assert!(is_alignable_marker("i)"));
 
-        // Should not align
         assert!(!is_alignable_marker("-"));
         assert!(!is_alignable_marker("*"));
         assert!(!is_alignable_marker("+"));
@@ -334,22 +301,17 @@ mod tests {
 
     #[test]
     fn continuation_uppercase_letter_item() {
-        // Pandoc requires two spaces after a single uppercase-letter marker (so
-        // "B. Russell" isn't a list); continuation lands two past the marker, col 4.
         assert_eq!(continuation_at_word("A.  item\n", "item"), Some(4));
     }
 
     #[test]
     fn continuation_nested_item_uses_marker_column() {
-        // Inner marker sits at column 2, so its content column is 4.
         let src = "- outer\n  - inner\n";
         assert_eq!(continuation_at_word(src, "inner"), Some(4));
     }
 
     #[test]
     fn continuation_task_item_excludes_checkbox() {
-        // Aligns under the marker content (col 2), not past the checkbox (col 6),
-        // matching the formatter and avoiding the 4-space code-block trap.
         assert_eq!(continuation_at_word("- [ ] task\n", "task"), Some(2));
     }
 

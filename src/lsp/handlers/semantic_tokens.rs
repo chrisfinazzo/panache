@@ -19,7 +19,7 @@
 //! Flavor gate: CommonMark/GFM documents get zero tokens (panache's parse and
 //! the editor's base grammar agree there, so there is nothing to add).
 //!
-//! Step 1 scope: `full` only (no `range`, no delta) and single-line tokens only.
+//! Only `full` requests and single-line tokens are supported.
 //! The collected kinds (markers, keys, single-line info/attr nodes) are
 //! inherently single-line; the encoder's cross-line guard is a safety net for
 //! the rare multi-line shortcode/span, whose bodies are deferred to a later
@@ -50,7 +50,7 @@ const TOKEN_TYPES: &[&str] = &[
 ];
 
 /// The legend advertised in `ServerCapabilities` and referenced by the encoded
-/// token-type indices. No modifiers in step 1.
+/// token-type indices. No modifiers are currently defined.
 pub(crate) fn legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
         token_types: TOKEN_TYPES

@@ -74,7 +74,6 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
             line_start += line.len();
         }
 
-        // Record the mapping
         mappings.push(BlockMapping {
             concatenated_range: concat_start..concat_end,
             original_range: block.original_range.clone(),
@@ -82,11 +81,9 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
             line_offsets,
         });
 
-        // Update current line based on how many lines we just added
         let lines_added = block.content.lines().count().max(1);
         current_line += lines_added;
 
-        // Add trailing newline if block doesn't end with one
         if !block.content.ends_with('\n') {
             content.push('\n');
             current_line += 1;

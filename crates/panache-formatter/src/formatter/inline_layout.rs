@@ -45,19 +45,15 @@ fn escape_special_chars(
     while let Some((byte_idx, ch)) = chars.next() {
         match ch {
             '*' => {
-                // Only escape asterisks when NOT a direct child of EMPHASIS/STRONG
                 if !skip_emphasis_delim {
                     result.push('\\');
                 }
                 result.push(ch);
             }
             '_' => {
-                // For underscores, only escape at word boundaries
-                // Intraword underscores like foo_bar are left unescaped
                 let at_start = byte_idx == 0;
                 let at_end = chars.peek().is_none();
 
-                // If the entire text is just "_", always escape it (not intraword)
                 if is_single_underscore {
                     if !skip_emphasis_delim {
                         result.push('\\');
@@ -66,13 +62,9 @@ fn escape_special_chars(
                     continue;
                 }
 
-                // If underscore is at start and previous token was TEXT, it's intraword
                 let intraword_start =
                     at_start && prev_is_text && !matches!(chars.peek(), Some((_, '_')));
-                // If underscore is at end and next token is TEXT, it's intraword
                 let intraword_end = at_end && next_is_text;
-                // Mid-text underscore between two alphanumeric chars (e.g. foo_bar
-                // inside a single coalesced TEXT node).
                 let intraword_mid = !at_start
                     && !at_end
                     && text[..byte_idx]
@@ -94,19 +86,14 @@ fn escape_special_chars(
                 }
                 result.push(ch);
             }
-            // `|` is only special where pipe tables exist; under CommonMark it
-            // carries no meaning, so escaping it would be spurious (matching
-            // pandoc's commonmark vs. markdown writers).
             '|' if !escape_pipes => {
                 result.push(ch);
             }
-            // Escape special syntax characters
             '|' | '~' | '`' => {
                 result.push('\\');
                 result.push(ch);
             }
             '\\' => {
-                // Keep backslash as-is
                 result.push(ch);
             }
             _ => {
@@ -251,10 +238,6 @@ pub(super) struct NodeWrapOptions<'a> {
 
 impl<'a> NodeWrapOptions<'a> {
     pub(super) fn reflow(widths: &'a [usize]) -> Self {
-        // Unlike the flavor-gated list/blockquote guards, the heading guard is
-        // unconditional: a `=`/`-` run at a line start turns the paragraph
-        // into a setext heading even under `blank-before-header`, so a width
-        // break before one is never safe in any flavor.
         Self {
             widths,
             mode: NodeWrapMode::Reflow,
@@ -267,9 +250,6 @@ impl<'a> NodeWrapOptions<'a> {
     }
 
     pub(super) fn sentence() -> Self {
-        // Unlike reflow's flavor-gated guards, sentence/semantic breaks are
-        // structural and could land before a marker, so guard every block-start
-        // token unconditionally; keeping the marker inline is always parse-safe.
         Self {
             widths: &[],
             mode: NodeWrapMode::Sentence,
@@ -292,11 +272,6 @@ impl<'a> NodeWrapOptions<'a> {
 
 impl WrapStrategy {
     fn options<'a>(self, config: &Config, widths: &'a [usize]) -> NodeWrapOptions<'a> {
-        // A `+`/`-`/`*` (or ordered marker) reflowed to column 1 becomes a list
-        // marker when the parser lets a list interrupt a paragraph. Pandoc only
-        // allows that under `lists_without_preceding_blankline`; the CommonMark
-        // dialect always does, so guard the line-break there too or reflow stops
-        // being idempotent.
         let avoid_unsafe_in_paragraph_reflow =
             config.parser_extensions.lists_without_preceding_blankline
                 || config.dialect() == Dialect::CommonMark;
@@ -314,8 +289,6 @@ impl WrapStrategy {
                 avoid_blockquote_line_start: avoid_blockquote_start,
                 ..NodeWrapOptions::reflow(widths)
             },
-            // `sentence()` already guards every block-start token, so list
-            // items need nothing beyond it.
             Self::ListSentence => NodeWrapOptions::sentence(),
             Self::ListSemantic => NodeWrapOptions::semantic(),
         }
@@ -438,14 +411,10 @@ fn is_unsafe_list_line_start_piece(piece: &str) -> bool {
         || is_bullet_list_marker_piece(piece)
 }
 
-// A standalone 1--6 `#` run opens an ATX heading at a line start (7+ `#`, or a
-// glued `#word`, does not).
 fn is_atx_heading_marker_piece(piece: &str) -> bool {
     !piece.is_empty() && piece.len() <= 6 && piece.bytes().all(|b| b == b'#')
 }
 
-// A pure `=`/`-` run is a setext underline or thematic break at a line start.
-// `*`/`_` rules can't reach here: the inline escaper backslash-escapes them.
 fn is_setext_or_thematic_marker_piece(piece: &str) -> bool {
     !piece.is_empty() && (piece.bytes().all(|b| b == b'=') || piece.bytes().all(|b| b == b'-'))
 }
@@ -496,10 +465,6 @@ impl<'a> StreamingCoreSink<'a> {
         }
     }
 
-    /// Whether `text` at the start of a line would open a block-level construct
-    /// (list item, blockquote, heading, rule, or definition) and split the
-    /// paragraph. Each category is gated by its `avoid_*` flag; `:` is always
-    /// unsafe.
     fn piece_would_start_unsafe_line(&self, text: &str) -> bool {
         is_definition_marker_piece(text)
             || (self.avoid_blockquote_line_start && is_unsafe_block_line_start_piece(text))
@@ -543,9 +508,6 @@ impl<'a> StreamingCoreSink<'a> {
         self.line_has_piece = true;
         self.prev_ws_after = segment.has_whitespace_after;
 
-        // Break after a sentence boundary -- but not when it would push the next
-        // piece to a line start where it opens a block; keeping it inline leaves
-        // the paragraph's parse (and so idempotency) intact.
         if self.sentence_mode
             && is_sentence_boundary_segment(&segment, next_segment, is_last, self.profile)
             && !next_segment.is_some_and(|next| self.piece_would_start_unsafe_line(&next.text))
@@ -862,10 +824,6 @@ impl<'a> TraversalBuilder<'a> {
         self.preserve_newlines
     }
 
-    /// Force a line break at an existing soft break (`NEWLINE`). Used by
-    /// `Semantic` wrap mode so authored breaks survive alongside the
-    /// sentence-boundary breaks. A trailing soft break (no following content)
-    /// is a no-op, so it never emits a dangling empty line.
     fn push_soft_break(&mut self) {
         self.flush_current(false);
         if self.sink.has_content_or_pending() {
@@ -988,17 +946,7 @@ fn process_node_recursive(
                         sink.push_piece(t.text());
                     }
                 }
-                SyntaxKind::LINE_PREFIX | SyntaxKind::BLOCK_QUOTE_MARKER => {
-                    // Container syntax, never inline content: a prefix
-                    // re-injected at a continuation line start (indent or `>`
-                    // bytes), or a quote marker opening a block the caller
-                    // re-prefixes itself. Skipping by kind is what keeps
-                    // marker bytes out of the piece stream -- a `>` that
-                    // reaches the stream as TEXT is pandoc's `Str ">"` and
-                    // must survive. The NEWLINE before a LINE_PREFIX already
-                    // set the pending break, so skip without touching sink
-                    // state.
-                }
+                SyntaxKind::LINE_PREFIX | SyntaxKind::BLOCK_QUOTE_MARKER => {}
                 SyntaxKind::ESCAPED_CHAR => {
                     if in_link_text && t.text() == r"\_" {
                         sink.push_piece("_");
@@ -1475,10 +1423,6 @@ fn paragraph_has_swept_fence_shape(config: &Config, node: &SyntaxNode) -> bool {
         return false;
     }
 
-    // Cheap reject: skip the allocation+scan unless an immediate TEXT child
-    // already contains `:::`. `:::` runs at the start of a continuation line
-    // sit in direct TEXT children of the PARAGRAPH (never nested inside an
-    // inline element), so this scan is sufficient.
     let has_triple_colon = node
         .children_with_tokens()
         .filter_map(|c| c.into_token())
@@ -1591,9 +1535,7 @@ mod tests {
     fn atx_heading_marker_rule_matches_hash_runs() {
         assert!(is_atx_heading_marker_piece("#"));
         assert!(is_atx_heading_marker_piece("######"));
-        // Seven or more hashes is not a heading.
         assert!(!is_atx_heading_marker_piece("#######"));
-        // A glued `#word` piece (no following space) is not a heading marker.
         assert!(!is_atx_heading_marker_piece("#foo"));
         assert!(!is_atx_heading_marker_piece(""));
     }
@@ -1604,7 +1546,6 @@ mod tests {
         assert!(is_setext_or_thematic_marker_piece("==="));
         assert!(is_setext_or_thematic_marker_piece("-"));
         assert!(is_setext_or_thematic_marker_piece("---"));
-        // Mixed or non-rule pieces are left alone.
         assert!(!is_setext_or_thematic_marker_piece("=-="));
         assert!(!is_setext_or_thematic_marker_piece("--x"));
         assert!(!is_setext_or_thematic_marker_piece(""));
@@ -1635,9 +1576,6 @@ mod tests {
 
     #[test]
     fn paragraph_reflow_unsafe_start_guard_enabled_for_commonmark_dialect() {
-        // CommonMark/gfm let a list interrupt a paragraph without a blank line,
-        // so the guard must fire even though `lists_without_preceding_blankline`
-        // is off by default.
         let flavor = crate::config::Flavor::Gfm;
         let config = crate::config::Config {
             flavor,
@@ -1651,15 +1589,8 @@ mod tests {
 
     #[test]
     fn paragraph_sentence_guards_are_unconditional() {
-        // Unlike reflow, sentence/semantic suppress breaks before every
-        // block-opener regardless of flavor extensions: keeping a marker inline
-        // is always parse-safe, so the guards are not gated by
-        // `blank_before_blockquote` (or any other extension) the way reflow's
-        // are.
         let flavor = crate::config::Flavor::Pandoc;
         let mut ext = crate::config::ParserExtensions::for_flavor(flavor);
-        // `>` at a line start would be "safe" to break before under this
-        // extension, yet sentence mode still guards it.
         ext.blank_before_blockquote = true;
         let config = crate::config::Config {
             parser_extensions: ext,

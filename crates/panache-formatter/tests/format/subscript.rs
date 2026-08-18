@@ -55,8 +55,6 @@ fn subscript_and_superscript_together() {
 
 #[test]
 fn subscript_with_unescaped_internal_whitespace_is_not_subscript() {
-    // Pandoc rejects unescaped whitespace inside subscript content; the
-    // tildes are then literal and must round-trip as escaped `\~`.
     let input = "Something~some text~ here.\n";
     let output = format(input, None, None);
     assert!(output.contains("\\~some text\\~"));
@@ -77,7 +75,6 @@ fn subscript_in_paragraph() {
     let input = "This is a long paragraph with H~2~O subscript that should wrap at the configured line width.";
     let output = format(input, Some(cfg), None);
 
-    // Should preserve subscript even with wrapping
     assert!(output.contains("H~2~O"));
 }
 

@@ -27,8 +27,6 @@ pub fn math_content_text(math: &SyntaxNode) -> String {
         .collect()
 }
 
-/// Whether `kind` is a math-content token emitted by the math parser (as
-/// opposed to a host container prefix interleaved into the subtree).
 fn is_math_content_token(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -331,9 +329,6 @@ pub fn math_diagnostics(content: &SyntaxNode) -> Vec<MathDiagnostic> {
         } else if let Some(delim) = MathDelimited::cast(node.clone()) {
             check_delimited(&delim, &mut out);
         }
-        // Stray tokens are flagged by their parent context: each token is a
-        // direct child of exactly one node, so iterating every node's direct
-        // children visits every token once.
         for child in node.children_with_tokens() {
             let Some(token) = child.as_token() else {
                 continue;
@@ -368,8 +363,6 @@ pub fn math_diagnostics(content: &SyntaxNode) -> Vec<MathDiagnostic> {
     out
 }
 
-/// A `MATH_GROUP` is well-formed only if it carries a closing `}`; the parser
-/// emits `MATH_GROUP_CLOSE` solely when the brace is matched.
 fn check_group(group: &MathGroup, out: &mut Vec<MathDiagnostic>) {
     if group.is_closed() {
         return;
@@ -384,7 +377,6 @@ fn check_group(group: &MathGroup, out: &mut Vec<MathDiagnostic>) {
 
 fn check_environment(env: &MathEnvironment, out: &mut Vec<MathDiagnostic>) {
     let Some(end) = env.end_token() else {
-        // No closing `\end`: point at the opening `\begin` (or the whole node).
         let range = env
             .begin_token()
             .map(|t| t.text_range())
@@ -396,7 +388,6 @@ fn check_environment(env: &MathEnvironment, out: &mut Vec<MathDiagnostic>) {
         return;
     };
     if env.begin_name().unwrap_or_default() != env.end_name().unwrap_or_default() {
-        // Point at the `\end` name group (or the `\end` token if unnamed).
         let children: Vec<SyntaxElement> = env.syntax().children_with_tokens().collect();
         let range = children
             .iter()
@@ -410,8 +401,6 @@ fn check_environment(env: &MathEnvironment, out: &mut Vec<MathDiagnostic>) {
     }
 }
 
-/// A `MATH_DELIMITED` run is well-formed only if it carries a closing `\right`;
-/// the parser emits it solely when the `\left` was matched.
 fn check_delimited(delim: &MathDelimited, out: &mut Vec<MathDiagnostic>) {
     if delim.is_closed() {
         return;
@@ -424,14 +413,12 @@ fn check_delimited(delim: &MathDelimited, out: &mut Vec<MathDiagnostic>) {
     }
 }
 
-/// The first direct token child of `node` with the given `kind`.
 fn token_child(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(|c| c.into_token())
         .find(|t| t.kind() == kind)
 }
 
-/// The first direct `MATH_COMMAND` token child with exactly `text`.
 fn command_child(node: &SyntaxNode, text: &str) -> Option<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(|c| c.into_token())
@@ -443,8 +430,6 @@ fn is_command(el: &SyntaxElement, text: &str) -> bool {
         .is_some_and(|t| t.kind() == SyntaxKind::MATH_COMMAND && t.text() == text)
 }
 
-/// Inner text of the first `MATH_GROUP` after `idx` (the environment name
-/// group), with its braces stripped — mirrors `parse_environment_name`.
 fn group_name_after(children: &[SyntaxElement], idx: usize) -> Option<String> {
     children[idx + 1..].iter().find_map(|c| {
         c.as_node()
@@ -509,13 +494,8 @@ mod tests {
         assert!(math.has_unescaped_single_dollar_in_content());
     }
 
-    // --- Diagnostics derived from the realized MATH_CONTENT subtree ---
-
     use crate::parser::math::{MathParseOptions, parse_math_content};
 
-    /// Build a standalone `MATH_CONTENT` root from raw content and report its
-    /// diagnostic kinds. The sub-parse root is itself `MATH_CONTENT`, matching
-    /// the embedded-node case the linter/formatter feed in.
     fn diag_kinds(content: &str) -> Vec<MathDiagnosticKind> {
         let node = SyntaxNode::new_root(parse_math_content(content, MathParseOptions::default()));
         math_diagnostics(&node)

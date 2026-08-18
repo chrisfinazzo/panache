@@ -50,7 +50,6 @@ fn parse_iana_schemes(csv: &str) -> Vec<String> {
     let mut chars = csv.chars().peekable();
     let mut header = true;
     while chars.peek().is_some() {
-        // Read the first field of the record.
         let mut field = String::new();
         let mut in_quotes = false;
         while let Some(&c) = chars.peek() {
@@ -76,7 +75,6 @@ fn parse_iana_schemes(csv: &str) -> Vec<String> {
                 field.push(c);
             }
         }
-        // Consume the remaining fields up to the record terminator.
         let mut in_quotes = false;
         while let Some(&c) = chars.peek() {
             chars.next();
@@ -93,7 +91,6 @@ fn parse_iana_schemes(csv: &str) -> Vec<String> {
             header = false;
             continue;
         }
-        // The scheme token is the leading word; drop trailing annotations.
         if let Some(name) = field.split_whitespace().next() {
             schemes.push(name.to_ascii_lowercase());
         }

@@ -223,7 +223,6 @@ pub(crate) fn validate_yaml_with_context_tree(
     reject_with_tree!(check_node_property_underindented(&tree, input), tree);
     reject_with_tree!(check_invalid_tag_chars(&tree), tree);
 
-    // Pool 2: consumer-only checks. Never on the substrate path.
     if ctx.is_substrate() {
         return (None, Some(tree));
     }
@@ -231,21 +230,15 @@ pub(crate) fn validate_yaml_with_context_tree(
     (diag, Some(tree))
 }
 
-/// Consumer-only checks: valid YAML 1.2 that a real consumer rejects. Each is
-/// gated on whether an active consumer in `ctx` makes that rejection. See
-/// `tests/yaml/consumer-matrix.md`.
 fn check_consumer_rejections(
     tree: &SyntaxNode,
     ctx: YamlValidationContext,
 ) -> Option<YamlDiagnostic> {
-    // Implicit empty block mapping key — rejected by EVERY real consumer.
     if ctx.any_rejects(ConsumerSet::all())
         && let Some(diag) = check_implicit_empty_block_key(tree)
     {
         return Some(diag);
     }
-    // Duplicate mapping key — rejected by js-yaml (Quarto) and R `yaml`
-    // (RMarkdown), but NOT pandoc/libyaml (which take the last value).
     let dup_rejectors = ConsumerSet::of(YamlConsumer::Jsyaml).with(YamlConsumer::RYaml);
     if ctx.any_rejects(dup_rejectors)
         && let Some(diag) = check_duplicate_keys(tree)
@@ -255,7 +248,6 @@ fn check_consumer_rejections(
     None
 }
 
-/// Trivia inside a mapping key that carries no key identity.
 fn is_key_trivia(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -521,8 +513,6 @@ fn check_directives(input: &str, tokens: &[Token]) -> Option<YamlDiagnostic> {
     None
 }
 
-/// The directive name — the run of non-whitespace characters following
-/// the leading `%`. `%YAML 1.2` → `"YAML"`, `%TAG ! …` → `"TAG"`.
 fn directive_name(text: &str) -> &str {
     text.strip_prefix('%')
         .unwrap_or(text)
@@ -622,10 +612,6 @@ fn check_tag_handle_scope<'a>(input: &'a str, tokens: &[Token]) -> Option<YamlDi
     None
 }
 
-/// Extract the handle portion of a tag token. Tags are tokenized by the
-/// scanner with the leading `!` already consumed into the token text:
-/// `!!str` → `!!`, `!prefix!A` → `!prefix!`, `!foo` → `!`, bare `!` → `!`.
-/// Verbatim `!<URI>` tags are filtered out by the caller.
 fn extract_tag_handle(text: &str) -> &str {
     if text.len() < 2 {
         return text;
@@ -686,19 +672,6 @@ fn check_undeclared_alias<'a>(input: &'a str, tokens: &[Token]) -> Option<YamlDi
     None
 }
 
-/// Cluster A — trailing content after a structure close at document
-/// level.
-///
-/// Two failures are surfaced:
-/// - `PARSE_TRAILING_CONTENT_AFTER_FLOW_END` when a `YAML_DOCUMENT`
-///   contains body content after a `YAML_FLOW_SEQUENCE` /
-///   `YAML_FLOW_MAP` has closed (KS4U, 4H7K, 9JBA). A spaceless `]#`
-///   sequence (parsed as `YAML_COMMENT` by the scanner) also counts —
-///   YAML 1.2 §6.6 requires whitespace before `#`.
-/// - `LEX_TRAILING_CONTENT_AFTER_DOCUMENT_END` when content appears on
-///   the same line as a `...` document-end marker (3HFZ).
-///
-/// Covers fixtures KS4U, 4H7K, 9JBA, 3HFZ.
 fn check_trailing_content(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for doc in tree
         .descendants()
@@ -724,10 +697,6 @@ fn check_trailing_content(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// 62EZ / P2EQ — a closed flow map/sequence inside a block-map value
-/// (or block-sequence item) followed by non-trivia content. The
-/// closing `}` / `]` ends the flow node; any subsequent scalar /
-/// collection on the same logical line is unspaced trailing content.
 fn check_trailing_after_flow_in_container(container: &SyntaxNode) -> Option<YamlDiagnostic> {
     let mut after_flow = false;
     let mut have_separator = false;
@@ -782,14 +751,6 @@ fn check_trailing_after_flow_in_container(container: &SyntaxNode) -> Option<Yaml
     None
 }
 
-/// Detects trailing content after a closed flow sequence/map at
-/// document level. Walks the document's direct children: after a
-/// `YAML_FLOW_SEQUENCE` or `YAML_FLOW_MAP`, the only legal followers
-/// are pure trivia (whitespace, newlines, properly-spaced comments),
-/// a `YAML_DOCUMENT_END` marker, or a `YAML_BLOCK_MAP` whose first
-/// entry's key is colon-only — that shape encodes the YAML 1.2
-/// "flow-collection-as-implicit-key" form (e.g. `[flow]: block` or
-/// `{a: b}: c`).
 fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
     let mut after_flow = false;
     let mut have_separator = false;
@@ -802,7 +763,6 @@ fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
                     SyntaxKind::YAML_FLOW_SEQUENCE | SyntaxKind::YAML_FLOW_MAP
                 ) {
                     if after_flow {
-                        // Two flow structures back-to-back — second is trailing content.
                         return Some(diag_at_range(
                             n.text_range().start().into(),
                             n.text_range().end().into(),
@@ -814,14 +774,6 @@ fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
                     have_separator = false;
                 } else if after_flow {
                     if kind == SyntaxKind::YAML_BLOCK_MAP && is_implicit_flow_key_block_map(n) {
-                        // Flow used as the implicit key of a block-map
-                        // entry (`[flow]: block`). The flow node and
-                        // the block-map sibling jointly form the entry,
-                        // BUT YAML 1.2 §7.4 requires implicit keys to
-                        // fit on a single line. A flow node spanning a
-                        // newline cannot serve as an implicit key
-                        // (C2SP), so the bytes after the close are
-                        // trailing content.
                         let flow_nodes: Vec<SyntaxNode> = doc
                             .children()
                             .filter(|c| {
@@ -865,9 +817,6 @@ fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
                     }
                     SyntaxKind::YAML_COMMENT => {
                         if !have_separator {
-                            // Spaceless `]#…` — scanner emitted a comment, but
-                            // YAML §6.6 requires whitespace before `#`. The
-                            // bytes are trailing content, not a comment.
                             return Some(diag_at_range(
                                 t.text_range().start().into(),
                                 t.text_range().end().into(),
@@ -877,7 +826,6 @@ fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
                         }
                     }
                     SyntaxKind::YAML_DOCUMENT_END => {
-                        // `...` legitimately follows a flow document.
                         after_flow = false;
                         have_separator = false;
                     }
@@ -896,12 +844,6 @@ fn check_trailing_after_flow(doc: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// Returns true when `block_map`'s first `YAML_BLOCK_MAP_ENTRY` has a
-/// `YAML_BLOCK_MAP_KEY` containing only the `:` colon (and trivia).
-/// The v2 builder produces this shape when a flow sequence/map is used
-/// as the implicit key of a block-map entry — the actual key bytes
-/// live in the *preceding sibling* flow node, and the block-map
-/// itself starts with a bare-colon key.
 fn is_implicit_flow_key_block_map(block_map: &SyntaxNode) -> bool {
     let Some(entry) = block_map
         .children()
@@ -926,11 +868,6 @@ fn is_implicit_flow_key_block_map(block_map: &SyntaxNode) -> bool {
     })
 }
 
-/// Detects content on the same line as a `...` document-end marker.
-/// Walks every `YAML_DOCUMENT_END` token; scans forward in the linear
-/// token stream until a `NEWLINE` (legal end-of-line) or the end of
-/// input. Anything other than whitespace or a properly-spaced comment
-/// before that newline is illegal trailing content.
 fn check_trailing_after_doc_end(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     let tokens: Vec<_> = tree
         .descendants_with_tokens()
@@ -949,7 +886,6 @@ fn check_trailing_after_doc_end(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
                 }
                 SyntaxKind::YAML_COMMENT if have_separator => break,
                 SyntaxKind::YAML_COMMENT => {
-                    // Spaceless `...#` is malformed.
                     return Some(diag_at_range(
                         next.text_range().start().into(),
                         next.text_range().end().into(),
@@ -1009,9 +945,6 @@ fn check_flow_node_commas(flow: &SyntaxNode) -> Option<YamlDiagnostic> {
     let mut seen_item_since_separator = false;
     for child in flow.children_with_tokens() {
         match &child {
-            // Any nested node — `YAML_FLOW_MAP_ENTRY`,
-            // `YAML_FLOW_SEQUENCE_ITEM`, or a nested flow collection —
-            // is an item.
             NodeOrToken::Node(_) => {
                 seen_item_since_separator = true;
             }
@@ -1028,12 +961,7 @@ fn check_flow_node_commas(flow: &SyntaxNode) -> Option<YamlDiagnostic> {
                     }
                     seen_item_since_separator = false;
                 }
-                // Structural opener/closer brackets — neutral.
                 SyntaxKind::YAML_FLOW_INDICATOR if matches!(t.text(), "[" | "]" | "{" | "}") => {}
-                // Any other token — bare scalar (implicit-null map
-                // entry like `single line` in `{ single line, a: b }`,
-                // or a plain-value entry in `{ http://foo.com, … }`),
-                // anchor, tag, etc. — counts as item evidence.
                 _ => {
                     seen_item_since_separator = true;
                 }
@@ -1043,16 +971,6 @@ fn check_flow_node_commas(flow: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// Cluster B — unterminated flow collection at EOF.
-///
-/// A `YAML_FLOW_SEQUENCE` whose direct children include no `]` token,
-/// or a `YAML_FLOW_MAP` whose direct children include no `}` token,
-/// reached EOF without closing. Note that nested flow brackets live
-/// inside `YAML_FLOW_SEQUENCE_ITEM` / `YAML_FLOW_MAP_ENTRY` wrappers,
-/// not as direct children — so an inner `]` does not satisfy an
-/// outer flow's close requirement.
-///
-/// Covers fixture 6JTT.
 fn check_unterminated_flow(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for flow in tree.descendants().filter(|n| {
         matches!(
@@ -1092,22 +1010,6 @@ fn check_unterminated_flow(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// Cluster G — flow context anomalies (partial coverage).
-///
-/// Three malformed shapes are detected:
-/// - A `YAML_FLOW_SEQUENCE_ITEM` whose direct children include a
-///   `YAML_COLON` AND a newline preceding it (covering DK4H plain-key
-///   form `[ key\n  : value ]` and ZXT5 quoted-key form
-///   `[ "key"\n  :value ]`). YAML 1.2 forbids an implicit key in flow
-///   context from spanning lines.
-/// - A `YAML_FLOW_MAP_VALUE` containing a stray `YAML_COLON` token
-///   directly (covering T833 `{ foo: 1\n bar: 2 }`). The v2 builder
-///   folds two entries into a single malformed entry whose value
-///   contains a second colon — that second colon is the symptom of
-///   a missing comma between flow-map entries.
-/// - A flow item/key/value whose content is a lone `-` scalar (covering
-///   YJV2 `[-]` and G5U8 `- [-, -]`); a `-` abutting a flow indicator is
-///   a bare indicator, not a valid `ns-plain-first` scalar start.
 fn check_flow_context_anomalies(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for item in tree
         .descendants()
@@ -1131,19 +1033,6 @@ fn check_flow_context_anomalies(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// Detects a lone `-` plain scalar inside a flow collection.
-///
-/// In flow context a plain scalar may only begin with `-` when the next
-/// character is a non-space, non-flow-indicator char (YAML 1.2
-/// `ns-plain-first` over `ns-plain-safe-in`). When the `-` is followed by
-/// a flow indicator (`,`, `]`, `}`) or the collection close, it is a bare
-/// indicator rather than a scalar and the document is malformed. The
-/// scanner still tokenizes the dash as a `YAML_SCALAR`, so the surviving
-/// signal is a flow item/key/value whose only significant content is a
-/// scalar whose text is exactly `-`.
-///
-/// Covers fixtures G5U8 (`- [-, -]`) and YJV2 (`[-]`). Scoped to `-`
-/// specifically; `?`/`:` are tokenized distinctly and handled elsewhere.
 fn check_flow_lone_dash(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for holder in tree.descendants().filter(|n| {
         matches!(
@@ -1168,11 +1057,6 @@ fn check_flow_lone_dash(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     None
 }
 
-/// Detects an implicit key in a `YAML_FLOW_SEQUENCE_ITEM` whose key
-/// shape contains a newline before its colon (multi-line implicit key).
-///
-/// Explicit-key entries (CT4Q's `? foo\n bar : baz` shape) are allowed
-/// to span lines and are skipped via the `YAML_KEY` indicator check.
 fn check_flow_seq_item_multiline_key(item: &SyntaxNode) -> Option<YamlDiagnostic> {
     let starts_with_explicit_key = item.children_with_tokens().any(|c| {
         c.as_token()
@@ -1199,8 +1083,6 @@ fn check_flow_seq_item_multiline_key(item: &SyntaxNode) -> Option<YamlDiagnostic
                 }
                 _ => {}
             },
-            // A multi-line implicit key is a `YAML_SCALAR` node spanning a
-            // newline (the break lives among the scalar's leaves).
             NodeOrToken::Node(n)
                 if n.kind() == SyntaxKind::YAML_SCALAR && n.text().to_string().contains('\n') =>
             {
@@ -1212,21 +1094,10 @@ fn check_flow_seq_item_multiline_key(item: &SyntaxNode) -> Option<YamlDiagnostic
     None
 }
 
-/// Detects a `YAML_FLOW_MAP_VALUE` whose direct children include a
-/// scalar followed by a stray `YAML_COLON` token — the T833 pattern
-/// where a missing comma between entries causes the v2 builder to
-/// fold two entries into one malformed value.
-///
-/// A leading colon in the value (`{x: :x}`, `{"key"::value}`) is *not*
-/// flagged: the v2 builder tokenizes the leading `:` as `YAML_COLON`
-/// even though semantically it is part of the value scalar text. The
-/// "scalar before colon" guard distinguishes T833's two-entry fold
-/// from this benign tokenization quirk.
 fn check_flow_map_value_extra_colon(value: &SyntaxNode) -> Option<YamlDiagnostic> {
     let mut saw_scalar = false;
     for child in value.children_with_tokens() {
         match &child {
-            // The value scalar is a `YAML_SCALAR` node child.
             NodeOrToken::Node(n) if n.kind() == SyntaxKind::YAML_SCALAR => saw_scalar = true,
             NodeOrToken::Token(t) => match t.kind() {
                 SyntaxKind::YAML_COLON if saw_scalar => {
@@ -1304,10 +1175,6 @@ fn check_multiline_quoted_indent(
     None
 }
 
-/// Scan direct `YAML_SCALAR` children of `container` and require any
-/// multi-line quoted scalar's continuation lines to indent strictly
-/// past `parent_indent`. Shared by the block-map-value and
-/// block-sequence-item variants of `check_multiline_quoted_indent`.
 fn check_quoted_scalar_continuation(
     container: &SyntaxNode,
     input: &str,
@@ -1345,19 +1212,10 @@ fn check_quoted_scalar_continuation(
                 .bytes()
                 .take_while(|b| *b == b' ' || *b == b'\t')
                 .count();
-            // Blank continuation lines do not impose indent
-            // (line folding consumes them).
             if leading_ws == line_text_in_src.len() {
                 offset += 1;
                 continue;
             }
-            // §6.1 — a tab in the *required-indentation slot* of a
-            // multi-line quoted scalar continuation is illegal (DK95/01).
-            // Spaces past `parent_indent` provide the required indentation;
-            // any tab after enough leading spaces is content (4ZYM), not
-            // indentation, and must not be flagged. No real consumer rejects
-            // this tab (pandoc, js-yaml, and R yaml all accept the
-            // continuation), so it survives only on the substrate path.
             let leading_spaces = line_text_in_src.bytes().take_while(|b| *b == b' ').count();
             if leading_spaces <= parent_indent
                 && line_text_in_src.as_bytes().get(leading_spaces) == Some(&b'\t')
@@ -1387,25 +1245,6 @@ fn check_quoted_scalar_continuation(
     None
 }
 
-/// Cluster D — block indentation anomalies.
-///
-/// Three sub-shapes are detected:
-/// - Tabs used for indentation (4EJS): a `WHITESPACE` token that
-///   follows a `NEWLINE` inside a `YAML_BLOCK_MAP_VALUE` /
-///   `YAML_BLOCK_MAP_KEY` / `YAML_BLOCK_SEQUENCE_ITEM` and starts
-///   with `\t`.
-/// - Sibling collections inside one block-map value or sequence item
-///   (4HVU, DMG6, N4JP, ZVH3): a `YAML_BLOCK_MAP_VALUE` (or
-///   `YAML_BLOCK_SEQUENCE_ITEM`) whose direct children include more
-///   than one of `YAML_BLOCK_MAP` / `YAML_BLOCK_SEQUENCE`, or one of
-///   each — symptom of a dedent or over-indent that broke the parent
-///   collection.
-/// - Multiple `YAML_SCALAR` token children inside a single
-///   `YAML_BLOCK_MAP_VALUE` (8XDJ, BF9H) or directly under a
-///   `YAML_DOCUMENT` (BS4K): a comment line split a multi-line plain
-///   scalar into two pieces. Top-level scalars carry the same
-///   "comment-inside-plain-scalar" failure mode as value-level ones;
-///   the only difference is the absence of an enclosing block-map.
 fn check_block_indent_anomalies(
     tree: &SyntaxNode,
     ctx: YamlValidationContext,
@@ -1443,13 +1282,6 @@ fn check_block_indent_anomalies(
                 NodeOrToken::Token(_) => {}
             }
         }
-        // The struct_count > 1 and scalar-after-structural checks below
-        // are about block-collection siblings being split by indent
-        // anomalies — they do not apply to YAML_DOCUMENT, which can
-        // legitimately hold multiple block collections under a
-        // doc-start marker before a doc-end one in error-recovery
-        // shapes. The scalar_count > 1 check that follows applies
-        // uniformly to all included node kinds.
         let is_doc = node.kind() == SyntaxKind::YAML_DOCUMENT;
         if !is_doc && struct_count > 1 {
             let n = last_struct.expect("struct_count > 1 implies last_struct set");
@@ -1465,12 +1297,6 @@ fn check_block_indent_anomalies(
             && node.kind() == SyntaxKind::YAML_BLOCK_MAP_VALUE
             && let Some(trailing_scalar) = scalar_after_structural_in_block_map_value(&node)
         {
-            // A scalar AFTER a structural collection inside a block-map
-            // value — e.g. `key:\n - item1\n - item2\ninvalid\n`
-            // (9CWY) where a stray top-level scalar is absorbed into
-            // the value alongside a block sequence. Compact mapping
-            // shapes (`a: <scalar>: <value>`, W5VH/26DV) put the
-            // scalar BEFORE the inner map and remain valid.
             return Some(diag_at_range(
                 trailing_scalar.text_range().start().into(),
                 trailing_scalar.text_range().end().into(),
@@ -1479,16 +1305,6 @@ fn check_block_indent_anomalies(
             ));
         }
         if scalar_count > 1 {
-            // At YAML_DOCUMENT scope, the v2 scanner currently folds
-            // `%YAML` / `%TAG` directives into plain scalars, so a bare
-            // "two scalars at doc root" shape isn't reliable evidence of
-            // the comment-splits-scalar bug — it commonly fires on
-            // well-formed directive-prefixed documents instead. Require
-            // a YAML_COMMENT token between two scalars to fire, which is
-            // BS4K's actual failure mode. The existing BLOCK_MAP_VALUE /
-            // BLOCK_SEQUENCE_ITEM scopes keep the simpler scalar-count
-            // contract because those parents cannot legitimately hold
-            // two sibling scalars without a comment under any shape.
             if is_doc && !has_comment_between_scalars(&node) {
                 continue;
             }
@@ -1520,24 +1336,11 @@ fn check_block_indent_anomalies(
     None
 }
 
-/// True when at least one `YAML_COMMENT` token appears between two
-/// `YAML_SCALAR` token children of `node` (with only trivia in
-/// between). Distinguishes BS4K's "comment splits a multi-line plain
-/// scalar" shape from a multi-scalar artifact caused by the v2
-/// scanner folding `%YAML` / `%TAG` directives as plain scalars
-/// (5TYM, well-formed directive-prefixed documents).
-///
-/// A `YAML_DOCUMENT_START` between the two scalars resets the state:
-/// the next scalar is content of a fresh document section, not a
-/// continuation of the previous one. A leading `%` on a scalar marks
-/// a folded directive and is also ignored.
 fn has_comment_between_scalars(node: &SyntaxNode) -> bool {
     let mut saw_scalar = false;
     let mut saw_comment_since_scalar = false;
     for child in node.children_with_tokens() {
         match &child {
-            // A scalar is a `YAML_SCALAR` node; a leading `%` marks a
-            // folded directive-shaped scalar that doesn't count.
             NodeOrToken::Node(n) if n.kind() == SyntaxKind::YAML_SCALAR => {
                 if n.text().to_string().starts_with('%') {
                     continue;
@@ -1566,11 +1369,6 @@ fn has_comment_between_scalars(node: &SyntaxNode) -> bool {
     false
 }
 
-/// Returns the first `YAML_SCALAR` token child of `block_map_value`
-/// that appears AFTER any structural collection node child
-/// (`YAML_BLOCK_MAP` / `YAML_BLOCK_SEQUENCE`). Returns `None` if no
-/// scalar follows a collection — preserves the compact-mapping shape
-/// `a: <scalar>: <value>` where the scalar precedes the inner map.
 fn scalar_after_structural_in_block_map_value(value: &SyntaxNode) -> Option<SyntaxNode> {
     let mut saw_struct = false;
     for child in value.children() {
@@ -1586,20 +1384,6 @@ fn scalar_after_structural_in_block_map_value(value: &SyntaxNode) -> Option<Synt
     None
 }
 
-/// Detects an inline block-sequence start on the same line as the
-/// owning block-map key (5U3A): `key: - a\n     - b\n`. YAML 1.2
-/// requires a block sequence to start on its own line at a column
-/// indented past the key. The v2 builder accepts the shape and emits
-/// a `YAML_BLOCK_SEQUENCE` directly inside `YAML_BLOCK_MAP_VALUE`
-/// without an intervening `NEWLINE`. Flag at the start of the second
-/// `YAML_BLOCK_SEQUENCE_ITEM` (the dash that turned the inline shape
-/// into a multi-line one), matching the v1 contract.
-///
-/// Exempts explicit-key entries (`? key` / `: - a`): the YAML 1.2
-/// grammar's `ns-l-compact-sequence` permits a block sequence to begin
-/// on the explicit value-indicator line (5WE3, A2M4, KK5P). The
-/// prohibition is specific to implicit keys (`key: - a`), whose value
-/// production (`l-block-map-implicit-value`) has no compact form.
 fn check_inline_block_seq_in_value(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for value in tree
         .descendants()
@@ -1630,9 +1414,6 @@ fn check_inline_block_seq_in_value(tree: &SyntaxNode) -> Option<YamlDiagnostic> 
                             "block sequence cannot start on the same line as its key",
                         ));
                     }
-                    // Other inline content resets — but a second
-                    // collection inside one value is detected by the
-                    // sibling-collection check, not here.
                 }
             }
         }
@@ -1640,11 +1421,6 @@ fn check_inline_block_seq_in_value(tree: &SyntaxNode) -> Option<YamlDiagnostic> 
     None
 }
 
-/// True when the `YAML_BLOCK_MAP_VALUE`'s owning entry uses an
-/// explicit key indicator (`?`) — i.e. its sibling
-/// `YAML_BLOCK_MAP_KEY` contains a `YAML_KEY` token. Explicit-key
-/// entries permit a compact block sequence on the value-indicator
-/// line, so the inline-block-sequence prohibition does not apply.
 fn block_map_entry_key_is_explicit(value: &SyntaxNode) -> bool {
     value
         .parent()
@@ -1698,8 +1474,6 @@ fn tab_indent_emits(ctx: YamlValidationContext, rejecting: ConsumerSet) -> bool 
 /// `-\tscalar`, where `s-separate-in-line` legitimately accepts a tab
 /// between the indicator and a plain scalar — are not flagged.
 fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<YamlDiagnostic> {
-    // js-yaml and R yaml reject a tab used as block indentation; R yaml also
-    // rejects it in a block-scalar body. pandoc never rejects a tab.
     let block_indent_rejectors = ConsumerSet::of(YamlConsumer::Jsyaml).with(YamlConsumer::RYaml);
     let block_scalar_rejectors = ConsumerSet::of(YamlConsumer::RYaml);
     fn tab_diag(t: &crate::syntax::SyntaxToken) -> YamlDiagnostic {
@@ -1737,9 +1511,6 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
         ) && flow_has_block_ancestor(n);
         is_block || is_nested_flow
     }) {
-        // In a nested-flow container no consumer rejects a tab in the
-        // continuation indent slot (Y79Y/003); in a block container js-yaml and
-        // R yaml do.
         let node_in_flow = matches!(
             node.kind(),
             SyntaxKind::YAML_FLOW_SEQUENCE | SyntaxKind::YAML_FLOW_MAP
@@ -1764,9 +1535,6 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
                 .and_then(|j| children.get(j))
                 .map(|c| match c {
                     NodeOrToken::Token(pt) => (pt.kind(), pt.text().to_string()),
-                    // A block scalar is now a `YAML_SCALAR` node; surface its
-                    // kind+text so the block-scalar-trailing-newline case
-                    // below still matches.
                     NodeOrToken::Node(pn) => (pn.kind(), pn.text().to_string()),
                 });
             let next = children.get(i + 1);
@@ -1776,13 +1544,6 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
             );
             let at_eof = next.is_none();
 
-            // Case (a-newline): tab in indent slot after a NEWLINE
-            // token. Only fires when the WHITESPACE *starts* with a
-            // tab — a tab following leading spaces is "after
-            // indentation" and is legal `s-separate-in-line` in flow
-            // context (6HB6's `  \tStill by two` line). Whitespace-
-            // only lines (next is NEWLINE or EOF) are line-folding
-            // fodder, not indentation (Y79Y/002).
             let prev_is_newline_token = matches!(&prev_kind, Some((SyntaxKind::NEWLINE, _)));
             if prev_is_newline_token
                 && starts_with_tab
@@ -1793,12 +1554,6 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
                 return Some(tab_diag(t));
             }
 
-            // Case (a-blockscalar): tab immediately after a block
-            // scalar (`|` / `>`) whose text ends with `\n`. The
-            // scalar absorbed everything it could fit into its body,
-            // so a dangling tab in the body-line indent slot is
-            // always an error, even if the next byte is another
-            // newline (Y79Y/000).
             let prev_is_block_scalar_with_trailing_newline = matches!(&prev_kind, Some((SyntaxKind::YAML_SCALAR, text))
                     if (text.starts_with('|') || text.starts_with('>')) && text.ends_with('\n'));
             if prev_is_block_scalar_with_trailing_newline
@@ -1808,15 +1563,6 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
                 return Some(tab_diag(t));
             }
 
-            // Case (b): tab between a block indicator and a nested
-            // block collection (same-line compact form). The inner
-            // collection's indentation column would be set by the
-            // tab — ambiguous per §6.1. The block indicator may be
-            // an immediate sibling (`?`, `-` inside a key/item) or
-            // the implicit `:` separator when WHITESPACE is the
-            // first child of a YAML_BLOCK_MAP_VALUE (Y79Y/007,
-            // Y79Y/009 where the colon lives in the sibling
-            // YAML_BLOCK_MAP_KEY container).
             let prev_is_block_indicator = matches!(
                 &prev_kind,
                 Some((
@@ -1870,8 +1616,6 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
         let header_end = text.find('\n').unwrap_or(text.len());
         let header = &text[..header_end];
         let bytes = header.as_bytes();
-        // Skip indicator + chomping/indent characters, tracking digit run for §8.1.1.1
-        // (indent indicator must be a single digit in `1-9`).
         let mut i = 1usize;
         let mut digit_start: Option<usize> = None;
         let mut digit_end: usize = i;
@@ -1893,7 +1637,6 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
         }
         if digit_count > 0 {
             let scalar_start: usize = token.text_range().start().into();
-            // `|0`: zero as the indent indicator is invalid (range `[1-9]`).
             if let Some(zero_off) = zero_digit
                 && digit_count == 1
             {
@@ -1904,7 +1647,6 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
                     "block scalar indent indicator must be in range 1-9",
                 ));
             }
-            // `|10`: multi-digit run is never a valid indent indicator.
             if digit_count > 1
                 && let Some(start_off) = digit_start
             {
@@ -1920,7 +1662,6 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
         if rest.is_empty() {
             continue;
         }
-        // X4QW: `#` immediately after the indicator (no whitespace).
         if rest.starts_with('#') {
             let scalar_start: usize = token.text_range().start().into();
             return Some(diag_at_range(
@@ -1936,10 +1677,8 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
             .count();
         let after_ws = &rest[leading_ws..];
         if after_ws.is_empty() || after_ws.starts_with('#') {
-            // Blank-only or properly-spaced comment — header is fine.
             continue;
         }
-        // S4GJ: non-whitespace, non-comment content on the header line.
         let scalar_start: usize = token.text_range().start().into();
         let content_start = scalar_start + i + leading_ws;
         let content_end = scalar_start + header_end;
@@ -1982,9 +1721,6 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
             continue;
         }
         let header_end = text.find('\n').unwrap_or(text.len());
-        // Skip indicator + chomping/indent characters; a digit among
-        // them is an explicit indent indicator, which disables the
-        // auto-detection rule this check enforces.
         let bytes = text.as_bytes();
         let mut i = 1usize;
         let mut explicit_indent = false;
@@ -1998,7 +1734,6 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
         }
 
         let scalar_start: usize = token.text_range().start().into();
-        // Leading blank lines, as (leading-space count, byte offset in `text`).
         let mut leading_blanks: Vec<(usize, usize)> = Vec::new();
         let mut cursor = header_end + 1; // first byte after the header's newline
         while cursor <= text.len() {
@@ -2010,15 +1745,12 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
 
             if line.bytes().any(|b| b == b'\t') {
                 if line.trim_matches([' ', '\t']).is_empty() {
-                    // Whitespace-only line with a tab: not space-comparable.
                     if line_end >= text.len() {
                         break;
                     }
                     cursor = line_end + 1;
                     continue;
                 }
-                // First non-empty line carries a tab — leave it to the
-                // tab-indent / block-indent checks.
                 break;
             }
 
@@ -2026,7 +1758,6 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
             if space_count == line.len() {
                 leading_blanks.push((space_count, cursor));
             } else {
-                // First non-empty content line establishes `m`.
                 let m = space_count;
                 if let Some(&(_, offset)) = leading_blanks.iter().find(|(sp, _)| *sp > m) {
                     let at = scalar_start + offset;
@@ -2085,9 +1816,6 @@ fn check_doc_level_bare_scalar_then_colon_map(tree: &SyntaxNode) -> Option<YamlD
                     SyntaxKind::YAML_DOCUMENT_START => {
                         has_doc_start = true;
                     }
-                    // Node properties (`&anchor`, `*alias`) are not
-                    // bare scalars; they attach to the following content
-                    // and must not reset or claim the slot.
                     SyntaxKind::YAML_ANCHOR | SyntaxKind::YAML_ALIAS => {}
                     SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::YAML_COMMENT => {}
                     _ => {
@@ -2128,19 +1856,6 @@ fn check_doc_level_bare_scalar_then_colon_map(tree: &SyntaxNode) -> Option<YamlD
     None
 }
 
-/// A `YAML_BLOCK_MAP_VALUE` containing a `YAML_SCALAR` immediately
-/// followed by a `YAML_BLOCK_MAP` whose first entry's key is
-/// colon-only. Two malformed shapes share this CST signature:
-/// - Single-line inline nested mapping: `a: b: c` (ZCZ6) and
-///   `a: 'b': c` (ZL4Z) — the value scalar is followed by a second
-///   `: ` value-indicator on the same line, which YAML 1.2 forbids.
-/// - Multi-line implicit key: `key:\n  word1 word2\n  no: key`
-///   (HU3P) — §7.4 forbids an implicit key spanning lines.
-///
-/// Both are exempt when the value scalar is purely a node property
-/// (anchor `&`, tag `!`, or alias `*`): the trailing `:` then
-/// annotates an anchored/tagged value or its nested map, the valid
-/// compact-mapping shapes W5VH and 26DV.
 fn check_value_level_scalar_then_colon_map(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for value in tree
         .descendants()
@@ -2150,9 +1865,6 @@ fn check_value_level_scalar_then_colon_map(tree: &SyntaxNode) -> Option<YamlDiag
         for child in value.children_with_tokens() {
             match &child {
                 NodeOrToken::Token(t) => match t.kind() {
-                    // Node properties (`&anchor`, `*alias`) are not
-                    // bare scalars; they attach to the following content
-                    // and must not reset or claim the slot.
                     SyntaxKind::YAML_ANCHOR | SyntaxKind::YAML_ALIAS => {}
                     SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::YAML_COMMENT => {}
                     _ => last_scalar = None,
@@ -2186,15 +1898,6 @@ fn check_value_level_scalar_then_colon_map(tree: &SyntaxNode) -> Option<YamlDiag
     None
 }
 
-/// True when a value-level scalar that precedes a colon-only inner
-/// block-map carries real implicit-key content, i.e. its first line
-/// is not made up solely of node properties.
-///
-/// Flags HU3P (`word1 word2\n  no` → content), ZCZ6 (`b` → content),
-/// and ZL4Z (`'b'` → content). Exempts 26DV (`&node3\n  *alias1`)
-/// and W5VH (`&anchor:`), where the leading line is only an anchor
-/// `&`, tag `!`, or alias `*` declaration: the actual key/value then
-/// sits past the property and meets the YAML 1.2 §7.4 contract.
 fn scalar_is_content_implicit_key(text: &str) -> bool {
     let first_line = text.split_once('\n').map_or(text, |(first, _)| first);
     let mut head = first_line.trim();
@@ -2210,9 +1913,6 @@ fn scalar_is_content_implicit_key(text: &str) -> bool {
     false
 }
 
-/// True if `block_map`'s first `YAML_BLOCK_MAP_ENTRY` has a key
-/// containing only a `YAML_COLON` token (i.e. no `YAML_SCALAR` child
-/// inside the key).
 fn first_entry_has_colon_only_key(block_map: &SyntaxNode) -> bool {
     let Some(first_entry) = block_map
         .children()
@@ -2377,12 +2077,10 @@ fn check_flow_continuation_indent(tree: &SyntaxNode, input: &str) -> Option<Yaml
                 col += 1;
                 j += 1;
             }
-            // Blank-only continuation lines do not impose indent.
             if j >= flow_end || bytes[j] == b'\n' {
                 i = j;
                 continue;
             }
-            // Closing-indicator line is exempt from the strict-indent rule.
             if bytes[j] == closer {
                 i = j;
                 continue;
@@ -2401,10 +2099,6 @@ fn check_flow_continuation_indent(tree: &SyntaxNode, input: &str) -> Option<Yaml
     None
 }
 
-/// Walk the ancestor chain of `flow` and return the nearest
-/// enclosing `YAML_BLOCK_MAP` whose body owns a `YAML_BLOCK_MAP_VALUE`
-/// containing the flow. Returns `None` for top-level flows or flows
-/// not nested inside a block-map value.
 fn enclosing_block_map_for_flow(flow: &SyntaxNode) -> Option<SyntaxNode> {
     let mut node = flow.parent();
     let mut saw_block_map_value = false;
@@ -2447,9 +2141,6 @@ fn check_flow_doc_markers(tree: &SyntaxNode, input: &str) -> Option<YamlDiagnost
             }
             let text = scalar.text().to_string();
             let head = text.as_bytes();
-            // Only plain scalars (no quote/block-style prefix) can carry
-            // the marker shape; quoted text starting with `---`/`...` is
-            // legal content.
             if matches!(head.first(), Some(b'"' | b'\'' | b'|' | b'>')) {
                 continue;
             }
@@ -2473,13 +2164,6 @@ fn check_flow_doc_markers(tree: &SyntaxNode, input: &str) -> Option<YamlDiagnost
     None
 }
 
-/// Cluster L — invalid double-quoted escape sequences.
-///
-/// Walks every `YAML_SCALAR` token whose text begins with `"` and
-/// looks for `\` followed by a character not in YAML 1.2's escape
-/// table (§5.7). Emits `LEX_INVALID_DOUBLE_QUOTED_ESCAPE` at the
-/// position of the offending backslash. Mirrors the v1 lexer's
-/// `invalid_double_quote_escape_offset` contract.
 fn check_invalid_dq_escapes(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
     for token in tree
         .descendants()
@@ -2523,7 +2207,6 @@ fn check_comment_not_preceded_by_space(tree: &SyntaxNode, input: &str) -> Option
         .filter(|t| t.kind() == SyntaxKind::YAML_COMMENT)
     {
         let start: usize = token.text_range().start().into();
-        // Start of input / line start, or a separating space/tab → valid.
         let preceded_ok = matches!(
             input[..start].chars().next_back(),
             None | Some('\n' | '\r' | ' ' | '\t')
@@ -2835,10 +2518,7 @@ fn is_valid_dq_escape(ch: char) -> bool {
         '0' | 'a'
             | 'b'
             | 't'
-            // `\<TAB>` is accepted by the scanner's escape table (§5.7).
             | '\t'
-            // `\<line-break>` is the escaped line break / line continuation
-            // (§7.5); the multi-line scalar token carries a literal break here.
             | '\n'
             | '\r'
             | 'n'
@@ -2860,10 +2540,6 @@ fn is_valid_dq_escape(ch: char) -> bool {
     )
 }
 
-/// Compute the byte-based column (zero-indexed) of `byte_offset`
-/// relative to the previous newline in `input`. Tabs are not
-/// width-expanded; this is byte-distance, sufficient for indent
-/// comparisons in space-indented YAML.
 fn column_of(input: &str, byte_offset: usize) -> usize {
     match input[..byte_offset].rfind('\n') {
         Some(nl) => byte_offset - nl - 1,
@@ -2895,8 +2571,6 @@ mod tests {
 
     #[test]
     fn validate_yaml_equals_substrate_context() {
-        // `validate_yaml` must stay a thin wrapper over the substrate context so
-        // the yaml-test-suite verdicts can never drift from it.
         let samples = [
             "title: ok\n",               // valid
             "this\n is\n  invalid: x\n", // structural 1.2 error
@@ -2914,8 +2588,6 @@ mod tests {
 
     #[test]
     fn substrate_never_runs_consumer_only_checks() {
-        // Implicit empty key and duplicate key are valid YAML 1.2: the substrate
-        // path must accept them (Pool-2 is gated off), keeping suite parity.
         assert!(validate_yaml(": a\n").is_none());
         assert!(validate_yaml("a: 1\na: 2\n").is_none());
     }
@@ -2952,10 +2624,7 @@ mod tests {
             EXPL_VAL_MAP,
         ];
 
-        // Tabs that js-yaml accepts (so Quarto accepts): flow content,
-        // block-scalar bodies, and quoted-scalar continuations.
         const JS_ACCEPTS: &[&str] = &[QUOTED_CONT, FLOW_IN_BLOCK, BLOCK_SCALAR];
-        // Tabs every block-context consumer rejects.
         const BLOCK_INDENT: &[&str] = &[
             SEQ_DASH,
             SEQ_DASH_SPACE,
@@ -3033,7 +2702,6 @@ mod tests {
                     "R yaml accepts the tab in {input:?}"
                 );
             }
-            // R's yaml additionally rejects the block-scalar-body tab (Y79Y/000).
             for input in std::iter::once(&BLOCK_SCALAR).chain(BLOCK_INDENT) {
                 assert_eq!(
                     code(input, ctx),
@@ -3066,7 +2734,6 @@ mod tests {
         const EXTRA_SPACES: &str = "?  :  x\n";
         const TRAILING_COMMENT: &str = "? : # c\n";
 
-        /// Same-line `? :` — rejected by every real consumer.
         const REJECTED: &[&str] = &[
             SEQ_ONELINE,
             TOP_ONELINE,
@@ -3077,8 +2744,6 @@ mod tests {
             TRAILING_COMMENT,
         ];
 
-        /// Accepted by every real consumer: the `:` on a later line, an explicit
-        /// key that carries content, or a flow-context empty key.
         const ACCEPTED: &[&str] = &[
             "?\n: x\n",
             "?\n:\n",
@@ -3096,8 +2761,6 @@ mod tests {
 
         #[test]
         fn substrate_accepts_every_explicit_empty_key_shape() {
-            // All of these are valid YAML 1.2 — the check is Pool-2 only, so the
-            // suite verdicts stay unchanged.
             for input in REJECTED.iter().chain(ACCEPTED) {
                 assert_eq!(
                     code(input, YamlValidationContext::substrate()),
@@ -3155,8 +2818,6 @@ mod tests {
 
         #[test]
         fn diagnostic_points_at_the_offending_colon() {
-            // The empty key is the nested mapping's, so the span is the `:` —
-            // the character to delete or move to its own line.
             let ctx = YamlValidationContext::frontmatter(Flavor::Quarto);
             let diag = validate_yaml_with_context(TOP_ONELINE, ctx).expect("rejected");
             assert_eq!(&TOP_ONELINE[diag.byte_start..diag.byte_end], ":");
@@ -3166,11 +2827,6 @@ mod tests {
 
     #[test]
     fn required_simple_key_empty_value_then_unindented_line() {
-        // A block-mapping key with an empty inline value whose
-        // continuation is NOT indented past the key. libyaml/pandoc
-        // reject this: the unindented line is a fresh simple key with no
-        // `:` ("could not find expected ':'"). Regression for a
-        // frontmatter `description:` followed by an unindented blurb.
         let input = "\
 description:
 Basin is my new Rust library for numerical optimization
@@ -3187,8 +2843,6 @@ categories:
 
     #[test]
     fn required_simple_key_indented_value_passes() {
-        // The same shape, but the value IS indented past the key, so it
-        // is a legitimate multi-line plain scalar — no diagnostic.
         let input = "\
 description:
   Basin is my new Rust library for numerical optimization
@@ -3201,7 +2855,6 @@ categories:
 
     #[test]
     fn unterminated_quoted_scalar_at_eof_cq3w() {
-        // CQ3W: a double-quoted value that never reaches its closing quote.
         let input = "---\nkey: \"missing closing quote";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::LEX_UNTERMINATED_QUOTED_SCALAR);
@@ -3599,12 +3252,8 @@ categories:
         assert!(run(input).is_none());
     }
 
-    // ---- Cluster G: flow context anomalies ----
-
     #[test]
     fn flow_seq_implicit_key_spans_lines_dk4h() {
-        // DK4H: `[ key\n  : value ]` — plain-key implicit entry where
-        // the key spans a newline before its colon.
         let input = "---\n[ key\n  : value ]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3612,7 +3261,6 @@ categories:
 
     #[test]
     fn flow_seq_implicit_key_quoted_spans_lines_zxt5() {
-        // ZXT5: `[ "key"\n  :value ]` — quoted-key form of DK4H.
         let input = "[ \"key\"\n  :value ]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3620,9 +3268,6 @@ categories:
 
     #[test]
     fn flow_map_missing_comma_t833() {
-        // T833: `{\n foo: 1\n bar: 2 }` — missing comma between
-        // entries; v2 builder folds them into one malformed entry
-        // with two colons in its value.
         let input = "---\n{\n foo: 1\n bar: 2 }\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3633,50 +3278,36 @@ categories:
 
     #[test]
     fn flow_seq_single_line_implicit_key_passes() {
-        // Sanity: `[ key: value ]` — single-line implicit key is fine.
         let input = "---\n[ key: value ]\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn flow_map_well_formed_multiline_passes() {
-        // `{ foo: 1, bar: 2 }` split across lines with proper commas
-        // is well-formed.
         let input = "---\n{\n foo: 1,\n bar: 2\n}\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn flow_map_value_starting_with_colon_passes_58mp() {
-        // 58MP: `{x: :x}` — value is the scalar `:x`. v2 tokenizes the
-        // leading `:` as YAML_COLON, but no scalar precedes it inside
-        // the value, so it must not be confused with T833.
         let input = "{x: :x}\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn flow_map_value_starting_with_double_colon_passes_5t43() {
-        // 5T43: `{ "key"::value }` — value is the scalar `:value`.
-        // Same shape as 58MP at the value level (leading colon, no
-        // preceding scalar in the value).
         let input = "- { \"key\":value }\n- { \"key\"::value }\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn flow_seq_explicit_key_spans_lines_passes_ct4q() {
-        // CT4Q: `[ ? foo\n bar : baz ]` — explicit-key indicator (`?`)
-        // permits the key to span lines. The check must skip items
-        // that begin with YAML_KEY.
         let input = "[\n? foo\n bar : baz\n]\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn flow_seq_lone_dash_yjv2() {
-        // YJV2: `[-]` — `-` is followed by the flow close `]`, so it is a
-        // bare indicator, not a valid plain scalar.
         let input = "[-]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3687,8 +3318,6 @@ categories:
 
     #[test]
     fn flow_seq_lone_dash_items_g5u8() {
-        // G5U8: `- [-, -]` — both flow-seq items are a lone `-` followed
-        // by a flow indicator (`,` then `]`).
         let input = "---\n- [-, -]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3699,27 +3328,18 @@ categories:
 
     #[test]
     fn flow_seq_dash_prefixed_scalar_passes() {
-        // Sanity: `[-1, -x]` — the `-` is followed by a plain-safe char,
-        // so each item is a legitimate plain scalar, not a bare dash.
         let input = "[-1, -x]\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn block_dash_prefixed_scalar_passes() {
-        // The flow-only rule must not touch block context: `key: -x` is a
-        // plain scalar value (`-` not followed by a space) outside any
-        // flow collection, so it carries no flow-node kinds to match.
         let input = "key: -x\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
-    // ---- Cluster H: multi-line quoted scalar under-indent ----
-
     #[test]
     fn multiline_quoted_under_indent_qb6e() {
-        // QB6E: `quoted: "a\nb\nc"` — continuation lines `b` and `c`
-        // sit at column 0, less than the scalar's start column 8.
         let input = "---\nquoted: \"a\nb\nc\"\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3727,31 +3347,25 @@ categories:
 
     #[test]
     fn multiline_quoted_properly_indented_passes() {
-        // Sanity: continuation lines at column >= scalar-start col.
         let input = "---\nquoted: \"a\n  b\n  c\"\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn singleline_quoted_passes() {
-        // No newline in scalar text — no continuation rule applies.
         let input = "---\nquoted: \"a b c\"\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn multiline_single_quoted_under_indent_rejects() {
-        // Same shape as QB6E with single quotes.
         let input = "---\nquoted: 'a\nb\nc'\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
     }
 
-    // ---- Cluster D: block indentation anomalies ----
-
     #[test]
     fn tab_as_indent_4ejs() {
-        // 4EJS: tabs used for indentation are not allowed in YAML.
         let input = "---\na:\n\tb:\n\t\tc: value\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_INDENT);
@@ -3759,7 +3373,6 @@ categories:
 
     #[test]
     fn map_under_indent_dmg6() {
-        // DMG6: `key:\n  ok: 1\n wrong: 2` — `wrong` dedented to col 1.
         let input = "key:\n  ok: 1\n wrong: 2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3767,7 +3380,6 @@ categories:
 
     #[test]
     fn map_under_indent_quoted_n4jp() {
-        // N4JP: same as DMG6 but with quoted values.
         let input = "map:\n  key1: \"quoted1\"\n key2: \"bad indentation\"\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3775,7 +3387,6 @@ categories:
 
     #[test]
     fn seq_under_indent_4hvu() {
-        // 4HVU: sequence items at col 3, then a `wrong` item at col 2.
         let input = "key:\n   - ok\n   - also ok\n  - wrong\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3783,8 +3394,6 @@ categories:
 
     #[test]
     fn seq_item_with_extra_subseq_zvh3() {
-        // ZVH3: `- key: value\n - item1` — over-indented `- item1`
-        // appears as a sibling sub-sequence inside the first item.
         let input = "- key: value\n - item1\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3792,7 +3401,6 @@ categories:
 
     #[test]
     fn comment_in_multiline_plain_8xdj() {
-        // 8XDJ: comment line splitting a multi-line plain scalar.
         let input = "key: word1\n#  xxx\n  word2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3800,7 +3408,6 @@ categories:
 
     #[test]
     fn trailing_comment_in_multiline_plain_bf9h() {
-        // BF9H: trailing comment on a continuation line splits the scalar.
         let input = "---\nplain: a\n       b # end of scalar\n       c\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3808,8 +3415,6 @@ categories:
 
     #[test]
     fn doc_level_comment_in_multiline_plain_bs4k() {
-        // BS4K: a comment splits a multi-line plain scalar that sits
-        // at the document root (no enclosing block map / sequence).
         let input = "word1  # comment\nword2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNEXPECTED_DEDENT);
@@ -3817,15 +3422,12 @@ categories:
 
     #[test]
     fn doc_level_single_multiline_plain_passes() {
-        // Plain scalar that legitimately spans multiple lines at the
-        // document root (no intervening comment).
         let input = "word1\nword2\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn multi_document_each_with_single_scalar_passes() {
-        // Two distinct documents, each containing a single scalar.
         let input = "---\nfoo\n---\nbar\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
@@ -3844,18 +3446,12 @@ categories:
 
     #[test]
     fn nested_block_seq_in_seq_item_passes() {
-        // `- - x` (nested sequence in single item) is well-formed.
         let input = "- - x\n  - y\n- z\n";
         assert!(run(input).is_none());
     }
 
-    // ---- Cluster J: inline nested mapping in a block-map value ----
-
     #[test]
     fn value_level_inline_nested_map_zcz6() {
-        // ZCZ6: `a: b: c: d` — the block-map value `b` is followed by a
-        // second `: ` value-indicator on the same line, forming an
-        // illegal inline nested mapping.
         let input = "a: b: c: d\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3863,8 +3459,6 @@ categories:
 
     #[test]
     fn value_level_inline_nested_map_quoted_zl4z() {
-        // ZL4Z: `a: 'b': c` — a quoted block-map value followed by a `: `
-        // value-indicator is the same illegal inline nested mapping.
         let input = "---\na: 'b': c\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3872,26 +3466,18 @@ categories:
 
     #[test]
     fn value_level_property_only_scalar_then_colon_passes_w5vh() {
-        // W5VH: `a: &anchor: scalar` — the value-level scalar is purely a
-        // node property (anchor), so the trailing `:` annotates an anchored
-        // value, not an inline nested mapping. Must stay accepted.
         let input = "a: &anchor: scalar a\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn value_level_colon_without_space_passes() {
-        // `a: b:c` — the inner colon is not followed by whitespace, so
-        // `b:c` is a single plain scalar value, not a nested mapping.
         let input = "a: b:c\n";
         assert!(run(input).is_none());
     }
 
-    // ---- Cluster E: block scalar header anomalies ----
-
     #[test]
     fn block_scalar_header_content_s4gj() {
-        // S4GJ: `folded: > first line` — text after `>` is not a comment.
         let input = "---\nfolded: > first line\n  second line\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3899,7 +3485,6 @@ categories:
 
     #[test]
     fn block_scalar_header_unspaced_comment_x4qw() {
-        // X4QW: `block: ># comment` — `#` immediately after `>`.
         let input = "block: ># comment\n  scalar\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
@@ -3907,46 +3492,36 @@ categories:
 
     #[test]
     fn block_scalar_with_strip_chomp_and_body_passes() {
-        // `text: |-\n  body` — `-` after `|` is a chomp indicator.
         let input = "text: |-\n  body\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn block_scalar_with_indent_indicator_passes() {
-        // `text: |2\n  body` — `2` is an explicit indent indicator.
         let input = "text: |2\n  body\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn block_scalar_with_spaced_comment_passes() {
-        // `text: > # ok\n  body` — comment with whitespace after `>` is fine.
         let input = "text: > # ok\n  body\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn block_scalar_bare_header_passes() {
-        // `text: >\n  body` — no content on header line.
         let input = "text: >\n  body\n";
         assert!(run(input).is_none());
     }
 
-    // ---- Cluster L: double-quoted escapes ----
-
     #[test]
     fn dq_escaped_line_break_passes_np9h() {
-        // NP9H (spec 7.5): a `\` at end of line is the escaped line break
-        // (line continuation), not an invalid escape. The validator's
-        // escape table previously omitted `\n`/`\r` and falsely rejected it.
         let input = "\"folded \nto a space,\t\n \nto a line feed, or \t\\\n \\ \tnon-content\"\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn dq_escaped_line_break_with_marker_passes_q8ad() {
-        // Q8AD: same escaped-line-break scalar behind a `---` marker.
         let input =
             "---\n\"folded \nto a space,\n \nto a line feed, or \t\\\n \\ \tnon-content\"\n";
         assert!(run(input).is_none());
@@ -3954,15 +3529,12 @@ categories:
 
     #[test]
     fn dq_escaped_tab_passes() {
-        // `\<TAB>` is accepted by the scanner's escape table; the
-        // validator must agree so the two paths don't diverge.
         let input = "key: \"a\\\tb\"\n";
         assert!(run(input).is_none());
     }
 
     #[test]
     fn dq_truly_invalid_escape_still_rejected() {
-        // Contract guard: a genuinely unknown escape (`\q`) is still flagged.
         let input = "key: \"a\\qb\"\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3973,8 +3545,6 @@ categories:
 
     #[test]
     fn comment_abutting_closing_quote_rejected_su5z() {
-        // SU5Z: a `#` directly after a closing quote with no separating
-        // space is not a valid comment (§6.6).
         let input = "key: \"value\"# invalid comment\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3985,7 +3555,6 @@ categories:
 
     #[test]
     fn comment_abutting_flow_comma_rejected_cvw2() {
-        // CVW2: a `#` immediately following a flow `,` separator.
         let input = "---\n[ a, b, c,#invalid\n]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -3996,7 +3565,6 @@ categories:
 
     #[test]
     fn comment_preceded_by_space_passes() {
-        // Contract guard: a properly separated comment must not be flagged.
         for input in [
             "key: value # ok\n",
             "# line-start comment\nkey: value\n",
@@ -4008,7 +3576,6 @@ categories:
 
     #[test]
     fn anchor_decorates_alias_sr86() {
-        // SR86: anchor on a block-map value whose body is itself an alias.
         let input = "key1: &a value\nkey2: &b *a\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_ANCHOR_DECORATES_ALIAS);
@@ -4016,7 +3583,6 @@ categories:
 
     #[test]
     fn anchor_decorates_alias_su74() {
-        // SU74: anchor + alias used together as a block-map key.
         let input = "key1: &alias value1\n&b *alias : value2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_ANCHOR_DECORATES_ALIAS);
@@ -4024,24 +3590,18 @@ categories:
 
     #[test]
     fn anchor_followed_by_scalar_passes() {
-        // Contract guard: a plain anchor decorating an ordinary scalar
-        // (i.e. not an alias) must not be flagged.
         let input = "key: &a value\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn lone_alias_without_anchor_passes() {
-        // Contract guard: a bare alias (no preceding anchor sibling) is
-        // valid.
         let input = "key1: &a value\nkey2: *a\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn invalid_tag_braces_lhl4() {
-        // LHL4: tag suffix carries `{}` which are c-flow-indicators,
-        // forbidden from ns-tag-char.
         let input = "---\n!invalid{}tag scalar\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_TAG_CHARACTER);
@@ -4049,8 +3609,6 @@ categories:
 
     #[test]
     fn invalid_tag_comma_u99r() {
-        // U99R: `!!str,` — comma is a c-flow-indicator and not a
-        // valid ns-tag-char.
         let input = "- !!str, xxx\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_TAG_CHARACTER);
@@ -4058,24 +3616,18 @@ categories:
 
     #[test]
     fn valid_tag_passes() {
-        // Contract guard: tags from the well-formed allowlist must not
-        // trip the invalid-char check.
         let input = "key: !!str value\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn verbatim_tag_with_uri_chars_passes() {
-        // Contract guard: verbatim form `!<uri>` allows any ns-uri-char
-        // in the URI body, including `,` and `[`.
         let input = "key: !<tag:example.com,2011:foo[bar]> value\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn multiple_anchors_on_node_4jvg() {
-        // 4JVG: scalar value decorated with two anchors
-        // (`top2: &node2\n  &v2 val2`).
         let input = "top1: &node1\n  &k1 key1: val1\ntop2: &node2\n  &v2 val2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_MULTIPLE_ANCHORS_ON_NODE);
@@ -4083,16 +3635,12 @@ categories:
 
     #[test]
     fn single_anchor_per_node_passes() {
-        // Contract guard: one anchor per value is fine, even when
-        // siblings carry anchors of their own.
         let input = "k1: &a 1\nk2: &b 2\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn anchor_before_block_seq_indicator_sy6v() {
-        // SY6V: `&anchor - sequence entry` — anchor must not share its
-        // line with the leading block-sequence `-`.
         let input = "&anchor - sequence entry\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -4103,20 +3651,12 @@ categories:
 
     #[test]
     fn anchor_on_own_line_before_block_seq_passes() {
-        // Contract guard: anchor on its own line preceding a block
-        // sequence is valid.
         let input = "&anchor\n- item\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn anchor_without_target_gt5m() {
-        // GT5M: `- item1\n&node\n- item2` — anchor between sequence
-        // items has no target node. The `&node` sits at the sequence
-        // indent (column 0), so the scanner registers it as a *required*
-        // simple key; when `- item2` arrives without an intervening `:`,
-        // it surfaces the same "could not find expected ':'" that
-        // libyaml reports for this fixture (line 2, column 1).
         let input = "- item1\n&node\n- item2\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(
@@ -4127,16 +3667,12 @@ categories:
 
     #[test]
     fn anchor_before_block_seq_item_value_passes() {
-        // Contract guard: `- &a item` — anchor before the item's value
-        // is valid.
         let input = "- &a item\n- b\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn undeclared_alias_errors() {
-        // `*missing` with no matching `&missing` is a hard error in
-        // libyaml/PyYAML/js-yaml (YAML 1.2 §7.1).
         let input = "key: *missing\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
@@ -4144,15 +3680,12 @@ categories:
 
     #[test]
     fn declared_alias_passes() {
-        // Contract guard: an alias resolving to a prior anchor is valid.
         let input = "a: &x 1\nb: *x\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn forward_reference_alias_errors() {
-        // An anchor must be declared *before* it is aliased; a forward
-        // reference is rejected.
         let input = "a: *x\nb: &x 1\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
@@ -4160,8 +3693,6 @@ categories:
 
     #[test]
     fn alias_across_document_boundary_errors() {
-        // Anchor scope is per-document: `&x` in the first document does
-        // not carry across `---` into the second.
         let input = "---\na: &x 1\n---\nb: *x\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
@@ -4169,7 +3700,6 @@ categories:
 
     #[test]
     fn undeclared_alias_as_key_errors() {
-        // Aliases can appear as keys; an undeclared one is still rejected.
         let input = "*x : v\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
@@ -4177,7 +3707,6 @@ categories:
 
     #[test]
     fn undeclared_alias_in_flow_errors() {
-        // Aliases inside a flow collection are checked too.
         let input = "key: [*x]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_UNDECLARED_ALIAS);
@@ -4185,9 +3714,6 @@ categories:
 
     #[test]
     fn undefined_tag_handle_in_second_doc_qlj7() {
-        // QLJ7: `%TAG !prefix!` declared in doc 1 only; doc 2's
-        // `!prefix!B` must error because tag directives don't carry
-        // across `---` per YAML 1.2 §6.8.2.
         let input =
             "%TAG !prefix! tag:example.com,2011:\n--- !prefix!A\na: b\n--- !prefix!B\nc: d\n";
         let diag = run(input).expect("expected diagnostic");
@@ -4196,16 +3722,12 @@ categories:
 
     #[test]
     fn declared_tag_handle_in_same_doc_passes() {
-        // Sanity: `%TAG !prefix!` directive + `!prefix!a` use within
-        // the same document is valid.
         let input = "%TAG !prefix! tag:example.com,2011:\n--- !prefix!a\nkey: value\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn builtin_tag_handles_always_ok() {
-        // The primary `!` and secondary `!!` handles are always declared
-        // without an explicit `%TAG` directive.
         let secondary = "--- !!str foo\n";
         assert!(
             run(secondary).is_none(),
@@ -4218,42 +3740,30 @@ categories:
 
     #[test]
     fn verbatim_tag_bypasses_handle_lookup() {
-        // `!<URI>` tags use the URI verbatim and don't go through handle
-        // resolution.
         let input = "--- !<tag:example.com,2025:foo> bar\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn flow_continuation_accepts_closing_bracket_at_parent_indent_depth0() {
-        // pretty_yaml, libyaml, and pandoc all accept the closing flow
-        // indicator on its own line at the parent block-map's indent
-        // column when wrapping a flow across lines. YAML 1.2 §7.1 is
-        // stricter, but matching real-world parsers is the behavioral
-        // bar (cf. `parser` rule on pandoc as reference).
         let input = "a: [\n  1,\n  2,\n  3,\n]\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn flow_continuation_accepts_closing_bracket_at_parent_indent_depth1() {
-        // Same shape, one nesting level deeper. Closing `]` sits at the
-        // inner block-map's indent (col 2), threshold = 2.
         let input = "outer:\n  inner: [\n    a,\n    b,\n  ]\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn flow_continuation_accepts_closing_brace_at_parent_indent() {
-        // Flow map equivalent of the depth-0 wrap shape.
         let input = "a: {\n  k1: v1,\n  k2: v2,\n}\n";
         assert!(run(input).is_none(), "got {:?}", run(input));
     }
 
     #[test]
     fn flow_continuation_rejects_content_line_at_parent_indent_9c9n() {
-        // 9C9N: `flow: [a,\nb,\nc]` — content lines at col 0 still get
-        // rejected. Only the closing-indicator line is exempt.
         let input = "---\nflow: [a,\nb,\nc]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::LEX_WRONG_INDENTED_FLOW);
@@ -4261,8 +3771,6 @@ categories:
 
     #[test]
     fn flow_continuation_rejects_comment_line_at_parent_indent_cml9() {
-        // CML9: comment at col 0 inside a flow opened at deeper indent.
-        // Comments are not the closer ⇒ still rejected.
         let input = "key: [ word1\n#  xxx\n  word2 ]\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::LEX_WRONG_INDENTED_FLOW);

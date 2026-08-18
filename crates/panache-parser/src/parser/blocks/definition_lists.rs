@@ -17,20 +17,10 @@ pub fn try_parse_definition_marker(line: &str) -> Option<(char, usize, usize, us
     try_parse_definition_marker_at(line, 0)
 }
 
-/// [`try_parse_definition_marker`] for a slice that starts at column
-/// `base_col` of its source line.
-///
-/// The 0-3 space allowance is measured from `line`'s own start, but the
-/// returned `indent_cols` and the tab expansion after the marker are absolute,
-/// so callers keep indexing the full line with `byte_index_at_column`.
 fn try_parse_definition_marker_at(
     line: &str,
     base_col: usize,
 ) -> Option<(char, usize, usize, usize)> {
-    // Cheap byte-level leading-byte gate: a definition marker is `:` or
-    // `~` after up to 3 ASCII spaces. Avoid the `leading_indent`
-    // (Unicode char walk + tab-aware column count) on the common
-    // non-marker line.
     {
         let bytes = line.as_bytes();
         let mut i = 0;
@@ -43,7 +33,6 @@ fn try_parse_definition_marker_at(
         }
     }
 
-    // Count leading whitespace in columns (0-3 allowed)
     let (indent_cols, indent_bytes) = leading_indent(line);
     if indent_cols > 3 {
         return None;
@@ -51,7 +40,6 @@ fn try_parse_definition_marker_at(
 
     let after_indent = &line[indent_bytes..];
 
-    // Check for : or ~ marker
     let marker = after_indent.chars().next()?;
     if !matches!(marker, ':' | '~') {
         return None;
@@ -59,11 +47,6 @@ fn try_parse_definition_marker_at(
 
     let after_marker = &after_indent[1..];
 
-    // Must be followed by whitespace, a line ending, or end of line. A bare
-    // marker whose definition body starts on the next line arrives as ":\n"
-    // (lines keep their trailing newline via `split_inclusive`); the newline is
-    // end-of-line, not content, so it's still a valid marker (matches pandoc's
-    // lazy `:`-on-its-own-line definition form).
     if !after_marker.starts_with(' ')
         && !after_marker.starts_with('\t')
         && !after_marker.starts_with('\n')
@@ -73,9 +56,6 @@ fn try_parse_definition_marker_at(
         return None;
     }
 
-    // Seed the column counter past the marker's own column, so a tab after
-    // the marker expands to the stop it actually reaches: `:\td` puts the tab
-    // at column 1, reaching column 4 (a content column of 4), not column 5.
     let marker_col = base_col + indent_cols;
     let (spaces_after_cols, spaces_after_bytes) = leading_indent_from(after_marker, marker_col + 1);
 
@@ -97,16 +77,11 @@ pub(in crate::parser) fn definition_marker_in_list_frame(
     line: &str,
     list_content_col: Option<usize>,
 ) -> Option<(char, usize, usize, usize)> {
-    // Only the reach answer is consumed here: a straddling tab reaches
-    // the frame, and `byte_index_at_column` below consumes it whole with
-    // the `base_col` re-read compensating for the overshoot.
     if let Some(content_col) = list_content_col
         && content_col > 0
         && resolve_content_indent(line, content_col).reaches_frame()
     {
         let base = byte_index_at_column(line, content_col);
-        // A tab straddling the content column lands `base` past it, so read
-        // the column actually reached rather than assuming `content_col`.
         let base_col = leading_indent(&line[..base]).0;
         if let Some(found) = try_parse_definition_marker_at(&line[base..], base_col) {
             return Some(found);
@@ -127,14 +102,9 @@ pub(crate) fn emit_term(
     config: &ParserOptions,
 ) {
     builder.start_node(SyntaxKind::TERM.into());
-    // Strip trailing newline from line (it will be emitted separately)
     let (text, newline_str) = strip_newline(line);
     let trimmed_text = text.trim_end();
 
-    // A term inside a container carries that container's indent. Emit it as
-    // WHITESPACE, the way the definition marker's own indent is emitted, so
-    // the term's inlines are just the term and the formatter can re-apply the
-    // indent it is rendering at.
     if let Some(indent) = stripped_indent.filter(|indent| !indent.is_empty()) {
         builder.token(SyntaxKind::WHITESPACE.into(), indent);
     }
@@ -169,8 +139,6 @@ pub(crate) fn emit_definition_marker(
     }
     builder.token(SyntaxKind::DEFINITION_MARKER.into(), &marker.to_string());
 }
-
-// Helper functions for definition list management in Parser
 
 use crate::parser::blocks::tables::{LineView, is_caption_followed_by_table};
 use crate::parser::utils::container_stack::{Container, ContainerStack};
@@ -218,37 +186,15 @@ pub(in crate::parser) fn next_line_is_definition_marker(
             check_pos += 1;
             continue;
         }
-        // Read the marker off the line's frame verdict, so the marker
-        // text and the frame membership come from the same resolution.
         let found = match lines.frame_verdict(check_pos) {
-            // A dedent out of a content container is not this
-            // lookahead's business: a marker below a definition body's
-            // content column is a second definition of the outer term,
-            // and the marker test itself still applies to the tail.
             FrameVerdict::Inside { rest } | FrameVerdict::Dedented { rest, .. } => {
                 try_parse_definition_marker(rest)
             }
-            // A marker whose indent the column-blind strip would have
-            // faked from content bytes is not inside the item: the `:`
-            // is preceded by text on its own line, and pandoc folds the
-            // line into the paragraph above (`- a\nb\n\nc :` is
-            // `BulletList` + `Para "c :"`), so it must not promote the
-            // term line above it.
             FrameVerdict::FakedIndent { .. } => return None,
-            // The line reaches the content column, but a tab straddles
-            // it: the tab byte is container indent with no boundary to
-            // split on. Read the marker from behind the tab, in the
-            // frame the tab's stop lands on — the same frame
-            // `definition_marker_in_list_frame` reads a dispatch-line
-            // marker in. Pandoc reads `- a\n\n  b\n\n\t: def` as a
-            // definition list on `b`; emission already carries literal
-            // indent bytes (`emit_definition_marker`), so a tab needs
-            // no byte boundary there either.
             FrameVerdict::StraddlingTab {
                 rest,
                 cols_before_tab,
             } => {
-                // The tab stop is 4 columns, as everywhere in the parser.
                 let tab_end_col = (cols_before_tab as usize / 4 + 1) * 4;
                 try_parse_definition_marker_at(&rest[1..], tab_end_col)
             }
@@ -316,9 +262,6 @@ mod tests {
 
     #[test]
     fn test_parse_definition_marker_bare_with_newline() {
-        // Lines retain their trailing newline (`split_inclusive`), so a bare
-        // marker whose body starts on the next line arrives as ":\n". The
-        // trailing newline is end-of-line, not content, so it's still a marker.
         assert_eq!(try_parse_definition_marker(":\n"), Some((':', 0, 0, 0)));
         assert_eq!(try_parse_definition_marker("~\n"), Some(('~', 0, 0, 0)));
         assert_eq!(try_parse_definition_marker(":\r\n"), Some((':', 0, 0, 0)));
@@ -349,9 +292,7 @@ mod tests {
     #[test]
     fn caption_probe_stops_at_the_container_boundary() {
         for input in [
-            // Unnested: the body's content column is 4.
             "T\n\n:   a\n\n    :   def\n\n----\n",
-            // Nested in a list item: the body's content column is 6.
             "- T\n\n  :   a\n\n      :   def\n\n----\n",
         ] {
             let tree = crate::parse(input, Some(crate::ParserOptions::default()));

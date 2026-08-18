@@ -45,9 +45,7 @@ pub(crate) enum OpenDisplayMath {
 /// content containers leave behind — never against the raw line.
 #[derive(Debug, Clone)]
 pub(crate) enum Container {
-    BlockQuote {
-        // No special tracking needed
-    },
+    BlockQuote {},
     Alert {
         blockquote_depth: usize,
     },
@@ -95,12 +93,8 @@ pub(crate) enum Container {
         /// whitespace correctly.
         virtual_marker_space: bool,
     },
-    DefinitionList {
-        // Definition lists don't need special tracking
-    },
-    DefinitionItem {
-        // No special tracking needed
-    },
+    DefinitionList {},
+    DefinitionItem {},
     Definition {
         content_col: usize,
         plain_open: bool,
@@ -114,9 +108,6 @@ pub(crate) enum Container {
         buffer: ParagraphBuffer, // Interleaved buffer for paragraph content with markers
         open_inline_math_envs: Vec<String>,
         open_display_math: Option<OpenDisplayMath>,
-        // Checkpoint at the position the paragraph started; used to retroactively
-        // wrap buffered content as PARAGRAPH (or HEADING for multi-line setext)
-        // when the paragraph is closed.
         start_checkpoint: Checkpoint,
     },
     FootnoteDefinition {

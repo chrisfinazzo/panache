@@ -32,7 +32,7 @@ pub use crate::vfs::FileId;
 /// distinguish a file it has *referenced but not loaded* (`None` --- a missing
 /// include or unreadable bibliography) from a file that is *present but empty*
 /// (`Some("")`). That distinction backs the bibliography "failed to read"
-/// diagnostic (audit §3.3 / G3). `Arc<str>` lets worker reads share text
+/// diagnostic. `Arc<str>` lets worker reads share text
 /// without cloning.
 #[salsa::input]
 pub struct FileText {
@@ -65,10 +65,8 @@ pub struct FileConfig {
 /// reference of a path (a real input write), which re-runs `project_graph` so
 /// it can resolve and recurse into the newly-referenced file.
 ///
-/// This replaces the former global `CacheGeneration` counter with an in-graph,
-/// *structural-only* signal: per-file **content** changes flow through each
-/// file's [`FileText`] input and never touch this set, so a sibling load no
-/// longer invalidates unrelated documents' `metadata` memos (audit §3.3 / G3).
+/// Content changes flow through each file's [`FileText`] input and do not touch
+/// this structural set, avoiding invalidation of unrelated document metadata.
 #[salsa::input]
 pub struct FileSet {
     #[returns(ref)]
@@ -331,7 +329,7 @@ pub fn parsed_tree_root(db: &dyn Db, file: FileText, config: FileConfig) -> Synt
 pub fn metadata(db: &dyn Db, file: FileText, config: FileConfig) -> DocumentMetadata {
     // Resolve the document's path from its `FileText` identity; an in-memory
     // buffer has no path, so relative bibliography/metadata paths simply don't
-    // resolve (audit §3.3 / G3).
+    // resolve.
     let path = db.path_of(file).unwrap_or_default();
     let tree = parsed_tree_root(db, file, config);
     let mut metadata =
@@ -369,7 +367,7 @@ pub fn metadata(db: &dyn Db, file: FileText, config: FileConfig) -> DocumentMeta
             // this query once the file loads --- no global firewall needed. A
             // `None` input *or* an absent path is "failed to read"; a present
             // file (even empty, `Some("")`) parses normally, preserving the
-            // absent-vs-empty distinction (audit §3.3 / G3).
+            // absent-vs-empty distinction.
             let loaded = db
                 .file_text(bib_path.clone())
                 .filter(|bib_file| bib_file.text(db).is_some());
@@ -429,7 +427,7 @@ pub fn doc_frontmatter_metadata_result(
 ///
 /// Manifest text is read through `db.file_text` (a tracked input loaded by
 /// `load_referenced_files`), so editing a manifest re-runs this query — the same
-/// invalidation path the bibliography reads use (audit §3.3 / G3).
+/// invalidation path the bibliography reads use.
 #[salsa::tracked(returns(ref), no_eq, unsafe(non_salsa_values))]
 pub fn project_manifest_diagnostics(
     db: &dyn Db,
@@ -1769,7 +1767,7 @@ struct InternedDefinitionIndex<'db> {
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> DefinitionIndex {
     // The definitions' source path is the document's own path, resolved from its
-    // `FileText` identity (empty for an in-memory buffer) (audit §3.3 / G3).
+    // `FileText` identity (empty for an in-memory buffer).
     let path = db.path_of(file).unwrap_or_default();
     let tree = parsed_tree_root(db, file, config);
     let mut index = InternedDefinitionIndex::default();
@@ -2364,12 +2362,11 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
     // Depend on the set of interned files so that the writer interning a
     // newly-referenced include/sibling (adding its id to the set) re-runs this
     // query and lets it resolve the new path. Per-file *content* arrival is
-    // tracked separately, via each file's `FileText` value read below (audit
-    // §3.3 / G3).
+    // tracked separately through each file's `FileText` value below.
     let _ = db.file_set().ids(db);
     let mut graph = InternedProjectGraph::default();
     // A pathless in-memory buffer has no project root and no resolvable
-    // includes, so its project graph is empty (audit §3.3 / G3).
+    // includes, so its project graph is empty.
     let Some(root_path) = db.path_of(root_file) else {
         return graph.into_owned(db);
     };
@@ -2410,7 +2407,7 @@ pub fn project_graph(db: &dyn Db, root_file: FileText, config: FileConfig) -> Pr
             // writer's `load_project_files` fixpoint can see it in the graph,
             // load it, and re-run (mirrors how includes record an edge before
             // the `file_text` check). Without this, an unloaded sibling would
-            // vanish from the graph and never get discovered (audit §3.2).
+            // vanish from the graph and never get discovered.
             graph.add_document(db, &path);
             // Resolve the sibling to its input and read its content (taking a
             // per-file dependency). Recurse only when it is actually loaded; an
@@ -2476,7 +2473,7 @@ fn visit_document<'db>(
         }
         // Read the include's content (per-file dependency); recurse only when
         // loaded. An interned-but-absent include records the dependency so a
-        // later load re-runs `project_graph` and recurses then (audit §3.3).
+        // later load re-runs `project_graph` and recurses then.
         let loaded = db
             .file_text(include.path.clone())
             .filter(|include_file| include_file.text(db).is_some());
@@ -2535,7 +2532,7 @@ fn visit_document<'db>(
 /// metadata-file, and bibliography paths that wire it into the project graph.
 ///
 /// Lifted out of the parse so [`project_structure`] can backdate the same way
-/// [`refdef_set`] firewalls the parse (audit §3.4 / G4). These are *paths only*
+/// [`refdef_set`] isolates the parse from unrelated changes. These are paths only
 /// — none of the byte ranges that include/duplicate diagnostics carry. A
 /// paragraph-body edit shifts those ranges but leaves the path set unchanged, so
 /// salsa value-equality on `ProjectEdges` lets the structural graph short-circuit
@@ -2554,7 +2551,7 @@ pub struct ProjectEdges {
 
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn project_edges(db: &dyn Db, file: FileText, config: FileConfig) -> ProjectEdges {
-    // `collect_includes` probes the filesystem directly (a residual G3 read:
+    // `collect_includes` probes the filesystem directly:
     // an include edge only forms when the target exists on disk), so depend on
     // the interned `FileSet` the way `project_graph` does --- interning a
     // newly-created include (a watcher event) re-runs this query and re-resolves
@@ -2608,7 +2605,7 @@ pub fn project_edges(db: &dyn Db, file: FileText, config: FileConfig) -> Project
 /// edit (`Some("a")` -> `Some("b")`) would re-run every reader. Returning the
 /// `bool` presence flag backdates instead — only an actual load/unload
 /// (`None` <-> `Some`) flips it — which is exactly what [`project_structure`]
-/// needs to decide whether to recurse into a referenced file (audit §3.4 / G4).
+/// needs to decide whether to recurse into a referenced file.
 #[salsa::tracked]
 pub fn file_is_present(db: &dyn Db, file: FileText) -> bool {
     file.text(db).is_some()
@@ -2620,7 +2617,7 @@ pub fn file_is_present(db: &dyn Db, file: FileText) -> bool {
 /// This is the backdating sibling of [`project_graph`]: it walks the project the
 /// same way, but reads each member's range-free [`project_edges`] and
 /// [`file_is_present`] instead of the member's full parse, so a paragraph-body
-/// edit in any member reuses this memo (audit §3.4 / G4). Every *structural*
+/// edit in any member reuses this memo. Every structural
 /// consumer — the writer's load fixpoint, `definition_index_with_includes`, and
 /// the navigation/workspace-symbol handlers — reads this query. `project_graph`
 /// remains the source of the `GraphDiagnostic` accumulator (include + cross-doc
@@ -2628,7 +2625,7 @@ pub fn file_is_present(db: &dyn Db, file: FileText) -> bool {
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn project_structure(db: &dyn Db, root_file: FileText, config: FileConfig) -> ProjectGraph {
     // Depend on the set of interned files so interning a newly-referenced
-    // include/sibling re-runs this query (mirrors `project_graph`, audit §3.3).
+    // include or sibling re-runs this query, mirroring `project_graph`.
     let _ = db.file_set().ids(db);
     let mut graph = InternedProjectGraph::default();
     let Some(root_path) = db.path_of(root_file) else {
@@ -2706,7 +2703,7 @@ pub trait Db: salsa::Database {
     /// The immutable backing path for a document's [`FileText`], or `None` for
     /// an in-memory buffer. Path-keyed queries resolve their document path this
     /// way instead of taking a `PathBuf` parameter, so `PathBuf` stops leaking
-    /// into analysis and the `<memory>` sentinel is retired (audit §3.3 / G3).
+    /// into analysis and the `<memory>` sentinel is unnecessary.
     fn path_of(&self, file: FileText) -> Option<PathBuf>;
 
     /// The immutable backing path for a [`FileId`], or `None` for an in-memory
@@ -2849,7 +2846,7 @@ impl SalsaDb {
     /// Register an in-memory buffer (no backing path) with initial `text`,
     /// returning its [`FileText`] input. The buffer gets a real [`FileId`] with
     /// `path_of == None`, so it never collides with another untitled buffer and
-    /// never needs the `<memory>` sentinel (audit §3.3 / G3). Writer-only.
+    /// needs no shared sentinel. Writer-only.
     pub fn create_in_memory_file(
         &mut self,
         text: impl Into<Arc<str>>,
@@ -3079,7 +3076,7 @@ impl SalsaDb {
     /// Discover and load every file `project_graph` references for `root_file`,
     /// on the writer, until the referenced set reaches a fixpoint.
     ///
-    /// `Db::file_text` is a pure lookup (audit §3.2), so a query only sees files
+    /// `Db::file_text` is a pure lookup, so a query only sees files
     /// already loaded. Each pass runs `project_graph` (which records the root,
     /// its included/sibling documents, and bibliography/metadata edges even when
     /// a file is unloaded), then for every referenced path **interns** it (which
@@ -3088,7 +3085,7 @@ impl SalsaDb {
     /// fresh `None`->`Some` load flips that file's per-file dependency, again
     /// re-running `project_graph` so it recurses into the freshly-loaded file's
     /// own references. Both convergence channels live inside salsa's dependency
-    /// graph; no `CacheGeneration` counter is needed (audit §3.3 / G3).
+    /// graph, without a global generation counter.
     ///
     /// Terminates once a pass loads no new content: the referenced set is the
     /// finite transitive closure of `root_path`, each pass only adds inputs, and
@@ -3162,7 +3159,7 @@ impl Db for SalsaDb {
     // writer has already loaded. Discovery-and-load of includes/bibliography is
     // the writer's job (see `crate::lsp::documents::load_project_files`), so
     // this never reads `std::fs` and never creates an input off a `&self` path
-    // --- restoring query purity and the single-writer invariant (audit §3.2).
+    // and preserves the single-writer invariant.
     fn file_text(&self, path: PathBuf) -> Option<FileText> {
         self.file_text_if_cached(&path)
     }
@@ -4334,7 +4331,7 @@ mod tests {
         let _ = std::fs::remove_file(stable_path);
     }
 
-    /// The core G3 granularity win (audit §3.3): interning an unrelated sibling
+    /// Interning an unrelated sibling
     /// (a `FileSet` change) re-runs queries that read the set --- like
     /// `project_graph` --- but NOT per-file readers like `metadata`, whose
     /// bibliography dependency is a per-file input rather than a global firewall.
@@ -4372,14 +4369,12 @@ mod tests {
         );
     }
 
-    // --- audit §3.4 / G4: cross-file invalidation firewall -----------------
-
     type ExecLog = Arc<Mutex<Vec<String>>>;
 
     /// A `SalsaDb` that records the `database_key` of every tracked query salsa
     /// *executes* (as opposed to validating from memo). Lets tests assert that a
     /// paragraph-body edit in one project member reuses other files' memos
-    /// (audit §3.4 / G4), using the same event-callback hook salsa's own test
+    /// using the same event-callback hook Salsa's own test
     /// suite uses.
     fn db_with_exec_log() -> (SalsaDb, ExecLog) {
         let log: ExecLog = Arc::new(Mutex::new(Vec::new()));
@@ -4577,7 +4572,7 @@ mod tests {
         );
     }
 
-    /// The cross-file firewall (audit §3.4 / G4): a paragraph-body edit in a
+    /// A paragraph-body edit in a
     /// project member must NOT re-execute the structural `project_structure`
     /// memo, nor the *other* file's `definition_index` / `heading_outline` /
     /// `metadata` memos. Pre-firewall (`project_structure` read the member's full
@@ -4632,7 +4627,7 @@ mod tests {
 
     /// The firewall must not over-suppress: a structural edit (adding a
     /// bibliography edge to the child) changes `project_edges`, so it does NOT
-    /// backdate and `project_structure` re-runs (audit §3.4 / G4).
+    /// backdate and `project_structure` re-runs.
     #[test]
     fn structural_edit_in_member_reexecutes_project_structure() {
         let (mut db, root_file, config, child_path, log, _temp_dir) = two_doc_project_logging();
@@ -4660,7 +4655,7 @@ mod tests {
 
         // A real file exists on disk, but it was never loaded through a writer
         // method. `file_text` must NOT read it --- it is a pure cache lookup
-        // (audit §3.2). Loading is the writer's responsibility.
+        // Loading is the writer's responsibility.
         let path = unique_temp_path("file-text-purity", ".qmd");
         std::fs::write(&path, "on disk but not loaded").expect("write probe file");
 

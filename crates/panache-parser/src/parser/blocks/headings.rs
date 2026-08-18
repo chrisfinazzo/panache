@@ -109,22 +109,17 @@ pub fn try_parse_atx_heading(content: &str) -> Option<usize> {
     };
     let trimmed = line.trim_start();
 
-    // Must start with 1-6 # characters
     let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
     if hash_count == 0 || hash_count > 6 {
         return None;
     }
 
-    // After hashes, must be end of line, space, or tab.
-    // We strip trailing line ending first so empty headings like `##\n`
-    // are accepted when this function is called on full source lines.
     let after_hashes = &trimmed[hash_count..];
     if !after_hashes.is_empty() && !after_hashes.starts_with(' ') && !after_hashes.starts_with('\t')
     {
         return None;
     }
 
-    // Check leading spaces (max 3)
     let leading_spaces = line.len() - trimmed.len();
     if leading_spaces > 3 {
         return None;
@@ -146,7 +141,6 @@ pub fn try_parse_atx_heading(content: &str) -> Option<usize> {
 /// - Text line cannot be indented 4+ spaces (would be code block)
 /// - Text line cannot be empty/blank
 pub fn try_parse_setext_heading(lines: &[&str], pos: usize) -> Option<(usize, char)> {
-    // Need current line (text) and next line (underline)
     if pos >= lines.len() {
         return None;
     }
@@ -159,43 +153,35 @@ pub fn try_parse_setext_heading(lines: &[&str], pos: usize) -> Option<(usize, ch
 
     let underline = lines[next_pos];
 
-    // Text line cannot be empty or blank
     if crate::parser::utils::helpers::is_blank_line(text_line) {
         return None;
     }
 
-    // Text line cannot be indented 4+ spaces (would be code block)
     let leading_spaces = text_line.len() - text_line.trim_start().len();
     if leading_spaces >= 4 {
         return None;
     }
 
-    // Check if underline is valid
     let underline_trimmed = underline.trim();
 
-    // Must be non-empty
     if underline_trimmed.is_empty() {
         return None;
     }
 
-    // Determine underline character and check consistency
     let first_char = underline_trimmed.chars().next()?;
     if first_char != '=' && first_char != '-' {
         return None;
     }
 
-    // All characters must be the same
     if !underline_trimmed.chars().all(|c| c == first_char) {
         return None;
     }
 
-    // Leading spaces in underline (max 3 for consistency with other block rules)
     let underline_leading_spaces = underline.len() - underline.trim_start().len();
     if underline_leading_spaces >= 4 {
         return None;
     }
 
-    // Determine level: '=' is level 1, '-' is level 2
     let level = if first_char == '=' { 1 } else { 2 };
 
     Some((level, first_char))
@@ -229,7 +215,6 @@ pub(crate) fn emit_setext_heading_text(
     text_line: &str,
     config: &ParserOptions,
 ) {
-    // Strip trailing newline from text line for processing
     let (text_without_newline, text_newline_str) =
         if let Some(stripped) = text_line.strip_suffix("\r\n") {
             (stripped, "\r\n")
@@ -239,7 +224,6 @@ pub(crate) fn emit_setext_heading_text(
             (text_line, "")
         };
 
-    // Handle leading spaces in text line
     let text_trimmed = text_without_newline.trim_start();
     let leading_spaces = text_without_newline.len() - text_trimmed.len();
 
@@ -250,10 +234,6 @@ pub(crate) fn emit_setext_heading_text(
         );
     }
 
-    // Try to parse trailing attributes from heading text. The block is only
-    // syntax while `header_attributes` is on; under `commonmark`, `Foo {#id}`
-    // over a `===` underline is `Header 1 ("",[],[]) [Str "Foo", Space,
-    // Str "{#id}"]`.
     let trailing_attrs = if config.extensions.header_attributes {
         try_parse_trailing_attributes_with_pos(text_trimmed)
     } else {
@@ -280,20 +260,16 @@ pub(crate) fn emit_setext_heading_text(
             (text_trimmed, None, "")
         };
 
-    // Emit heading content with inline parsing
     emit_heading_content(builder, text_content, attr_text.is_none(), config);
 
-    // Emit space before attributes if present
     if !space_before_attrs.is_empty() {
         builder.token(SyntaxKind::WHITESPACE.into(), space_before_attrs);
     }
 
-    // Emit attributes if present
     if let Some(attr_text) = attr_text {
         emit_attribute_node(builder, attr_text);
     }
 
-    // Emit newline after text line
     if !text_newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), text_newline_str);
     }
@@ -303,7 +279,6 @@ pub(crate) fn emit_setext_heading_text(
 /// `SETEXT_HEADING_UNDERLINE` node, and the trailing newline. See
 /// [`emit_setext_heading_text`] for why this is a separate entry point.
 pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, underline_line: &str) {
-    // Strip trailing newline from underline for processing
     let (underline_without_newline, underline_newline_str) =
         if let Some(stripped) = underline_line.strip_suffix("\r\n") {
             (stripped, "\r\n")
@@ -313,7 +288,6 @@ pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, und
             (underline_line, "")
         };
 
-    // Emit underline leading spaces if present
     let underline_trimmed = underline_without_newline.trim_start();
     let underline_leading_spaces = underline_without_newline.len() - underline_trimmed.len();
 
@@ -324,7 +298,6 @@ pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, und
         );
     }
 
-    // Emit the setext underline as a node containing a token
     builder.start_node(SyntaxKind::SETEXT_HEADING_UNDERLINE.into());
     builder.token(
         SyntaxKind::SETEXT_HEADING_UNDERLINE.into(),
@@ -332,7 +305,6 @@ pub(crate) fn emit_setext_underline(builder: &mut GreenNodeBuilder<'static>, und
     );
     builder.finish_node();
 
-    // Emit trailing newline after underline
     if !underline_newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), underline_newline_str);
     }
@@ -373,21 +345,11 @@ impl<'a> AtxTail<'a> {
         }
     }
 
-    /// Whether the content runs to the end of the line, with no closing run or
-    /// attribute block behind it --- the only case where a trailing backslash
-    /// is against the line ending and so reads as a line break.
     fn content_ends_the_line(&self) -> bool {
         self.mmd_attrs.is_none() && self.closing_run.is_empty() && self.attrs.is_none()
     }
 }
 
-/// Length of the trailing `#` run that can close an ATX heading, in bytes.
-///
-/// The run stops at a hash the content escaped, since that hash is text rather
-/// than decoration: `# foo \##` is `[Str "foo", Space, Str "#"]`, so only the
-/// last hash closes the heading, and `# foo\#` closes on none at all. A
-/// backslash that is itself escaped does not escape the hash behind it, so
-/// `# foo\\##` closes on both.
 fn closing_run_len(text: &str) -> usize {
     let bytes = text.as_bytes();
     let mut end = bytes.len();
@@ -428,7 +390,6 @@ fn split_atx_tail<'a>(
     let mut tail = AtxTail::all_content(heading_text);
     let mut rest = heading_text;
 
-    // A `{...}` block only counts when it ends the line, so it comes off first.
     if config.extensions.header_attributes
         && let Some((_attrs, text_before, open_brace)) =
             try_parse_trailing_attributes_with_pos(rest)
@@ -438,15 +399,10 @@ fn split_atx_tail<'a>(
         rest = text_before;
     }
 
-    // Then the closing `#` run, which sits in front of that block.
     let run_end = trim_end_spaces_tabs(rest).len();
     let hashes = closing_run_len(&rest[..run_end]);
     if hashes > 0 {
         let before_run = &rest[..run_end - hashes];
-        // CommonMark requires whitespace in front of the run (`# foo#` is
-        // `<h1>foo#</h1>`); pandoc does not (`Header 1 (foo) [Str "foo"]`).
-        // That whitespace is either in `before_run`, or --- when the content is
-        // empty (`### ###`) --- the post-marker spaces the caller consumed.
         let preceded_by_ws = config.dialect != Dialect::CommonMark
             || before_run
                 .chars()
@@ -464,9 +420,6 @@ fn split_atx_tail<'a>(
         }
     }
 
-    // The mmd identifier is the one piece pandoc reads in front of the run, and
-    // a `{...}` block outranks it, so it is only worth looking for when none
-    // was found.
     if tail.attrs.is_none()
         && config.extensions.mmd_header_identifiers
         && let Some((_normalized, start_bracket, end_bracket)) =
@@ -475,8 +428,6 @@ fn split_atx_tail<'a>(
         let content = trim_end_spaces_tabs(&rest[..start_bracket]);
         tail.mmd_gap = &rest[content.len()..start_bracket];
         tail.mmd_attrs = Some(&rest[start_bracket..end_bracket]);
-        // The identifier scan looks past trailing whitespace, which then sits
-        // in front of the (possibly empty) closing run.
         if end_bracket < rest.len() {
             tail.closing_gap = &rest[end_bracket..];
         }
@@ -496,7 +447,6 @@ fn split_atx_tail<'a>(
 /// and `# foo # #` both lose meaning when the run goes. Callers that get `true`
 /// here have to keep a run in front of the line ending.
 pub fn content_reads_as_decoration(content: &str, config: &ParserOptions) -> bool {
-    // One post-marker space, matching the `# ` the formatter emits.
     let tail = split_atx_tail(content, 1, config);
     tail.attrs.is_some() || !tail.closing_run.is_empty()
 }
@@ -510,7 +460,6 @@ pub(crate) fn emit_atx_heading(
 ) {
     builder.start_node(SyntaxKind::HEADING.into());
 
-    // Strip trailing newline (LF or CRLF) for processing but remember to emit it later
     let (content_without_newline, newline_str) =
         if let Some(stripped) = content.strip_suffix("\r\n") {
             (stripped, "\r\n")
@@ -523,7 +472,6 @@ pub(crate) fn emit_atx_heading(
     let trimmed = content_without_newline.trim_start();
     let leading_spaces = content_without_newline.len() - trimmed.len();
 
-    // Emit leading spaces if present
     if leading_spaces > 0 {
         builder.token(
             SyntaxKind::WHITESPACE.into(),
@@ -531,18 +479,15 @@ pub(crate) fn emit_atx_heading(
         );
     }
 
-    // Marker node for the hashes (must be a node containing a token, not just a token)
     builder.start_node(SyntaxKind::ATX_HEADING_MARKER.into());
     builder.token(SyntaxKind::ATX_HEADING_MARKER.into(), &trimmed[..level]);
     builder.finish_node();
 
-    // Get content after marker
     let after_marker = &trimmed[level..];
     let spaces_after_marker_count = after_marker
         .find(|c: char| !c.is_whitespace())
         .unwrap_or(after_marker.len());
 
-    // Emit spaces after marker
     if spaces_after_marker_count > 0 {
         builder.token(
             SyntaxKind::WHITESPACE.into(),
@@ -550,12 +495,10 @@ pub(crate) fn emit_atx_heading(
         );
     }
 
-    // Get actual heading text
     let heading_text = &after_marker[spaces_after_marker_count..];
 
     let tail = split_atx_tail(heading_text, spaces_after_marker_count, config);
 
-    // Heading content node
     emit_heading_content(builder, tail.content, tail.content_ends_the_line(), config);
 
     if !tail.mmd_gap.is_empty() {
@@ -577,7 +520,6 @@ pub(crate) fn emit_atx_heading(
         emit_attribute_node(builder, attrs);
     }
 
-    // Emit trailing newline if present
     if !newline_str.is_empty() {
         builder.token(SyntaxKind::NEWLINE.into(), newline_str);
     }
@@ -608,23 +550,19 @@ mod tests {
     fn test_atx_heading_with_attributes_losslessness() {
         use crate::ParserOptions;
 
-        // Regression test for losslessness bug where space before attributes was dropped
         let input = "# Test {#id}\n";
         let config = ParserOptions::default();
         let tree = crate::parse(input, Some(config));
 
-        // Verify losslessness: tree text should exactly match input
         assert_eq!(
             tree.text().to_string(),
             input,
             "Parser must preserve all bytes including space before attributes"
         );
 
-        // Verify structure
         let heading = tree.first_child().unwrap();
         assert_eq!(heading.kind(), SyntaxKind::HEADING);
 
-        // Find the whitespace between content and attribute
         let mut found_whitespace = false;
         for child in heading.children_with_tokens() {
             if child.kind() == SyntaxKind::WHITESPACE
@@ -660,8 +598,6 @@ mod tests {
         }
     }
 
-    /// `(content, closing_run)` for a heading line's tail, with the post-marker
-    /// space the caller consumes assumed present.
     fn split(text: &str, config: &ParserOptions) -> (String, String) {
         let tail = split_atx_tail(text, 1, config);
         (tail.content.to_string(), tail.closing_run.to_string())
@@ -669,12 +605,9 @@ mod tests {
 
     #[test]
     fn pandoc_closes_a_heading_on_a_run_with_no_space_in_front() {
-        // `pandoc -f markdown`: `# foo#` is `Header 1 (foo) [Str "foo"]`.
         let config = ParserOptions::default();
         assert_eq!(split("foo#", &config), ("foo".into(), "#".into()));
         assert_eq!(split("foo###", &config), ("foo".into(), "###".into()));
-        // The braces are content, since pandoc reads the block only after the
-        // run: `Header 1 (foo-id) [Str "foo", Space, Str "{#id}"]`.
         assert_eq!(
             split("foo {#id}#", &config),
             ("foo {#id}".into(), "#".into())
@@ -683,7 +616,6 @@ mod tests {
 
     #[test]
     fn commonmark_requires_a_space_in_front_of_a_closing_run() {
-        // CommonMark keeps the hash in the content: `# foo#` is `<h1>foo#</h1>`.
         let config = commonmark_options();
         assert_eq!(split("foo#", &config), ("foo#".into(), String::new()));
         assert_eq!(split("foo###", &config), ("foo###".into(), String::new()));
@@ -692,9 +624,6 @@ mod tests {
 
     #[test]
     fn a_brace_block_needs_the_header_attributes_extension() {
-        // `pandoc -f commonmark`: `# foo {#id}` is
-        // `Header 1 ("",[],[]) [Str "foo", Space, Str "{#id}"]`, so the block is
-        // content and the run in front of it is decoration like any other.
         let config = commonmark_options();
         assert_eq!(
             split("foo {#id}", &config),
@@ -704,8 +633,6 @@ mod tests {
             split("garply#{#id}", &config),
             ("garply#{#id}".into(), String::new())
         );
-        // With the extension on, the block comes off and the run in front of it
-        // stays decoration: `Header 1 (id) [Str "foo"]`.
         let config = ParserOptions::default();
         assert_eq!(split("foo {#id}", &config), ("foo".into(), String::new()));
     }
@@ -744,23 +671,15 @@ mod tests {
 
     #[test]
     fn an_escaped_hash_ends_the_closing_run() {
-        // `# foo \##` is `[Str "foo", Space, Str "#"]`: the escaped hash is
-        // content, so the run is the single hash behind it.
         let config = ParserOptions::default();
         assert_eq!(split("foo \\##", &config), ("foo \\#".into(), "#".into()));
         assert_eq!(split("foo\\###", &config), ("foo\\#".into(), "##".into()));
-        // An escaped hash with nothing behind it leaves no run at all:
-        // `# foo\#` is `Str "foo#"`.
         assert_eq!(split("foo\\#", &config), ("foo\\#".into(), String::new()));
-        // The backslash is itself escaped, so the run is real: `# foo\\##` is
-        // `Str "foo\"`.
         assert_eq!(split("foo\\\\##", &config), ("foo\\\\".into(), "##".into()));
     }
 
     #[test]
     fn a_closing_run_still_ends_the_line() {
-        // A hash run mid-line is content, not decoration:
-        // `# foo # bar #` is `[Str "foo", Space, Str "#", Space, Str "bar"]`.
         let config = ParserOptions::default();
         assert_eq!(
             split("foo # bar #", &config),
@@ -789,7 +708,6 @@ mod tests {
         assert_eq!(try_parse_atx_heading("####### Too many"), None);
     }
 
-    // Setext heading tests
     #[test]
     fn test_setext_level_1() {
         let lines = vec!["Heading", "======="];
@@ -804,9 +722,6 @@ mod tests {
 
     #[test]
     fn test_setext_any_underline_length() {
-        // Per CommonMark §4.3 and Pandoc, the setext underline can be any
-        // non-zero length. Single `=` or `-` after a non-blank line is a
-        // valid setext underline.
         let lines = vec!["Heading", "="];
         assert_eq!(try_parse_setext_heading(&lines, 0), Some((1, '=')));
 
@@ -849,7 +764,6 @@ mod tests {
 
     #[test]
     fn test_setext_four_spaces_indent() {
-        // 4+ spaces means code block, not setext
         let lines = vec!["    Heading", "    ======="];
         assert_eq!(try_parse_setext_heading(&lines, 0), None);
     }

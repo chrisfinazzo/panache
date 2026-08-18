@@ -58,43 +58,12 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
         );
         let next_is_definition_marker =
             definition_lists::try_parse_definition_marker(next_inner).is_some();
-        // A term candidate inside a list item has to reach that item's content
-        // column, the same rule the block dispatcher's term lookahead applies.
-        // Otherwise a sibling item marker — `- Term` at indent 0, whose own
-        // next line is a `:` marker — reads as a term and keeps the definition
-        // list in the *previous* item open across the blank line separating
-        // them, hiding the separator from the `LIST` and rendering it compact.
-        // At top level there is no such column, and pandoc does read `- Term2`
-        // there as a term, so the constraint is only applied when a list item
-        // encloses the container being tested.
-        //
-        // The column is the one enclosing the container being tested, so it is
-        // resolved per level: a list nested *inside* a definition body sits
-        // above the definition list on the stack and must not constrain it.
-        //
-        // A content container below the level being tested constrains it the
-        // same way, and stacks with the item's column: a definition list nested
-        // in a definition body only keeps that body open while the term reaches
-        // the body's own content column. `content_indent` is that running sum,
-        // and a list item's column is already cumulative within it.
         let next_line_opens_definition = !is_blank_line(next_inner) && {
-            // Read the marker lookahead through the open containers'
-            // frame. A raw line slice resolves every line as inside the
-            // frame, so a `:` whose indent the strip would have to fake
-            // from content bytes used to slip through here, and a marker
-            // behind a container's content indent (which fails the raw
-            // 0-3-space test) was invisible.
             let prefix = ContainerPrefix::from_stack(&containers.stack, false, self.config);
             let window = StrippedLines::new(lines, next_line_pos, &prefix);
             definition_lists::next_line_is_definition_marker(&window, next_line_pos).is_some()
         };
         let next_is_definition_term_below = |level: usize| -> bool {
-            // The frame enclosing the container being tested: the
-            // content-container column of the sub-stack below it, plus
-            // the innermost enclosing item's (cumulative) content
-            // column. This is the scalar approximation of resolving
-            // against `stack[..level]` — outer-section list columns are
-            // not represented (same approximation `from_ctx` makes).
             next_line_opens_definition
                 && raw_indent_cols
                     >= crate::parser::utils::container_stack::content_container_indent(
@@ -112,16 +81,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                         .unwrap_or(0)
         };
 
-        // Re-detect the definition marker after stripping a content-container
-        // indent (e.g. the 4-space footnote body indent). Without this, a `:`
-        // line nested inside a footnote body fails the 0-3-space marker test
-        // and the parent DefinitionList/DefinitionItem incorrectly closes
-        // across blank lines, splitting one logical item into many.
         let stripped_is_definition_marker = |content_indent_so_far: usize| -> bool {
-            // Only the reach answer is consumed: `byte_index_at_column`
-            // below consumes a straddling tab whole, so a marker behind
-            // one is still found (the overshoot is absorbed by the
-            // absolute marker test).
             if content_indent_so_far == 0
                 || !resolve_content_indent(next_inner, content_indent_so_far).reaches_frame()
             {
@@ -137,13 +97,9 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             definition_lists::try_parse_definition_marker(&next_inner[strip_bytes..]).is_some()
         };
 
-        // `current_bq_depth` is used for proper indent calculation when the next line
-        // increases blockquote nesting.
-
         let mut keep_level = 0;
         let mut content_indent_so_far = 0usize;
 
-        // First, account for blockquotes
         for (i, c) in containers.stack.iter().enumerate() {
             match c {
                 crate::parser::utils::container_stack::Container::BlockQuote { .. } => {
@@ -171,8 +127,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                     }
                 }
                 crate::parser::utils::container_stack::Container::Admonition { content_col } => {
-                    // A blank line keeps the admonition open only while the
-                    // next content stays indented to its content column.
                     content_indent_so_far += *content_col;
                     if raw_indent_cols >= *content_col {
                         keep_level = i + 1;
@@ -182,10 +136,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                     content_col,
                     ..
                 } => {
-                    // A blank line does not necessarily end a definition, but the continuation
-                    // indent must be measured relative to any outer content containers (e.g.
-                    // footnotes). Otherwise a line indented only for the footnote would wrongly
-                    // continue the definition.
                     let min_indent = self.definition_min_block_indent(*content_col);
                     let effective_indent = raw_indent_cols.saturating_sub(content_indent_so_far);
                     if effective_indent >= min_indent {
@@ -229,29 +179,11 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
 
                     let effective_indent = raw_indent_cols.saturating_sub(content_indent_so_far);
                     let continues_list = if let Some(ref marker_match) = next_marker {
-                        // Ordered markers can be right-aligned across items
-                        // (e.g. `i.`, `ii.`, `iii.`), so they need a symmetric
-                        // drift tolerance. Bullets are directional: a marker
-                        // outdented from the list's base indent belongs to an
-                        // outer list, not this one. Without that lower bound,
-                        // a blank line followed by an outer-level marker keeps
-                        // the inner list open and parks the BLANK_LINE inside
-                        // it, breaking idempotency for nested-list outputs.
                         let indent_in_range = match marker {
                             lists::ListMarker::Ordered(_) => {
                                 effective_indent.abs_diff(*base_indent_cols) <= 3
                             }
                             lists::ListMarker::Bullet(_) => {
-                                // A bullet marker at indent ≥ 4 cannot continue
-                                // a shallow-base bullet list across a blank line:
-                                // pandoc treats the would-be marker as the start
-                                // of an indented code block once the list is
-                                // ineligible to absorb it as a sublist of the
-                                // open item. The LIST_ITEM branch below still
-                                // rescues the LIST when the previous item's
-                                // content column accommodates the new indent
-                                // (keep_level is monotonic), so this guard only
-                                // closes the list when no item can absorb it.
                                 let jumps_out_of_shallow_list =
                                     effective_indent >= 4 && *base_indent_cols < 4;
                                 if jumps_out_of_shallow_list {
@@ -259,15 +191,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                                 } else if effective_indent >= *base_indent_cols {
                                     effective_indent <= base_indent_cols + 3
                                 } else {
-                                    // Bullets are directional, but only when an
-                                    // outer bullet list with matching marker can
-                                    // absorb the outdented marker. With no such
-                                    // outer list, pandoc keeps the current list
-                                    // open (the marker continues this list with
-                                    // a small leftward drift). Closing here would
-                                    // split one logical list into two and surface
-                                    // as an idempotency failure once the
-                                    // formatter normalizes indents.
                                     let has_outer_match =
                                         containers.stack[..i].iter().any(|outer| {
                                             matches!(
@@ -332,17 +255,7 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
                         continue;
                     }
 
-                    // CommonMark §5.2: a list item that has only seen its
-                    // marker line is closed by the first blank line. Any
-                    // subsequent indented content is no longer part of the
-                    // item. Pandoc keeps the item open across the blank.
                     if *marker_only && self.config.dialect == crate::options::Dialect::CommonMark {
-                        // If the next line doesn't start another list marker,
-                        // the parent List has nothing to continue with — close
-                        // it too. (The List's own branch above optimistically
-                        // kept itself based on indent ≥ content_col, which
-                        // assumes a continuing item; that assumption fails
-                        // once the empty item is closed by the blank.)
                         if next_marker.is_none() && i > 0 && keep_level == i {
                             keep_level = i - 1;
                         }
@@ -403,7 +316,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             false
         };
 
-        // A blank line that isn't indented to the definition content column ends the definition.
         let (indent_cols, _) = leading_indent(raw_content);
         if is_blank_line(raw_content) && indent_cols < content_indent {
             return false;
@@ -413,7 +325,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             return false;
         }
 
-        // If it's a block element marker, don't continue as plain.
         if definition_lists::try_parse_definition_marker(stripped_content).is_some()
             && leading_indent(raw_content).0 <= 3
             && !stripped_content.starts_with(':')
@@ -442,23 +353,12 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             if block_ctx.in_list {
                 return false;
             }
-            // A list marker indented to the definition's content column opens a
-            // nested list inside the definition (matches pandoc-native), even
-            // without a separating blank line.
             let (raw_indent_cols, _) = leading_indent(raw_content);
             if content_indent > 0 && raw_indent_cols >= content_indent {
                 return false;
             }
         }
         if count_blockquote_markers(stripped_content).0 > 0 {
-            // Under pandoc's `blank_before_blockquote` rule a blockquote cannot
-            // interrupt an in-progress paragraph. With an open PLAIN and no
-            // point at which a blockquote could start here (no preceding blank
-            // line, not the definition's first block), the `>` line is lazy
-            // paragraph continuation, not a new blockquote — matching
-            // pandoc-native. Without an open PLAIN (blockquote as the
-            // definition's first block) or after a blank line it starts a
-            // blockquote as usual.
             if self.config.extensions.blank_before_blockquote
                 && plain_open
                 && !blockquotes::can_start_blockquote(
@@ -476,12 +376,6 @@ impl<'a, 'cfg> ContinuationPolicy<'a, 'cfg> {
             let (probe, _) = crate::parser::utils::helpers::strip_newline(stripped_content);
             if let Some(block_type) = html_blocks::try_parse_html_block_start(probe, is_commonmark)
             {
-                // Tags that cannot interrupt a running paragraph (pandoc's
-                // `isInlineTag` set plus comments and PIs) stay lazy text in
-                // the open PLAIN, matching pandoc-native: `<!-- c -->` or
-                // `<button>x</button>` under `: definition text` folds into
-                // the PLAIN as `RawInline`s. Without an open PLAIN the same
-                // line is the body's next block and lifts to a `RawBlock`.
                 if plain_open
                     && crate::parser::block_dispatcher::html_block_cannot_interrupt(
                         &block_type,

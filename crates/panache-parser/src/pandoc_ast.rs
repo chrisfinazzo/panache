@@ -180,8 +180,6 @@ pub fn to_pandoc_json_with_options(tree: &SyntaxNode, options: &crate::ParserOpt
     serde_json::to_string(&doc).expect("pandoc-json serialization is infallible")
 }
 
-/// The `markdown` reader's option set --- the projector's default assumption,
-/// and what the recursive cell/div reparses below run under.
 fn pandoc_flavor_options() -> crate::ParserOptions {
     crate::ParserOptions {
         flavor: crate::Flavor::Pandoc,
@@ -213,10 +211,6 @@ fn build_refs_ctx_inherited(
         borrowed.example_label_to_num = ctx.example_label_to_num.clone();
         borrowed.example_list_start_by_offset = ctx.example_list_start_by_offset.clone();
     });
-    // Seed seen_ids from parent's heading_ids so inner heading auto-ids
-    // disambiguate against outer's history. Reverse-engineer counts from
-    // final ids: id `base` implies count >= 1; `base-N` implies count >=
-    // N+1. Take max per base.
     let mut seen_ids: HashMap<String, u32> = HashMap::new();
     if let Some(p) = parent {
         for id in &p.heading_ids {
@@ -232,11 +226,6 @@ fn build_refs_ctx_inherited(
         }
     }
     collect_refs_and_headings(tree, &mut ctx, &mut seen_ids);
-    // Fold parent refs/footnotes/heading_ids into the inner ctx so lookups
-    // during projection see both halves. Inner-defined keys win on conflict
-    // (scoping semantics; pandoc's true rule is "first def in document
-    // order wins" but tracking that across the recursive boundary would
-    // require offset-aware merging that no current corpus case exercises).
     if let Some(p) = parent {
         for (k, v) in &p.refs {
             ctx.refs.entry(k.clone()).or_insert_with(|| v.clone());
@@ -331,8 +320,6 @@ fn collect_example_numbering(node: &SyntaxNode, ctx: &mut RefsCtx, counter: &mut
                     ctx.example_label_to_num.entry(label).or_insert(*counter);
                 }
             }
-            // Recurse into the list's contents to pick up nested Example
-            // lists (rare but possible).
             collect_example_numbering(&child, ctx, counter);
         } else {
             collect_example_numbering(&child, ctx, counter);
@@ -372,8 +359,6 @@ fn list_item_marker_text(item: &SyntaxNode) -> String {
         .unwrap_or_default()
 }
 
-/// Returns the `@label` text for an Example list item, or `None` for the
-/// unlabeled `(@)` form.
 fn example_item_label(item: &SyntaxNode) -> Option<String> {
     let marker = list_item_marker_text(item);
     let trimmed = marker.trim();
@@ -413,13 +398,9 @@ fn collect_refs_and_headings(
             SyntaxKind::HEADING => {
                 let (id, was_explicit) = heading_id_with_explicitness(&child);
                 let final_id = if was_explicit {
-                    // Explicit `{#x}` ids are kept verbatim; pandoc only
-                    // warns on conflicts but does not auto-disambiguate.
                     seen_ids.entry(id.clone()).or_insert(0);
                     id
                 } else if !ctx.auto_identifiers {
-                    // Without the extension there is no id to derive, and so
-                    // nothing to disambiguate or fall back to `section` for.
                     String::new()
                 } else {
                     let mut base = id;
@@ -447,9 +428,6 @@ fn collect_refs_and_headings(
     }
 }
 
-/// Returns `(id, was_explicit)` for a HEADING node. Explicit ids come from
-/// `{#id}` attributes; the auto-id is the slugified plaintext (which may be
-/// empty for headings whose text contains no slug-eligible characters).
 fn heading_id_with_explicitness(node: &SyntaxNode) -> (String, bool) {
     let inlines = node
         .children()
@@ -467,12 +445,6 @@ fn parse_footnote_def(node: &SyntaxNode) -> Option<(String, Vec<Block>)> {
     let label = footnote_label(node)?;
     let mut blocks = Vec::new();
     for child in node.children() {
-        // The CST keeps each footnote-body line at its full raw indentation
-        // (the 4-space body indent plus any nested-block indent). Most blocks
-        // recover transparently because `coalesce_inlines` trims leading
-        // spaces on paragraph content, but code blocks preserve all leading
-        // whitespace — strip the 4 footnote-body columns, on top of which the
-        // helper removes an indented block's own 4.
         if child.kind() == SyntaxKind::CODE_BLOCK {
             blocks.push(code_block_with_extra_strip(&child, 4));
         } else {
@@ -482,31 +454,16 @@ fn parse_footnote_def(node: &SyntaxNode) -> Option<(String, Vec<Block>)> {
     Some((label, blocks))
 }
 
-/// Project a code block whose body carries `extra` columns of host indent on
-/// every line (footnote body, definition body, list item content).
-///
-/// The host indent comes off by column rather than by token: the emitter's
-/// prefix token is not column-exact when tabs are in play (see
-/// [`fenced_in_blockquote`]), so `code_content_text` leaves it in the string
-/// for [`strip_leading_spaces_per_line`] to measure. Blockquote markers are
-/// still dropped token-wise — nothing here compensates for a `>`.
 fn code_block_with_extra_strip(node: &SyntaxNode, extra: usize) -> Block {
     let raw_format = code_block_raw_format(node);
     let attr = code_block_attr(node);
     let is_fenced = node
         .children()
         .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN);
-    // Tab expansion happens inside `code_content_text`, before any strip, so
-    // a `:\t` marker followed by `\t\t\tcode` correctly becomes
-    // `"        code"` once the 4-col definition-content offset comes off.
     let mut content = code_content_text(node, false);
     while content.ends_with('\n') {
         content.pop();
     }
-    // A fenced block also loses its opening fence's indent. That indent shares
-    // the pre-fence `WHITESPACE` run with whatever host indent the parser left
-    // in the block, so the run already covers `extra` when it covers anything —
-    // see [`pre_fence_indent_columns`].
     let strip = if is_fenced {
         extra.max(pre_fence_indent_columns(node))
     } else {
@@ -546,8 +503,6 @@ fn pre_fence_indent_columns(node: &SyntaxNode) -> usize {
             NodeOrToken::Token(t)
                 if matches!(t.kind(), SyntaxKind::WHITESPACE | SyntaxKind::LINE_PREFIX) =>
             {
-                // `nonindentSpaces` and the container peels are space-only
-                // here, so the byte count is the column count.
                 cols += t.text().chars().take_while(|&c| c == ' ').count();
             }
             NodeOrToken::Node(n) if n.kind() == SyntaxKind::CODE_FENCE_OPEN => return cols,
@@ -587,9 +542,6 @@ fn parse_reference_def(node: &SyntaxNode) -> Option<(String, String, String)> {
         .find(|c| c.kind() == SyntaxKind::LINK_TEXT)?;
     let label = label_node.text().to_string();
 
-    // Read the structured destination/title nodes the parser emits — no
-    // re-parsing of the post-`]` tail. Angle brackets, when present, are
-    // delimiter tokens inside REFERENCE_URL.
     let url_node = node
         .children()
         .find(|c| c.kind() == SyntaxKind::REFERENCE_URL)?;
@@ -692,7 +644,6 @@ pub fn normalize_native(s: &str) -> String {
                 i += 1;
             }
             b'"' => {
-                // String literal: copy bytes until matching unescaped quote.
                 let start = i;
                 i += 1;
                 while i < bytes.len() {
@@ -732,9 +683,6 @@ pub fn normalize_native(s: &str) -> String {
     tokens.join(" ")
 }
 
-// Variant names mirror Pandoc's `Text.Pandoc.Definition` constructors so the
-// emission code reads 1:1 against pandoc-native — `BlockQuote`, `CodeBlock`,
-// `BulletList`, `OrderedList` are not redundant here, they are the spec names.
 #[derive(Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 enum Block {
@@ -776,9 +724,6 @@ struct TableData {
     foot_rows: Vec<Vec<GridCell>>,
 }
 
-/// One cell in a `TableData` row. `row_span`/`col_span` default to 1 for
-/// pipe/simple/multiline tables (which don't model spans). Grid tables
-/// compute proper span counts via the layout algorithm in `grid_table`.
 #[derive(Debug, Clone)]
 struct GridCell {
     row_span: u32,
@@ -844,8 +789,6 @@ struct Attr {
     kvs: Vec<(String, String)>,
 }
 
-// ----- block-level walking ------------------------------------------------
-
 fn blocks_from_doc(doc: &SyntaxNode) -> Vec<Block> {
     let mut out = Vec::new();
     for child in doc.children() {
@@ -864,17 +807,9 @@ fn block_from(node: &SyntaxNode) -> Option<Block> {
         SyntaxKind::HORIZONTAL_RULE => Some(Block::HorizontalRule),
         SyntaxKind::LIST => Some(list_block(node)),
         SyntaxKind::BLANK_LINE => None,
-        // Reference definitions don't appear in pandoc-native output (they
-        // resolve into the link they define).
         SyntaxKind::REFERENCE_DEFINITION => None,
-        // Footnote definitions are pulled into Note inlines at the
-        // FOOTNOTE_REFERENCE site; the definition block itself is dropped.
         SyntaxKind::FOOTNOTE_DEFINITION => None,
-        // YAML metadata becomes the document Meta wrapper, not a body block.
-        // The projector emits a bare block list, so just drop these.
         SyntaxKind::YAML_METADATA => None,
-        // Pandoc title block (`% title\n% authors\n% date`) populates Meta
-        // and produces no body block.
         SyntaxKind::PANDOC_TITLE_BLOCK => None,
         SyntaxKind::HTML_BLOCK | SyntaxKind::HTML_BLOCK_RAW => Some(html_block(node)),
         SyntaxKind::HTML_BLOCK_DIV => Some(html_div_block(node)),
@@ -911,8 +846,6 @@ fn figure_block(node: &SyntaxNode) -> Block {
             image_inline = Some(first);
         }
     }
-    // Pandoc's `implicit_figures` migrates only the image's id to the Figure
-    // attr; the image keeps its classes and key-value pairs but loses the id.
     let (figure_attr, image_inline) = match image_inline {
         Some(Inline::Image(mut attr, alt_inlines, url, title)) if !attr.id.is_empty() => {
             let fig_attr = Attr::with_id(std::mem::take(&mut attr.id));
@@ -939,9 +872,6 @@ fn heading_block(node: &SyntaxNode) -> Block {
         .find(|c| c.kind() == SyntaxKind::HEADING_CONTENT)
         .map(|c| coalesce_inlines(inlines_from(&c)))
         .unwrap_or_default();
-    // Auto-id and disambiguation are computed in the `RefsCtx` pre-pass so
-    // duplicate slugs and `section`-fallbacks are document-wide consistent.
-    // Explicit attributes still need their classes/kvs parsed here.
     let offset: u32 = node.text_range().start().into();
     let final_id = REFS_CTX
         .with(|c| c.borrow().heading_id_by_offset.get(&offset).cloned())
@@ -993,11 +923,7 @@ fn code_block(node: &SyntaxNode) -> Block {
     let is_fenced = node
         .children()
         .any(|c| c.kind() == SyntaxKind::CODE_FENCE_OPEN);
-    // `code_content_text` already tab-expands (pandoc expands code-block
-    // bodies before emission) and drops any container prefix the emitter
-    // interleaved into `CODE_CONTENT`.
     let mut content = code_content_text(node, fenced_in_blockquote(node, is_fenced));
-    // Pandoc strips the trailing newline that closes the block.
     while content.ends_with('\n') {
         content.pop();
     }
@@ -1046,11 +972,6 @@ fn code_block_attr(node: &SyntaxNode) -> Attr {
     let Some(info) = open.children().find(|c| c.kind() == SyntaxKind::CODE_INFO) else {
         return Attr::default();
     };
-    // Structured DisplayExplicit/DisplayShortcut: the parser emits bare `ATTR_*`
-    // children (plus a `CODE_LANGUAGE` token) for `{.python #id key=val}` and
-    // `lang {.cls}` forms. Read them directly. Executable chunks instead carry a
-    // `CHUNK_OPTIONS` node and stay on the text path below, as do opaque
-    // Plain/Raw info strings.
     let has_bare_attrs = info.children_with_tokens().any(|el| {
         matches!(
             el.kind(),
@@ -1062,7 +983,6 @@ fn code_block_attr(node: &SyntaxNode) -> Attr {
         .any(|c| c.kind() == SyntaxKind::CHUNK_OPTIONS);
     if has_bare_attrs && !has_chunk_options {
         let mut attr = read_bare_attr_children(&info);
-        // Pandoc concatenates the language as the first class.
         if let Some(lang) = info
             .children_with_tokens()
             .find(|el| el.kind() == SyntaxKind::CODE_LANGUAGE)
@@ -1078,8 +998,6 @@ fn code_block_attr(node: &SyntaxNode) -> Attr {
     if let Some(inner) = trimmed.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
         return parse_attr_block(inner);
     }
-    // Shortcut form: `lang {.cls #id key=value}` — language followed by an
-    // attribute block. Pandoc concatenates the language as the first class.
     if let Some(brace) = trimmed.find('{')
         && trimmed.ends_with('}')
     {
@@ -1122,18 +1040,12 @@ fn strip_indented_code_indent(s: &str) -> String {
         if i > 0 {
             out.push('\n');
         }
-        // Pandoc expands tabs to 4-column tab stops *before* stripping the
-        // 4-column indent. Mixed `  \tfoo` therefore becomes `    foo` →
-        // `foo` after strip, which is what `pandoc -t native` emits.
         let expanded = expand_tabs_to_4(line);
         let stripped = if let Some(rest) = expanded.strip_prefix("    ") {
             rest.to_string()
         } else if let Some(rest) = expanded.strip_prefix('\t') {
             rest.to_string()
         } else {
-            // Strip up to 3 leading spaces if present (pandoc tolerates short
-            // indentation only on blank lines, which we don't try to detect
-            // here — safer to leave non-conforming lines alone).
             expanded
         };
         out.push_str(&stripped);
@@ -1239,21 +1151,10 @@ fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
     {
         let elements: Vec<crate::syntax::SyntaxElement> = content.children_with_tokens().collect();
         let mut col = 0usize;
-        // `in_prefix` is the line-start container-prefix run; `saw_bq` marks
-        // that the previous element was a `>` whose one padding space is not
-        // code.
         let mut in_prefix = true;
         let mut saw_bq = false;
         for (i, el) in elements.iter().enumerate() {
             let Some(token) = el.as_token() else {
-                // Only `HASHPIPE_YAML_PREAMBLE` nests here, and its subtree
-                // uses the YAML token vocabulary, which this walk cannot
-                // classify. Take it verbatim, as this projection always has.
-                // (Hashpipe is Quarto/RMarkdown-only; under `Flavor::Pandoc`
-                // a ```` ```{r} ```` fence never reaches the fenced code-block
-                // parser, so no conformance case exercises it. A hashpipe
-                // preamble inside a container therefore still leaks its
-                // prefix — a pre-existing, separately scoped gap.)
                 let text = el.as_node().expect("element is a node").text().to_string();
                 let expanded = expand_tabs_from_col(&text, &mut col);
                 in_prefix = expanded.ends_with('\n');
@@ -1280,15 +1181,12 @@ fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
             match token.kind() {
                 SyntaxKind::LINE_PREFIX | SyntaxKind::WHITESPACE => {
                     let next_is_marker = elements.get(i + 1).is_some_and(&is_marker_piece);
-                    // Exactly one space after a `>` belongs to the marker;
-                    // anything past it is host indent.
                     let rest = if saw_bq {
                         expanded.strip_prefix(' ').unwrap_or(&expanded)
                     } else {
                         expanded.as_str()
                     };
                     saw_bq = false;
-                    // Leading padding the following `>` owns is never code.
                     if next_is_marker || drop_indent || rest.is_empty() {
                         continue;
                     }
@@ -1305,11 +1203,6 @@ fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
     out
 }
 
-/// Single-block projection of an opaque `HTML_BLOCK`. Used when a non-
-/// structural caller (e.g. grid-table cell reparse via `block_from`)
-/// needs one `Block` rather than a stream. Emits a single `RawBlock`
-/// — no structural lift (the lifted shape projects as multiple blocks
-/// and is handled by `emit_html_block` via `collect_block`).
 fn html_block(node: &SyntaxNode) -> Block {
     let mut content = node.text().to_string();
     while content.ends_with('\n') {
@@ -1402,12 +1295,6 @@ fn html_div_block(node: &SyntaxNode) -> Block {
     Block::Div(attr, Vec::new())
 }
 
-/// Concatenate the node's token text, dropping the container prefix the
-/// parser injects for container nesting (`> <div>\n> foo\n> </div>`
-/// becomes `<div>\nfoo\n</div>`, `- <pre>\n  foo\n  </pre>` becomes
-/// `<pre>\nfoo\n</pre>`). Prefix bytes carry the `LINE_PREFIX` kind, so
-/// the skip is structural — top-level indented HTML keeps its leading
-/// indent (a `TEXT`/`WHITESPACE` token) untouched.
 fn collect_html_block_text_skip_bq_markers(node: &SyntaxNode) -> String {
     let mut out = String::new();
     for token in node
@@ -1421,21 +1308,6 @@ fn collect_html_block_text_skip_bq_markers(node: &SyntaxNode) -> String {
     out
 }
 
-/// True when the parser has lifted the `<div>` body into structural
-/// CST children AND both the open and close `HTML_BLOCK_TAG`s are
-/// "clean" (carry no inner content): the open tag ends with the `>`
-/// token followed only by a NEWLINE, and the close tag's first text
-/// starts with `</`. "Messy" shapes — same-line `<div>foo</div>`,
-/// trailing content on the open tag (`<div>foo\nbar\n</div>`),
-/// butted close (`<div>\nfoo\nbar</div>`) — fall through to the byte
-/// reparse path, which is the source of truth for those cases until
-/// follow-up parser work lifts them too.
-///
-/// Presence of an `HTML_BLOCK_CONTENT` child signals an unlifted body
-/// (parser kept body lines as opaque TEXT) — bq-wrapped divs are the
-/// current example. Those still need the byte-reparse path. Empty
-/// and blank-only bodies have no `HTML_BLOCK_CONTENT` child and can
-/// be lifted structurally to `Div ("",[],[]) []`.
 fn div_has_structural_inner(node: &SyntaxNode) -> bool {
     let mut tags = node
         .children()
@@ -1443,10 +1315,6 @@ fn div_has_structural_inner(node: &SyntaxNode) -> bool {
     let Some(open_tag) = tags.next() else {
         return false;
     };
-    // Close tag is optional: pandoc emits an implicit close at EOF
-    // for an unclosed `<div>` (warning: "Div ... unclosed ... closing
-    // implicitly"). The body lift still produces structural children
-    // (or none, for empty `<div>`), which we project as `Block::Div`.
     let close_tag = tags.next();
     if tags.next().is_some() {
         return false;
@@ -1464,19 +1332,10 @@ fn div_has_structural_inner(node: &SyntaxNode) -> bool {
         .any(|c| c.kind() == SyntaxKind::HTML_BLOCK_CONTENT)
 }
 
-/// True when the open `HTML_BLOCK_TAG` carries no inner content after
-/// its closing `>`: the tag's children, in order, end with a TEXT
-/// token whose last byte is `>` (either the dedicated `>` token used
-/// by the structural `<div>` emission, or the whole-line TEXT used by
-/// non-div strict-block emission like `<form>` / `<section>`),
-/// followed only by zero or more NEWLINE tokens. Trailing content
-/// (e.g. `<div id="x">foo\n`) returns false.
 fn html_block_open_tag_is_clean(open_tag: &SyntaxNode) -> bool {
     let mut seen_gt = false;
     for child in open_tag.children_with_tokens() {
         let NodeOrToken::Token(t) = child else {
-            // Structural HTML_ATTRS nodes are part of the open tag;
-            // ignore them — they belong before `>`.
             continue;
         };
         if !seen_gt {
@@ -1490,9 +1349,6 @@ fn html_block_open_tag_is_clean(open_tag: &SyntaxNode) -> bool {
     seen_gt
 }
 
-/// True when the close `HTML_BLOCK_TAG`'s first TEXT token begins with
-/// `</`. A butted-close shape (`bar</div>`) starts with content text
-/// and returns false.
 fn html_block_close_tag_is_clean(close_tag: &SyntaxNode) -> bool {
     for child in close_tag.children_with_tokens() {
         if let NodeOrToken::Token(t) = child
@@ -1504,13 +1360,6 @@ fn html_block_close_tag_is_clean(close_tag: &SyntaxNode) -> bool {
     false
 }
 
-/// Read the `<div>` open tag's attributes from the structural CST.
-/// `HTML_BLOCK_DIV` always has an open `HTML_BLOCK_TAG` as its first
-/// `HTML_BLOCK_TAG` child. The open tag may contain multiple
-/// `HTML_ATTRS` regions when the source spans multiple attribute lines
-/// (e.g. `<div\n  id="x"\n  class="y">`); join their text with spaces
-/// before parsing so attributes from every line contribute. Empty
-/// attributes (`<div>`) produce `Attr::default()`.
 fn cst_div_open_tag_attr(node: &SyntaxNode) -> Attr {
     let Some(open_tag) = node
         .children()
@@ -1518,9 +1367,6 @@ fn cst_div_open_tag_attr(node: &SyntaxNode) -> Attr {
     else {
         return Attr::default();
     };
-    // A multi-line `<div>` open tag emits one `HTML_ATTRS` region per line;
-    // merge the structured attrs from each (first non-empty id wins, classes
-    // and key-values concatenated in source order).
     let mut attr = Attr::default();
     for region in open_tag
         .children()
@@ -1552,46 +1398,19 @@ fn cst_div_open_tag_attr(node: &SyntaxNode) -> Attr {
 /// handled at parse time (HTML_BLOCK_DIV lift) and routed through
 /// `html_div_block`, not the splitter.
 fn emit_html_block(node: &SyntaxNode, out: &mut Vec<Block>) {
-    // Fix #4 / Phase 6 structural lift: when the parser has lifted the
-    // body into structural CST children (open `HTML_BLOCK_TAG` + body
-    // blocks + close `HTML_BLOCK_TAG`, no `HTML_BLOCK_CONTENT`), walk
-    // the children directly. This avoids the byte-reparse path that
-    // would re-disambiguate heading auto-ids against a fresh inner
-    // `RefsCtx` (producing `heading-1` instead of `heading` when the
-    // outer ctx already saw the heading).
     if html_block_has_structural_lift(node) {
         emit_html_block_structural(node, out);
         return;
     }
-    // Phase 7b standalone-tag split: the parser emits one HTML_BLOCK_TAG
-    // per tag for a single line of ≥ 2 standalone block-level tags
-    // (`</p></div>`, `<embed><embed>`). Each tag projects to its own
-    // RawBlock — the same structural walk as the matched-pair lift.
     if html_block_is_standalone_tag_sequence(node) {
         emit_html_block_structural(node, out);
         return;
     }
-    // Phase 7c open-only lift: a non-div strict-block / inline-block open
-    // tag with a trailing body and no matching close (`<section>foo`).
-    // The parser lifts the body into structural children (one clean open
-    // `HTML_BLOCK_TAG` + block children, no close tag, no
-    // `HTML_BLOCK_CONTENT`). Walk them structurally so the open tag
-    // projects to a lone `RawBlock` and the body to sibling blocks —
-    // matching pandoc-native's `RawBlock "<section>"` + `Para [foo]`.
     if html_block_has_open_only_structural_lift(node) {
         emit_html_block_structural(node, out);
         return;
     }
-    // Strip BLOCK_QUOTE_MARKER + WHITESPACE prefix tokens so the
-    // byte-level walkers below see clean HTML — the parser keeps bq
-    // markers as structural tokens inside HTML_BLOCK for verbatim-tag
-    // content (e.g. `> <pre>\n> code\n> </pre>`). Outside a blockquote
-    // this returns the same bytes as `node.text()`.
     let mut content = collect_html_block_text_skip_bq_markers(node);
-    // Pandoc trims trailing ASCII whitespace (newlines, spaces, tabs)
-    // from RawBlock text — `<!-- hi -->   \n` emits `RawBlock
-    // "<!-- hi -->"`, not `"<!-- hi -->   "`. Interior whitespace is
-    // preserved (e.g. `<pre>foo\n   </pre>` keeps the indented close).
     while content
         .as_bytes()
         .last()
@@ -1605,12 +1424,6 @@ fn emit_html_block(node: &SyntaxNode, out: &mut Vec<Block>) {
         .position(|&b| b != b' ' && b != b'\t')
         .unwrap_or(content.len());
     let trimmed = &content[leading_ws..];
-    // Pandoc strips leading 1-3 spaces of indent from the first line
-    // of an HTML block's RawBlock text — `  <pre>foo</pre>\n` emits
-    // `RawBlock "<pre>foo</pre>"`. Subsequent lines keep their
-    // indent. The HTML-block scanner only recognizes 0-3 leading
-    // spaces of indent, so leading_ws is bounded; tabs aren't part
-    // of an HTML-block opener and shouldn't be stripped.
     let strip_first_line_indent = leading_ws > 0
         && leading_ws <= 3
         && content.as_bytes()[..leading_ws].iter().all(|&b| b == b' ');
@@ -1763,9 +1576,6 @@ fn open_tag_raw_block_text(tag: &SyntaxNode) -> String {
                     let text = t.text();
                     if name_prefix.is_none() && text.starts_with('<') {
                         if let Some(gt_idx) = text.find('>') {
-                            // Whole-line shape (`<form>` etc., shouldn't
-                            // reach here because has_attrs would be
-                            // false). Defensive: emit literal prefix.
                             return text[..=gt_idx].to_string();
                         }
                         name_prefix = Some(text.to_string());
@@ -1789,14 +1599,6 @@ fn open_tag_raw_block_text(tag: &SyntaxNode) -> String {
         result.push('>');
         return result;
     }
-    // Blockquote-wrapped close tags (`> </form>`, `> </video>`) carry
-    // their leading container prefix inside the close `HTML_BLOCK_TAG`
-    // for losslessness, tagged `LINE_PREFIX`. Pandoc-native's RawBlock
-    // text is the tag bytes only — skip those tokens. Leading 1-3 space
-    // indent (captured as a WHITESPACE token before the tag name TEXT)
-    // is likewise stripped: pandoc's HTML block scanner accepts ≤ 3
-    // leading spaces on the open/close line but doesn't round-trip them
-    // into the RawBlock text.
     let mut text = String::new();
     for child in tag.children_with_tokens() {
         if let NodeOrToken::Token(t) = child {
@@ -1844,9 +1646,6 @@ fn split_html_block_by_tags(content: &str, out: &mut Vec<Block>) {
         let b = bytes[i];
         if b == b'\n' {
             consecutive_newlines += 1;
-            // A blank line resets the inline-pending state — pandoc
-            // restarts block parsing after a blank line, so subsequent
-            // inline-block tags become eligible to split again.
             if consecutive_newlines >= 2 {
                 inline_pending = false;
             }
@@ -1879,12 +1678,6 @@ fn split_html_block_by_tags(content: &str, out: &mut Vec<Block>) {
             continue;
         };
         if is_pandoc_block_tag_name(name) {
-            // Strict block tags (incl. `<div>`) inside an opaque
-            // HTML_BLOCK split into RawBlocks per tag. Matched
-            // `<div>...</div>` is handled at parse time (HTML_BLOCK_DIV
-            // lift); we only reach the splitter for unbalanced or
-            // multi-tag content (e.g. `</section>` standalone), so
-            // emit each tag as its own RawBlock.
             if i > text_start {
                 flush_html_block_text(&content[text_start..i], out);
             }
@@ -1895,24 +1688,6 @@ fn split_html_block_by_tags(content: &str, out: &mut Vec<Block>) {
             continue;
         }
         if is_pandoc_inline_block_tag_name(name) {
-            // At a fresh-block position (!inline_pending):
-            //
-            // - Open tag with matched close, interior not opening with a
-            //   void block tag: lift `<tag>...</tag>` into RawBlock +
-            //   interior + RawBlock.
-            // - Open tag with no matched close, or open tag whose interior
-            //   begins (after any indent) with a void block tag at column
-            //   0: emit the open tag as a single RawBlock and continue
-            //   scanning. Pandoc-native treats `<video>\n<source>...` as
-            //   per-tag emission rather than a balanced span; once
-            //   `<source>` interrupts the run, the closing `</video>` ends
-            //   up as `RawInline` inside the trailing paragraph.
-            // - Close tag at fresh-block: emit as a single RawBlock.
-            //   Pandoc-native pins `</video>` standalone as a RawBlock.
-            //
-            // Inside an existing inline run (`inline_pending == true`),
-            // pass through as inline raw HTML (pandoc's `cannot_interrupt`
-            // semantics for `eitherBlockOrInline` tags).
             if !inline_pending {
                 if !is_close
                     && let Some((close_start, close_end)) =
@@ -1946,14 +1721,6 @@ fn split_html_block_by_tags(content: &str, out: &mut Vec<Block>) {
             continue;
         }
         if is_pandoc_void_block_tag_name(name) {
-            // Void `eitherBlockOrInline` tags (`<embed>`, `<area>`,
-            // `<source>`, `<track>`) emit as a single `RawBlock` per
-            // instance at fresh-block positions; inside inline content
-            // (`inline_pending == true`) they pass through as raw
-            // inline HTML. The closing form (`</embed>` etc.) is not
-            // valid HTML for void elements, but if it appears in the
-            // wild pandoc still emits it as a `RawBlock` at fresh-block
-            // positions — mirror that.
             if !inline_pending {
                 if i > text_start {
                     flush_html_block_text(&content[text_start..i], out);
@@ -1968,17 +1735,10 @@ fn split_html_block_by_tags(content: &str, out: &mut Vec<Block>) {
             i += tag_end;
             continue;
         }
-        // Non-splitting tag (truly inline-only HTML). Mark that an
-        // inline run has started so subsequent `eitherBlockOrInline`
-        // tags don't split mid-paragraph.
         inline_pending = true;
         i += tag_end;
     }
     if text_start < bytes.len() {
-        // Tail text — no further tag follows in this HTML block, so the
-        // final `Para` should NOT be demoted to `Plain`. Pandoc only
-        // promotes a paragraph to `Plain` when it is butted up against
-        // the next HTML tag in the same block.
         flush_html_block_tail_text(&content[text_start..], out);
     }
 }
@@ -2050,8 +1810,6 @@ fn interior_starts_with_void_block_tag(content: &str, interior_start: usize) -> 
     extract_html_tag_name(&rest[..end]).is_some_and(is_pandoc_void_block_tag_name)
 }
 
-/// Extract the tag name from a complete HTML tag text (`<name ...>` or
-/// `</name>`). Used to gate splitting on block-level tag membership.
 fn extract_html_tag_name(tag_text: &str) -> Option<&str> {
     let bytes = tag_text.as_bytes();
     if bytes.first() != Some(&b'<') {
@@ -2069,10 +1827,6 @@ fn extract_html_tag_name(tag_text: &str) -> Option<&str> {
     }
 }
 
-/// Depth-aware scan for the matching closing tag of `name` starting at
-/// byte position `start` (the `<` of the opening tag) in `content`.
-/// Returns `(close_start, close_end)` — the bounds of the matching
-/// `</name>` tag — or `None` when no balanced close exists in `content`.
 fn find_matching_html_close_with_start(
     content: &str,
     start: usize,
@@ -2147,25 +1901,14 @@ fn is_raw_text_element_open(s: &str) -> bool {
 /// `markdown_in_html_blocks`) while keeping every other kind one-block.
 fn collect_block(node: &SyntaxNode, out: &mut Vec<Block>) {
     if node.kind() == SyntaxKind::HTML_BLOCK_DIV {
-        // `HTML_BLOCK_DIV` is the parser's explicit `<div>` retag. The
-        // structural projector walks lifted CST children directly —
-        // all balanced `<div>` shapes lift at parse time.
         out.push(html_div_block(node));
         return;
     }
     if node.kind() == SyntaxKind::HTML_BLOCK_RAW {
-        // Single-construct opaque HTML block the parser tagged at parse
-        // time — comment, PI, or verbatim (`<pre>`, `<style>`,
-        // `<script>`, `<textarea>`). Projects to exactly one RawBlock.
         html_raw_block(node, out);
         return;
     }
     if node.kind() == SyntaxKind::HTML_BLOCK {
-        // Opaque HTML block the parser left untagged — void inline-block
-        // tags and any strict/inline-block tag it couldn't lift, plus
-        // unlifted CommonMark comment/PI/verbatim. The byte walker (or
-        // the leading-byte-sniff early return) splits these into per-tag
-        // RawBlocks plus interior text.
         emit_html_block(node, out);
         return;
     }
@@ -2182,16 +1925,6 @@ fn parse_pandoc_blocks(text: &str) -> Vec<Block> {
         return Vec::new();
     }
     let doc = crate::parse(text, Some(pandoc_flavor_options()));
-    // Swap REFS_CTX with one built from the inner CST so heading auto-ids,
-    // reference-link defs, and footnote defs inside the recursive parse
-    // resolve against inner offsets/labels rather than the outer document's.
-    // Outer refs/footnotes/heading-id history are inherited so a `<div>`
-    // body can use a label/footnote defined outside, and inner heading
-    // slugs disambiguate against outer headings. Pandoc parses
-    // `<div>...</div>` natively in one pass, so this approximation
-    // matches the common case (outer-def-before-inner-use, inner-loses
-    // for shared keys); offset-aware document-order resolution would be
-    // needed for full parity but is not exercised by current corpus.
     let outer = REFS_CTX.with(|c| std::mem::take(&mut *c.borrow_mut()));
     let inner_ctx = build_refs_ctx_inherited(&doc, Some(&outer), outer.auto_identifiers);
     REFS_CTX.with(|c| *c.borrow_mut() = inner_ctx);
@@ -2217,8 +1950,6 @@ fn fenced_div(node: &SyntaxNode) -> Block {
         .find(|c| c.kind() == SyntaxKind::DIV_FENCE_OPEN)
         .and_then(|open| open.children().find(|c| c.kind() == SyntaxKind::DIV_INFO))
         .map(|info| {
-            // Structured `{...}` bodies are read straight from the CST; bare-word
-            // shorthand and opaque/empty bodies still go through `parse_div_info`.
             if attr_node_is_structured(&info) {
                 attr_from_attribute_node(&info)
             } else {
@@ -2287,12 +2018,6 @@ fn attr_from_attribute_node(attr_node: &SyntaxNode) -> Attr {
     read_bare_attr_children(attr_node)
 }
 
-/// Walk the bare `ATTR_ID` / `ATTR_CLASS` / `ATTR_KEY_VALUE` children of a node
-/// (as emitted by `emit_attribute_node` and `emit_code_info_attrs`) into an
-/// `Attr`, mirroring [`parse_attr_block`] semantics: `#id` strips its `#`; only
-/// `.`-prefixed ATTR_CLASS tokens are classes (`=format` pseudo-classes are
-/// dropped); ATTR_VALUE strips a `"` pair. Callers handle any `CODE_LANGUAGE`
-/// token separately.
 fn read_bare_attr_children(node: &SyntaxNode) -> Attr {
     let mut attr = Attr::default();
     for el in node.children_with_tokens() {
@@ -2303,13 +2028,10 @@ fn read_bare_attr_children(node: &SyntaxNode) -> Attr {
                 }
             }
             SyntaxKind::ATTR_CLASS => {
-                // `=format` pseudo-classes are not `.`-prefixed; `parse_attr_block`
-                // never produced them, so drop them here for output parity.
                 if let Some(c) = el.as_token().and_then(|t| t.text().strip_prefix('.')) {
                     attr.classes.push(c.to_string());
                 }
             }
-            // A bare `-` is pandoc's shorthand for `.unnumbered`.
             SyntaxKind::ATTR_UNNUMBERED => attr.classes.push("unnumbered".to_string()),
             SyntaxKind::ATTR_KEY_VALUE => {
                 if let Some(kv) = el.as_node() {
@@ -2329,7 +2051,6 @@ fn read_bare_attr_children(node: &SyntaxNode) -> Attr {
     attr
 }
 
-/// Text of the first child token of `kv` with the given kind, or empty.
 fn attr_kv_child_text(kv: &SyntaxNode, kind: SyntaxKind) -> String {
     kv.children_with_tokens()
         .find(|el| el.kind() == kind)
@@ -2337,8 +2058,6 @@ fn attr_kv_child_text(kv: &SyntaxNode, kind: SyntaxKind) -> String {
         .unwrap_or_default()
 }
 
-/// Strip a matching pair of double quotes from an attribute value, mirroring
-/// [`parse_attr_block`] (single quotes are kept, as it does).
 fn strip_attr_value_quotes(raw: &str) -> String {
     if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
         raw[1..raw.len() - 1].to_string()
@@ -2347,8 +2066,6 @@ fn strip_attr_value_quotes(raw: &str) -> String {
     }
 }
 
-/// Strip a matching surrounding pair of `"` or `'` from an HTML attribute
-/// value. HTML uses either quote style, both of which are part of the syntax.
 fn strip_any_quotes(raw: &str) -> String {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2 {
@@ -2360,11 +2077,6 @@ fn strip_any_quotes(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Build an `Attr` from a structural `HTML_ATTRS` node (or the legacy
-/// native-span `SPAN_ATTRIBUTES` node, which carries the same HTML syntax),
-/// reading the bare `ATTR_*` children the parser emits. HTML ids/classes carry
-/// no `#`/`.` marker, and values may use either quote style (both stripped). An
-/// opaque node (no recognized attributes) yields `Attr::default()`.
 fn attr_from_html_attrs_node(node: &SyntaxNode) -> Attr {
     let mut attr = Attr::default();
     for el in node.children_with_tokens() {
@@ -2399,9 +2111,6 @@ fn attr_from_html_attrs_node(node: &SyntaxNode) -> Attr {
     attr
 }
 
-/// Read a child `ATTRIBUTE` (node or token) on `parent` into an `Attr`. Returns
-/// `Attr::default()` if no attribute is attached or the body isn't
-/// `{...}`-shaped.
 fn extract_attr_from_node(parent: &SyntaxNode) -> Attr {
     parent
         .children_with_tokens()
@@ -2419,9 +2128,6 @@ fn extract_attr_from_node(parent: &SyntaxNode) -> Attr {
         .unwrap_or_default()
 }
 
-/// Parse the body of an attribute block like `#my-id .class1 .class2 key=value`.
-/// Whitespace-separated. Tokens starting with `#` are id, `.` are classes,
-/// `key=value` (optionally quoted value) are kvs.
 fn parse_attr_block(s: &str) -> Attr {
     let mut id = String::new();
     let mut classes: Vec<String> = Vec::new();
@@ -2451,14 +2157,11 @@ fn parse_attr_block(s: &str) -> Attr {
                 classes.push(s[start..j].to_string());
                 i = j;
             }
-            // A bare `-` is pandoc's shorthand for `.unnumbered`; it consumes
-            // exactly one byte, so `{---}` is three `unnumbered` classes.
             b'-' => {
                 classes.push("unnumbered".to_string());
                 i += 1;
             }
             _ => {
-                // Read key up to `=` or whitespace.
                 let key_start = i;
                 while i < bytes.len() && !matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'=') {
                     i += 1;
@@ -2486,7 +2189,6 @@ fn parse_attr_block(s: &str) -> Attr {
                     };
                     kvs.push((key, value));
                 } else if !key.is_empty() {
-                    // Bare token (legacy class form).
                     classes.push(key);
                 }
             }
@@ -2544,10 +2246,6 @@ fn is_loose_definition_item(item: &SyntaxNode) -> bool {
 }
 
 fn definition_blocks(def_node: &SyntaxNode, loose: bool) -> Vec<Block> {
-    // Definition body content lives at the marker's content offset (`: ` →
-    // 2 columns by default). The CST keeps that indent on each line, so any
-    // CODE_BLOCK descendant needs the offset stripped before pandoc-native
-    // projection.
     let extra = definition_content_offset(def_node);
     let mut out = Vec::new();
     for child in def_node.children() {
@@ -2599,8 +2297,6 @@ fn definition_content_offset(def_node: &SyntaxNode) -> usize {
     col
 }
 
-/// Advance a column counter by `s`, treating `\t` as moving to the next
-/// 4-column tab stop and any other character as a single column.
 fn advance_col(start: usize, s: &str) -> usize {
     let mut col = start;
     for c in s.chars() {
@@ -2614,9 +2310,6 @@ fn advance_col(start: usize, s: &str) -> usize {
 }
 
 fn line_block(node: &SyntaxNode) -> Block {
-    // A `LINE_BLOCK_LINE` without a `LINE_BLOCK_MARKER` is a continuation
-    // line: pandoc's `lineBlockLine` joins it onto the marker line above with
-    // `unwords`, so `| a` + `  b` is the single line `a b`, not two lines.
     let mut lines: Vec<Vec<Inline>> = Vec::new();
     for line in node
         .children()
@@ -2660,13 +2353,8 @@ fn bracketed_span_inline(node: &SyntaxNode) -> Inline {
         .find(|n| n.kind() == SyntaxKind::SPAN_ATTRIBUTES)
         .map(|n| {
             if is_html {
-                // Legacy native-span path: `SPAN_ATTRIBUTES` carries HTML
-                // `class="..."` syntax, structured into bare ATTR_* children.
                 attr_from_html_attrs_node(&n)
             } else {
-                // Pandoc bracketed span: `SPAN_ATTRIBUTES` is structured into
-                // ATTR_* children; `attr_from_attribute_node` reads them (and
-                // reparses an opaque/empty body via its own fallback).
                 attr_from_attribute_node(&n)
             }
         })
@@ -2718,11 +2406,6 @@ fn pipe_table(node: &SyntaxNode) -> Option<TableData> {
             _ => {}
         }
     }
-    // The delimiter row owns the column count. Pandoc's `pipeTable` reads it
-    // from `pipeBreak` and pads or truncates every row to it, so a surplus
-    // header cell (`a | b | c` over `---|---`) never reaches the output and a
-    // short row (`a | b` over `---|---|---`) gains an empty one.
-    // `cells_to_plain_blocks` pads; the truncation is here.
     let cols = aligns.len();
     if cols == 0 {
         return None;
@@ -2773,9 +2456,6 @@ fn extract_caption_attrs(mut inlines: Vec<Inline>) -> (Attr, Vec<Inline>) {
     let Some(end_idx) = last_str_end else {
         return (Attr::default(), inlines);
     };
-    // Walk back to find the Str starting with `{`. Allow only Str/Space
-    // between (no structural inlines like Emph), since attribute blocks
-    // are plain text.
     let mut start_idx = end_idx;
     let mut found_open = false;
     loop {
@@ -2797,8 +2477,6 @@ fn extract_caption_attrs(mut inlines: Vec<Inline>) -> (Attr, Vec<Inline>) {
     if !found_open {
         return (Attr::default(), inlines);
     }
-    // Concatenate the Str/Space slice into a flat string, then strip the
-    // outer braces.
     let mut raw = String::new();
     for el in &inlines[start_idx..=end_idx] {
         match el {
@@ -2819,10 +2497,6 @@ fn extract_caption_attrs(mut inlines: Vec<Inline>) -> (Attr, Vec<Inline>) {
     (attr, inlines)
 }
 
-/// Resolve `(Attr, caption_inlines)` for a table whose caption has already
-/// been projected. Prefers a structural ATTRIBUTE node when the parser
-/// captured one (`+caption_attributes` lift); falls back to the legacy
-/// trailing-Str scan for older paths.
 fn resolve_caption_attr(
     caption_inlines: Vec<Inline>,
     caption_attr_from_node: Option<Attr>,
@@ -2833,9 +2507,6 @@ fn resolve_caption_attr(
     }
 }
 
-/// Run `pipe_table_caption` over the table node's TABLE_CAPTION child if any,
-/// returning collected inlines and a structurally-extracted attr (None when
-/// the parser didn't lift one).
 fn project_table_caption_from(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) {
     node.children()
         .find(|c| c.kind() == SyntaxKind::TABLE_CAPTION)
@@ -2844,10 +2515,6 @@ fn project_table_caption_from(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) 
 }
 
 fn pipe_table_caption(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) {
-    // Walk all tokens after TABLE_CAPTION_PREFIX and collect inline content.
-    // The parser lifts a trailing `{...}` attribute block (Pandoc's
-    // `+caption_attributes`) into a structural ATTRIBUTE node — surface it as
-    // the table's outer attr instead of projecting it as an inline.
     let mut out = Vec::new();
     let mut caption_attr: Option<Attr> = None;
     let mut after_prefix = false;
@@ -2863,7 +2530,6 @@ fn pipe_table_caption(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) {
                 }
                 if n.kind() == SyntaxKind::ATTRIBUTE {
                     caption_attr = Some(attr_from_attribute_node(&n));
-                    // Drop any trailing whitespace inline pushed before the attribute.
                     if matches!(out.last(), Some(Inline::Space)) {
                         out.pop();
                     }
@@ -2895,10 +2561,6 @@ fn pipe_table_caption(node: &SyntaxNode) -> (Vec<Inline>, Option<Attr>) {
     (coalesce_inlines(out), caption_attr)
 }
 
-/// Alignment of one separator segment (a slice of marker tokens between
-/// delimiters). Mirrors the old `s.trim()` + leading/trailing-colon check:
-/// the segment is left/right aligned when its first/last non-whitespace
-/// marker is a colon.
 fn segment_align(seg: &[SyntaxToken]) -> &'static str {
     let non_ws = |t: &&SyntaxToken| t.kind() != SyntaxKind::TABLE_SEP_WHITESPACE;
     let left = seg
@@ -2918,15 +2580,11 @@ fn segment_align(seg: &[SyntaxToken]) -> &'static str {
     }
 }
 
-/// Whether a separator carries any alignment colon.
 fn separator_has_colon(separator: &SyntaxNode) -> bool {
     separator_marker_tokens(separator).any(|t| t.kind() == SyntaxKind::TABLE_SEP_COLON)
 }
 
 fn pipe_separator_aligns(separator: &SyntaxNode) -> Vec<&'static str> {
-    // One column per delimiter-separated segment. The segmentation is the
-    // typed wrapper's (`PipeTable::column_count` counts the same segments), so
-    // the projector and the linter cannot disagree about what a column is.
     separator_column_segments(separator)
         .iter()
         .map(|seg| segment_align(seg))
@@ -2967,8 +2625,6 @@ fn show_double(x: f64) -> String {
             format!("{s}.0")
         }
     } else {
-        // Rust's `{:e}` already matches Haskell's mantissa/exponent shape:
-        // `8.333333333333333e-2`. Whole-number mantissa needs `.0` appended.
         let s = format!("{x:e}");
         if let Some((m, e)) = s.split_once('e') {
             if m.contains('.') {
@@ -2981,8 +2637,6 @@ fn show_double(x: f64) -> String {
         }
     }
 }
-
-// ----- simple table -------------------------------------------------------
 
 /// Project a `SIMPLE_TABLE` node. Pandoc's "simple" table form:
 ///
@@ -3009,13 +2663,10 @@ fn simple_table(node: &SyntaxNode) -> Option<TableData> {
     let header = node
         .children()
         .find(|c| c.kind() == SyntaxKind::TABLE_HEADER);
-    // Body rows: every TABLE_ROW. The closing dash line of a table with a
-    // closer is a second TABLE_SEPARATOR child, so no filtering is needed.
     let body_rows_nodes: Vec<SyntaxNode> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::TABLE_ROW)
         .collect();
-    // Alignment: from header if present, else from the first data row.
     let aligns = if let Some(h) = &header {
         simple_table_aligns(h, &cols)
     } else if let Some(r0) = body_rows_nodes.first() {
@@ -3065,14 +2716,7 @@ fn container_prefix_len(node: &SyntaxNode) -> usize {
         .sum()
 }
 
-/// Return the `(start_col, end_col)` (inclusive) of each dash run in a
-/// `TABLE_SEPARATOR` node, where columns are 0-based offsets within the
-/// separator's line.
 fn simple_table_dash_runs(separator: &SyntaxNode) -> Vec<(usize, usize)> {
-    // One inclusive `(start, end)` per dash run, offsets relative to the start
-    // of the line's own content (past any block-quote prefix) so
-    // `simple_table_aligns` can match them against cell offsets. Markers are
-    // ASCII, so byte offsets equal the char indices the old char scan produced.
     let node_start =
         u32::from(separator.text_range().start()) + container_prefix_len(separator) as u32;
     separator_marker_tokens(separator)
@@ -3085,10 +2729,6 @@ fn simple_table_dash_runs(separator: &SyntaxNode) -> Vec<(usize, usize)> {
 }
 
 fn simple_table_row_cells(row: &SyntaxNode) -> Vec<Vec<Inline>> {
-    // Zero-width TABLE_CELL nodes represent positionally-empty columns
-    // (e.g. case 0094, where header words land in only some of the
-    // dash-defined columns). Keep them as empty cells so the row's
-    // column ordering matches the dash separator.
     row.children()
         .filter(|c| c.kind() == SyntaxKind::TABLE_CELL)
         .map(|cell| coalesce_inlines(inlines_from(&cell)))
@@ -3167,8 +2807,6 @@ fn simple_table_aligns(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<&'stati
         .collect()
 }
 
-// ----- grid table ---------------------------------------------------------
-
 /// Project a `GRID_TABLE` node into pandoc-native shape. Implements a
 /// `gridtables`-style 2D layout pass:
 ///
@@ -3195,11 +2833,6 @@ fn simple_table_aligns(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<&'stati
 /// `grid_separator_aligns`.
 #[allow(clippy::needless_range_loop)]
 fn grid_table(node: &SyntaxNode) -> Option<TableData> {
-    // Collect all lines except the caption, tagged with their parent kind.
-    // Continuation lines inside the row nodes carry the enclosing
-    // containers' prefix bytes (item indent, `>` markers) as leading
-    // tokens; `analyze_grid` requires lines dedented to the table's own
-    // left edge, so read the rows through the prefix-skipping accessor.
     let mut tagged: Vec<(SyntaxKind, String)> = Vec::new();
     for child in node.children() {
         if child.kind() == SyntaxKind::TABLE_CAPTION {
@@ -3215,16 +2848,12 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         return None;
     }
 
-    // Recover the canonical column/row grid and cell tiling via the shared
-    // 2D geometry pass (also used by the formatter's spanning-grid engine).
     let lines: Vec<&str> = tagged.iter().map(|(_, l)| l.as_str()).collect();
     let layout = crate::grid_layout::analyze_grid(&lines)?;
     let row_seps = &layout.row_seps;
     let ncols = layout.cols_pos.len() - 1;
     let nrows = row_seps.len() - 1;
 
-    // Block kind per row block: head if any non-sep line in the block came
-    // from a TABLE_HEADER, foot if from TABLE_FOOTER, else body.
     let mut block_kind: Vec<&'static str> = vec!["body"; nrows];
     for r in 0..nrows {
         let start = row_seps[r];
@@ -3238,8 +2867,6 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         }
     }
 
-    // Group cells by row block and convert to GridCells. Within each block,
-    // emit cells in canonical column order.
     let mut head_rows: Vec<Vec<GridCell>> = Vec::new();
     let mut body_rows: Vec<Vec<GridCell>> = Vec::new();
     let mut foot_rows: Vec<Vec<GridCell>> = Vec::new();
@@ -3268,8 +2895,6 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         }
     }
 
-    // Column widths and alignments. Pick the alignment-bearing separator
-    // for both (or fall back to the first separator).
     let alignment_sep = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::TABLE_SEPARATOR)
@@ -3285,7 +2910,6 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         vec!["AlignDefault"; ncols]
     };
 
-    // Caption.
     let (caption_inlines, caption_attr_from_node) = project_table_caption_from(node);
     let (attr, caption_inlines) = resolve_caption_attr(caption_inlines, caption_attr_from_node);
 
@@ -3314,9 +2938,6 @@ fn parse_grid_cell_text(text: &str) -> Vec<Block> {
             out.push(block);
         }
     }
-    // Pandoc's `plainify` (`Parsing/GridTable.hs`): a cell holding exactly
-    // one `Para` becomes `Plain`; a multi-block cell (e.g. a rowspan cell
-    // whose sub-rows each carry a paragraph) keeps its `Para`s.
     if let [Block::Para(_)] = out.as_slice()
         && let Some(Block::Para(inlines)) = out.pop()
     {
@@ -3336,8 +2957,6 @@ fn parse_grid_cell_text(text: &str) -> Vec<Block> {
 /// width[i] = raw[i] / norm
 /// ```
 fn grid_dash_widths(separator: &SyntaxNode) -> Vec<f64> {
-    // Column raw width = chars between two consecutive `+`, plus 1. With
-    // tokens that's the summed byte length of the markers in each gap.
     let toks: Vec<SyntaxToken> = separator_marker_tokens(separator).collect();
     let mut raw: Vec<usize> = Vec::new();
     let mut seg_start: Option<usize> = None;
@@ -3360,7 +2979,6 @@ fn grid_dash_widths(separator: &SyntaxNode) -> Vec<f64> {
 }
 
 fn grid_separator_aligns(separator: &SyntaxNode, cols: usize) -> Vec<&'static str> {
-    // One alignment per segment strictly between consecutive `+` delimiters.
     let toks: Vec<SyntaxToken> = separator_marker_tokens(separator).collect();
     let mut aligns: Vec<&'static str> = Vec::with_capacity(cols);
     let mut seg_start: Option<usize> = None;
@@ -3379,18 +2997,7 @@ fn grid_separator_aligns(separator: &SyntaxNode, cols: usize) -> Vec<&'static st
     aligns
 }
 
-// ----- multiline table ----------------------------------------------------
-
-/// Project a `MULTILINE_TABLE` node. Multi-line tables have an opening
-/// `-----` border, an optional header (one or more lines), a
-/// `----- ----- -----` column separator, body rows (each row possibly
-/// spans multiple lines, separated from the next row by a blank line),
-/// and a closing `-----` border. Cell content within a row is joined with
-/// `SoftBreak` between source lines. Column widths are
-/// `(dash_count + 1) / 72`.
 fn multiline_table(node: &SyntaxNode) -> Option<TableData> {
-    // The column-separator (the dashes between header and body) is the
-    // *second* TABLE_SEPARATOR if there is a header, else the first.
     let separators: Vec<SyntaxNode> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::TABLE_SEPARATOR)
@@ -3407,10 +3014,6 @@ fn multiline_table(node: &SyntaxNode) -> Option<TableData> {
     if cols.is_empty() {
         return None;
     }
-    // Per pandoc `widthsFromIndices`: each non-last column's width is
-    // `dashes + spaces_after` (= start of next column - start of this); the
-    // last column's width is `dashes + 1` (the indices' bump). Normalize
-    // by `max(total, 72)`.
     let raw: Vec<usize> = cols
         .iter()
         .enumerate()
@@ -3425,8 +3028,6 @@ fn multiline_table(node: &SyntaxNode) -> Option<TableData> {
     let total: usize = raw.iter().sum();
     let norm = (total.max(72)) as f64;
     let widths: Vec<f64> = raw.into_iter().map(|w| w as f64 / norm).collect();
-    // Alignment from header (if present) or first data row, using the
-    // simple-table flushness rule against the column-separator dash runs.
     let aligns = if let Some(h) = &header {
         simple_table_aligns(h, &cols)
     } else if let Some(r0) = node.children().find(|c| c.kind() == SyntaxKind::TABLE_ROW) {
@@ -3466,15 +3067,9 @@ fn multiline_table(node: &SyntaxNode) -> Option<TableData> {
     })
 }
 
-/// Slice each line of a multiline-table row by column ranges, then merge
-/// each column's per-line text into a single Plain block with `SoftBreak`s
-/// between source lines.
 fn multiline_row_cells_blocks(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<Vec<Block>> {
     let row_start: u32 = row.text_range().start().into();
     let raw = row.text().to_string();
-    // Re-construct the row's per-line text. Tokens give us byte offsets, but
-    // plain `.text()` is enough — split on '\n', then for each line, slice by
-    // column ranges.
     let lines: Vec<&str> = raw.split_inclusive('\n').collect();
     let mut col_lines: Vec<Vec<String>> = vec![Vec::new(); cols.len()];
     let mut line_start_offset: usize = 0;
@@ -3485,10 +3080,6 @@ fn multiline_row_cells_blocks(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<
             continue;
         }
         for (i, &(cs, _ce)) in cols.iter().enumerate() {
-            // A column spans from the start of its dashes to the start of the
-            // next column's dashes (the gap belongs to the left column); the
-            // last column runs to end-of-line. Slicing at the dash-run end
-            // instead would drop cell text that overruns a short dash run.
             let end = cols.get(i + 1).map_or(usize::MAX, |(next_cs, _)| *next_cs);
             let slice = char_slice(line_no_nl, cs, end);
             let trimmed = slice.trim();
@@ -3506,11 +3097,6 @@ fn multiline_row_cells_blocks(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<
             if segments.is_empty() {
                 return Vec::new();
             }
-            // Re-parse the cell's joined text through panache's inline parser
-            // so that `**bold**`, `` `code` ``, `[link](url)` etc. inside
-            // multiline-table cells project as Strong/Code/Link rather than
-            // raw Str (matches pandoc's `multilineTableHeader` behavior of
-            // joining lines per column and parsing as Markdown).
             let joined = segments.join("\n");
             let inlines = parse_cell_text_inlines(&joined);
             if inlines.is_empty() {
@@ -3521,11 +3107,6 @@ fn multiline_row_cells_blocks(row: &SyntaxNode, cols: &[(usize, usize)]) -> Vec<
         .collect()
 }
 
-/// Parse a cell text fragment through panache's inline parser and return its
-/// inline content. Used for multiline-table cells whose per-line slices are
-/// not seen by the outer parser as inline-bearing TABLE_CELLs (the parser
-/// holds raw TEXT for lines past the first). Empty or whitespace-only input
-/// returns an empty vec.
 fn parse_cell_text_inlines(text: &str) -> Vec<Inline> {
     if text.trim().is_empty() {
         return Vec::new();
@@ -3562,8 +3143,6 @@ fn list_block(node: &SyntaxNode) -> Block {
         .children()
         .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
         .map(|item| {
-            // Pandoc's `rawListItem` swallows the blank lines that follow an
-            // item, so they terminate that item's last paragraph.
             let followed_by_blank = item
                 .next_sibling()
                 .is_some_and(|s| s.kind() == SyntaxKind::BLANK_LINE);
@@ -3627,7 +3206,6 @@ fn ordered_list_attrs(node: &SyntaxNode) -> (usize, &'static str, &'static str) 
 /// start value for Example lists is left at 1 — pandoc tracks numbering
 /// across lists at the document level, which we don't model.
 fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str) {
-    // Strip surrounding parens / trailing period or paren to get (body, delim).
     let (body, delim) =
         if let Some(inner) = trimmed.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
             (inner, "TwoParens")
@@ -3639,19 +3217,15 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
             (trimmed, "DefaultDelim")
         };
 
-    // All-digit body → Decimal.
     if !body.is_empty() && body.chars().all(|c| c.is_ascii_digit()) {
         let start: usize = body.parse().unwrap_or(1);
         return (start, "Decimal", delim);
     }
 
-    // `#` (DefaultStyle) — when style is DefaultStyle pandoc forces
-    // DefaultDelim regardless of the actual punctuation.
     if body == "#" {
         return (1, "DefaultStyle", "DefaultDelim");
     }
 
-    // `@` or `@label` (Example list).
     if let Some(rest) = body.strip_prefix('@')
         && rest
             .chars()
@@ -3660,7 +3234,6 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
         return (1, "Example", delim);
     }
 
-    // Single `i`/`I` is romanOne (tried before alpha, so `i.`/`I.` is Roman 1).
     if body == "i" {
         return (1, "LowerRoman", delim);
     }
@@ -3668,7 +3241,6 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
         return (1, "UpperRoman", delim);
     }
 
-    // Single lowercase / uppercase letter → alpha.
     if body.len() == 1
         && let Some(c) = body.chars().next()
     {
@@ -3680,7 +3252,6 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
         }
     }
 
-    // Multi-char roman lowercase/uppercase.
     if body
         .chars()
         .all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'))
@@ -3696,8 +3267,6 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
         return (n, "UpperRoman", delim);
     }
 
-    // Fallback — the parser accepted some marker we don't classify; emit
-    // Decimal/Period so the list renders rather than dropping coverage.
     (1, "Decimal", delim)
 }
 
@@ -3748,10 +3317,6 @@ fn list_item_blocks(item: &SyntaxNode, followed_by_blank: bool) -> Vec<Block> {
         match child.kind() {
             SyntaxKind::PLAIN => {
                 let mut inlines = coalesce_inlines(inlines_from(&child));
-                // Skip empty Plain blocks. The parser emits a PLAIN node for
-                // any line under a list item, including the bare-marker line
-                // (`-` followed by blank then indented content); pandoc only
-                // counts blocks with actual inline content.
                 if inlines.is_empty() {
                     continue;
                 }
@@ -3767,12 +3332,6 @@ fn list_item_blocks(item: &SyntaxNode, followed_by_blank: bool) -> Vec<Block> {
                 }
             }
             SyntaxKind::CODE_BLOCK => {
-                // Both fenced and indented code blocks inside list items
-                // carry the item-content indent on every body line in the
-                // CST. Strip that offset so pandoc sees the same body it
-                // would in a flat document. (For indented code, the helper
-                // also strips the 4-space code-block indent on top of the
-                // item offset.)
                 out.push(code_block_with_extra_strip(&child, item_indent));
             }
             _ => collect_block(&child, &mut out),
@@ -3847,10 +3406,6 @@ fn list_item_content_offset(item: &SyntaxNode) -> usize {
     parent_ws + leading_ws + marker_width
 }
 
-/// WHITESPACE token immediately preceding `item` on its parent LIST node, if
-/// any. Used to recover the outer-container indent when the parser stores it
-/// on the parent LIST (e.g. LIST inside DEFINITION) rather than as the item's
-/// own leading WHITESPACE.
 fn parent_list_leading_ws(item: &SyntaxNode) -> usize {
     let prev = item.prev_sibling_or_token();
     match prev {
@@ -3885,7 +3440,6 @@ fn compactify(items: &mut [Vec<Block>]) {
     let Some(last) = items.len().checked_sub(1) else {
         return;
     };
-    // Pandoc counts each item's top-level blocks only, never nested ones.
     let paras = items
         .iter()
         .flatten()
@@ -3926,8 +3480,6 @@ fn paragraph_is_para(plain: &SyntaxNode, item_followed_by_blank: bool) -> bool {
     while let Some(node) = next {
         match node.kind() {
             SyntaxKind::BLANK_LINE => return true,
-            // A bare-marker line emits an empty PLAIN (NEWLINE only), which is
-            // not a block pandoc can see; look past it.
             SyntaxKind::PLAIN if child_is_empty_plain(&node) => next = node.next_sibling(),
             kind => return interrupts_paragraph(kind, &node),
         }
@@ -3975,8 +3527,6 @@ fn child_is_empty_plain(node: &SyntaxNode) -> bool {
     })
 }
 
-// ----- inline walking -----------------------------------------------------
-
 fn inlines_from(parent: &SyntaxNode) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut iter = parent.children_with_tokens().peekable();
@@ -3992,9 +3542,6 @@ fn inlines_from(parent: &SyntaxNode) -> Vec<Inline> {
             NodeOrToken::Node(n) => push_inline_node(&n, &mut out),
         }
     }
-    // Trailing NEWLINE inside paragraphs/headings is structural. Strip a
-    // single trailing SoftBreak so the inline list ends on Str/Space, matching
-    // pandoc's "trim trailing line endings" rule.
     while matches!(out.last(), Some(Inline::SoftBreak)) {
         out.pop();
     }
@@ -4023,9 +3570,6 @@ fn emit_citation_with_absorb<I>(
         render_citation_inline(node, out, None);
         return;
     }
-    // Bare AuthorInText form. Use rowan's sibling navigation (not the iter
-    // peek) to verify the absorption pattern without consuming anything we
-    // can't put back. Then if confirmed, advance the iter to skip both.
     let next_sibling_pair = node.next_sibling_or_token().and_then(|el1| {
         let t = el1.as_token().cloned()?;
         if t.kind() != SyntaxKind::TEXT || !t.text().starts_with(' ') {
@@ -4034,10 +3578,6 @@ fn emit_citation_with_absorb<I>(
         let space_text = t.text().to_string();
         let link_el = t.next_sibling_or_token()?;
         let link = link_el.as_node().cloned()?;
-        // Pandoc absorbs `[locator]` after `@key` whether the brackets
-        // resolve as a link or not; under the new IR, an unresolved
-        // bracket-shape pattern is `UNRESOLVED_REFERENCE` rather than
-        // shape-only `LINK`. Both shapes are valid locator candidates.
         if link.kind() != SyntaxKind::LINK && link.kind() != SyntaxKind::UNRESOLVED_REFERENCE {
             return None;
         }
@@ -4056,7 +3596,6 @@ fn emit_citation_with_absorb<I>(
         Some((space_text, link_text))
     });
     if let Some((_space_text, locator_text)) = next_sibling_pair {
-        // Advance the iter past the consumed TEXT and LINK.
         iter.next();
         iter.next();
         render_citation_inline(node, out, Some(&locator_text));
@@ -4112,13 +3651,6 @@ fn push_inline_node(node: &SyntaxNode, out: &mut Vec<Inline>) {
         SyntaxKind::LINK => render_link_inline(node, out),
         SyntaxKind::IMAGE_LINK => render_image_inline(node, out),
         SyntaxKind::CITATION => render_citation_inline(node, out, None),
-        // Pandoc-native treats unresolved bracket-shape patterns as
-        // literal text — the bracket bytes themselves are `Str "["`
-        // and `Str "]"`, but inner inline structure (emphasis, math,
-        // raw spans, etc.) survives. The Panache `UNRESOLVED_REFERENCE`
-        // wrapper is a tooling concession; emit the bracket bytes as
-        // `Str` and recurse into structural children so inner content
-        // is preserved.
         SyntaxKind::UNRESOLVED_REFERENCE => render_unresolved_reference_inline(node, out),
         _ => out.push(inline_from_node(node)),
     }
@@ -4163,8 +3695,6 @@ fn render_unresolved_reference_inline(node: &SyntaxNode, out: &mut Vec<Inline>) 
         None => (text_label.clone(), false, String::new()),
     };
 
-    // Implicit-heading-id resolution at projection time. Only for
-    // link-shape (not image-shape) shortcut/full-ref/collapsed forms.
     if !is_image && let Some(id) = lookup_heading_id(&label) {
         let url = format!("#{id}");
         let resolved_text_inlines = text_node
@@ -4180,11 +3710,6 @@ fn render_unresolved_reference_inline(node: &SyntaxNode, out: &mut Vec<Inline>) 
         return;
     }
 
-    // Inherited reference resolution. The parser emits UNRESOLVED_REFERENCE
-    // when the corresponding `[label]: url` def isn't in the same CST, but
-    // when projecting recursively-reparsed content (e.g. a `<div>` body)
-    // the outer document's refs are folded into REFS_CTX. Resolve here so
-    // an outer-defined ref used inside `<div>...</div>` becomes a Link.
     if let Some((url, title)) = lookup_ref(&label) {
         let resolved_text_inlines = text_node
             .as_ref()
@@ -4204,8 +3729,6 @@ fn render_unresolved_reference_inline(node: &SyntaxNode, out: &mut Vec<Inline>) 
         return;
     }
 
-    // Unresolved: emit the original markdown bytes, preserving inner
-    // inline structure.
     let unresolved_text_inlines = text_node
         .as_ref()
         .map(|n| coalesce_inlines_keep_edges(inlines_from(n)))
@@ -4234,7 +3757,6 @@ fn render_citation_inline(
     out: &mut Vec<Inline>,
     extra_suffix_text: Option<&str>,
 ) {
-    // Example-list resolution short-circuit (legacy carve-out).
     let first_key = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -4304,9 +3826,6 @@ fn render_citation_inline(
         builders.push(c);
     }
 
-    // Absorbed `[locator]` text becomes additional suffix on the LAST
-    // citation in the group (pandoc only absorbs into AuthorInText cites
-    // anyway, which always have one citation in the group).
     if let Some(extra) = extra_suffix_text
         && let Some(last) = builders.last_mut()
     {
@@ -4331,7 +3850,6 @@ fn render_citation_inline(
         .map(|b| b.into_citation(note_num))
         .collect();
 
-    // Build literal text from CITATION node text + any absorbed suffix.
     let mut literal = node.text().to_string();
     if let Some(extra) = extra_suffix_text {
         literal.push(' ');
@@ -4344,11 +3862,6 @@ fn render_citation_inline(
     out.push(Inline::Cite(projected, text_inlines));
 }
 
-/// Internal builder for a single Citation while walking the CITATION node's
-/// tokens. `prefix_raw` and `suffix_raw` capture the raw `CITATION_CONTENT`
-/// text segments before / after the key; they are inline-parsed (with smart
-/// transformations applied via `coalesce_inlines`) once the builder is
-/// finalized.
 struct CitationBuilder {
     id: String,
     prefix_raw: String,
@@ -4411,7 +3924,6 @@ fn parse_cite_affix_inlines(raw: &str, is_prefix: bool) -> Vec<Inline> {
     let wrapped = format!("Z {work}");
     let inlines = parse_cell_text_inlines(&wrapped);
     let mut coalesced = coalesce_inlines(inlines);
-    // Strip the leading `Z` sentinel + Space.
     if matches!(coalesced.first(), Some(Inline::Str(s)) if s == "Z") {
         coalesced.remove(0);
         if matches!(coalesced.first(), Some(Inline::Space)) {
@@ -4470,13 +3982,10 @@ fn push_token_inline(
         SyntaxKind::NEWLINE => out.push(Inline::SoftBreak),
         SyntaxKind::HARD_LINE_BREAK => out.push(Inline::LineBreak),
         SyntaxKind::ESCAPED_CHAR => {
-            // \x — keep just the escaped character as a Str
             let s: String = t.text().chars().skip(1).collect();
             out.push(Inline::Str(s));
         }
         SyntaxKind::NONBREAKING_SPACE => out.push(Inline::Str("\u{a0}".to_string())),
-        // Skip structural tokens (markers, brackets, fence bytes) that don't
-        // contribute to the inline stream.
         _ => {}
     }
 }
@@ -4525,12 +4034,6 @@ fn inline_from_node(node: &SyntaxNode) -> Inline {
             strip_inline_code_padding(&inline_code_payload(node)),
         ),
         SyntaxKind::LINK | SyntaxKind::IMAGE_LINK | SyntaxKind::UNRESOLVED_REFERENCE => {
-            // LINK / IMAGE_LINK / UNRESOLVED_REFERENCE render through
-            // `push_inline_node` so reference resolution can emit
-            // multiple inlines (resolved Link, or unresolved Str
-            // fragments). This single-Inline path is unreachable;
-            // emit Unsupported as a guard rather than silently
-            // dropping.
             Inline::Unsupported(format!("{:?}", node.kind()))
         }
         SyntaxKind::AUTO_LINK => autolink_inline(node),
@@ -4546,9 +4049,6 @@ fn inline_from_node(node: &SyntaxNode) -> Inline {
     }
 }
 
-/// Inlines from a wrapper (Emph/Strong/...) where the structural markers are
-/// child *nodes* (e.g. EMPHASIS_MARKER) rather than child tokens. We descend
-/// through such marker children but skip their bytes.
 fn inlines_from_marked(parent: &SyntaxNode) -> Vec<Inline> {
     let mut out = Vec::new();
     let mut iter = parent.children_with_tokens().peekable();
@@ -4600,8 +4100,6 @@ fn render_link_inline(node: &SyntaxNode, out: &mut Vec<Inline>) {
         return;
     }
 
-    // Reference-style link: shortcut [label], implicit [label][], or full
-    // [text][ref]. Distinguish by presence/contents of LINK_REF.
     let ref_node = node.children().find(|c| c.kind() == SyntaxKind::LINK_REF);
     let resolved_text_inlines = text_node
         .as_ref()
@@ -4645,14 +4143,6 @@ fn render_link_inline(node: &SyntaxNode, out: &mut Vec<Inline>) {
         return;
     }
 
-    // Unresolved: emit the original markdown bytes as plain text. The reader
-    // assembles `[<text>]`, optionally followed by `[<ref>]` for a full or
-    // implicit reference. Using Str inlines here (rather than Link with empty
-    // dest) matches pandoc's behavior of leaving unresolved references as raw
-    // text in the output stream. Use keep_edges so leading/trailing whitespace
-    // inside `[ ... ]` survives — pandoc preserves source whitespace for
-    // unresolved references (`[ foo ]` → `Str "[", Space, Str "foo", Space,
-    // Str "]"`), unlike resolved Links which strip edges.
     let unresolved_text_inlines = text_node
         .as_ref()
         .map(|n| coalesce_inlines_keep_edges(inlines_from(n)))
@@ -4762,9 +4252,6 @@ fn strip_inline_code_padding(s: &str) -> String {
 }
 
 fn math_inline(node: &SyntaxNode, kind: &'static str) -> Inline {
-    // The raw math content lives in a `MATH_CONTENT` subtree (a structural TeX
-    // CST); reconstruct it excluding any host container prefixes interleaved on
-    // continuation lines (e.g. blockquote `>`).
     let content = crate::syntax::math::math_content_text(node);
     Inline::Math(kind, content)
 }
@@ -4778,8 +4265,6 @@ fn autolink_inline(node: &SyntaxNode) -> Inline {
             url.push_str(t.text());
         }
     }
-    // Pandoc treats `<foo@bar>` as an email autolink (class "email", `mailto:`
-    // dest) when the body has no scheme but contains an `@`.
     let is_email = !url.contains("://") && !url.starts_with("mailto:") && url.contains('@');
     if is_email {
         let attr = Attr {
@@ -4790,9 +4275,6 @@ fn autolink_inline(node: &SyntaxNode) -> Inline {
         let dest = format!("mailto:{url}");
         return Inline::Link(attr, vec![Inline::Str(url)], dest, String::new());
     }
-    // Pandoc only treats `<scheme:body>` as a URI autolink when `scheme` is
-    // in its known-schemes allowlist (see pandoc/src/Text/Pandoc/URI.hs).
-    // Otherwise the original `<...>` bytes are emitted as raw HTML.
     if !is_known_uri_scheme(&url) {
         return Inline::RawInline("html".to_string(), node.text().to_string());
     }
@@ -4873,8 +4355,6 @@ fn footnote_reference_inline(node: &SyntaxNode) -> Inline {
     let blocks = REFS_CTX.with(|c| c.borrow().footnotes.get(&label).map(|bs| bs.to_vec()));
     match blocks {
         Some(bs) => Inline::Note(bs),
-        // Unresolved footnote reference: pandoc emits the original bytes as
-        // text rather than a `Note []`. Keep the raw token text for now.
         None => Inline::Str(node.text().to_string()),
     }
 }
@@ -4889,13 +4369,8 @@ fn inline_footnote_inline(node: &SyntaxNode) -> Inline {
 }
 
 fn parse_link_dest(node: &SyntaxNode) -> (String, String) {
-    // LINK_DEST holds the raw bytes between `(` and `)`. Split into URL and
-    // optional quoted title, then percent-escape unsafe characters in the URL
-    // to match pandoc's `escapeURI`.
     let raw = node.text().to_string();
     let trimmed = raw.trim();
-    // `<URL>` form: pandoc strips the angle brackets, even if the URL
-    // contains otherwise-ambiguous characters like spaces or parens.
     if let Some(rest) = trimmed.strip_prefix('<')
         && let Some(end) = rest.find('>')
     {
@@ -4904,9 +4379,6 @@ fn parse_link_dest(node: &SyntaxNode) -> (String, String) {
         let title = parse_dest_title(after);
         return (escape_link_dest(url), title);
     }
-    // URL/title boundary: a title starts with `"`, `'`, or `(` after
-    // whitespace. Without one, the entire string is the URL — internal
-    // spaces still get percent-escaped.
     let bytes = trimmed.as_bytes();
     let mut url_end = trimmed.len();
     let mut i = 0;
@@ -4973,8 +4445,6 @@ fn parse_dest_title(s: &str) -> String {
     String::new()
 }
 
-// ----- coalescing & helpers ----------------------------------------------
-
 fn coalesce_inlines(input: Vec<Inline>) -> Vec<Inline> {
     coalesce_inlines_inner(input, true)
 }
@@ -4997,15 +4467,11 @@ fn coalesce_inlines_inner(input: Vec<Inline>, trim_edges: bool) -> Vec<Inline> {
                 out.push(Inline::Str(s));
             }
         } else if let Inline::Space = inline {
-            // Collapse runs of Space into a single Space; pandoc never emits
-            // two consecutive Space tokens.
             if matches!(out.last(), Some(Inline::Space) | Some(Inline::SoftBreak)) {
                 continue;
             }
             out.push(Inline::Space);
         } else if let Inline::SoftBreak = inline {
-            // SoftBreak after Space: drop the trailing Space to match pandoc
-            // (line-end whitespace is not preserved as Space).
             if matches!(out.last(), Some(Inline::Space)) {
                 out.pop();
             }
@@ -5015,8 +4481,6 @@ fn coalesce_inlines_inner(input: Vec<Inline>, trim_edges: bool) -> Vec<Inline> {
         }
     }
     if trim_edges {
-        // Trim leading/trailing Space/SoftBreak — pandoc does not emit edge
-        // whitespace inside a paragraph or header.
         while matches!(out.first(), Some(Inline::Space) | Some(Inline::SoftBreak)) {
             out.remove(0);
         }
@@ -5024,14 +4488,9 @@ fn coalesce_inlines_inner(input: Vec<Inline>, trim_edges: bool) -> Vec<Inline> {
             out.pop();
         }
     }
-    // Pandoc's `smart` extension is on by default for the `markdown` reader
-    // family only; under `gfm`/`commonmark`/`markdown_mmd` pandoc leaves the
-    // bytes alone (`Str "---"`, `Str "it's"`, `Str "Dr."` + `Space`).
     if !smart_enabled() {
         return out;
     }
-    // Apply the simple in-Str substitutions here (apostrophe, dashes,
-    // ellipsis), then restructure paired straight quotes into `Quoted` nodes.
     for inline in out.iter_mut() {
         if let Inline::Str(s) = inline {
             let mut t = smart_intraword_apostrophe(s);
@@ -5097,13 +4556,11 @@ fn apply_abbreviations(inlines: Vec<Inline>) -> Vec<Inline> {
             && matches_abbreviation_suffix(s)
             && matches!(iter.peek(), Some(Inline::Space))
         {
-            // Drop the Space.
             iter.next();
             let Inline::Str(mut new_s) = inline else {
                 unreachable!()
             };
             new_s.push('\u{a0}');
-            // Merge with the following Str if present.
             if let Some(Inline::Str(_)) = iter.peek()
                 && let Some(Inline::Str(next_s)) = iter.next()
             {
@@ -5118,13 +4575,6 @@ fn apply_abbreviations(inlines: Vec<Inline>) -> Vec<Inline> {
 }
 
 fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
-    // Walk left-to-right, when a Str starts with a straight quote and the
-    // previous element is a "boundary" (None/Space/SoftBreak/LineBreak), look
-    // ahead for a matching close quote (Str ending with same quote char,
-    // followed by a boundary). Wrap the inlines in between in a `Quoted` node.
-    // Only handle quotes at Str boundaries; embedded or interleaved quotes are
-    // not restructured (kept as-is) — pandoc has more nuanced rules but this
-    // covers the common natural-text patterns in the corpus.
     fn is_boundary(prev: Option<&Inline>) -> bool {
         match prev {
             None => true,
@@ -5140,7 +4590,6 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
         if consumed[i] {
             continue;
         }
-        // Try to detect an open quote at position i.
         let Inline::Str(s) = &inlines[i] else {
             out.push(inlines[i].clone());
             consumed[i] = true;
@@ -5152,11 +4601,6 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
             Some('\'') => Some('\''),
             _ => None,
         };
-        // Open quote condition: previous inline is boundary, AND either
-        // (a) the Str has more chars after the quote and the next char is
-        //     non-space (open quote attaches to a word in the same Str), or
-        // (b) the Str is *only* the quote and the next inline is a markup
-        //     atom (Emph/Strong/...), so the quote attaches across atoms.
         let prev_is_boundary = is_boundary(out.last());
         let str_has_more = s.chars().count() > 1;
         let next_char_is_word = s.chars().nth(1).is_some_and(|c| !c.is_whitespace());
@@ -5177,11 +4621,8 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
             && prev_is_boundary
             && attaches
         {
-            // Find the matching close.
+            // Closing-quote matching is a separate pass over the inline stream.
             if let Some(close_idx) = find_matching_close(&inlines, i, q, &consumed) {
-                // Build content: inlines from i to close_idx (inclusive),
-                // strip the leading quote from inlines[i] and trailing quote
-                // from inlines[close_idx].
                 let kind = if q == '"' {
                     "DoubleQuote"
                 } else {
@@ -5194,7 +4635,6 @@ fn smart_quote_pairs(inlines: Vec<Inline>) -> Vec<Inline> {
                     }
                     let inline = &inlines[j];
                     if j == i && j == close_idx {
-                        // Open and close in the same Str — strip both ends.
                         if let Inline::Str(s) = inline {
                             let mut chars: Vec<char> = s.chars().collect();
                             if chars.len() >= 2 {
@@ -5242,12 +4682,10 @@ fn find_matching_close(
     quote: char,
     consumed: &[bool],
 ) -> Option<usize> {
-    // First check: same Str ends with the matching quote (close in same Str).
     if let Inline::Str(s) = &inlines[open_idx]
         && s.chars().count() >= 3
         && s.ends_with(quote)
     {
-        // Need to confirm the next inline (after this Str) is a boundary.
         let next = inlines.get(open_idx + 1);
         let after_is_boundary = match next {
             None => true,
@@ -5259,8 +4697,6 @@ fn find_matching_close(
             return Some(open_idx);
         }
     }
-    // Otherwise, scan forward for a Str ending with the quote and followed by
-    // a boundary.
     let n = inlines.len();
     let mut j = open_idx + 1;
     while j < n {
@@ -5285,11 +4721,9 @@ fn find_matching_close(
                 }
             }
             Inline::Space | Inline::SoftBreak | Inline::LineBreak => {}
-            // Don't span over markup atoms — keep search cheap and predictable.
             _ => {}
         }
         j += 1;
-        // Cap search range — natural quoted spans are short.
         if j - open_idx > 32 {
             return None;
         }
@@ -5322,7 +4756,6 @@ fn smart_dashes_and_ellipsis(s: &str) -> String {
             i += 3;
             continue;
         }
-        // Read one UTF-8 char.
         let len = utf8_char_len(bytes[i]);
         out.push_str(&s[i..i + len]);
         i += len;
@@ -5331,7 +4764,6 @@ fn smart_dashes_and_ellipsis(s: &str) -> String {
 }
 
 fn utf8_char_len(b: u8) -> usize {
-    // Invalid start bytes (0x80..0xc0) advance one byte to recover.
     if b < 0xc0 {
         1
     } else if b < 0xe0 {
@@ -5398,8 +4830,6 @@ fn inlines_to_plaintext(inlines: &[Inline]) -> String {
 }
 
 fn pandoc_slugify(text: &str) -> String {
-    // Mirror crates/panache-formatter::utils::pandoc_slugify so the parser-side
-    // projector doesn't need to depend on the formatter crate.
     let mut out = String::new();
     let mut prev_dash = false;
     for ch in text.chars() {
@@ -5432,8 +4862,6 @@ impl Attr {
         }
     }
 }
-
-// ----- text emission ------------------------------------------------------
 
 fn write_block(b: &Block, out: &mut String) {
     match b {
@@ -5843,13 +5271,6 @@ fn write_haskell_string(s: &str, out: &mut String) {
     out.push('"');
 }
 
-// ----- pandoc JSON projection ---------------------------------------------
-//
-// Walks the same `Block`/`Inline` tree as `write_block`/`write_inline` but
-// emits pandoc's JSON shape — `{"t": "Constructor", "c": <content>}`, with
-// nullary constructors omitting `"c"`. See pandoc's
-// `Text.Pandoc.Definition` ToJSON instances for the source of truth.
-
 fn attr_to_json(attr: &Attr) -> Value {
     let kvs: Vec<Value> = attr.kvs.iter().map(|(k, v)| json!([k, v])).collect();
     json!([attr.id, attr.classes, kvs])
@@ -5995,8 +5416,6 @@ fn block_to_json(b: &Block) -> Value {
             json!({ "t": "DefinitionList", "c": items_json })
         }
         Block::Figure(attr, caption, body) => {
-            // Pandoc's Caption shape: `[shortCaption_or_null, [blocks]]`.
-            // panache stores the caption as a Vec<Block> directly; wrap it.
             let caption_json = json!([Value::Null, blocks_to_json(caption)]);
             json!({
                 "t": "Figure",
@@ -6008,7 +5427,6 @@ fn block_to_json(b: &Block) -> Value {
 }
 
 fn table_to_json(data: &TableData) -> Value {
-    // Caption: `[null, [Plain inlines]]` when non-empty, `[null, []]` when empty.
     let caption_blocks: Vec<Value> = if data.caption.is_empty() {
         Vec::new()
     } else {
@@ -6016,8 +5434,6 @@ fn table_to_json(data: &TableData) -> Value {
     };
     let caption_json = json!([Value::Null, caption_blocks]);
 
-    // Column specs: pair each align constructor with its column-width
-    // constructor — `ColWidthDefault` (nullary) or `ColWidth f` (with value).
     let colspecs: Vec<Value> = data
         .aligns
         .iter()
@@ -6116,8 +5532,6 @@ mod tests {
 
     #[test]
     fn smart_typography_applies_under_the_markdown_reader_flavors() {
-        // `pandoc -f markdown -t native`. Quarto and R Markdown read pandoc
-        // markdown, so they get the same treatment.
         for flavor in [
             crate::options::Flavor::Pandoc,
             crate::options::Flavor::Quarto,
@@ -6125,8 +5539,6 @@ mod tests {
         ] {
             let opts = flavor_options(flavor);
             let out = to_pandoc_ast_with_options(&parse(SMART_INPUT, Some(opts.clone())), &opts);
-            // Non-ASCII is written as pandoc's decimal escapes: em dash
-            // 8212, en dash 8211, ellipsis 8230, apostrophe 8217, NBSP 160.
             assert!(out.contains(r#"Str "\8212""#), "{flavor:?}: {out}");
             assert!(out.contains(r#"Str "\8211""#), "{flavor:?}: {out}");
             assert!(out.contains(r#"Str "\8230""#), "{flavor:?}: {out}");
@@ -6141,9 +5553,6 @@ mod tests {
 
     #[test]
     fn smart_typography_is_off_for_flavors_whose_reader_lacks_it() {
-        // `pandoc -f gfm|commonmark|markdown_mmd -t native` leaves the bytes
-        // alone: `Str "---"`, `Str "\"q\""`, `Str "Dr."` + `Space`. mdsvex and
-        // MyST have no smart typography on by default either.
         for flavor in [
             crate::options::Flavor::Gfm,
             crate::options::Flavor::CommonMark,
@@ -6171,8 +5580,6 @@ mod tests {
 
     #[test]
     fn smart_flag_does_not_leak_between_projections() {
-        // The flag lives in a thread-local, so a non-smart projection must not
-        // sour the next default (`markdown` reader) one.
         let gfm = flavor_options(crate::options::Flavor::Gfm);
         let _ = to_pandoc_ast_with_options(&parse(SMART_INPUT, Some(gfm.clone())), &gfm);
         let out = to_pandoc_ast(&parse(SMART_INPUT, Some(pandoc_options())));
@@ -6181,16 +5588,6 @@ mod tests {
 
     #[test]
     fn bq_def_later_line_div_lifts_structurally() {
-        // A `<div>` opening on a later line of a definition body *inside* a
-        // blockquote now lifts structurally: the dispatcher pre-strips the
-        // `> ` markers + content indent from the body, reparses it, and
-        // re-injects the prefix bytes during graft (byte-lossless). The
-        // projector consumes the lifted `HTML_BLOCK_DIV` and emits a
-        // structural `Div` matching pandoc's block shape. (The surrounding
-        // `Para [Term]` / `Plain [text]` divergence is a pre-existing
-        // definition-list-in-blockquote gap, unrelated to the HTML lift.)
-        // Also a regression guard for the former `HTML_BLOCK_DIV without
-        // structural inner shape` debug-assert panic.
         let input = "> Term\n>\n> :   text\n>\n>     <div id=\"d\">\n>     x\n>     </div>\n";
         let tree = parse(input, Some(pandoc_options()));
         let native = to_pandoc_ast(&tree);
@@ -6206,9 +5603,6 @@ mod tests {
 
     #[test]
     fn headings_get_no_auto_id_without_the_extension() {
-        // `pandoc -f commonmark -t native` reports `Header 1 ("",[],[])` for
-        // every heading, including duplicates that would otherwise be
-        // disambiguated and empty slugs that would fall back to `section`.
         let opts = crate::options::ParserOptions {
             flavor: crate::options::Flavor::CommonMark,
             dialect: crate::options::Dialect::for_flavor(crate::options::Flavor::CommonMark),
@@ -6225,8 +5619,6 @@ mod tests {
 
     #[test]
     fn explicit_heading_ids_survive_without_auto_identifiers() {
-        // `header_attributes` is off for commonmark, so use a flavor that has
-        // explicit ids but no auto-ids of its own to derive.
         let mut opts = pandoc_options();
         opts.extensions.auto_identifiers = false;
         let tree = parse("# Explicit {#kept}\n\n# Derived\n", Some(opts.clone()));
@@ -6258,10 +5650,8 @@ mod tests {
 
     #[test]
     fn nullary_constructors_omit_c_key() {
-        // A space between two words produces a nullary `Space` inline.
         let v = parse_to_json("a b");
         let inlines = v["blocks"][0]["c"].as_array().expect("Para.c is array");
-        // [Str "a", Space, Str "b"]
         let space = inlines
             .iter()
             .find(|i| i["t"] == "Space")
@@ -6275,21 +5665,17 @@ mod tests {
 
     #[test]
     fn header_attr_shape_matches_pandoc_tuple() {
-        // `# Hi {#foo .bar key=val}` → Header 1 ("foo", ["bar"], [("key","val")]) [Str "Hi"]
         let v = parse_to_json("# Hi {#foo .bar key=val}");
         let header = &v["blocks"][0];
         assert_eq!(header["t"], "Header");
         let c = header["c"].as_array().expect("Header.c is array");
         assert_eq!(c.len(), 3);
         assert_eq!(c[0], 1, "level");
-        // attr tuple: [id, [classes], [[k, v], ...]]
         let attr = c[1].as_array().expect("attr tuple");
         assert_eq!(attr[0], "foo");
         assert_eq!(attr[1], serde_json::json!(["bar"]));
         assert_eq!(attr[2], serde_json::json!([["key", "val"]]));
     }
-
-    // ----- list looseness: pandoc's `para` terminators -------------------
 
     fn no_blank_before_header_options() -> crate::options::ParserOptions {
         let mut opts = pandoc_options();
@@ -6303,9 +5689,6 @@ mod tests {
 
     #[test]
     fn lazy_header_in_quoted_item_makes_list_loose() {
-        // `> - item` / ` # head` under `-blank_before_header`: the lazy line
-        // de-indents into the quote and opens a header inside the item, which
-        // terminates the item's paragraph. Pandoc yields `Para`, not `Plain`.
         let out = native("> - item\n # head\n", no_blank_before_header_options());
         assert!(
             out.contains("Para [ Str \"item\" ]"),
@@ -6319,9 +5702,6 @@ mod tests {
 
     #[test]
     fn fenced_code_after_item_text_makes_list_loose() {
-        // A backtick fence breaks a paragraph with no blank line in sight
-        // (`backtick_code_blocks`), so the item's text is a `Para` and the
-        // looseness spreads to every sibling item.
         let out = native("- a\n  ```\n  c\n  ```\n- b\n", pandoc_options());
         assert!(
             out.contains("Para [ Str \"a\" ]") && out.contains("Para [ Str \"b\" ]"),
@@ -6332,10 +5712,6 @@ mod tests {
 
     #[test]
     fn nested_list_after_item_text_keeps_list_tight() {
-        // `lists_without_preceding_blankline` is off, and even with it on
-        // pandoc keeps `- a` / `  - n` tight: a list start is *not* one of
-        // `para`'s terminators. Guards against the promotion overfiring on
-        // any second block.
         let out = native("- a\n  - n\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"a\" ]") && out.contains("Plain [ Str \"n\" ]"),
@@ -6345,7 +5721,6 @@ mod tests {
 
     #[test]
     fn html_block_after_item_text_keeps_list_tight() {
-        // A `<div>` is not a `para` terminator either.
         let out = native("- a\n  <div>\nx\n</div>\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"a\" ]"),
@@ -6355,8 +5730,6 @@ mod tests {
 
     #[test]
     fn header_after_definition_text_keeps_definition_tight() {
-        // Definition lists do *not* share the promotion: pandoc reads
-        // `term` / `:   def` / `    # h` as `Plain def`, `Header`.
         let out = native("term\n:   def\n    # h\n", no_blank_before_header_options());
         assert!(
             out.contains("Plain [ Str \"def\" ]"),
@@ -6364,13 +5737,8 @@ mod tests {
         );
     }
 
-    // ----- list looseness: pandoc's `compactify` -------------------------
-
     #[test]
     fn sole_trailing_para_demoted_to_plain() {
-        // The blank line makes the item loose, but the footnote definition
-        // projects to no block, so the paragraph is the list's only `Para`
-        // and pandoc's `compactify` demotes it.
         let out = native("- x[^1]\n\n  [^1]: d\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"x\", Note [ Para [ Str \"d\" ] ] ]"),
@@ -6380,8 +5748,6 @@ mod tests {
 
     #[test]
     fn refdef_only_second_block_demotes_last_item() {
-        // Same shape one item later: item 1 is tight, item 2's only surviving
-        // block is its paragraph, so the whole list ends up `Plain`.
         let out = native("- a\n- b\n\n  [^1]: d\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"a\" ]") && out.contains("Plain [ Str \"b\" ]"),
@@ -6391,8 +5757,6 @@ mod tests {
 
     #[test]
     fn sole_para_after_block_quote_demoted() {
-        // The `Para` is the last block of the last item and the only one, so
-        // it is demoted even though the item genuinely holds two blocks.
         let out = native("- > q\n\n  a\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"a\" ]"),
@@ -6402,7 +5766,6 @@ mod tests {
 
     #[test]
     fn multiple_paras_are_not_demoted() {
-        // Two `Para`s across the list, so `compactify` leaves both alone.
         let out = native("- y\n\n- x[^1]\n\n  [^1]: d\n", pandoc_options());
         assert!(
             out.contains("Para [ Str \"y\" ]"),
@@ -6413,8 +5776,6 @@ mod tests {
 
     #[test]
     fn empty_first_item_keeps_last_item_plain() {
-        // A bare marker contributes no block, so the second item's paragraph
-        // is again the list's only `Para`.
         let out = native("- \n\n- a\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"a\" ]"),
@@ -6424,8 +5785,6 @@ mod tests {
 
     #[test]
     fn bare_task_checkbox_is_not_a_checkbox() {
-        // Pandoc's `taskListItemFromAscii` needs `Str "[x]" : Space : rest`,
-        // so a marker with nothing after it stays literal text.
         let out = native("- [x]\n", pandoc_options());
         assert!(
             out.contains("Plain [ Str \"[x]\" ]"),
@@ -6435,8 +5794,6 @@ mod tests {
 
     #[test]
     fn task_checkbox_shape_resolves_as_reference() {
-        // With a matching definition the bracket shape is a link, and the
-        // definition leaves no block behind, so the `Para` is demoted.
         let out = native("- [x]\n\n  [x]: /url\n", pandoc_options());
         assert!(
             out.contains("Plain [ Link ( \"\" , [] , [] ) [ Str \"x\" ] ( \"/url\" , \"\" ) ]"),
@@ -6466,24 +5823,16 @@ mod tests {
 
     #[test]
     fn quoted_fence_body_keeps_significant_indent() {
-        // Only the marker and its one padding space are container syntax;
-        // the four columns past them are code.
         assert_code_payload("> ```\n>     code\n> ```\n", "    code");
     }
 
     #[test]
     fn quoted_fence_body_expands_tabs_from_the_raw_column() {
-        // Pandoc's `tabFilter` runs over the source line *before* the quote
-        // marker is stripped, so the tab starts from column 2 and reaches the
-        // stop at column 4 — two spaces, not four.
         assert_code_payload("> ```\n> \tcode\n> ```\n", "  code");
     }
 
     #[test]
     fn lazy_quoted_fence_body_drops_the_gobbled_indent() {
-        // Corpus 512. A lazy body line carries no marker; pandoc's blockquote
-        // reader gobbles its whole leading indent into the quote's raw
-        // content, so none of it is code.
         assert_code_payload("> ```\n code\n> ```\n", "code");
         assert_code_payload("> # h\n ```\n     deep\n ```\n", "deep");
     }
@@ -6495,9 +5844,6 @@ mod tests {
 
     #[test]
     fn quoted_indented_code_drops_markers_but_keeps_indent() {
-        // The indented emitter splits marker padding and significant indent
-        // into separate `WHITESPACE` tokens, which is what lets the two be
-        // told apart on a continuation line.
         assert_code_payload("> text\n>\n>     line1\n>     line2\n", "line1\nline2");
     }
 
@@ -6516,9 +5862,6 @@ mod tests {
 
     #[test]
     fn tab_indented_definition_fence_body_strips_by_column_not_token() {
-        // Corpus 44. For a `:\t` marker (content column 4) the emitter peels
-        // `"\t\t"` — 8 columns — into the prefix token, so the host indent
-        // has to come off by column: 12 columns of body minus 4 leaves 8.
         assert_code_payload(
             "Indented with tabs\n\n:\t```markdown\n\t\t\tcode\n\t\t\ta <- 1\n\t```\n",
             "        code\n        a <- 1",
@@ -6527,28 +5870,20 @@ mod tests {
 
     #[test]
     fn indented_fence_body_strips_the_fence_indent() {
-        // `codeBlockFenced` gobbles at most the opening fence's own indent
-        // off every body line, so a body indented no further than the fence
-        // has no code indent left.
         assert_code_payload("   ```\n   c\n   ```\n", "c");
-        // Only the fence's share comes off; the rest is code.
         assert_code_payload("   ```\n      c\n   ```\n", "   c");
-        // `gobbleAtMostSpaces` — an under-indented line loses only what it has.
         assert_code_payload("   ```\n c\n   ```\n", "c");
-        // Tabs expand before the gobble: `\t` is four columns, two survive.
         assert_code_payload("  ```\n\tc\n  ```\n", "  c");
     }
 
     #[test]
     fn quoted_indented_fence_body_strips_the_fence_indent() {
-        // The fence indent is measured inside the quote, after `> ` comes off.
         assert_code_payload(">   ```\n>   c\n>   ```\n", "c");
         assert_code_payload(">   ```\n>       c\n>   ```\n", "    c");
     }
 
     #[test]
     fn footnote_indented_fence_strips_the_body_and_fence_indents() {
-        // Four columns of footnote body plus the fence's own two.
         assert_code_payload(
             "Text[^1]\n\n[^1]: note\n\n      ```\n        deep\n      ```\n",
             "  deep",
@@ -6572,65 +5907,42 @@ mod tests {
 
     #[test]
     fn code_span_tab_expands_from_its_own_column() {
-        // The tab sits at column 3, so it reaches the stop at column 4 — one
-        // space, not four.
         assert_inline_code_payload("a`x\ty`b\n", "x y");
-        // At column 0 of a continuation line it reaches column 4.
         assert_inline_code_payload("`x\n\ty`\n", "x     y");
     }
 
     #[test]
     fn code_span_tab_expands_past_a_blockquote_marker() {
-        // `tabFilter` runs before `> ` is stripped, so the tab starts from
-        // column 2 and only two of its columns survive.
         assert_inline_code_payload("> a\n> \t`x\n> \ty`\n", "x   y");
     }
 
     #[test]
     fn list_item_straddling_tab_loses_the_gobbled_columns() {
-        // `listLine` gobbles the item's content column off every continuation
-        // line. A tab covering columns 0-4 straddles a content column of 2, so
-        // two of its four columns are indent and two are payload. The tab is
-        // one byte and the CST is byte-lossless, so the split cannot happen in
-        // the parser — the projector accounts for it by column.
         assert_inline_code_payload("- a\n\t`x\n\ty`\n", "x   y");
-        // Same content column, reached with spaces before the tab: the parser
-        // gobbles the spaces it can, and the tab expands from where they end.
         assert_inline_code_payload("- a\n \t`x\n \ty`\n", "x   y");
         assert_inline_code_payload("- a\n  \t`x\n  \ty`\n", "x   y");
         assert_inline_code_payload("- a\n   \t`x\n   \ty`\n", "x   y");
-        // Only the first tab straddles; the second is payload in full.
         assert_inline_code_payload("- a\n\t\t`x\n\t\ty`\n", "x       y");
-        // A content column of 4 consumes the tab exactly — no residue.
         assert_inline_code_payload("1.  a\n\t`x\n\ty`\n", "x y");
-        // The gobble is the *innermost* item's content column.
         assert_inline_code_payload("- - a\n\t\t`x\n\t\ty`\n", "x     y");
-        // A quoted list gobbles from the column past its own marker.
         assert_inline_code_payload("> - a\n> \t`x\n> \ty`\n", "x y");
-        // A loose item and a lazy first line reach the same content column.
         assert_inline_code_payload("- a\n\n  `x\n  \ty`\n", "x   y");
         assert_inline_code_payload("- a\n`x\n\ty`\n", "x   y");
     }
 
     #[test]
     fn list_item_interior_tab_keeps_every_column() {
-        // Past the content column there is nothing left to gobble.
         assert_inline_code_payload("- `x\ty`\n", "x    y");
         assert_inline_code_payload("- a\n  `x\ty`\n", "x    y");
-        // A lazy continuation line has no indent to gobble, so the tab keeps
-        // all the columns it reaches from where the lazy text left off.
         assert_inline_code_payload("- a\nb\t`x\ty`\n", "x  y");
     }
 
     #[test]
     fn list_item_space_indent_still_strips_by_token() {
-        // The no-tab path is unchanged: the parser holds the gobbled spaces
-        // out of the span and the projector keeps the rest.
         assert_inline_code_payload("- a\n   `x\n   y`\n", "x  y");
         assert_inline_code_payload("- a\n  `x\n  y`\n", "x y");
     }
 
-    /// Assert the projected payload of the document's first display `Math`.
     fn assert_display_math_payload(input: &str, expected: &str) {
         let out = native(input, pandoc_options());
         let needle = format!("Math DisplayMath {expected:?}");
@@ -6642,40 +5954,23 @@ mod tests {
 
     #[test]
     fn definition_body_continuation_indent_is_gobbled() {
-        // Pandoc re-reads a definition body from its content column, the same
-        // rule `listLine` applies to a list item, so an inline construct that
-        // preserves interior whitespace measures from there and not from
-        // column 0.
         assert_inline_code_payload("a\n:   d\n    `x\n    y`\n", "x y");
-        // The content column follows the marker's own spacing.
         assert_inline_code_payload("a\n: d\n  `x\n  y`\n", "x y");
         assert_inline_code_payload("a\n~   d\n    `x\n    y`\n", "x y");
-        // Only the content column is gobbled; the surplus is payload.
         assert_inline_code_payload("a\n:   d\n      `x\n      y`\n", "x   y");
         assert_inline_code_payload("a\n:   d\n        `x\n        y`\n", "x     y");
-        // Three lines gobble on every continuation line, not just the first.
         assert_inline_code_payload("a\n:   d\n    `x\n    y\n    z`\n", "x y z");
-        // A body that reopens after a blank line gobbles from line one.
         assert_inline_code_payload("a\n:   d\n\n    `x\n    y`\n", "x y");
-        // So does one that follows a heading in the same body.
         assert_inline_code_payload("a\n:   # H\n    `x\n    y`\n", "x y");
     }
 
     #[test]
     fn definition_body_straddling_tab_loses_the_gobbled_columns() {
-        // `tabFilter` expands the marker's own tab before the reader runs, so
-        // `:\t` reaches the stop at column 4 — a content column of 4, not 5.
         assert_inline_code_payload("a\n:\td\n\t`x\n\ty`\n", "x y");
-        // A space after that tab pushes the content column to 5, and the
-        // continuation line's `\t ` reaches exactly that.
         assert_inline_code_payload("a\n:\t d\n\t `x\n\t y`\n", "x y");
-        // A tab covering columns 0-4 straddles a content column of 2 or 3. It
-        // is one byte and the CST is byte-lossless, so the parser leaves it in
-        // the payload and the projector accounts for the gobble by column.
         assert_inline_code_payload("a\n: d\n\t`x\n\ty`\n", "x   y");
         assert_inline_code_payload("a\n:  d\n\t`x\n\ty`\n", "x  y");
         assert_inline_code_payload("a\n: d\n \t`x\n \ty`\n", "x   y");
-        // Past the content column there is nothing left to gobble.
         assert_inline_code_payload("a\n:   d\n\t `x\n\t y`\n", "x  y");
         assert_inline_code_payload("a\n:   d\n\t\t`x\n\t\ty`\n", "x     y");
         assert_inline_code_payload("a\n:   d\n    `x\ty`\n", "x  y");
@@ -6683,8 +5978,6 @@ mod tests {
 
     #[test]
     fn definition_body_lazy_continuation_gobbles_nothing() {
-        // An under-indented continuation line never reaches the content
-        // column, and pandoc takes no columns off it at all.
         assert_inline_code_payload("a\n:   d\n`x\ny`\n", "x y");
         assert_inline_code_payload("a\n:   d\n  `x\n  y`\n", "x   y");
         assert_inline_code_payload("a\n:   d\n   `x\n   y`\n", "x    y");
@@ -6692,8 +5985,6 @@ mod tests {
 
     #[test]
     fn definition_body_gobble_survives_into_display_math() {
-        // Display math keeps its interior newlines and spaces verbatim, so it
-        // shows the gobble where a code span (newline to space) cannot.
         assert_display_math_payload("a\n:   d\n    $$x\n    y$$\n", "x\ny");
         assert_display_math_payload("a\n:   d\n      $$x\n      y$$\n", "x\n  y");
     }

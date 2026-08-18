@@ -65,7 +65,6 @@ impl AttributeNode {
         }
     }
 
-    /// Reparse the opaque node text into an [`AttributeBlock`] (fallback path).
     fn reparse(&self) -> Option<AttributeBlock> {
         let text = self.0.text().to_string();
         match self.0.kind() {
@@ -101,7 +100,6 @@ impl AttributeNode {
                 })
                 .filter_map(|el| el.into_token())
                 .map(|t| {
-                    // A bare `-` is pandoc's shorthand for `.unnumbered`.
                     if t.kind() == SyntaxKind::ATTR_UNNUMBERED {
                         return "unnumbered".to_string();
                     }
@@ -132,9 +130,6 @@ impl AttributeNode {
 
     pub fn id_value_range(&self) -> Option<rowan::TextRange> {
         if self.has_structured_children() {
-            // Precise inner-value range: the ATTR_ID token, minus its leading
-            // `#` for Pandoc `{...}` attributes. HTML_ATTRS ids are bare (no
-            // marker), so the whole token range is the value.
             let tok = self.structured_id_token()?;
             let r = tok.text_range();
             let lead = if tok.text().starts_with('#') {
@@ -145,18 +140,11 @@ impl AttributeNode {
             return Some(rowan::TextRange::new(r.start() + lead, r.end()));
         }
 
-        // Existence guard only -- every length below is measured in SOURCE
-        // bytes, never from `id()`, whose HTML value may have been shortened
-        // by character-reference decoding.
         let id = self.id()?;
         let text = self.0.text().to_string();
         let node_start: usize = self.0.text_range().start().into();
         match self.0.kind() {
             SyntaxKind::HTML_ATTRS => {
-                // Match `id=` followed by an optional quote and the id value.
-                // The salsa indexer uses this range for highlights / renames;
-                // a precise inner-value range is preferred over the full attr
-                // node range.
                 let marker = text.find("id")?;
                 let after_id = &text[marker + 2..];
                 let eq_off = after_id.bytes().position(|b| b == b'=')?;
@@ -191,7 +179,6 @@ impl AttributeNode {
     }
 }
 
-/// Text of the first child token of `node` with the given kind.
 fn child_token_text(node: &SyntaxNode, kind: SyntaxKind) -> Option<String> {
     node.children_with_tokens()
         .find(|el| el.kind() == kind)
@@ -199,7 +186,6 @@ fn child_token_text(node: &SyntaxNode, kind: SyntaxKind) -> Option<String> {
         .map(|t| t.text().to_string())
 }
 
-/// Strip a matching surrounding pair of `"`/`'` quotes from an attribute value.
 fn strip_value_quotes(raw: &str) -> String {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2 {
@@ -221,8 +207,6 @@ mod tests {
             flavor: crate::options::Flavor::RMarkdown,
             ..Default::default()
         };
-        // The `{...}` div body is now structured into ATTR_* children, so the
-        // wrapper reads id/classes/key-values straight from the CST.
         let tree = crate::parse("::: {#mu .exercise k=v}\ntext\n:::\n", Some(config));
         let node = tree
             .descendants()
@@ -234,7 +218,6 @@ mod tests {
         assert_eq!(node.classes(), vec!["exercise".to_string()]);
         assert_eq!(node.key_values(), vec![("k".to_string(), "v".to_string())]);
 
-        // The id range points at the inner `mu`, derived from the ATTR_ID token.
         let range = node.id_value_range().expect("id range");
         let start: usize = range.start().into();
         let end: usize = range.end().into();

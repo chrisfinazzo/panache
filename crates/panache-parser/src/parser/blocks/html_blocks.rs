@@ -79,7 +79,6 @@ const BLOCK_TAGS: &[&str] = &[
     "ul",
 ];
 
-/// Tags that contain raw/verbatim content (no Markdown processing inside).
 const VERBATIM_TAGS: &[&str] = &["script", "style", "pre", "textarea"];
 
 /// Pandoc's `blockHtmlTags` (mirrors
@@ -317,16 +316,6 @@ pub(crate) fn is_pandoc_matched_pair_tag(name: &str) -> bool {
         || VERBATIM_TAGS.contains(&lower.as_str())
 }
 
-/// Open-tag-attribute tokenization gate for non-div strict-block tags
-/// inside a blockquote (`bq_depth > 0`). Returns the tag name when the
-/// open tag is eligible for finer-grained tokenization
-/// (`TEXT("<tag") + WS + HTML_ATTRS{TEXT(attrs)} + TEXT(">")`) without
-/// driving the full body lift — that's the `bq_clean_lift` path. The
-/// HTML_ATTRS region lets `AttributeNode::cast` register any `id` with
-/// the salsa anchor index.
-///
-/// `<div>` is handled by its own structural path (`HTML_BLOCK_DIV`
-/// wrapper) regardless of bq depth, so this gate skips it.
 fn bq_strict_attr_emit_tag_name(
     wrapper_kind: SyntaxKind,
     block_type: &HtmlBlockType,
@@ -405,33 +394,22 @@ pub(crate) fn try_parse_html_block_start(
 ) -> Option<HtmlBlockType> {
     let trimmed = strip_leading_spaces(content);
 
-    // Must start with <
     if !trimmed.starts_with('<') {
         return None;
     }
 
-    // HTML comment
     if trimmed.starts_with("<!--") {
         return Some(HtmlBlockType::Comment);
     }
 
-    // Processing instruction
     if trimmed.starts_with("<?") {
         return Some(HtmlBlockType::ProcessingInstruction);
     }
 
-    // CDATA section — CommonMark dialect only. Pandoc-markdown does not
-    // recognize bare CDATA as a raw HTML block; the literal bytes fall
-    // through to paragraph parsing (`<![CDATA[` becomes Str, the inner
-    // text is parsed as inline markdown, etc).
     if is_commonmark && trimmed.starts_with("<![CDATA[") {
         return Some(HtmlBlockType::CData);
     }
 
-    // Declaration (DOCTYPE, etc.) — CommonMark dialect only. Pandoc-markdown
-    // does not recognize bare declarations as raw HTML blocks (its
-    // `htmlBlock` reader uses `htmlTag isBlockTag`, which only matches
-    // tag-shaped blocks); the bytes fall through to paragraph parsing.
     if is_commonmark && trimmed.starts_with("<!") && trimmed.len() > 2 {
         let after_bang = &trimmed[2..];
         if after_bang.chars().next()?.is_ascii_alphabetic() {
@@ -439,22 +417,10 @@ pub(crate) fn try_parse_html_block_start(
         }
     }
 
-    // Try to parse as opening tag (or closing tag, under CommonMark and Pandoc).
-    // Pandoc-native recognizes standalone closing forms of strict-block tags
-    // (`</p>`, `</nav>`, `</section>`), verbatim tags (`</pre>`, `</style>`,
-    // `</script>`, `</textarea>`), and inline-block / void tags (`</video>`,
-    // `</button>`, `</embed>`) as single-line `RawBlock`s — they always end on
-    // the open-tag line via `closes_at_open_tag: true`.
     if let Some(tag_name) = extract_block_tag_name(trimmed, true) {
         let tag_lower = tag_name.to_lowercase();
         let is_closing = trimmed.starts_with("</");
 
-        // Pandoc dialect: strict-block (`PANDOC_BLOCK_TAGS`) and verbatim
-        // (`VERBATIM_TAGS`) closing forms emit as single-line `RawBlock`.
-        // Unlike inline-block / void closes, these CAN interrupt a running
-        // paragraph (the dispatcher's `cannot_interrupt` only covers the
-        // inline-block / void categories). Inline-block / void closes are
-        // handled by their own branches further below.
         if !is_commonmark
             && is_closing
             && (PANDOC_BLOCK_TAGS.contains(&tag_lower.as_str())
@@ -472,10 +438,6 @@ pub(crate) fn try_parse_html_block_start(
             });
         }
 
-        // Under Pandoc, remaining closing forms (truly inline-only tags like
-        // `</em>`, `</span>`) are not block starts — fall through to the
-        // existing inline-html path. Inline-block + void closes are caught
-        // by the dedicated branches further below.
         if !is_commonmark
             && is_closing
             && !PANDOC_INLINE_BLOCK_TAGS.contains(&tag_lower.as_str())
@@ -484,11 +446,6 @@ pub(crate) fn try_parse_html_block_start(
             return None;
         }
 
-        // Check if it's a block-level tag. Pandoc and CommonMark disagree on
-        // membership: pandoc's `blockHtmlTags` (see
-        // `pandoc/src/Text/Pandoc/Readers/HTML/TagCategories.hs`) treats some
-        // CM type-6 tags as inline (e.g. `dialog`, `legend`, `option`) and
-        // some non-CM tags as block (e.g. `canvas`, `hgroup`, `meta`).
         let is_block_tag = if is_commonmark {
             BLOCK_TAGS.contains(&tag_lower.as_str())
         } else {
@@ -496,13 +453,6 @@ pub(crate) fn try_parse_html_block_start(
         };
         if is_block_tag {
             let is_verbatim = VERBATIM_TAGS.contains(&tag_lower.as_str());
-            // Void strict-block tags (`col`, `hr`, `meta`) have no
-            // closing form, so under Pandoc the block must close on the
-            // open-tag line — otherwise a bare `<hr>` opens a depth-aware
-            // block and the matched-pair body lift swallows the following
-            // lines (`<hr>\n<hr>` nesting the second as a child instead of
-            // a sibling `RawBlock`). CommonMark keeps the type-6 shape
-            // (block continues until a blank line).
             let is_void_strict = !is_commonmark && is_pandoc_void_strict_block_tag_name(&tag_lower);
             return Some(HtmlBlockType::BlockTag {
                 tag_name: tag_lower,
@@ -514,13 +464,6 @@ pub(crate) fn try_parse_html_block_start(
             });
         }
 
-        // Pandoc dialect also treats `eitherBlockOrInline` tags as block
-        // starters at fresh-block positions. The block dispatcher caller
-        // gates these as `cannot_interrupt` (mirrors pandoc — they never
-        // interrupt a running paragraph; only start a fresh block when
-        // following a blank line or at document start). Closing forms
-        // (`</video>`) emit as a single-line `RawBlock` with no balanced
-        // match — pandoc-native pins this for standalone closes.
         if !is_commonmark && PANDOC_INLINE_BLOCK_TAGS.contains(&tag_lower.as_str()) {
             return Some(HtmlBlockType::BlockTag {
                 tag_name: tag_lower,
@@ -532,17 +475,6 @@ pub(crate) fn try_parse_html_block_start(
             });
         }
 
-        // Pandoc dialect also recognizes the void subset of
-        // `eitherBlockOrInline` (`area`, `embed`, `source`, `track`).
-        // These have no closing tag, so the parser closes the block
-        // immediately on the open-tag line; the projector's
-        // `split_html_block_by_tags` handles the same-line splitting
-        // (e.g. `<embed src="a"> trailing` → RawBlock + Para). Like
-        // non-void inline-block tags, void tags never interrupt a
-        // running paragraph (gated as `cannot_interrupt` in the
-        // dispatcher). Closing forms (`</embed>`) — semantically
-        // nonsensical for void elements — pandoc still emits as a
-        // single-line `RawBlock`; mirror that.
         if !is_commonmark && PANDOC_VOID_BLOCK_TAGS.contains(&tag_lower.as_str()) {
             return Some(HtmlBlockType::BlockTag {
                 tag_name: tag_lower,
@@ -554,11 +486,6 @@ pub(crate) fn try_parse_html_block_start(
             });
         }
 
-        // Also accept verbatim tags even if not in BLOCK_TAGS list — but
-        // only as opening tags. CommonMark §4.6 type 1 starts with `<pre`,
-        // `<script`, `<style`, or `<textarea`; closing forms like `</pre>`
-        // do not start a type-1 block. Letting `</pre>` through here would
-        // wrongly interrupt a paragraph.
         if !is_closing && VERBATIM_TAGS.contains(&tag_lower.as_str()) {
             return Some(HtmlBlockType::BlockTag {
                 tag_name: tag_lower,
@@ -571,8 +498,6 @@ pub(crate) fn try_parse_html_block_start(
         }
     }
 
-    // Type 7 (CommonMark only): complete open or close tag on a line by
-    // itself, tag name not in the type-1 verbatim list.
     if is_commonmark && let Some(end) = parse_open_tag(trimmed).or_else(|| parse_close_tag(trimmed))
     {
         let rest = &trimmed[end..];
@@ -580,11 +505,6 @@ pub(crate) fn try_parse_html_block_start(
             .bytes()
             .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'));
         if only_ws {
-            // Reject if the tag name belongs to the type-1 verbatim set
-            // (`<pre>`, `<script>`, `<style>`, `<textarea>`) — those are
-            // type-1 starts above, so seeing one here means the opener
-            // had a different shape (e.g. `<pre/>` self-closing) that
-            // shouldn't trigger type 7 either. Conservatively skip.
             let leading = trimmed.strip_prefix("</").unwrap_or_else(|| &trimmed[1..]);
             let name_end = leading
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -621,7 +541,6 @@ fn extract_block_tag_name(text: &str, accept_closing: bool) -> Option<String> {
         after_bracket
     };
 
-    // Extract tag name (alphanumeric, ends at space, >, or /)
     let tag_end = after_slash
         .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
         .unwrap_or(after_slash.len());
@@ -632,7 +551,6 @@ fn extract_block_tag_name(text: &str, accept_closing: bool) -> Option<String> {
 
     let tag_name = &after_slash[..tag_end];
 
-    // Tag name must be valid (ASCII alphabetic start, alphanumeric)
     if !tag_name.chars().next()?.is_ascii_alphabetic() {
         return None;
     }
@@ -672,7 +590,6 @@ fn is_closing_marker(line: &str, block_type: &HtmlBlockType) -> bool {
             closed_by_blank_line: false,
             ..
         } => {
-            // Look for closing tag </tagname>
             let closing_tag = format!("</{}>", tag_name);
             line.to_lowercase().contains(&closing_tag)
         }
@@ -722,8 +639,6 @@ pub(crate) fn count_tag_balance(line: &str, tag_name: &str) -> (usize, usize) {
                 Some(b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/') | None
             );
 
-        // Walk forward to the closing `>` of this tag bracket, skipping
-        // inside quoted attribute values. Self-closing form ends with `/>`.
         let mut j = if matched { after_name } else { after };
         let mut quote: Option<u8> = None;
         let mut self_close = false;
@@ -756,8 +671,6 @@ pub(crate) fn count_tag_balance(line: &str, tag_name: &str) -> (usize, usize) {
         if found_gt {
             i = j + 1;
         } else {
-            // Unterminated `<...` — bail out to avoid an infinite loop.
-            // The remaining bytes don't form a complete tag.
             break;
         }
     }
@@ -864,12 +777,6 @@ fn fenced_div_body_end(lines: &[&str], start: usize) -> usize {
     lines.len()
 }
 
-/// Index of the first line at/after `start` that no longer continues
-/// the enclosing blockquote at `bq_depth` markers (or `lines.len()`
-/// when every remaining line continues it). Bounds the softbreak-fusion
-/// reparse so it never crosses the blockquote boundary. Lazy paragraph
-/// continuation (a bare, `>`-less line) is intentionally excluded — it
-/// is a broader blockquote-continuation gap handled elsewhere.
 fn blockquote_body_end(lines: &[&str], start: usize, bq_depth: usize) -> usize {
     for (offset, line) in lines[start..].iter().enumerate() {
         let (depth, _) = count_blockquote_markers(line);
@@ -897,13 +804,6 @@ fn try_parse_comment_pi_with_trailing_split(
         _ => return None,
     };
 
-    // Find the close marker in the bq-stripped line content. For
-    // bq_depth == 0 the inner content equals the raw line; for
-    // bq_depth > 0 we look past the `>` markers stripped by the
-    // outer dispatcher (line 0) and emitted as bq prefix below
-    // (lines > 0). `marker_end_in_inner` is the byte offset of the
-    // first byte AFTER the close marker, measured from the start
-    // of the inner (post-strip) content.
     let mut close_line_idx: Option<usize> = None;
     let mut marker_end_in_inner: usize = 0;
     for (offset, line) in lines[start_pos..].iter().enumerate() {
@@ -928,12 +828,6 @@ fn try_parse_comment_pi_with_trailing_split(
     let close_prefix_len = close_line.len() - close_inner.len();
     let trailing = &close_inner[marker_end_in_inner..];
 
-    // Only fire when there is non-whitespace content AFTER the close
-    // marker on the close line. The legacy path correctly handles
-    // the close-line-ends-at-close-marker shapes (`-->\n` followed
-    // by separate blocks); only the same-line-trailing case needs
-    // structural splitting. Trailing-whitespace-only handling
-    // (`-->   \n`) is a projector-side trim — separate concern.
     let has_non_ws_trailing = trailing.bytes().any(|b| !b.is_ascii_whitespace());
     if !has_non_ws_trailing {
         return None;
@@ -941,15 +835,7 @@ fn try_parse_comment_pi_with_trailing_split(
 
     builder.start_node(html_block_node_kind(wrapper_kind, block_type, config.dialect).into());
 
-    // Emit open `HTML_BLOCK_TAG` (the opening marker line(s)) and any
-    // middle `HTML_BLOCK_CONTENT` lines between open and close. The
-    // close `HTML_BLOCK_TAG` carries only the bytes up to and
-    // including the close marker — trailing bytes go to the sibling.
     if close_line_idx == start_pos {
-        // Same-line shape: one HTML_BLOCK_TAG containing the close
-        // marker's bytes. The newline lives on the trailing sibling.
-        // Line 0's bq prefix (if any) was already emitted by the
-        // outer dispatcher; emit only the inner marker bytes.
         builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
         let close_part = &close_inner[..marker_end_in_inner];
         if !close_part.is_empty() {
@@ -957,11 +843,6 @@ fn try_parse_comment_pi_with_trailing_split(
         }
         builder.finish_node();
     } else {
-        // Multi-line shape: open tag covers lines[start_pos..close],
-        // middle lines go inside HTML_BLOCK_CONTENT, close tag holds
-        // only the marker bytes. Line 0's bq prefix was emitted by
-        // the outer dispatcher; subsequent lines (middle + close)
-        // need bq prefix re-emission inside the wrapper.
         builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
         let first_line = lines[start_pos];
         let first_inner = if bq_depth > 0 {
@@ -999,23 +880,6 @@ fn try_parse_comment_pi_with_trailing_split(
 
     builder.finish_node(); // HTML_BLOCK
 
-    // Recursively parse the trailing bytes on the close line and graft
-    // top-level children as siblings of the HTML_BLOCK we just closed.
-    // Refdefs flow through from the outer config (same pattern as
-    // `emit_html_block_body_lifted_inner`).
-    //
-    // Under Pandoc a paragraph greedily fuses following lines as
-    // soft-break continuations (`<!-- --> trailing\nmore\n` ->
-    // `RawBlock, Para [trailing, SoftBreak, more]`). Reparse the trailing
-    // bytes together with the following lines up to `fusion_end` so the
-    // parser's own paragraph-continuation rules decide the extent, graft
-    // ONLY that first block, and hand the rest back to the outer
-    // dispatcher. `fusion_end` is the end of the document at the outermost
-    // level, the enclosing fenced div's closing `:::` line inside a plain
-    // fenced div, and the blockquote boundary inside a pure blockquote;
-    // either way the fragment excludes any container close marker, so it
-    // can't be swallowed into the paragraph. Inside a list / content-indent
-    // container fusion is disabled and the close-line-only split is kept.
     let fusion_end: Option<usize> = match fusion {
         SoftbreakFusion::ToDocEnd => Some(lines.len()),
         SoftbreakFusion::ToFencedDivClose => Some(fenced_div_body_end(lines, close_line_idx + 1)),
@@ -1031,15 +895,6 @@ fn try_parse_comment_pi_with_trailing_split(
             let mut inner_options = config.clone();
             let refdefs = config.refdef_labels.clone().unwrap_or_default();
             inner_options.refdef_labels = Some(refdefs.clone());
-            // Build the reparse fragment from `trailing` plus each
-            // continuation line with its outer blockquote prefix stripped,
-            // so the parser's paragraph-continuation rules fuse them. Line 0
-            // (the `trailing` bytes) carries no prefix — line 0's `> ` was
-            // already emitted by the outer dispatcher; each continuation
-            // line contributes its stripped `> ` prefix, re-injected during
-            // graft so the CST stays byte-equal to source. For non-bq
-            // fusions `bq_depth == 0` so the strip is a no-op and every
-            // captured prefix is empty (state collapses to `None`).
             let mut fragment = String::from(trailing);
             let mut prefix_lines: Vec<ContainerPrefixLine> = vec![ContainerPrefixLine::default()];
             let mut stripped_lens: Vec<usize> = Vec::new();
@@ -1057,12 +912,6 @@ fn try_parse_comment_pi_with_trailing_split(
             let inner_root =
                 crate::parser::parse_with_refdefs(&fragment, Some(inner_options), refdefs);
             if let Some(first) = inner_root.first_child() {
-                // Map the first block's end offset in the reparsed fragment
-                // back to a source-line count. Bytes up to `trailing.len()`
-                // are the close line (already counted); each subsequent line
-                // fully covered by the first block is an extra consumed line.
-                // `stripped_lens` mirrors the fragment coordinates (prefixes
-                // stripped), so the comparison against `block_end` is exact.
                 let block_end: usize = first.text_range().end().into();
                 let mut consumed_bytes = trailing.len();
                 let mut extra_lines = 0usize;
@@ -1087,15 +936,11 @@ fn try_parse_comment_pi_with_trailing_split(
     Some(close_line_idx + 1)
 }
 
-/// One source-order piece of a standalone-tag line: either a complete
-/// HTML tag or a run of inter-tag/leading/trailing whitespace.
 enum StandaloneTagSegment<'a> {
     Whitespace(&'a str),
     Tag(&'a str),
 }
 
-/// Extract the tag name from an open-tag slice (`<name ...>`), or `None`
-/// if `tag` is not a well-formed open tag start.
 fn open_tag_name(tag: &str) -> Option<&str> {
     let bytes = tag.as_bytes();
     if bytes.first() != Some(&b'<') {
@@ -1140,12 +985,6 @@ fn split_line_into_standalone_tags(line: &str) -> Option<Vec<StandaloneTagSegmen
     }
     while i < bytes.len() {
         let rest = &line[i..];
-        // Any closing tag is an unconditional block splitter. For open
-        // tags, only void block tags (`<embed>`, `<source>`, …) split
-        // unconditionally at a fresh-block position — strict-block and
-        // inline-block opens start a region (matched-pair lift /
-        // `inline_pending` context), so leave those to the legacy byte
-        // walker.
         let len = parse_close_tag(rest).or_else(|| {
             parse_open_tag(rest).filter(|&len| {
                 open_tag_name(&rest[..len]).is_some_and(is_pandoc_void_block_tag_name)
@@ -1195,8 +1034,6 @@ fn try_parse_standalone_block_tags_split(
     if config.dialect != crate::options::Dialect::Pandoc {
         return None;
     }
-    // Void/close forms keep the opaque `HTML_BLOCK` wrapper; `<div>`
-    // and lifted strict/inline-block tags carry their own wrappers.
     if wrapper_kind != SyntaxKind::HTML_BLOCK {
         return None;
     }
@@ -1250,13 +1087,6 @@ pub(crate) fn parse_html_block_with_wrapper(
     config: &ParserOptions,
 ) -> usize {
     let bq_depth = prefix.bq_depth();
-    // Pandoc-dialect Comment / PI trailing-text split. Pandoc-native
-    // closes the RawBlock at the close marker (`-->` / `?>`) and parses
-    // any subsequent bytes (same-line trailing or following lines) as
-    // fresh blocks. The legacy path absorbs them into the HTML block
-    // wrapper, producing one oversized RawBlock. Handle the split here
-    // before entering the legacy emission so the CST encodes the
-    // sibling structure.
     if config.dialect == crate::options::Dialect::Pandoc
         && matches!(
             block_type,
@@ -1276,11 +1106,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         return consumed;
     }
 
-    // Pandoc-dialect Phase 7b standalone-tag split. A single line of two
-    // or more complete standalone block-level tags (`</p></div>`,
-    // `<embed><embed>`) projects to one `RawBlock` per tag; emit one
-    // `HTML_BLOCK_TAG` per tag so the CST encodes the split structurally
-    // instead of leaving the projector to re-tokenize a baked TEXT token.
     if let Some(consumed) = try_parse_standalone_block_tags_split(
         builder,
         lines,
@@ -1293,36 +1118,13 @@ pub(crate) fn parse_html_block_with_wrapper(
         return consumed;
     }
 
-    // Start HTML block. The node kind may retag to `HTML_BLOCK_RAW` for
-    // single-construct opaque shapes (comment / PI / verbatim) under
-    // Pandoc; `wrapper_kind` itself stays the behavioral gate below so no
-    // lift logic changes and the child tokens stay byte-identical.
     builder.start_node(html_block_node_kind(wrapper_kind, &block_type, config.dialect).into());
 
     let first_line = lines[start_pos];
     let blank_terminated = ends_at_blank_line(&block_type);
 
-    // The block dispatcher has already emitted the bq prefix tokens for
-    // the first line; emit only the inner content as TEXT to keep the
-    // CST byte-equal to the source. List-marker bytes are stripped only
-    // when this dispatch fires on a list-marker line — for
-    // continuation-line dispatches (the much more common case) the
-    // leading indent is inner content, not upstream-emitted prefix.
     let first_inner = prefix.strip_line_0_for_emission(first_line);
 
-    // Detect a multi-line open tag.
-    // - `<div>` (Pandoc lift): we tokenize each line structurally so the
-    //   salsa anchor walk picks up `id` from the HTML_ATTRS region.
-    // - Pandoc strict-block tags eligible for the Fix #4 lift (`<form>`,
-    //   `<section>`, `<header>`, …): same structural emission, exposing
-    //   `id` to the salsa anchor walk and enabling the body lift below.
-    // - Void block tags (`<embed>`, `<area>`, `<source>`, `<track>`):
-    //   without this, the parser closes the block after line 0 and the
-    //   remainder of the open tag falls into following paragraphs;
-    //   pandoc-native treats the whole multi-line open tag as a single
-    //   `RawBlock`. Emission for void tags uses simple per-line
-    //   TEXT + NEWLINE (no HTML_ATTRS — the projector doesn't read attrs
-    //   from void tags).
     let multiline_open_end = match (wrapper_kind, &block_type) {
         (SyntaxKind::HTML_BLOCK_DIV, _) => {
             find_multiline_open_end(lines, start_pos, first_inner, "div", prefix)
@@ -1351,12 +1153,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         _ => None,
     };
 
-    // Set up depth-aware close tracking when the block type asks for it
-    // (Pandoc dialect, balanced same-name tag matching). A `None` means
-    // we fall back to the legacy "first matching close" path via
-    // `is_closing_marker`. Computed up front so the lift-mode gate
-    // below can decide whether the open line already balances the
-    // block (same-line `<div>...</div>`).
     let depth_aware_tag: Option<String> = match &block_type {
         HtmlBlockType::BlockTag {
             tag_name,
@@ -1368,14 +1164,10 @@ pub(crate) fn parse_html_block_with_wrapper(
     };
     let mut depth: i64 = 1;
     if let Some(tag_name) = &depth_aware_tag {
-        // Sum opens/closes across all open-tag lines (single-line: just
-        // line 0; multi-line: lines 0..=end_line_idx).
         let last_open_line = multiline_open_end.unwrap_or(start_pos);
         let mut opens = 0usize;
         let mut closes = 0usize;
         for (offset, line) in lines[start_pos..=last_open_line].iter().enumerate() {
-            // Line 0 is the dispatch line: its innermost `ListAdvance`
-            // may be the marker the core emitted, not indent.
             let inner = if offset == 0 {
                 prefix.strip_dispatch_line(line)
             } else {
@@ -1388,12 +1180,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         depth = opens as i64 - closes as i64;
     }
 
-    // Same-line `<div>foo</div>` shape: the open line balances the
-    // block under depth-aware tracking. We can lift this structurally
-    // only when the open-tag trailing has exactly one `</div>` close,
-    // zero `<div>` opens, and no non-whitespace content after the
-    // close. Other same-line shapes (nested, trailing text, malformed)
-    // fall through to the byte-reparse path.
     let is_same_line_div = wrapper_kind == SyntaxKind::HTML_BLOCK_DIV
         && multiline_open_end.is_none()
         && depth_aware_tag.is_some()
@@ -1403,14 +1189,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         probe_same_line_lift(line_without_newline, "div")
     };
 
-    // Strict-block-tag Fix #4 lift (`<form>`, `<section>`, `<header>`,
-    // `<nav>`, …): the body parses as fresh markdown between RawBlock
-    // emissions of the open/close tags. Covers the clean multi-line
-    // shape (open tag stands alone on its line), open-trailing
-    // (`<form>foo\n…\n</form>`), butted-close (`<form>\n…\nfoo</form>`),
-    // and same-line (`<form>foo</form>`). Multi-line open and
-    // blockquote-wrapped non-div shapes still fall through to the
-    // byte-walker path.
     let strict_block_tag_name: Option<&str> =
         if wrapper_kind == SyntaxKind::HTML_BLOCK && bq_depth == 0 {
             match &block_type {
@@ -1427,38 +1205,16 @@ pub(crate) fn parse_html_block_with_wrapper(
         } else {
             None
         };
-    // Same-line `<form>foo</form>` shape: the open line already
-    // balances the block (`depth <= 0`). Lift only when the trailing
-    // bytes after the open `>` end with `</tag>` and contain exactly
-    // one close + zero nested opens.
     let same_line_strict_lift_safe = strict_block_tag_name.is_some_and(|name| {
         multiline_open_end.is_none() && depth <= 0 && {
             let (line_no_nl, _) = strip_newline(first_inner);
             probe_same_line_lift(line_no_nl, name)
-                // Suppress the lift when the same-line trailing after the
-                // first matched close holds inter-tag TEXT before another
-                // matched-pair block tag. Pandoc treats the whole line as
-                // one opaque type-6 block (`<p>foo</p> bar <p>baz</p>`,
-                // corpus 0472); keep it opaque for the projector splitter.
                 && !same_line_trailing_forces_opaque(line_no_nl, name)
         }
     });
-    // Strict-block lift gate: accept (a) a multi-line open tag spanning
-    // `lines[start_pos..=multiline_open_end]`, or (b) a clean / open-
-    // trailing single-line open (depth > 0, open `>` is present with
-    // quote-aware matching), or (c) a safe same-line shape. For
-    // inline-block matched-pair tags (`<video>`, `<iframe>`, `<button>`,
-    // …) the lift additionally abandons when the body starts at a
-    // fresh-block position with a void block tag — pandoc-native pins
-    // per-tag emission rather than a matched-pair lift in that case.
     let strict_block_lift = strict_block_tag_name.is_some_and(|name| {
         let (line_no_nl, _) = strip_newline(first_inner);
         let shape_ok = if multiline_open_end.is_some() {
-            // `find_multiline_open_end` already verified the open tag
-            // closes with a quote-aware `>` somewhere in lines
-            // `start_pos+1..=end`. No same-line trailing content to
-            // probe; defer trailing-on-close-`>`-line handling to a
-            // future session (rare in practice).
             true
         } else if depth > 0 {
             probe_open_tag_line_has_close_gt(line_no_nl, name)
@@ -1471,14 +1227,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         true
     });
 
-    // Same-line lift inside a blockquote (`> <tag>body</tag>`). Bytes
-    // are byte-equal to the non-bq same-line shape minus the leading
-    // `> ` (which sits on the outer BLOCK_QUOTE, not inside HTML_BLOCK).
-    // The body has no inner newlines, so no bq prefix re-injection is
-    // needed when grafting — `emit_html_block_body_lifted` (passing
-    // `bq: &mut None`) is enough. Other bq shapes (butted-close,
-    // open-trailing) still fall through to the projector's byte
-    // walker — they need per-line prefix injection.
     let same_line_bq_lift_tag: Option<&str> = if bq_depth > 0
         && multiline_open_end.is_none()
         && depth_aware_tag.is_some()
@@ -1503,9 +1251,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 } if is_pandoc_lift_eligible_block_tag(tag_name)
                     && probe_same_line_lift(line_no_nl, tag_name.as_str()) =>
                 {
-                    // Inline-block tags (`<video>`, `<iframe>`, …) skip
-                    // the void-interior check at same-line — the shape
-                    // has no inner block content to interfere with.
                     Some(tag_name.as_str())
                 }
                 _ => None,
@@ -1517,17 +1262,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         None
     };
 
-    // Messy-shape lift inside a blockquote — covers open-trailing
-    // (`> <div>foo\n> </div>`), butted-close (`> <div>\n> foo</div>`),
-    // and open-trailing + butted-close (`> <div>foo\n> bar</div>`),
-    // including the multi-line-open variants (`> <div\n>   id="x">foo\n>
-    // body\n> </div>`) where the trailing is captured into `pre_content`
-    // by `emit_multiline_open_tag_with_attrs` with `lift_trailing=true`.
-    // The open line does NOT balance the block (depth > 0 after the
-    // open line, distinguishing this from `same_line_bq_lift_tag` which
-    // requires depth <= 0). The close line — possibly with leading body
-    // text — closes the block when depth returns to 0. Body lines (incl.
-    // open trailing and close leading) graft via prefix re-injection.
     let bq_messy_lift_tag: Option<&str> = if bq_depth > 0 && depth_aware_tag.is_some() && depth > 0
     {
         if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
@@ -1551,17 +1285,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         None
     };
 
-    // Multi-line open + matched close-on-the-open's-last-line shape inside
-    // a blockquote (`> <div\n>   id="x">foo</div>` and depth-aware variants:
-    // nested same-tag, trailing close, trailing text, strict-block `<form>`).
-    // Mirrors the non-bq `pre_content`-close branch (line ~1363) but inside
-    // a blockquote. Distinguishing features from `bq_messy_lift_tag`: the
-    // close is on the open's last line (`depth <= 0` after the open lines)
-    // AND `multiline_open_end.is_some()`. The trailing bytes after the
-    // last `>` get lifted into `pre_content` via
-    // `emit_multiline_open_tag_with_attrs(... lift_trailing=true)`, then the
-    // new branch below splits `pre_content` at the matched close marker
-    // and grafts body + close + any trailing siblings.
     let bq_multiline_close_lift_tag: Option<&str> = if bq_depth > 0
         && multiline_open_end.is_some()
         && depth_aware_tag.is_some()
@@ -1588,12 +1311,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         None
     };
 
-    // Whether this block participates in the Phase 6 structural lift
-    // (recursively parse body as Pandoc markdown and graft children).
-    // Covers `<div>` outside blockquote context. For same-line shapes
-    // the lift is gated on `same_line_*_lift_safe` — when unsafe we
-    // keep the legacy single-HTML_BLOCK_TAG shape and let the
-    // byte-reparse path handle projection.
     let lift_mode = (wrapper_kind == SyntaxKind::HTML_BLOCK_DIV
         && bq_depth == 0
         && (!is_same_line_div || same_line_div_lift_safe))
@@ -1602,14 +1319,8 @@ pub(crate) fn parse_html_block_with_wrapper(
         || bq_messy_lift_tag.is_some()
         || bq_multiline_close_lift_tag.is_some();
 
-    // Trailing content from the open tag (after `>`). When the lift is
-    // active and the open line is `<div ATTRS>foo\n`, this captures
-    // `"foo\n"` so it becomes the leading bytes of the recursive-parse
-    // input. Stays empty for clean opens (`<div>\n`) and for non-lift
-    // shapes (same-line / blockquote-wrapped).
     let mut pre_content = String::new();
 
-    // Emit opening line(s)
     builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
 
     if let Some(end_line_idx) = multiline_open_end {
@@ -1639,18 +1350,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             );
         } else if let Some(name) = bq_strict_attr_emit_tag_name(wrapper_kind, &block_type, bq_depth)
         {
-            // Multi-line open of a lift-eligible strict-block tag inside a
-            // blockquote (`> <section\n>   id=...>`). The non-bq
-            // `strict_block_tag_name` gate is `bq_depth == 0`; this branch
-            // covers the bq side so the open tag emits HTML_ATTRS regions
-            // for `AttributeNode::cast` and the projector's canonicalizer.
-            //
-            // `lift_trailing` mirrors the single-line `emit_open_tag_tokens`
-            // call below: only push trailing bytes into `pre_content` when
-            // the structural lift will consume them (bq messy lift). The
-            // bq clean-lift requires `pre_content.is_empty()`, so for clean
-            // multi-line opens the trailing is empty anyway and this is
-            // a no-op.
             let lift_trailing =
                 bq_messy_lift_tag == Some(name) || bq_multiline_close_lift_tag == Some(name);
             emit_multiline_open_tag_with_attrs(
@@ -1669,11 +1368,6 @@ pub(crate) fn parse_html_block_with_wrapper(
     } else {
         let (line_without_newline, newline_str) = strip_newline(first_inner);
         if !line_without_newline.is_empty() {
-            // For HTML_BLOCK_DIV, expose the open tag's attributes
-            // structurally so `AttributeNode::cast(HTML_ATTRS)` finds them
-            // via the same descendants walk that handles fenced-div /
-            // heading attrs. CST bytes stay byte-equal to source — we only
-            // tokenize at finer granularity for matched div opens.
             if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
                 let trailing =
                     emit_open_tag_tokens(builder, line_without_newline, "div", lift_mode);
@@ -1692,14 +1386,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             } else if let Some(name) =
                 bq_strict_attr_emit_tag_name(wrapper_kind, &block_type, bq_depth)
             {
-                // Inside a blockquote, lift trailing bytes into
-                // `pre_content` when either the same-line bq gate fires
-                // (`> <tag>body</tag>` — handled by `same_line_closed`)
-                // or the messy-shape bq gate fires (`> <tag>foo\n…\n>
-                // </tag>` and butted-close — handled at the close-marker
-                // site below). For the clean-shape bq lift the open has
-                // no trailing bytes regardless, so `lift_trailing=true`
-                // is a no-op there.
                 let lift_trailing =
                     same_line_bq_lift_tag == Some(name) || bq_messy_lift_tag == Some(name);
                 let trailing =
@@ -1712,9 +1398,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 builder.token(SyntaxKind::TEXT.into(), line_without_newline);
             }
         }
-        // When the open tag has trailing content under lift mode, the
-        // newline belongs to that trailing line (it terminates the
-        // synthetic body line, not the open tag). Don't double-emit.
         if pre_content.is_empty() && !newline_str.is_empty() {
             builder.token(SyntaxKind::NEWLINE.into(), newline_str);
         }
@@ -1722,11 +1405,6 @@ pub(crate) fn parse_html_block_with_wrapper(
 
     builder.finish_node(); // HtmlBlockTag
 
-    // Check if opening line also contains closing marker. Blank-line-terminated
-    // blocks (CommonMark types 6 & 7) ignore inline close markers — they only
-    // end at a blank line or end of input. Void `eitherBlockOrInline` tags
-    // (`closes_at_open_tag: true`) close immediately — the block always
-    // ends on the open-tag line since there is no closing tag to find.
     let void_block = matches!(
         &block_type,
         HtmlBlockType::BlockTag {
@@ -1734,11 +1412,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             ..
         }
     );
-    // Void tags with a multi-line open close immediately after the open
-    // tag's last line. The HTML_BLOCK_TAG already covers all open-tag
-    // lines (`emit_multiline_open_tag_simple` above); pandoc-native emits
-    // a single RawBlock for the whole multi-line tag, with no following
-    // content.
     if void_block && let Some(end_line_idx) = multiline_open_end {
         log::trace!(
             "HTML void block at line {} closes after multi-line open ending at line {}",
@@ -1748,21 +1421,6 @@ pub(crate) fn parse_html_block_with_wrapper(
         builder.finish_node(); // HtmlBlock
         return end_line_idx + 1;
     }
-    // Multi-line open with all matched closes on the open's last line:
-    // `pre_content` holds the bytes after the last open `>` (lifted there
-    // by `emit_multiline_open_tag_with_attrs` when `lift_trailing=true`).
-    // When `depth <= 0` after the multi-line open and the trailing bytes
-    // contain the depth-zero matched close, do the same-line lift on
-    // `pre_content` directly. Mirrors the single-line `same_line_closed`
-    // lift below — same body / close-marker / trailing-graft shape, just
-    // consuming `end_line_idx + 1` lines instead of `start_pos + 1`.
-    //
-    // The body bytes of `pre_content` come from the open's last line,
-    // which `emit_multiline_open_tag_with_attrs` already prefixed with the
-    // re-emitted bq prefix tokens (for `bq_depth > 0`). The body and close
-    // tag thus inherit the bq context without per-line prefix injection,
-    // so `emit_html_block_body_lifted` (with `bq: &mut None`) suffices for
-    // both the non-bq and bq variants of this shape.
     if let Some(end_line_idx) = multiline_open_end
         && !blank_terminated
         && depth_aware_tag.is_some()
@@ -1840,11 +1498,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             "HTML block at line {} opens and closes on same line",
             start_pos + 1
         );
-        // Same-line structural lift (div or non-div strict-block):
-        // pre_content holds the bytes after the open `>` (including
-        // the close `</tag>` and the trailing newline). Split into
-        // body + close tag, emit body via recursive parse, emit close
-        // tag as a sibling `HTML_BLOCK_TAG`.
         let same_line_lift_tag: Option<&str> = if !lift_mode || pre_content.is_empty() {
             None
         } else if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV && same_line_div_lift_safe {
@@ -1852,41 +1505,20 @@ pub(crate) fn parse_html_block_with_wrapper(
         } else if same_line_strict_lift_safe {
             strict_block_tag_name
         } else if let Some(name) = same_line_bq_lift_tag {
-            // Bq same-line: body has no inner newlines so the standard
-            // `emit_html_block_body_lifted` (with `bq: &mut None`) is
-            // sufficient. The bq prefix `> ` lives on the outer
-            // BLOCK_QUOTE, outside the HTML_BLOCK[_DIV] span.
             Some(name)
         } else {
             None
         };
         if let Some(tag_name) = same_line_lift_tag {
             let (pre_no_nl, post_nl) = strip_newline(&pre_content);
-            // Depth-aware split: handles `<tag>foo</tag>bar` (single
-            // close, trailing text), `<tag>foo</tag></tag>` (matched
-            // close + unmatched trailing close → sibling RawBlock),
-            // and `<tag><tag>x</tag></tag>bar` (nested same-tag,
-            // recursive body parse).
             if let Some((leading, close_part)) =
                 try_split_close_line_depth_aware(pre_no_nl, tag_name)
             {
-                // `close_part` starts with `</tag` and contains the close
-                // marker followed by any same-line trailing text. Split
-                // off the close marker bytes (`</tag>`) so the close
-                // `HTML_BLOCK_TAG` carries only those bytes; trailing
-                // text is parsed and grafted as a sibling block at the
-                // parent level (matches pandoc-native shape:
-                // `<div>foo</div>bar` → `Div [Plain[foo]] + Para [bar]`).
                 let close_marker_end =
                     split_close_marker_end(close_part, tag_name).unwrap_or(close_part.len());
                 let close_marker = &close_part[..close_marker_end];
                 let same_line_trailing = &close_part[close_marker_end..];
 
-                // Same-line is always close-butted; div demotes the
-                // trailing Para→Plain via `SkipTrailingBlanks`.
-                // Non-div strict-block uses `OnlyIfLast` (consistent
-                // with butted-close — no trailing BLANK_LINE before
-                // the close means the trailing Para demotes).
                 let policy = if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
                     LastParaDemote::SkipTrailingBlanks
                 } else {
@@ -1902,9 +1534,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                     builder.finish_node();
                     builder.finish_node(); // HtmlBlock
                 } else {
-                    // Close tag holds only the close-marker bytes;
-                    // trailing + newline graft as siblings of the
-                    // wrapper (matches pandoc's per-tag block split).
                     builder.token(SyntaxKind::TEXT.into(), close_marker);
                     builder.finish_node(); // HTML_BLOCK_TAG
                     builder.finish_node(); // HtmlBlock
@@ -1914,13 +1543,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                     trailing_text.push_str(same_line_trailing);
                     trailing_text.push_str(post_nl);
                     if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
-                        // `<div>x</div> y <div>z</div>`: peel each further
-                        // matched `<div>...</div>` pair in the trailing into
-                        // its own sibling `HTML_BLOCK_DIV`, with inter-tag
-                        // text as demoted `Plain` blocks. A plain reparse of
-                        // the trailing keeps mid-line `<div>`s as inline raw
-                        // HTML (`Para [.., RawInline "<div>", ..]`); pandoc-
-                        // native lifts each to a block-level `Div`.
                         graft_same_line_div_peel(builder, &trailing_text, config);
                     } else {
                         let mut inner_options = config.clone();
@@ -1953,27 +1575,15 @@ pub(crate) fn parse_html_block_with_wrapper(
     let mut content_lines: Vec<&str> = Vec::new();
     let mut found_closing = false;
 
-    // Pandoc: an unclosed fenced div (`::: x`) opened inside the body
-    // greedily consumes the following `</div>` line as a `RawBlock`, so it
-    // does NOT close the outer HTML `<div>`. Track body-level fence nesting
-    // and suspend the depth-aware close match while a fence is open. Gated
-    // to Pandoc + the `fenced_divs` extension so CommonMark (where `:::` is
-    // ordinary text and `<div>` stays opaque) is unaffected.
     let fence_suspends_close = config.dialect == crate::options::Dialect::Pandoc
         && config.extensions.fenced_divs
         && depth_aware_tag.is_some();
     let mut body_fence_depth: usize = 0;
 
-    // Parse content until we find the closing marker
     while current_pos < lines.len() {
         let line = lines[current_pos];
         let (line_bq_depth, inner) = count_blockquote_markers(line);
 
-        // Only process lines at the same or deeper blockquote depth — except
-        // under Pandoc, where the blockquote reader gobbles a non-blank lazy
-        // line back into the quote's raw content, so it is still body. The
-        // blank line that ends the quote also ends this scan, via the depth
-        // check (a blank line carries no markers).
         let gobbled_lazily = config.dialect == crate::options::Dialect::Pandoc
             && bq_depth > 0
             && !line.trim().is_empty();
@@ -1981,15 +1591,10 @@ pub(crate) fn parse_html_block_with_wrapper(
             break;
         }
 
-        // Blank-line-terminated blocks (types 6/7) end before the blank line.
-        // The blank line itself is not part of the block.
         if blank_terminated && inner.trim().is_empty() {
             break;
         }
 
-        // Track body-level fenced-div nesting before the close check so an
-        // open fence suspends the outer `</div>` match (see the note at the
-        // fence tracker above).
         if fence_suspends_close {
             if crate::parser::blocks::fenced_divs::try_parse_div_fence_open(inner).is_some() {
                 body_fence_depth += 1;
@@ -2000,17 +1605,9 @@ pub(crate) fn parse_html_block_with_wrapper(
             }
         }
 
-        // Check for closing marker. Under depth-aware mode (Pandoc dialect)
-        // count opens/closes of the same tag name and only close when depth
-        // returns to 0; otherwise fall back to substring-match on the line.
         let line_closes = match &depth_aware_tag {
             Some(tag_name) => {
                 if fence_suspends_close && body_fence_depth > 0 {
-                    // Inside an open fenced div: the `</div>` line is body
-                    // content the fence swallows, not the outer close. Do
-                    // not advance `depth` or close here — the whole body
-                    // (including `</div>`) lifts on the no-close path with
-                    // an implicit EOF close, matching pandoc-native.
                     false
                 } else {
                     let (opens, closes) = count_tag_balance(inner, tag_name);
@@ -2026,34 +1623,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             log::trace!("Found HTML block closing at line {}", current_pos + 1);
             found_closing = true;
 
-            // Pandoc-dialect blockquote-wrapped clean-shape lift: when
-            // the open and close tags stand alone on their source lines
-            // (no trailing on open, no body content on close after
-            // stripping bq markers), lift the body lines structurally
-            // so the projector walks CST children instead of
-            // byte-reparsing via `collect_html_block_text_skip_bq_markers`.
-            //
-            // Covers `<div>` (HTML_BLOCK_DIV → Block::Div with body
-            // grafted, Para preserved), non-div strict-block tags
-            // (`<form>`, `<section>`, …) and inline-block matched-pair
-            // tags (`<video>`, `<iframe>`, …) — the latter two under
-            // HTML_BLOCK with the structural lift hitting pandoc's
-            // RawBlock + Plain + RawBlock shape via `OnlyIfLast`
-            // demotion. Inline-block additionally bails if the body
-            // starts at a fresh-block position with a void block tag
-            // (mirrors the non-bq matched-pair gate).
-            //
-            // Other bq-wrapped shapes (butted-close / open-trailing /
-            // same-line) still fall through to the opaque path.
-            // Multi-line opens are allowed here as of 2026-05-12: the
-            // open `HTML_BLOCK_TAG` was emitted (potentially with HTML_ATTRS
-            // per attr line and per-line bq prefix tokens) by the bq-aware
-            // `emit_multiline_open_tag_with_attrs`. `pre_content` stays
-            // empty for multi-line opens (the emitter writes any trailing
-            // bytes on the last open line directly as TEXT inside
-            // HTML_BLOCK_TAG, not into `pre_content`) — so multi-line +
-            // trailing falls through to the opaque path, matching the non-
-            // bq deferral.
             let bq_lift_tag: Option<&str> = if bq_depth > 0 && pre_content.is_empty() {
                 if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
                     Some("div")
@@ -2077,10 +1646,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             };
 
             let bq_clean_lift = bq_lift_tag.is_some_and(|_tag_name| {
-                // Open-shape: last open line must end with `>` (clean
-                // close-of-open). For single-line, that's `first_inner`
-                // (already bq-stripped); for multi-line, strip bq markers
-                // from `lines[end_line_idx]` and check the same.
                 let last_open_line: &str = match multiline_open_end {
                     None => first_inner,
                     Some(end) if prefix.bq_depth() > 0 || prefix.list_content_col() > 0 => {
@@ -2123,16 +1688,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 break;
             }
 
-            // Bq messy-shape lift — single-line open with trailing or
-            // butted-close (or both). `pre_content` already captures any
-            // open-trailing bytes (open `HTML_BLOCK_TAG` ends at `>`);
-            // strip the close line's bq markers before splitting so
-            // `leading` and `close_part` are bq-prefix-free. Body parses
-            // recursively from `pre_content + stripped(content_lines) +
-            // leading`, with per-line bq prefixes re-injected so the CST
-            // stays byte-equal to the source. Demote: div is keyed on
-            // close-butted-ness (Plain when leading non-empty, Para
-            // otherwise); non-div uses OnlyIfLast either way.
             if let Some(tag_name) = bq_messy_lift_tag {
                 let close_stripped = prefix.strip(line);
                 let close_prefix_len = line.len() - close_stripped.len();
@@ -2159,13 +1714,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                         config,
                     );
                     builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
-                    // When `leading` is empty, no recursive-parse output carries
-                    // the close line's bq prefix, so emit it here before the
-                    // close tag. When `leading` is non-empty,
-                    // `emit_html_block_body_lifted_bq_messy` already injected
-                    // the prefix at the start of the leading bytes (via the
-                    // BqPrefixState entry); emitting again would double the
-                    // prefix bytes and break losslessness.
                     if leading.is_empty() {
                         emit_bq_prefix_tokens(builder, close_prefix);
                     }
@@ -2176,20 +1724,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 }
             }
 
-            // Under lift mode, try to split the close line into a
-            // leading "body content" prefix and the close-marker
-            // remainder using depth-aware matching. Walks at depth 1
-            // (we're inside the open tag) so nested same-tag opens
-            // (e.g. `<inner></inner></tag>` style with a nested div)
-            // are absorbed into the body and parsed recursively, and
-            // multi-close shapes (`foo</div></div>` on the close line)
-            // peel off the matched-pair close — the unmatched
-            // trailing close projects as a sibling `RawBlock` per
-            // pandoc-native. For `<div>`, non-empty `leading`
-            // propagates pandoc's `markdown_in_html_blocks` Plain
-            // demotion rule. For non-div strict-block tags, demotion
-            // follows pandoc's `OnlyIfLast` rule (demote the trailing
-            // Para only when no blank line precedes the close).
             let close_split_tag = if lift_mode {
                 if strict_block_lift {
                     strict_block_tag_name
@@ -2206,14 +1740,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 .and_then(|name| try_split_close_line_depth_aware(close_no_nl, name));
 
             if let Some((leading, close_part)) = close_split {
-                // Close-line leading that is whitespace-only is close-tag
-                // indentation, not body content (pandoc-native strips it
-                // from the close RawBlock and treats the close as butted —
-                // see `   </tag>` shapes). Route those bytes into the
-                // close `HTML_BLOCK_TAG` as a WHITESPACE token so the
-                // projector strips them; keep the demote policy keyed on
-                // the original leading so butted-close detection (Plain
-                // demotion for div, OnlyIfLast for non-div) still fires.
                 let leading_is_ws_only =
                     !leading.is_empty() && leading.bytes().all(|b| b == b' ' || b == b'\t');
                 let body_leading = if leading_is_ws_only { "" } else { leading };
@@ -2224,12 +1750,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                 } else {
                     LastParaDemote::Never
                 };
-                // Split close_part into close-marker bytes (`</tag>`)
-                // and trailing bytes (e.g. an extra `</div>` for the
-                // double-close case, or `bar` for trailing text after
-                // a normal close). Trailing bytes are recursively
-                // parsed and grafted as siblings of the HTML_BLOCK_DIV
-                // wrapper.
                 let close_tag_name = close_split_tag.expect("close_split_tag present");
                 let close_marker_end =
                     split_close_marker_end(close_part, close_tag_name).unwrap_or(close_part.len());
@@ -2256,8 +1776,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                     emit_html_block_line(builder, &close_line, 0);
                     builder.finish_node();
                 } else {
-                    // Close tag holds only the close-marker bytes;
-                    // trailing + newline graft as siblings.
                     builder.token(SyntaxKind::TEXT.into(), close_marker);
                     builder.finish_node(); // HTML_BLOCK_TAG
                     builder.finish_node(); // HtmlBlock
@@ -2267,11 +1785,6 @@ pub(crate) fn parse_html_block_with_wrapper(
                     trailing_text.push_str(close_trailing);
                     trailing_text.push_str(close_post_nl);
                     if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV && bq_depth == 0 {
-                        // Multi-line div variant of `<div>x</div> y
-                        // <div>z</div>` — the close line carries the
-                        // inter-tag text and a further `<div>` pair. Peel
-                        // each into a sibling `HTML_BLOCK_DIV` (see
-                        // `graft_same_line_div_peel`).
                         graft_same_line_div_peel(builder, &trailing_text, config);
                     } else {
                         let mut inner_options = config.clone();
@@ -2313,12 +1826,10 @@ pub(crate) fn parse_html_block_with_wrapper(
             break;
         }
 
-        // Regular content line
         content_lines.push(line);
         current_pos += 1;
     }
 
-    // If we didn't find a closing marker, emit what we collected
     if !found_closing {
         log::trace!("HTML block at line {} has no closing marker", start_pos + 1);
         emit_html_block_body(
@@ -2370,8 +1881,6 @@ fn emit_html_block_body(
         return;
     }
     if lift_mode && wrapper_kind == SyntaxKind::HTML_BLOCK_DIV {
-        // Reached when the parser walked to end-of-input without finding
-        // `</div>` (unbalanced div) — no close tag, no Plain demotion.
         emit_html_block_body_lifted(
             builder,
             pre_content,
@@ -2382,18 +1891,6 @@ fn emit_html_block_body(
         );
         return;
     }
-    // Phase 7c: non-div strict-block / inline-block open tag with trailing
-    // body and no matching close (`<section>foo`, `<video>foo\nbar`).
-    // Pandoc-native emits the open tag as a standalone `RawBlock` followed
-    // by the body parsed as fresh markdown siblings (`RawBlock "<section>"`
-    // + `Para [foo]`) — NOT a wrapping like `<div>`. Lift the body into
-    // structural CST children so the open `HTML_BLOCK_TAG` stays a lone
-    // RawBlock and the body (`Para`, `Header`, `BulletList`, …) becomes
-    // visible to consumers instead of opaque `HTML_BLOCK_CONTENT` TEXT.
-    // No demotion (pandoc keeps the trailing `Para`). Gated to `bq_depth ==
-    // 0`: inside a blockquote the body lines still carry `> ` markers that
-    // this path would not re-inject, so those stay on the opaque byte
-    // walker.
     if lift_mode && wrapper_kind == SyntaxKind::HTML_BLOCK && bq_depth == 0 {
         emit_html_block_body_lifted(
             builder,
@@ -2405,17 +1902,6 @@ fn emit_html_block_body(
         );
         return;
     }
-    // Phase 7c (blockquote): same open-only strict-block / inline-block
-    // shape as above, but inside a blockquote (`> <section>foo\n> bar`).
-    // Line 0's `> ` is consumed by the outer BLOCK_QUOTE, so the
-    // open-tag trailing sits in `pre_content` with no bq prefix; the
-    // continuation `content_lines` still carry their `> ` markers.
-    // `emit_html_block_body_lifted_bq_messy` re-injects each line's
-    // captured bq prefix at line start so the lifted `PARAGRAPH` stays
-    // byte-equal to source. No close line (open-only), so `leading` and
-    // `close_line_prefix` are empty. No demotion — pandoc keeps the
-    // trailing `Para` (`RawBlock "<section>"` + `Para [foo, SoftBreak,
-    // bar]`).
     if open_only && lift_mode && wrapper_kind == SyntaxKind::HTML_BLOCK && bq_depth > 0 {
         emit_html_block_body_lifted_bq_messy(
             builder,
@@ -2429,10 +1915,6 @@ fn emit_html_block_body(
         );
         return;
     }
-    // Legacy path: opaque TEXT capture. `pre_content` is always empty
-    // here (lift_mode is the only path that populates it), but be
-    // defensive — if a trailing prefix snuck in, emit it as TEXT so
-    // bytes are preserved.
     builder.start_node(SyntaxKind::HTML_BLOCK_CONTENT.into());
     if !pre_content.is_empty() {
         builder.token(SyntaxKind::TEXT.into(), pre_content);
@@ -2443,8 +1925,6 @@ fn emit_html_block_body(
     builder.finish_node();
 }
 
-/// Rule for promoting the trailing `PARAGRAPH` of an HTML-block body
-/// to `PLAIN` when grafting children into the structural CST.
 #[derive(Copy, Clone, Debug)]
 enum LastParaDemote {
     /// Never demote — pandoc preserves the trailing `Para`.
@@ -2556,10 +2036,6 @@ fn emit_html_block_body_lifted_bq_messy(
         stripped_lines.push(inner);
     }
     if !leading.is_empty() {
-        // The close line carries its own captured prefix bytes; treat
-        // them as bq-prefix only (no list-indent split applied) to keep
-        // the legacy bq-only re-injection behavior for messy-shape
-        // close-line lifts.
         prefix_lines.push(ContainerPrefixLine::bq_only(close_line_prefix.to_string()));
     }
     let mut state = ContainerPrefixState::new(prefix_lines);
@@ -2604,18 +2080,6 @@ fn emit_html_block_body_lifted_inner(
     graft_document_children(builder, &inner_root, demote_policy, bq);
 }
 
-/// Walk a parsed inner document's top-level children and re-emit them
-/// into `builder`. The document's wrapper node is skipped — only its
-/// children are grafted.
-///
-/// `demote_policy` controls whether a trailing `PARAGRAPH` is retagged
-/// as `PLAIN` — see [`LastParaDemote`].
-///
-/// `bq` is `Some` when grafting a body that lived inside an outer
-/// container (blockquote, list-item, or both) — token emission then
-/// injects the captured per-line prefix tokens at line starts so the
-/// CST stays byte-equal to source. See
-/// [`super::container_prefix::ContainerPrefixState`].
 fn graft_document_children(
     builder: &mut GreenNodeBuilder<'static>,
     doc: &SyntaxNode,
@@ -2668,10 +2132,6 @@ fn graft_document_children(
     }
 }
 
-/// Recursively re-emit `node` and its descendants into `builder`.
-/// Token text is copied verbatim so the result is byte-identical to
-/// the input span (modulo bq prefix tokens injected at line starts
-/// when `bq` is `Some`).
 fn graft_subtree(
     builder: &mut GreenNodeBuilder<'static>,
     node: &SyntaxNode,
@@ -2680,9 +2140,6 @@ fn graft_subtree(
     graft_subtree_as(builder, node, node.kind(), bq);
 }
 
-/// Like `graft_subtree` but the outer wrapper's `SyntaxKind` is
-/// overridden. Used to retag a top-level `PARAGRAPH` as `PLAIN` for
-/// the close-butted demotion rule.
 fn graft_subtree_as(
     builder: &mut GreenNodeBuilder<'static>,
     node: &SyntaxNode,
@@ -2701,8 +2158,6 @@ fn graft_subtree_as(
     builder.finish_node();
 }
 
-/// Emit a captured per-line bq prefix as a byte-by-byte stream of
-/// `LINE_PREFIX` tokens (the bytes land inside a content node).
 fn emit_bq_prefix_tokens(builder: &mut GreenNodeBuilder<'static>, prefix: &str) {
     for ch in prefix.chars() {
         let mut buf = [0u8; 4];
@@ -2710,11 +2165,6 @@ fn emit_bq_prefix_tokens(builder: &mut GreenNodeBuilder<'static>, prefix: &str) 
     }
 }
 
-/// Locate the byte index (within `line`) of the open-tag's closing `>`
-/// after a quote-aware scan of `<tag_name ATTRS>`. Returns `None` when
-/// the line doesn't fit the expected shape. Mirrors the inner scan of
-/// `probe_open_tag_line_has_close_gt` but exposes the position so the
-/// caller can slice off the trailing bytes.
 fn locate_open_tag_close_gt(line: &str, tag_name: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let indent_end = bytes
@@ -2818,7 +2268,6 @@ fn same_line_trailing_forces_opaque(line: &str, tag_name: &str) -> bool {
     {
         return false;
     }
-    // Locate the open tag's closing `>` (quote-aware).
     let after_name = &rest[prefix_len..];
     let after_name_bytes = after_name.as_bytes();
     let mut i = 0usize;
@@ -2844,9 +2293,6 @@ fn same_line_trailing_forces_opaque(line: &str, tag_name: &str) -> bool {
         return false;
     };
     let after_close = &trailing[close_end..];
-    // Trailing that is empty or begins (after whitespace) with a tag is
-    // handled correctly by the tail reparse; only inter-tag TEXT forces
-    // the opaque whole-line treatment.
     let trimmed = after_close.trim_start();
     if trimmed.is_empty() || trimmed.starts_with('<') {
         return false;
@@ -2881,21 +2327,6 @@ fn trailing_contains_matched_pair_tag(s: &str) -> bool {
     false
 }
 
-/// Probe whether the same-line `<tag>BODY</tag>` shape on `line` can
-/// be lifted structurally. Returns `true` only when:
-/// - The line starts with `<tag_name` (modulo leading whitespace).
-/// - The open tag's `>` exists with proper quote handling.
-/// - The bytes after the open `>` contain a depth-zero matched
-///   `</tag_name>` close (depth-aware: nested `<tag>` opens
-///   increment depth; matching is case-insensitive, quote-aware).
-///
-/// Trailing bytes after the matched close are accepted and grafted
-/// as a sibling block by the caller. Examples:
-/// - `<div>foo</div>bar` → body=`foo`, trailing=`bar`.
-/// - `<div>foo</div></div>` → body=`foo`, trailing=`</div>` (which
-///   recursively parses to a `RawBlock`).
-/// - `<div><div>x</div></div>bar` → body=`<div>x</div>` (nested div
-///   parsed recursively), trailing=`bar`.
 fn probe_same_line_lift(line: &str, tag_name: &str) -> bool {
     let bytes = line.as_bytes();
     let indent_end = bytes
@@ -2932,24 +2363,9 @@ fn probe_same_line_lift(line: &str, tag_name: &str) -> bool {
         return false;
     };
     let trailing = &after_name[gt_idx + 1..];
-    // Depth-aware: walk `trailing` (we begin inside the open tag at
-    // depth 1). Return true iff a matched `</tag>` exists where depth
-    // returns to 0. Self-closing `<tag/>` opens don't bump depth.
     matched_close_offset(trailing, tag_name).is_some()
 }
 
-/// Walk `trailing` (the bytes after an open `<tag ...>`'s closing `>`)
-/// looking for the depth-zero matched `</tag>` close. Counts `<tag>`
-/// opens and `</tag>` closes case-insensitively, quote-aware. Depth
-/// starts at 1 (we begin inside the open tag). Self-closing opens
-/// (`<tag/>`) do not increment depth.
-///
-/// Returns `Some((close_start, close_end))` where:
-/// - `close_start` is the byte offset of `<` in the matched `</tag>`.
-/// - `close_end` is one past the matched `>`.
-///
-/// Returns `None` when no matched close is present (unclosed tag,
-/// depth never returns to 0).
 fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)> {
     let bytes = trailing.as_bytes();
     let lower_line = trailing.to_ascii_lowercase();
@@ -2977,8 +2393,6 @@ fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)
                 Some(b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/') | None
             );
 
-        // Scan forward to this tag bracket's `>`, respecting quoted
-        // attribute values; track self-closing form (`/>`).
         let mut j = if matched { after_name } else { after };
         let mut quote: Option<u8> = None;
         let mut self_close = false;
@@ -3014,19 +2428,12 @@ fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)
         if found_gt {
             i = j + 1;
         } else {
-            // Unterminated `<...` — give up.
             break;
         }
     }
     None
 }
 
-/// Locate the byte offset of the first `>` after a `</tag` prefix at
-/// the start of `close_part`. Returns `Some(end_of_close_marker)` so
-/// the caller can split `close_part` into the close-marker bytes
-/// (`</tag>`) and any same-line trailing text. Returns `None` if the
-/// expected prefix shape is missing — caller treats the whole slice
-/// as the close marker (no trailing).
 fn split_close_marker_end(close_part: &str, tag_name: &str) -> Option<usize> {
     let prefix_len = 2 + tag_name.len();
     let bytes = close_part.as_bytes();
@@ -3037,7 +2444,6 @@ fn split_close_marker_end(close_part: &str, tag_name: &str) -> Option<usize> {
     {
         return None;
     }
-    // Scan from after `</tag` to the first unquoted `>`.
     let mut i = prefix_len;
     let mut quote: Option<u8> = None;
     while i < bytes.len() {
@@ -3069,10 +2475,6 @@ fn try_split_close_line<'a>(line: &'a str, tag_name: &str) -> Option<(&'a str, &
     if opens != 0 || closes != 1 {
         return None;
     }
-    // Locate the close tag's opening `<` by lowercased substring search.
-    // Safe because we've already established (above) that the line has
-    // exactly one `</tag>` and no `<tag>` opens, so the first match is
-    // THE close.
     let needle = format!("</{}", tag_name);
     let lower = line.to_ascii_lowercase();
     let close_lt = lower.find(&needle)?;
@@ -3100,19 +2502,11 @@ fn try_split_close_line_depth_aware<'a>(
     Some((&line[..close_start], &line[close_start..]))
 }
 
-/// Locate the next `<tag ...>...</tag>` matched pair in `s`. Returns
-/// `(open_start, pair_end)` where `open_start` is the byte offset of the
-/// open `<` and `pair_end` is one past the matched close's `>`. Opens
-/// without a depth-zero matched close (unclosed) are skipped. Close-only
-/// forms (`</tag>`) never match an open. Quote-aware throughout.
 fn find_next_matched_pair(s: &str, tag_name: &str) -> Option<(usize, usize)> {
     let bytes = s.as_bytes();
     let mut search = 0usize;
     while let Some(rel) = bytes[search..].iter().position(|&b| b == b'<') {
         let lt = search + rel;
-        // `locate_open_tag_close_gt` returns `None` for close tags and
-        // non-`<tag` shapes; when it matches, the returned index is the
-        // open tag's `>` relative to `s[lt..]`.
         if let Some(gt_rel) = locate_open_tag_close_gt(&s[lt..], tag_name) {
             let after_open = lt + gt_rel + 1;
             if let Some((_close_start, close_end)) =
@@ -3189,22 +2583,6 @@ fn graft_same_line_div_peel(
     }
 }
 
-/// Emit the open-tag line of a lift-eligible HTML block (div or non-div
-/// strict-block tag), splitting the bytes `[ws]<tag[ ws ATTRS]>[trailing]`
-/// into `WHITESPACE? + TEXT("<tag") + (WHITESPACE + HTML_ATTRS{TEXT(attrs)})?
-/// + TEXT(">") + TEXT(trailing)?`.
-///
-/// Bytes are byte-identical to the source — this only tokenizes at finer
-/// granularity so `AttributeNode::cast(HTML_ATTRS)` can read the attribute
-/// region structurally. Falls back to a single TEXT token if the line
-/// doesn't fit the expected `<tag ...>` shape (defensive — the parser
-/// only retags as the lift kind when this shape was matched).
-///
-/// `lift_trailing`: when true, bytes after `>` are NOT emitted as TEXT —
-/// returned as `&str` instead so the caller can splice them into the
-/// recursive-parse input for the structural body lift. When false
-/// (legacy / non-lift path), trailing bytes are emitted as TEXT and an
-/// empty slice is returned.
 fn emit_open_tag_tokens<'a>(
     builder: &mut GreenNodeBuilder<'static>,
     line: &'a str,
@@ -3212,13 +2590,11 @@ fn emit_open_tag_tokens<'a>(
     lift_trailing: bool,
 ) -> &'a str {
     let bytes = line.as_bytes();
-    // Leading indent (CommonMark allows up to 3 spaces).
     let indent_end = bytes.iter().position(|&b| b != b' ').unwrap_or(bytes.len());
     if indent_end > 0 {
         builder.token(SyntaxKind::WHITESPACE.into(), &line[..indent_end]);
     }
     let rest = &line[indent_end..];
-    // Match the literal `<tag_name` prefix (ASCII case-insensitive on the tag name).
     let prefix_len = 1 + tag_name.len();
     if !rest.starts_with('<')
         || rest.len() < prefix_len
@@ -3229,7 +2605,6 @@ fn emit_open_tag_tokens<'a>(
     }
     let after_name = &rest[prefix_len..];
     let after_name_bytes = after_name.as_bytes();
-    // Find the closing `>` of the open tag, respecting quoted attribute values.
     let mut i = 0usize;
     let mut quote: Option<u8> = None;
     let mut tag_close: Option<usize> = None;
@@ -3247,11 +2622,9 @@ fn emit_open_tag_tokens<'a>(
         i += 1;
     }
     let Some(tag_close) = tag_close else {
-        // Open tag has no closing `>` on this line — defensive fallback.
         builder.token(SyntaxKind::TEXT.into(), rest);
         return "";
     };
-    // Whitespace between the tag name and the attribute region.
     let attrs_inner = &after_name[..tag_close];
     let ws_end = attrs_inner
         .as_bytes()
@@ -3259,10 +2632,6 @@ fn emit_open_tag_tokens<'a>(
         .position(|&b| !matches!(b, b' ' | b'\t'))
         .unwrap_or(attrs_inner.len());
     let leading_ws = &attrs_inner[..ws_end];
-    // Strip a trailing self-closing slash and the whitespace before it
-    // from the attribute region; emit them as TEXT outside the
-    // HTML_ATTRS node so the structural region only holds attribute
-    // bytes (not formatting punctuation).
     let attrs_after_ws = &attrs_inner[ws_end..];
     let mut attr_end = attrs_after_ws.len();
     let attr_bytes = attrs_after_ws.as_bytes();
@@ -3278,8 +2647,6 @@ fn emit_open_tag_tokens<'a>(
     let trailing_text = &attrs_after_ws[attr_end..self_close_start.max(attr_end)];
     let after_self_close = &attrs_after_ws[self_close_start..];
 
-    // Use the original source bytes for the `<tag` prefix (preserves
-    // source casing — losslessness).
     builder.token(SyntaxKind::TEXT.into(), &rest[..prefix_len]);
     if !leading_ws.is_empty() {
         builder.token(SyntaxKind::WHITESPACE.into(), leading_ws);
@@ -3296,8 +2663,6 @@ fn emit_open_tag_tokens<'a>(
     builder.token(SyntaxKind::TEXT.into(), ">");
     let after_gt = &after_name[tag_close + 1..];
     if lift_trailing {
-        // Return trailing bytes to the caller (will be spliced into the
-        // recursive-parse input for the body lift).
         return after_gt;
     }
     if !after_gt.is_empty() {
@@ -3306,14 +2671,6 @@ fn emit_open_tag_tokens<'a>(
     ""
 }
 
-/// Detect a multi-line HTML open tag for `tag_name`. Returns
-/// `Some(end_line_idx)` when the open tag's closing `>` is on a line *after*
-/// `start_pos` and within `lines`; `None` for single-line opens (handled by
-/// the existing path) or when the `>` is missing entirely.
-///
-/// Quoted attribute values (`"..."`, `'...'`) are honored so a `>` inside an
-/// attribute value doesn't terminate the open tag. Quote state carries
-/// across line boundaries.
 fn find_multiline_open_end(
     lines: &[&str],
     start_pos: usize,
@@ -3321,10 +2678,6 @@ fn find_multiline_open_end(
     tag_name: &str,
     prefix: &ContainerPrefix,
 ) -> Option<usize> {
-    // Locate the `<tag_name` literal in `first_inner` to start scanning past
-    // it. Match is ASCII case-insensitive; the parser preserves source casing.
-    // `first_inner` is already bq-stripped by the caller; subsequent lines are
-    // stripped inline below via `strip_n_blockquote_markers`.
     let trimmed = strip_leading_spaces(first_inner);
     let prefix_len = 1 + tag_name.len();
     if !trimmed.starts_with('<')
@@ -3337,7 +2690,6 @@ fn find_multiline_open_end(
     let mut i = leading_indent + prefix_len; // past `<tag_name`
     let mut quote: Option<u8> = None;
 
-    // Scan first line for an unquoted `>`.
     let line0_bytes = first_inner.as_bytes();
     while i < line0_bytes.len() {
         match (quote, line0_bytes[i]) {
@@ -3349,9 +2701,6 @@ fn find_multiline_open_end(
         i += 1;
     }
 
-    // No `>` on first line. Scan subsequent lines, stripping `bq_depth`
-    // blockquote markers per line so `> ` prefixes don't count toward the
-    // quote-aware scan. Mirrors `pandoc_html_open_tag_closes`.
     let mut line_idx = start_pos + 1;
     while line_idx < lines.len() {
         let raw = lines[line_idx];
@@ -3391,10 +2740,6 @@ pub(crate) fn pandoc_html_open_tag_closes(
     }
     let mut quote: Option<u8> = None;
     for (offset, line) in lines.iter().enumerate().skip(start_pos) {
-        // Line 0 must be stripped the way the dispatcher's `first()` is:
-        // a continuation-line dispatch skips the innermost `ListAdvance`,
-        // whose blind column advance would otherwise eat the tag's first
-        // bytes on an under-indented line (`- a` / `<hr>` at column 0).
         let inner = if offset == start_pos {
             prefix.strip_line_0_for_emission(line)
         } else {
@@ -3457,13 +2802,6 @@ fn emit_multiline_open_tag_with_attrs(
         .take(end_line_idx + 1)
         .skip(start_pos)
     {
-        // Strip `bq_depth` blockquote markers from the source line so
-        // indent/HTML_ATTRS/TEXT splitting ignores the bq prefix bytes.
-        // Re-emit the stripped prefix as `BLOCK_QUOTE_MARKER` /
-        // `WHITESPACE` tokens — but ONLY for lines past `start_pos`.
-        // Line 0's bq prefix is consumed by the outer BLOCK_QUOTE node
-        // before this parser runs; re-emitting it here would double
-        // the bytes and break losslessness.
         let stripped = if bq_depth > 0 {
             strip_n_blockquote_markers(raw, bq_depth)
         } else {
@@ -3477,16 +2815,11 @@ fn emit_multiline_open_tag_with_attrs(
         let (line_no_nl, newline_str) = strip_newline(line);
 
         if line_idx == start_pos {
-            // Line 0: leading indent (if any) + "<{tag_name}" + (whitespace
-            // + attrs)?. The closing `>` is on a later line, so any
-            // remaining bytes after "<{tag_name}" on this line are the
-            // start of the attribute region.
             let bytes = line_no_nl.as_bytes();
             let indent_end = bytes.iter().position(|&b| b != b' ').unwrap_or(bytes.len());
             if indent_end > 0 {
                 builder.token(SyntaxKind::WHITESPACE.into(), &line_no_nl[..indent_end]);
             }
-            // Defensive: caller verified the line starts with `<{tag_name}`.
             let after_indent = &line_no_nl[indent_end..];
             if after_indent.len() >= prefix_len {
                 builder.token(SyntaxKind::TEXT.into(), &after_indent[..prefix_len]);
@@ -3496,7 +2829,6 @@ fn emit_multiline_open_tag_with_attrs(
                 builder.token(SyntaxKind::TEXT.into(), after_indent);
             }
         } else if line_idx < end_line_idx {
-            // Pure attribute line.
             let bytes = line_no_nl.as_bytes();
             let indent_end = bytes
                 .iter()
@@ -3510,7 +2842,6 @@ fn emit_multiline_open_tag_with_attrs(
                 emit_html_attrs_node(builder, attrs_text);
             }
         } else {
-            // Last line: indent + attrs + ">" + trailing.
             let bytes = line_no_nl.as_bytes();
             let indent_end = bytes
                 .iter()
@@ -3519,7 +2850,6 @@ fn emit_multiline_open_tag_with_attrs(
             if indent_end > 0 {
                 builder.token(SyntaxKind::WHITESPACE.into(), &line_no_nl[..indent_end]);
             }
-            // Find the unquoted `>` byte position in this line.
             let mut quote: Option<u8> = None;
             let mut gt_pos: Option<usize> = None;
             for (j, &b) in line_no_nl.as_bytes()[indent_end..].iter().enumerate() {
@@ -3535,20 +2865,14 @@ fn emit_multiline_open_tag_with_attrs(
                 }
             }
             let Some(gt) = gt_pos else {
-                // Defensive — caller said `>` is on this line.
                 builder.token(SyntaxKind::TEXT.into(), &line_no_nl[indent_end..]);
                 if !newline_str.is_empty() {
                     builder.token(SyntaxKind::NEWLINE.into(), newline_str);
                 }
                 continue;
             };
-            // Attribute region: between indent_end and gt, with possibly
-            // trailing whitespace before `>`.
             let attrs_region = &line_no_nl[indent_end..gt];
             let region_bytes = attrs_region.as_bytes();
-            // Strip trailing whitespace from attrs region; emit as
-            // separate WHITESPACE so HTML_ATTRS only contains attribute
-            // bytes.
             let mut attr_end = region_bytes.len();
             while attr_end > 0 && matches!(region_bytes[attr_end - 1], b' ' | b'\t') {
                 attr_end -= 1;
@@ -3564,12 +2888,6 @@ fn emit_multiline_open_tag_with_attrs(
             builder.token(SyntaxKind::TEXT.into(), ">");
             let after_gt = &line_no_nl[gt + 1..];
             if lift_trailing && !after_gt.is_empty() {
-                // Lift trailing bytes (and the trailing newline) into
-                // `pre_content` so the open `HTML_BLOCK_TAG` ends cleanly
-                // with `TEXT(">")`. The recursive parse at the close-marker
-                // site treats `pre_content` as the leading bytes of the
-                // structural body — same shape produced by `emit_open_tag_tokens`
-                // for single-line opens.
                 pre_content.push_str(after_gt);
                 pre_content.push_str(newline_str);
                 continue;
@@ -3609,8 +2927,6 @@ fn emit_multiline_open_tag_simple(
             raw
         };
         let bq_prefix_len = raw.len() - stripped.len();
-        // Line 0's bq prefix is owned by the outer BLOCK_QUOTE node;
-        // re-emit prefixes only for subsequent lines.
         if bq_prefix_len > 0 && line_idx != start_pos {
             emit_bq_prefix_tokens(builder, &raw[..bq_prefix_len]);
         }
@@ -3624,17 +2940,11 @@ fn emit_multiline_open_tag_simple(
     }
 }
 
-/// Emit the trailing portion of `<div`'s line 0 — i.e. anything after the
-/// `<div` literal up to end-of-line. Called only from
-/// `emit_multiline_open_tag_with_attrs`. The `>` is on a later line, so this is
-/// pure attribute (and possibly inter-attribute whitespace).
 fn emit_attr_region(builder: &mut GreenNodeBuilder<'static>, region: &str) {
     if region.is_empty() {
         return;
     }
     let bytes = region.as_bytes();
-    // Split a leading run of whitespace into a WHITESPACE token so the
-    // HTML_ATTRS node holds only attribute bytes.
     let ws_end = bytes
         .iter()
         .position(|&b| !matches!(b, b' ' | b'\t'))
@@ -3648,9 +2958,6 @@ fn emit_attr_region(builder: &mut GreenNodeBuilder<'static>, region: &str) {
     }
 }
 
-/// Emit one continuation line of an HTML block, preserving any blockquote
-/// prefix as `LINE_PREFIX` tokens (so the CST stays byte-equal to the
-/// source while consumers can skip the prefix structurally).
 fn emit_html_block_line(builder: &mut GreenNodeBuilder<'static>, line: &str, bq_depth: usize) {
     let inner = if bq_depth > 0 {
         let stripped = strip_n_blockquote_markers(line, bq_depth);
@@ -3742,33 +3049,20 @@ mod tests {
 
     #[test]
     fn test_try_parse_declaration() {
-        // CommonMark dialect recognizes declarations as type-4 HTML blocks.
         assert_eq!(
             try_parse_html_block_start("<!DOCTYPE html>", true),
             Some(HtmlBlockType::Declaration)
         );
-        // CommonMark §4.6 type 4 accepts any ASCII letter after `<!`, not
-        // just uppercase. Lowercase doctype must match too.
         assert_eq!(
             try_parse_html_block_start("<!doctype html>", true),
             Some(HtmlBlockType::Declaration)
         );
-        // Pandoc dialect does not — bare declarations fall through to
-        // paragraph parsing.
         assert_eq!(try_parse_html_block_start("<!DOCTYPE html>", false), None);
         assert_eq!(try_parse_html_block_start("<!doctype html>", false), None);
     }
 
     #[test]
     fn test_dialect_specific_block_tag_membership() {
-        // Pandoc-markdown's `blockHtmlTags` is a strict subset of
-        // CommonMark §4.6 type-6 plus a few additions. These tags
-        // diverge between dialects:
-        //   CM-only block tags (Pandoc treats as inline raw HTML):
-        //     dialog, legend, menuitem, optgroup, option, frame,
-        //     base, basefont, link, param
-        //   Pandoc-only block tags (CM doesn't recognize):
-        //     canvas, hgroup, isindex, meta, output
         for cm_only in [
             "<dialog>",
             "<legend>",
@@ -3795,8 +3089,6 @@ mod tests {
             );
         }
         for pandoc_only in ["<canvas>", "<hgroup>", "<isindex>", "<meta>", "<output>"] {
-            // Under CM these are not type-6 BlockTags; they may still match
-            // type-7 (complete tag on a line) which has different semantics.
             assert!(
                 !matches!(
                     try_parse_html_block_start(pandoc_only, true),
@@ -3816,11 +3108,6 @@ mod tests {
 
     #[test]
     fn test_pandoc_inline_block_tag_membership() {
-        // Pandoc's `eitherBlockOrInline` tags start an HTML block at
-        // fresh-block positions under Pandoc dialect. We list the
-        // non-void, non-script subset (verbatim `script` is handled
-        // via the verbatim path; void elements are deferred — see
-        // PANDOC_INLINE_BLOCK_TAGS docs).
         for tag in [
             "<button>",
             "<iframe>",
@@ -3846,11 +3133,6 @@ mod tests {
                 "{tag} should be a depth-aware block-tag start under Pandoc",
             );
         }
-        // Closing forms of inline-block tags also start a block under
-        // Pandoc — pandoc-native pins `</button>` standalone as a
-        // single-line `RawBlock`. These use `closes_at_open_tag: true`
-        // (no balanced match — the close emits as a one-line block on
-        // its own).
         for closing in ["</button>", "</iframe>", "</video>", "</audio>"] {
             assert!(
                 matches!(
@@ -3868,10 +3150,6 @@ mod tests {
 
     #[test]
     fn test_pandoc_void_block_tag_membership() {
-        // Pandoc's void `eitherBlockOrInline` tags start an HTML block
-        // at fresh-block positions under Pandoc dialect, with
-        // `closes_at_open_tag: true` — the block always ends on the
-        // open-tag line (no closing tag to match).
         for tag in [
             "<area>",
             "<embed>",
@@ -3892,11 +3170,6 @@ mod tests {
                 "{tag} should be a void block-tag start under Pandoc",
             );
         }
-        // Closing forms of void tags also start a single-line block
-        // under Pandoc. Void elements have no closing tag in HTML, but
-        // `</embed>` etc. can appear in the wild — pandoc-native still
-        // emits them as `RawBlock`s at fresh-block positions; mirror
-        // that with the same `closes_at_open_tag: true` shape.
         for closing in ["</area>", "</embed>", "</source>", "</track>"] {
             assert!(
                 matches!(
@@ -3910,13 +3183,6 @@ mod tests {
                 "{closing} (closing form) should be a single-line void block-tag start under Pandoc",
             );
         }
-        // Under CommonMark dialect, the void-tag block-start path is
-        // skipped. `<source>` and `<track>` are in the CM type-6
-        // BLOCK_TAGS set so they DO start a block, but with CM type-6
-        // semantics (`closed_by_blank_line: true`,
-        // `closes_at_open_tag: false`), not the Pandoc void-tag path.
-        // `<embed>` and `<area>` aren't in the CM type-6 list — they
-        // fall through to type 7 (complete tag on a line by itself).
         assert_eq!(
             try_parse_html_block_start("<embed>", true),
             Some(HtmlBlockType::Type7)
@@ -3945,7 +3211,6 @@ mod tests {
 
     #[test]
     fn test_find_multiline_open_end() {
-        // Single-line opens return None (caller takes the regular path).
         assert_eq!(
             find_multiline_open_end(
                 &["<div id=\"x\">"],
@@ -3966,7 +3231,6 @@ mod tests {
             ),
             None
         );
-        // Multi-line opens return the line index of the closing `>`.
         assert_eq!(
             find_multiline_open_end(
                 &["<embed", "  src=\"x\">"],
@@ -3987,7 +3251,6 @@ mod tests {
             ),
             Some(2)
         );
-        // Tag-name mismatch returns None (case-insensitive on the tag name).
         assert_eq!(
             find_multiline_open_end(
                 &["<embed", "  src=\"x\">"],
@@ -4008,8 +3271,6 @@ mod tests {
             ),
             Some(1)
         );
-        // Quoted `>` does not terminate the open tag; quote state threads
-        // across line boundaries.
         assert_eq!(
             find_multiline_open_end(
                 &["<embed title=\"a>b", "  c\">"],

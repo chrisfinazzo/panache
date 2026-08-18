@@ -399,9 +399,6 @@ impl UnresolvedReference {
     /// `]`). For `[foo]` this is `"foo"`; for `[text][label]` this is
     /// `"text"`.
     pub fn text(&self) -> String {
-        // Mirror Link::text behavior: collect TEXT tokens from the
-        // primary text wrapper if present, falling back to all TEXT
-        // tokens under the node.
         if let Some(link_text) = support::child::<LinkText>(&self.0) {
             return link_text.text_content();
         }
@@ -486,7 +483,6 @@ mod tests {
 
     #[test]
     fn image_reference_label_and_range_are_extracted() {
-        // Refdef present: parses as ImageLink so the wrapper accessors apply.
         let input = "![Alt text][img]\n\n[img]: /url\n";
         let tree = crate::parse(input, None);
         let image = tree
@@ -504,8 +500,6 @@ mod tests {
 
     #[test]
     fn unresolved_image_reference_label_is_extracted() {
-        // No matching refdef: parses as UnresolvedReference under Pandoc.
-        // Confirms `is_image()` and `label()` accessors.
         let input = "![Alt text][img]";
         let tree = crate::parse(input, None);
         let unresolved = tree

@@ -30,13 +30,10 @@ pub fn line_range_to_byte_offsets(
         current_line += 1;
     }
 
-    // If we reached end of document
     if current_line == end_line + 1 && start_offset.is_some() {
-        // end_line was the last line
         return start_offset.map(|start| (start, byte_offset));
     }
 
-    // end_line is beyond document
     None
 }
 
@@ -136,8 +133,7 @@ pub fn expand_byte_range_to_blocks(tree: &SyntaxNode, start: usize, end: usize) 
         }
     };
 
-    // Check if we need to expand to encompass parent containers
-    // This handles cases where the range touches list items, blockquotes, etc.
+    // Include a containing list item or block quote when the range touches it.
     if let Some(start_node) = find_enclosing_block(tree, expanded_start)
         && let Some(container) = find_expandable_container(&start_node)
     {

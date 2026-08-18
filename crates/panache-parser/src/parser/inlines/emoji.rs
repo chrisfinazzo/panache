@@ -26,7 +26,6 @@ pub(crate) fn try_parse_emoji(text: &str) -> Option<(usize, &str)> {
         return None;
     }
 
-    // Avoid matching as emoji when immediately followed by word characters.
     if end + 1 < bytes.len() {
         let next = bytes[end + 1] as char;
         if next.is_ascii_alphanumeric() || next == '_' {

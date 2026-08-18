@@ -16,13 +16,10 @@ use crate::syntax::SyntaxKind;
 pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
-    // Must start with [
     if bytes.is_empty() || bytes[0] != b'[' {
         return None;
     }
 
-    // Look ahead to see if this contains a citation marker (@)
-    // We need to distinguish from regular links
     let mut has_citation = false;
     let mut pos = 1;
     let mut bracket_depth = 0;
@@ -30,33 +27,23 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
     while pos < bytes.len() {
         match bytes[pos] {
             b'\\' => {
-                // Skip escaped character
                 pos += 2;
                 continue;
             }
-            b'`' => {
-                // Skip verbatim code spans; markers inside don't count.
-                match code_span_end(bytes, pos) {
-                    Some(end) => pos = end,
-                    None => pos += 1,
-                }
-            }
+            b'`' => match code_span_end(bytes, pos) {
+                Some(end) => pos = end,
+                None => pos += 1,
+            },
             b'[' => {
                 bracket_depth += 1;
                 pos += 1;
             }
             b']' => {
                 if bracket_depth == 0 {
-                    // Closing bracket of main citation - stop looking
                     break;
                 }
                 bracket_depth -= 1;
                 pos += 1;
-                // A nested bracket group directly followed by `(dest)` is an
-                // inline link/image; its destination is verbatim, so `@`
-                // inside it must not count (pandoc parses
-                // `[![alt](https://x.io/@scope)](url)` as a link, not a
-                // citation).
                 if pos < bytes.len()
                     && bytes[pos] == b'('
                     && let Some(end) = inline_destination_end(bytes, pos)
@@ -65,7 +52,6 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
                 }
             }
             b'@' => {
-                // Found a citation marker - this is likely a citation
                 has_citation = true;
                 break;
             }
@@ -79,24 +65,19 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
         return None;
     }
 
-    // Now find the closing bracket
     pos = 1;
     bracket_depth = 1;
 
     while pos < bytes.len() {
         match bytes[pos] {
             b'\\' => {
-                // Skip escaped character
                 pos += 2;
                 continue;
             }
-            b'`' => {
-                // Skip verbatim code spans; brackets inside don't close.
-                match code_span_end(bytes, pos) {
-                    Some(end) => pos = end,
-                    None => pos += 1,
-                }
-            }
+            b'`' => match code_span_end(bytes, pos) {
+                Some(end) => pos = end,
+                None => pos += 1,
+            },
             b'[' => {
                 bracket_depth += 1;
                 pos += 1;
@@ -104,13 +85,10 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
             b']' => {
                 bracket_depth -= 1;
                 if bracket_depth == 0 {
-                    // Found the closing bracket
                     let content = &text[1..pos];
                     return Some((pos + 1, content));
                 }
                 pos += 1;
-                // Skip nested link/image destinations so a `]` inside them
-                // does not terminate the citation bracket.
                 if pos < bytes.len()
                     && bytes[pos] == b'('
                     && let Some(end) = inline_destination_end(bytes, pos)
@@ -124,7 +102,6 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
         }
     }
 
-    // No closing bracket found
     None
 }
 
@@ -140,11 +117,6 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
 pub(crate) fn try_parse_bare_citation(text: &str, pos: usize) -> Option<(usize, &str, bool)> {
     let parsed @ (_, _, has_suppress) = parse_bare_citation_unchecked(text, pos)?;
 
-    // Pandoc's `notAfterString`: an author-in-text `@key` is not recognized
-    // when its `@` directly follows a word character, so `word@key` and
-    // `user@example.com` stay literal text. The rule keys off the character
-    // before the `@` itself, which is why the suppress-author `-@` form still
-    // cites after a word (`word-@key`) — there the `@` follows the `-`.
     if !has_suppress && prev_char_suppresses_bare_citation(text, pos) {
         return None;
     }
@@ -174,7 +146,6 @@ fn parse_bare_citation_unchecked(text: &str, pos: usize) -> Option<(usize, &str,
         }
     }
 
-    // Must have @ next
     if bytes[p] != b'@' {
         return None;
     }
@@ -184,7 +155,6 @@ fn parse_bare_citation_unchecked(text: &str, pos: usize) -> Option<(usize, &str,
         return None;
     }
 
-    // Parse the citation key
     let key_start = p;
     let key_len = parse_citation_key(&cite[p..])?;
 
@@ -356,9 +326,7 @@ fn parse_citation_key(text: &str) -> Option<usize> {
         return None;
     }
 
-    // Check for braced key: @{...}
     if text.starts_with('{') {
-        // Find matching closing brace
         let mut escape_next = false;
 
         for (idx, ch) in text.char_indices().skip(1) {
@@ -374,11 +342,9 @@ fn parse_citation_key(text: &str) -> Option<usize> {
             }
         }
 
-        // No closing brace found
         return None;
     }
 
-    // Regular key: must start with letter, digit, or _
     let mut iter = text.char_indices();
     let (_, first_char) = iter.next()?;
     if !first_char.is_alphanumeric() && first_char != '_' {
@@ -397,16 +363,13 @@ fn parse_citation_key(text: &str) -> Option<usize> {
             last_included_end = last_alnum_end;
             last_punct_start = None;
         } else if is_internal_punctuation(ch) {
-            // Check if previous was also punctuation (double punct terminates)
             if prev_was_punct {
-                // Double punctuation - terminate before the first punctuation
                 return Some(last_punct_start.unwrap_or(last_alnum_end));
             }
             prev_was_punct = true;
             last_punct_start = Some(idx);
             last_included_end = idx + ch.len_utf8();
         } else {
-            // Not a valid key character - terminate here
             break;
         }
     }
@@ -454,19 +417,12 @@ fn code_span_end(bytes: &[u8], pos: usize) -> Option<usize> {
     None
 }
 
-/// Given `bytes[pos] == b'('` immediately after a `]` that closed a nested
-/// bracket group, return the index just past the closing `)` when the group
-/// parses like an inline link/image destination: an optional angle-bracketed
-/// or bare (space-free, balanced-paren) destination followed by an optional
-/// quoted title. Returns `None` when the group is not destination-shaped, in
-/// which case its bytes stay visible to citation detection.
 fn inline_destination_end(bytes: &[u8], pos: usize) -> Option<usize> {
     let mut i = pos + 1;
     while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
         i += 1;
     }
     if i < bytes.len() && bytes[i] == b'<' {
-        // Angle-bracketed destination: runs to the closing `>`.
         i += 1;
         while i < bytes.len() && bytes[i] != b'>' {
             i += if bytes[i] == b'\\' { 2 } else { 1 };
@@ -476,8 +432,6 @@ fn inline_destination_end(bytes: &[u8], pos: usize) -> Option<usize> {
         }
         i += 1;
     } else {
-        // Bare destination: no whitespace, balanced parens. A `]` is allowed
-        // here (pandoc links `[x](a]b)`).
         let mut depth = 0usize;
         while i < bytes.len() {
             match bytes[i] {
@@ -496,8 +450,6 @@ fn inline_destination_end(bytes: &[u8], pos: usize) -> Option<usize> {
             }
         }
     }
-    // Optional whitespace, which must introduce a quoted title or end the
-    // group; a bare space inside the parens is not a valid destination.
     let mut j = i;
     while j < bytes.len() && matches!(bytes[j], b' ' | b'\t' | b'\n') {
         j += 1;
@@ -519,7 +471,6 @@ fn inline_destination_end(bytes: &[u8], pos: usize) -> Option<usize> {
     (j < bytes.len() && bytes[j] == b')').then(|| j + 1)
 }
 
-/// Check if a character is valid internal punctuation in citation keys.
 fn is_internal_punctuation(ch: char) -> bool {
     matches!(
         ch,
@@ -531,13 +482,10 @@ fn is_internal_punctuation(ch: char) -> bool {
 pub(crate) fn emit_bracketed_citation(builder: &mut impl InlineSink, content: &str) {
     builder.start_node(SyntaxKind::CITATION.into());
 
-    // Opening bracket
     builder.token(SyntaxKind::LINK_START.into(), "[");
 
-    // Emit prefix + citations + suffix with fine-grained tokens.
     emit_bracketed_citation_content(builder, content);
 
-    // Closing bracket
     builder.token(SyntaxKind::LINK_DEST.into(), "]");
 
     builder.finish_node();
@@ -548,9 +496,6 @@ fn emit_bracketed_citation_content(builder: &mut impl InlineSink, content: &str)
     let mut iter = content.char_indices().peekable();
 
     while let Some((idx, ch)) = iter.next() {
-        // Backslash escapes (e.g. `\@`, `\[`, `\]`) suppress citation/separator
-        // recognition for the following character — matching Pandoc, which
-        // treats the escape as a literal in the citation prefix/suffix.
         if ch == '\\' {
             iter.next();
             continue;
@@ -559,8 +504,6 @@ fn emit_bracketed_citation_content(builder: &mut impl InlineSink, content: &str)
         if ch == '`'
             && let Some(end) = code_span_end(content.as_bytes(), idx)
         {
-            // Verbatim code span: leave its bytes in the pending
-            // CITATION_CONTENT run and skip markers/separators inside it.
             while matches!(iter.peek(), Some((next_idx, _)) if *next_idx < end) {
                 iter.next();
             }
@@ -636,14 +579,12 @@ fn emit_bracketed_citation_content(builder: &mut impl InlineSink, content: &str)
 pub(crate) fn emit_bare_citation(builder: &mut impl InlineSink, key: &str, has_suppress: bool) {
     builder.start_node(SyntaxKind::CITATION.into());
 
-    // Emit marker (@ or -@)
     if has_suppress {
         builder.token(SyntaxKind::CITATION_MARKER.into(), "-@");
     } else {
         builder.token(SyntaxKind::CITATION_MARKER.into(), "@");
     }
 
-    // Check if key is braced
     if key.starts_with('{') && key.ends_with('}') {
         builder.token(SyntaxKind::CITATION_BRACE_OPEN.into(), "{");
         builder.token(SyntaxKind::CITATION_KEY.into(), &key[1..key.len() - 1]);
@@ -659,7 +600,6 @@ pub(crate) fn emit_bare_citation(builder: &mut impl InlineSink, key: &str, has_s
 mod tests {
     use super::*;
 
-    // Citation key parsing tests
     #[test]
     fn test_parse_simple_citation_key() {
         assert_eq!(parse_citation_key("doe99"), Some(5));
@@ -674,14 +614,12 @@ mod tests {
 
     #[test]
     fn test_parse_citation_key_trailing_punct() {
-        // Trailing punctuation should be excluded
         assert_eq!(parse_citation_key("Foo_bar.baz."), Some(11));
         assert_eq!(parse_citation_key("key:value:"), Some(9));
     }
 
     #[test]
     fn test_parse_citation_key_double_punct() {
-        // Double punctuation terminates key
         assert_eq!(parse_citation_key("Foo_bar--baz"), Some(7)); // key is "Foo_bar"
     }
 
@@ -712,17 +650,12 @@ mod tests {
     fn is_crossref_key_accepts_custom_prefix() {
         let custom = vec!["algo".to_string()];
         assert!(is_crossref_key("algo-cd", &custom));
-        // Case-insensitive on the prefix, consistent with the built-in check.
         assert!(is_crossref_key("ALGO-cd", &custom));
-        // Built-ins still match alongside the custom set.
         assert!(is_crossref_key("tbl-x", &custom));
-        // A bare prefix with no `-suffix` is not a crossref.
         assert!(!is_crossref_key("algo", &custom));
-        // Unrelated prefixes remain citations.
         assert!(!is_crossref_key("doe99", &custom));
     }
 
-    // Bare citation parsing tests
     #[test]
     fn test_parse_bare_citation_simple() {
         let result = try_parse_bare_citation("@doe99", 0);
@@ -753,21 +686,15 @@ mod tests {
         assert_eq!(try_parse_bare_citation("@", 0), None);
     }
 
-    // Pandoc `notAfterString`: a bare `@key` glued to a preceding word
-    // character is literal text, not a citation. These expectations match
-    // `pandoc -f markdown` (see issue #448).
     #[test]
     fn test_bare_citation_suppressed_after_word() {
-        // `@` directly after a letter/digit is not a citation.
         assert_eq!(try_parse_bare_citation("word@key", 4), None);
         assert_eq!(try_parse_bare_citation("1@key", 1), None);
-        // Email addresses stay literal.
         assert_eq!(try_parse_bare_citation("user@example.com", 4), None);
     }
 
     #[test]
     fn test_bare_citation_suppressed_after_cjk() {
-        // CJK ideographs are alphanumeric, so a glued citation is suppressed.
         let text = "違法編訂@jzkhl";
         let at = text.find('@').unwrap();
         assert_eq!(try_parse_bare_citation(text, at), None);
@@ -775,13 +702,11 @@ mod tests {
 
     #[test]
     fn test_bare_citation_suppressed_after_period() {
-        // A trailing `.` also suppresses (matches pandoc's str handling).
         assert_eq!(try_parse_bare_citation("x.@key", 2), None);
     }
 
     #[test]
     fn test_bare_citation_allowed_after_non_word_punct() {
-        // Non-word punctuation before `@` keeps the citation.
         assert_eq!(
             try_parse_bare_citation("x)@key", 2),
             Some((4, "key", false))
@@ -791,7 +716,6 @@ mod tests {
 
     #[test]
     fn test_bare_citation_allowed_after_space() {
-        // The classic in-text form: a space before `@`.
         assert_eq!(
             try_parse_bare_citation("says @doe99", 5),
             Some((6, "doe99", false))
@@ -800,8 +724,6 @@ mod tests {
 
     #[test]
     fn test_suppress_author_citation_allowed_after_word() {
-        // The `-@` form still cites after a word: its `@` follows the `-`,
-        // not the word (pandoc parses `word-@key` as a citation).
         assert_eq!(
             try_parse_bare_citation("word-@key", 4),
             Some((5, "key", true))
@@ -810,15 +732,12 @@ mod tests {
 
     #[test]
     fn test_bare_citation_at_buffer_start() {
-        // No preceding character: the citation stands.
         assert_eq!(
             try_parse_bare_citation("@doe99", 0),
             Some((6, "doe99", false))
         );
     }
 
-    // `suppressed_bare_citation` is the linter's mirror of the parser guard: it
-    // returns exactly the bare citations `notAfterString` rejected.
     #[test]
     fn test_suppressed_bare_citation_after_word() {
         assert_eq!(
@@ -835,16 +754,12 @@ mod tests {
 
     #[test]
     fn test_suppressed_bare_citation_none_when_recognized() {
-        // A citation that actually parses is not "suppressed".
         assert_eq!(suppressed_bare_citation("says @doe99", 5), None);
         assert_eq!(suppressed_bare_citation("@doe99", 0), None);
-        // The `-@` form is never suppressed by context.
         assert_eq!(suppressed_bare_citation("word-@key", 4), None);
-        // No citation at the position at all.
         assert_eq!(suppressed_bare_citation("word key", 4), None);
     }
 
-    // Bracketed citation parsing tests
     #[test]
     fn test_parse_bracketed_citation_simple() {
         let result = try_parse_bracketed_citation("[@doe99]");
@@ -883,7 +798,6 @@ mod tests {
 
     #[test]
     fn test_parse_bracketed_citation_not_citation() {
-        // Regular link should not be parsed as citation
         assert_eq!(try_parse_bracketed_citation("[text](url)"), None);
         assert_eq!(try_parse_bracketed_citation("[just text]"), None);
     }
@@ -902,23 +816,17 @@ mod tests {
 
     #[test]
     fn test_parse_bracketed_citation_paren_in_prefix() {
-        // Pandoc treats parens in the citation prefix as ordinary text;
-        // they must not abort citation detection.
         let result = try_parse_bracketed_citation("[see (Smith 1999) and @doe99]");
         assert_eq!(result, Some((29, "see (Smith 1999) and @doe99")));
     }
 
     #[test]
     fn test_bracketed_citation_ignores_at_in_code_span() {
-        // `@foo` inside a code span is verbatim, so [`@foo`] is a link label,
-        // not a citation (matches pandoc).
         assert_eq!(try_parse_bracketed_citation("[`@foo`]"), None);
     }
 
     #[test]
     fn test_bracketed_citation_code_span_in_prefix() {
-        // A code span may appear in the citation prefix; @ inside it is verbatim
-        // and the real @key follows.
         assert_eq!(
             try_parse_bracketed_citation("[`x@y` @doe99]"),
             Some((14, "`x@y` @doe99"))
@@ -927,7 +835,6 @@ mod tests {
 
     #[test]
     fn test_bracketed_citation_bracket_in_code_span() {
-        // A `]` inside a code span does not terminate the bracket.
         assert_eq!(
             try_parse_bracketed_citation("[`a]b` @doe99]"),
             Some((14, "`a]b` @doe99"))
@@ -936,7 +843,6 @@ mod tests {
 
     #[test]
     fn test_bracketed_citation_unterminated_backtick() {
-        // An unterminated backtick run is literal, so @foo is still a citation.
         assert_eq!(
             try_parse_bracketed_citation("[`@foo bar]"),
             Some((11, "`@foo bar"))
@@ -945,8 +851,6 @@ mod tests {
 
     #[test]
     fn test_bracketed_citation_ignores_at_in_nested_image_url() {
-        // The @ lives in the image destination, so the outer bracket is a link
-        // label, not a citation (matches pandoc's Link [ Image ... ] parse).
         assert_eq!(
             try_parse_bracketed_citation(
                 "[![npm version](https://badge.fury.io/js/@arity-cli%2Farity-cli.svg?icon=si%3Anpm)]"
@@ -965,8 +869,6 @@ mod tests {
 
     #[test]
     fn test_bracketed_citation_marker_after_nested_link_url() {
-        // A nested link's destination is skipped, but a top-level @key after
-        // it still makes the bracket a citation (matches pandoc).
         assert_eq!(
             try_parse_bracketed_citation("[see [foo](url@x) and @bar]"),
             Some((27, "see [foo](url@x) and @bar"))
@@ -975,9 +877,6 @@ mod tests {
 
     #[test]
     fn test_parse_bracketed_citation_escaped_at_in_prefix() {
-        // Pandoc accepts \@ref(label) inside the citation prefix without
-        // mistaking it for a citation marker; the actual citation is the
-        // unescaped @key that follows.
         let result =
             try_parse_bracketed_citation(r"[see also \@ref(svm) and @bischl_applied_2024]");
         assert_eq!(

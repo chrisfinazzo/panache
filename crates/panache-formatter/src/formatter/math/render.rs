@@ -25,10 +25,6 @@ pub(super) fn render(tree: &SyntaxNode, opts: &MathFormatOptions) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Display: block environments interleaved with free (non-aligned) rows.
-// ---------------------------------------------------------------------------
-
 fn render_display(top: &[SyntaxElement], opts: &MathFormatOptions) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut pending: Vec<SyntaxElement> = Vec::new();
@@ -64,9 +60,6 @@ fn flush_free_rows(
     lines: &mut Vec<String>,
 ) {
     let rows = split_logical_rows(elems);
-    // A relation chain spread across `\\` hard breaks is aligned like an implicit
-    // `aligned`: continuation rows hang under the head row's RHS column (rule
-    // "b"). `extra` is that per-row alignment offset (0 for heads / non-chains).
     let extra = relation_chain_alignment(&rows);
     for (idx, row) in rows.iter().enumerate() {
         if row.is_blank() {
@@ -74,14 +67,10 @@ fn flush_free_rows(
         }
         let ei = extra[idx];
         let pad = " ".repeat(ei);
-        // Charge the flat math-indent *and* the alignment offset against the
-        // budget so packed (and single) lines genuinely stay within `line_width`
-        // once the indent and pad are prepended.
         let budget = line_width.saturating_sub(indent.chars().count() + ei);
         let physical = linebreak::break_free_row(&row.elems, budget);
         let last = physical.len() - 1;
         for (i, content) in physical.into_iter().enumerate() {
-            // The trailing `\\` (if any) rides the final physical line.
             let content = if i == last {
                 with_break(content, row.has_break)
             } else {
@@ -92,16 +81,6 @@ fn flush_free_rows(
     }
 }
 
-/// Per-row alignment offset for relation chains split across `\\` hard breaks.
-///
-/// A *group* is a maximal run of `\\`-joined rows whose head ends in a hard break
-/// and whose every following row begins with a top-level relation operator (a
-/// continuation like `= b`). For a group of ≥ 2 rows, each continuation row is
-/// offset to the head row's [`linebreak::rhs_start_column`] so the continuation
-/// relations hang under the head's right-hand side. Heads, non-chain rows, and
-/// any group containing a top-level `&` (left to the existing free-row path) get
-/// offset 0. Recomputed from the (whitespace-trimmed) logical rows each pass, so
-/// the alignment is a deterministic fixed point.
 fn relation_chain_alignment(rows: &[Row]) -> Vec<usize> {
     let mut extra = vec![0usize; rows.len()];
     let mut i = 0;
@@ -129,14 +108,9 @@ fn relation_chain_alignment(rows: &[Row]) -> Vec<usize> {
     extra
 }
 
-/// True if any direct element of the row is a top-level `&` alignment tab.
 fn has_top_level_align(elems: &[SyntaxElement]) -> bool {
     elems.iter().any(|el| el.kind() == SyntaxKind::MATH_ALIGN)
 }
-
-// ---------------------------------------------------------------------------
-// Environments.
-// ---------------------------------------------------------------------------
 
 fn render_environment_lines(
     env: &SyntaxNode,
@@ -144,8 +118,6 @@ fn render_environment_lines(
     opts: &MathFormatOptions,
 ) -> Vec<String> {
     let Some(parts) = EnvParts::of(env) else {
-        // Defensive: a shape we don't recognize (only reachable if the parser
-        // contract drifts) — emit collapsed-but-verbatim so we stay lossless-ish.
         return vec![render_inline(
             &env.children_with_tokens().collect::<Vec<_>>(),
         )];
@@ -157,8 +129,6 @@ fn render_environment_lines(
     lines
 }
 
-/// An environment's reconstructed `\begin{name}` / `\end{name}` lines and the
-/// body elements between them.
 struct EnvParts {
     begin_line: String,
     end_line: String,
@@ -179,7 +149,6 @@ impl EnvParts {
 
         let begin_line = format!(r"\begin{}", group_text(&children, begin_name));
         let end_line = format!(r"\end{}", group_text(&children, end_name));
-        // Body = everything strictly between the begin name group and `\end`.
         let body_start = begin_name.map(|i| i + 1).unwrap_or(begin_idx + 1);
         let body = children[body_start..end_idx].to_vec();
         Some(Self {
@@ -197,16 +166,11 @@ fn first_group_after(children: &[SyntaxElement], idx: usize) -> Option<usize> {
         .map(|p| p + idx + 1)
 }
 
-/// `{name}` text of the group at `idx`, or empty (an unnamed environment).
 fn group_text(children: &[SyntaxElement], idx: Option<usize>) -> String {
     idx.and_then(|i| children[i].as_node())
         .map(|n| n.text().to_string())
         .unwrap_or_default()
 }
-
-// ---------------------------------------------------------------------------
-// Body layout: alignable rows + nested-environment blocks.
-// ---------------------------------------------------------------------------
 
 enum BodyItem {
     /// A nested environment rendered on its own line(s), already indented.
@@ -312,7 +276,6 @@ fn pad_right(s: &str, width: usize) -> String {
     }
 }
 
-/// Append a normalized ` \\` line break (or a bare `\\` if the row is empty).
 fn with_break(line: String, has_break: bool) -> String {
     if !has_break {
         return line;
@@ -324,23 +287,16 @@ fn with_break(line: String, has_break: bool) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Rows & cells.
-// ---------------------------------------------------------------------------
-
 struct Row {
     elems: Vec<SyntaxElement>,
     has_break: bool,
 }
 
 impl Row {
-    /// No content tokens and no hard break ⇒ a blank/whitespace-only line.
     fn is_blank(&self) -> bool {
         !self.has_break && self.elems.iter().all(is_layout_whitespace)
     }
 
-    /// If the row's only content is a single nested environment (no `&`, no
-    /// `\\`), return it so it can be block-laid-out instead of inlined.
     fn single_environment(&self) -> Option<SyntaxNode> {
         if self.has_break {
             return None;
@@ -385,8 +341,6 @@ fn split_logical_rows(elems: &[SyntaxElement]) -> Vec<Row> {
                 });
                 cur_has_comment = false;
             }
-            // A comment-terminating newline closes the row (drop the newline, as
-            // a soft break); any other soft newline is kept as in-row whitespace.
             SyntaxKind::MATH_NEWLINE if cur_has_comment => {
                 rows.push(Row {
                     elems: std::mem::take(&mut cur),
@@ -411,9 +365,6 @@ fn split_logical_rows(elems: &[SyntaxElement]) -> Vec<Row> {
     rows
 }
 
-/// Split a flat element run into rows. A row ends at a top-level `\\` (hard
-/// break, recorded) or a top-level newline (soft break, dropped). Trailing
-/// content with no terminator is the final row.
 fn split_rows(elems: &[SyntaxElement]) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
     let mut cur: Vec<SyntaxElement> = Vec::new();
@@ -443,8 +394,6 @@ fn split_rows(elems: &[SyntaxElement]) -> Vec<Row> {
     rows
 }
 
-/// Split a row into cells on top-level `&` tokens. A `&` nested inside a group
-/// or sub-environment is not a separator (it isn't a direct child here).
 fn split_cells(elems: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
     let mut cells: Vec<Vec<SyntaxElement>> = vec![Vec::new()];
     for el in elems {
@@ -461,10 +410,6 @@ pub(super) fn is_layout_whitespace(el: &SyntaxElement) -> bool {
     matches!(el.kind(), SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE)
         && el.as_token().is_some()
 }
-
-// ---------------------------------------------------------------------------
-// Inline rendering: flatten tokens, then re-space around operators.
-// ---------------------------------------------------------------------------
 
 /// Render a run of elements onto a single line. Groups and nested environments
 /// are flattened in document order, whitespace runs collapse to one space, and
@@ -489,9 +434,6 @@ pub(super) fn render_inline_seeded(elems: &[SyntaxElement], seed: Option<AtomCla
     collapse_spaces(&space_operators(&toks, seed))
 }
 
-/// Flatten elements into `(kind, text)` tokens in document order, descending
-/// into group/environment nodes so `{`/`}` and nested-environment tokens appear
-/// in the stream (the spacing pass needs them for atom-class context).
 fn flatten_tokens(elems: &[SyntaxElement]) -> Vec<(SyntaxKind, String)> {
     let mut out: Vec<(SyntaxKind, String)> = Vec::new();
     for el in elems {
@@ -510,7 +452,6 @@ fn flatten_tokens(elems: &[SyntaxElement]) -> Vec<(SyntaxKind, String)> {
     out
 }
 
-/// The spacing demand an emitted atom places on the gaps beside it.
 #[derive(Clone, Copy, PartialEq)]
 enum Demand {
     /// Nothing emitted yet — no leading space before the first atom.
@@ -523,24 +464,13 @@ enum Demand {
     TightOp,
 }
 
-/// Walk the flat token stream, grouping consecutive `MATH_OPERATOR` tokens into
-/// runs and emitting one space on each side of binary/relation runs while
-/// keeping unary runs tight. Author whitespace between non-operator atoms is
-/// preserved (a command-terminating space in `\alpha x`, a `\text{ a }`
-/// interior); whitespace adjacent to a tight unary operator is stripped, but a
-/// space demanded by a neighboring spaced operator still wins.
 fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> String {
     let mut out = String::new();
     let mut prev_class: Option<AtomClass> = seed;
     let mut prev_demand = Demand::Start;
     let mut pending_space = false;
-    // Brace-group mode stack (`true` = text mode, where interior whitespace is
-    // significant) and whether the last significant token was a text-mode
-    // command (so its `{…}` argument opens a text-mode group).
     let mut group_stack: Vec<bool> = Vec::new();
     let mut prev_sig_is_text_cmd = false;
-    // Set when the `:` of a definition `:=` was passed over: the next operator
-    // run's first atom carries it, so the pair is emitted as one relation.
     let mut colon_head = false;
 
     let mut i = 0;
@@ -551,9 +481,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 pending_space = true;
                 i += 1;
             }
-            // The `:` of a `:=` is the head of a composite relation, not an
-            // ordinary atom — hold it back and let the `=` below emit `:=` as one
-            // spaced unit. The space it demands lands *before* the `:`.
             SyntaxKind::MATH_TEXT
                 if operators::is_definition_colon(
                     text,
@@ -565,10 +492,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 i += 1;
             }
             SyntaxKind::MATH_OPERATOR => {
-                // Collect the maximal run of *adjacent* operator tokens (a space
-                // between two operators breaks the run, so `- -` stays two),
-                // then split it into atoms: relation-char runs merge (`<=`),
-                // each sign char stands alone so it can be unary (`=-` → `= -`).
                 let mut run = String::new();
                 while i < toks.len() && toks[i].0 == SyntaxKind::MATH_OPERATOR {
                     run.push_str(&toks[i].1);
@@ -578,7 +501,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                     .into_iter()
                     .enumerate()
                 {
-                    // Only the run's *first* atom fuses with a held-back `:`.
                     let atom = if n == 0 && colon_head {
                         format!(":{atom}")
                     } else {
@@ -601,12 +523,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
             SyntaxKind::MATH_COMMAND => {
                 let name = text.strip_prefix('\\').unwrap_or(text);
                 let demand = match operators::command_class(name) {
-                    // A binary/relation command operator (`\cdot`, `\leq`) gets
-                    // one space on each side. A coerced (unary-position) command
-                    // op, a large operator (`\sum`), a delimiter (`\left`), or an
-                    // ordinary command (`\alpha`, `\frac`) stays Plain — never
-                    // TightOp — so the mandatory command-terminating space is
-                    // preserved, never stripped into a wrong control word.
                     Some(raw) => {
                         let class = operators::coerce(raw, prev_class);
                         prev_class = Some(class);
@@ -628,8 +544,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 i += 1;
             }
             SyntaxKind::MATH_COMMENT => {
-                // Transparent for class purposes (an operator looks back past a
-                // comment), but emitted verbatim.
                 emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
                 pending_space = false;
                 prev_demand = Demand::Plain;
@@ -637,9 +551,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 i += 1;
             }
             SyntaxKind::MATH_SCRIPT => {
-                // `_`/`^` bind tightly: strip author whitespace on both sides
-                // (it is insignificant in TeX). Still present an `Open` class so
-                // a directly following `+`/`-` coerces to unary (`x^{-1}`).
                 emit_atom(&mut out, prev_demand, Demand::TightOp, pending_space, text);
                 pending_space = false;
                 prev_demand = Demand::TightOp;
@@ -648,13 +559,9 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 i += 1;
             }
             SyntaxKind::MATH_GROUP_OPEN => {
-                // A group is text mode if its `{` is a text-command argument or
-                // its parent group is already text mode (`\text{a {b} c}`).
                 let parent_text = group_stack.last().copied().unwrap_or(false);
                 let is_text = prev_sig_is_text_cmd || parent_text;
                 group_stack.push(is_text);
-                // Exterior (left) gap is preserved; the interior-leading space is
-                // stripped for a math-mode group (`{ 00}` → `{00}`), kept for text.
                 emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
                 pending_space = false;
                 prev_demand = if is_text {
@@ -668,8 +575,6 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
             }
             SyntaxKind::MATH_GROUP_CLOSE => {
                 let is_text = group_stack.pop().unwrap_or(false);
-                // Interior-trailing space is stripped for a math-mode group
-                // (`{-1 }` → `{-1}`); the exterior space after `}` is preserved.
                 let cur = if is_text {
                     Demand::Plain
                 } else {
@@ -692,16 +597,12 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
             }
         }
     }
-    // Defensive: a slice that ends on the `:` of a `:=` (its `=` lives outside)
-    // must still emit the colon — dropping it would lose bytes.
     if colon_head {
         emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, ":");
     }
     out
 }
 
-/// Append `text`, inserting the resolved gap before it. The first atom
-/// (`prev == Start`) never gets a leading space.
 fn emit_atom(out: &mut String, prev: Demand, cur: Demand, pending_space: bool, text: &str) {
     if prev != Demand::Start && gap_space(prev, cur, pending_space) {
         out.push(' ');
@@ -722,14 +623,7 @@ fn gap_space(prev: Demand, cur: Demand, pending_space: bool) -> bool {
     }
 }
 
-/// The atom class a non-operator token presents to a *following* operator run.
-/// `MATH_COMMAND` is handled inline in [`space_operators`] (it sets `prev_class`
-/// from the coerced class), so it never reaches here. `None` resets context (a
-/// `\\` starts a fresh line, so a following `+`/`-` is unary).
 fn atom_prev_class(kind: SyntaxKind, _text: &str) -> Option<AtomClass> {
-    // Delimiters/punctuation (`( ) [ ] , ;`) carry their class on the token
-    // kind now — the parser tokenizes them, so the formatter no longer re-lexes
-    // a `MATH_TEXT` tail to recover it.
     if let Some(class) = operators::delimiter_class(kind) {
         return Some(class);
     }
@@ -737,18 +631,13 @@ fn atom_prev_class(kind: SyntaxKind, _text: &str) -> Option<AtomClass> {
         SyntaxKind::MATH_TEXT => AtomClass::Ord,
         SyntaxKind::MATH_GROUP_OPEN => AtomClass::Open,
         SyntaxKind::MATH_GROUP_CLOSE => AtomClass::Close,
-        // `^`/`_` bind tightly; a `&` opens a fresh cell — both make a directly
-        // following `+`/`-` unary.
         SyntaxKind::MATH_SCRIPT | SyntaxKind::MATH_ALIGN => AtomClass::Open,
         SyntaxKind::MATH_LINE_BREAK => return None,
-        // MATH_EQUATION_LABEL and anything unforeseen: ordinary.
         _ => AtomClass::Ord,
     };
     Some(class)
 }
 
-/// Collapse runs of spaces to a single space (tabs already became spaces). Safe
-/// everywhere: math mode ignores spaces; text mode collapses runs anyway.
 fn collapse_spaces(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_space = false;

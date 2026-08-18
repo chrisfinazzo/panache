@@ -40,10 +40,6 @@ pub(crate) fn parse_line_block(
 ) -> usize {
     let lines = window.raw();
     let start_pos = window.pos();
-    // The 5-scalar container geometry is derived once from the window's
-    // prefix; the dispatch-line emitter (`emit_open_line_prefixes`) still
-    // consumes the scalars, while continuation lines route through the
-    // window's `strip_at` / `emit_prefix_at`.
     let prefix = window.prefix();
     let bq_depth = prefix.bq_depth();
     let list_content_col = prefix.list_content_col();
@@ -62,25 +58,10 @@ pub(crate) fn parse_line_block(
         let raw_line = lines[pos];
 
         let kind = if first_line {
-            // Detection in `LineBlockParser::detect_prepared` already confirmed
-            // line 0 is a marker line; commit without a peek.
             LineKind::Marker
         } else {
-            // Peek with the strip emission will actually use: `strip_at`
-            // walks the list indent column-blind, so on an under-indented
-            // lazy line like `" b |"` it hands back `" |"` and the trailing
-            // pipe reads as a marker the emitter will not find.
             let peek = window.peek_prefix_at(pos);
-            // A line carrying fewer `>` markers than the quote is open at is
-            // lazy, and pandoc's blockquote reader drops its indentation when
-            // it folds the line back in — so by the time `lineBlockLine` sees
-            // it there is no leading space left to continue with.
             let lazy_in_quote = bq_depth > 0 && count_blockquote_markers(raw_line).0 < bq_depth;
-            // Continuation before marker: pandoc's `lineBlockLine` runs
-            // `many (try (char ' ' >> anyLine))` *inside* the line it just
-            // read, so the continuation gobble wins over the next
-            // `lineBlockLine` attempt. An indented marker line therefore
-            // folds into the line above instead of opening one of its own.
             if !lazy_in_quote && continues_previous_line(peek, raw_line, list_content_col) {
                 LineKind::Continuation
             } else if parse_line_block_line_marker(peek).is_some() {
@@ -92,10 +73,6 @@ pub(crate) fn parse_line_block(
 
         builder.start_node(SyntaxKind::LINE_BLOCK_LINE.into());
 
-        // Emit container-prefix tokens inside LINE_BLOCK_LINE so each
-        // line's byte range stays self-contained (matches the top-level
-        // line_blocks snapshot convention where LINE_BLOCK_LINE covers a
-        // whole source line).
         let stripped = if first_line {
             emit_open_line_prefixes(
                 builder,
@@ -211,7 +188,6 @@ fn emit_open_line_prefixes<'a>(
         if let Some(start) = *pending
             && current_offset > start
         {
-            // Container-frame indent on the dispatch line: prefix.
             builder.token(
                 SyntaxKind::LINE_PREFIX.into(),
                 &source_line[start..current_offset],
@@ -276,8 +252,6 @@ fn emit_open_line_prefixes<'a>(
 /// Parse a line block marker and return the index where content starts.
 /// Returns Some(index) if the line starts with "| " or just "|", None otherwise.
 fn parse_line_block_line_marker(line: &str) -> Option<usize> {
-    // Line block lines start with | followed by a space or end of line
-    // We need to handle leading whitespace (indentation)
     let trimmed_start = line.len() - line.trim_start().len();
     let after_indent = &line[trimmed_start..];
 
@@ -302,7 +276,6 @@ mod tests {
         assert!(try_parse_line_block_start("|").is_some()); // Empty line block
         assert!(try_parse_line_block_start("  | Some text").is_some());
 
-        // Not line blocks
         assert!(try_parse_line_block_start("|No space").is_none());
         assert!(try_parse_line_block_start("Regular text").is_none());
         assert!(try_parse_line_block_start("").is_none());
@@ -315,7 +288,6 @@ mod tests {
         assert_eq!(parse_line_block_line_marker("|"), Some(1)); // Empty line block
         assert_eq!(parse_line_block_line_marker("  | Indented"), Some(4));
 
-        // Not valid
         assert_eq!(parse_line_block_line_marker("|No space"), None);
         assert_eq!(parse_line_block_line_marker("Regular"), None);
     }
@@ -362,26 +334,18 @@ mod tests {
 
     #[test]
     fn continuation_needs_leading_space_at_top_level() {
-        // list_content_col == 0: only the stripped tail decides.
         assert!(continues_previous_line("  b", "  b", 0));
         assert!(!continues_previous_line("b", "b", 0));
         assert!(!continues_previous_line("\n", "\n", 0));
-        // A whitespace-only line reads as an empty continuation, matching
-        // pandoc: `| a\n  \n| b` is one line block of two lines.
         assert!(continues_previous_line("   \n", "   \n", 0));
     }
 
     #[test]
     fn indented_marker_line_continues_the_line_above() {
-        // Pandoc's continuation gobble beats the next `lineBlockLine`, so a
-        // marker that carries any leading space folds into the line above:
-        // `| a\n  | b` is one line reading `a | b`.
         assert!(continues_previous_line("  | b", "  | b", 0));
         assert!(continues_previous_line(" | b", " | b", 0));
-        // Bare `|` and a marker with no space after it fold in the same way.
         assert!(continues_previous_line("  |\n", "  |\n", 0));
         assert!(continues_previous_line("  |b", "  |b", 0));
-        // Flush against the margin it opens a line of its own.
         assert!(!continues_previous_line("| b", "| b", 0));
     }
 
@@ -395,9 +359,6 @@ mod tests {
         let new_pos = parse_line_block(&window, &mut builder, &ParserOptions::default());
 
         assert_eq!(new_pos, 3);
-        // A continuation keeps its own LINE_BLOCK_LINE node but carries no
-        // LINE_BLOCK_MARKER, so the marker count is the count of logical
-        // lines: two, not three — `  | b` folds into `| a`.
         let node = crate::syntax::SyntaxNode::new_root(builder.finish());
         let markers = node
             .descendants_with_tokens()
@@ -408,16 +369,9 @@ mod tests {
 
     #[test]
     fn under_indented_lazy_line_continues_inside_a_list_item() {
-        // Pandoc's `gobbleSpaces 2` fails on a one-space line, so `" b |"`
-        // keeps its indent and continues the line above. Panache's strip is
-        // greedy and hands us `"b |"`, hence the raw-line check.
         assert!(continues_previous_line("b |", " b |", 2));
-        // Indented past the content column: still a continuation.
         assert!(continues_previous_line(" b |", "   b |", 2));
-        // Indented exactly to the content column: the gobble succeeds and
-        // consumes all of it, so this opens a new block instead.
         assert!(!continues_previous_line("b |", "  b |", 2));
-        // No indent at all: never a continuation.
         assert!(!continues_previous_line("b |", "b |", 2));
     }
 

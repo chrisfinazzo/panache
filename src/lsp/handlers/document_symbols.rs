@@ -65,14 +65,12 @@ fn build_document_symbols(
                 if let Some(symbol) = extract_heading_symbol(&node, index) {
                     let level = heading_levels.get(&node.text_range()).copied().unwrap_or(1);
 
-                    // Pop stack until we find a parent with lower level
                     while let Some((stack_level, _)) = heading_stack.last() {
                         if *stack_level < level {
                             break;
                         }
                         let (_, completed) = heading_stack.pop().unwrap();
 
-                        // Add to parent or root
                         if let Some((_, parent)) = heading_stack.last_mut() {
                             parent.children.get_or_insert_with(Vec::new).push(completed);
                         } else {

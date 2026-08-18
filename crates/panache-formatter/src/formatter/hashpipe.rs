@@ -56,10 +56,8 @@ fn preamble_normalized_yaml(content_node: &SyntaxNode) -> String {
     out.replace("\r\n", "\n")
 }
 
-/// A chunk option with a classified value (simple or expression).
 type ClassifiedOption = (String, ChunkOptionValue);
 
-/// Value types that can appear in chunk options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ValueType {
     Boolean,
@@ -68,45 +66,32 @@ enum ValueType {
     QuotedStringOnly, // Only accepts quoted strings, not barewords
 }
 
-/// Allowlist of chunk options safe for hashpipe conversion.
-///
-/// Each entry maps an option name to the value types it accepts in hashpipe format.
-/// Options not in this list will stay inline to avoid unknown type restrictions.
-///
-/// Based on knitr documentation: https://yihui.org/knitr/options/
 const HASHPIPE_SAFE_OPTIONS: &[(&str, &[ValueType])] = &[
-    // Chunk identification
     ("label", &[ValueType::QuotedStringOnly]), // Chunk label/name - only quoted to be safe
-    // Code evaluation
-    ("eval", &[ValueType::Boolean]), // Can also be numeric vector, but keep those inline
-    // Text output
-    ("echo", &[ValueType::Boolean]), // Can also be numeric vector, but keep those inline
-    ("results", &[ValueType::String]), // "markup", "asis", "hold", "hide"
+    ("eval", &[ValueType::Boolean]),           // Can also be numeric vector, but keep those inline
+    ("echo", &[ValueType::Boolean]),           // Can also be numeric vector, but keep those inline
+    ("results", &[ValueType::String]),         // "markup", "asis", "hold", "hide"
     ("collapse", &[ValueType::Boolean]),
     ("warning", &[ValueType::Boolean]), // Can also be NA or numeric, but keep those inline
     ("message", &[ValueType::Boolean]),
     ("error", &[ValueType::Boolean]), // Can also be numeric 0/1/2, but keep those inline
     ("include", &[ValueType::Boolean]),
     ("strip-white", &[ValueType::Boolean]),
-    // Code decoration
     ("comment", &[ValueType::String]),
     ("highlight", &[ValueType::Boolean]),
     ("prompt", &[ValueType::Boolean]),
     ("size", &[ValueType::String]),       // LaTeX font sizes
     ("background", &[ValueType::String]), // Color values
-    // Cache
-    ("cache", &[ValueType::Boolean]), // Can also be path, but keep those inline
+    ("cache", &[ValueType::Boolean]),     // Can also be path, but keep those inline
     ("cache-path", &[ValueType::String]),
     ("cache-lazy", &[ValueType::Boolean]),
     ("cache-comments", &[ValueType::Boolean]),
     ("cache-rebuild", &[ValueType::Boolean]),
     ("autodep", &[ValueType::Boolean]),
-    // Plots
     ("fig-path", &[ValueType::String]),
     ("fig-keep", &[ValueType::String]), // "high", "none", "all", "first", "last"
     ("fig-show", &[ValueType::String]), // "asis", "hold", "animate", "hide"
     ("dev", &[ValueType::String]),      // "png", "pdf", "svg", etc.
-    // Figure dimensions and layout
     ("fig-width", &[ValueType::Numeric]),
     ("fig-height", &[ValueType::Numeric]),
     ("fig-asp", &[ValueType::Numeric]),  // Aspect ratio
@@ -117,21 +102,16 @@ const HASHPIPE_SAFE_OPTIONS: &[(&str, &[ValueType])] = &[
     ("fig-env", &[ValueType::String]),
     ("fig-pos", &[ValueType::String]),
     ("fig-scap", &[ValueType::String]),
-    // Figure captions and alt text
     ("fig-cap", &[ValueType::String]),
     ("fig-alt", &[ValueType::String]),
     ("fig-subcap", &[ValueType::String]),
-    // Plot parameters
     ("dpi", &[ValueType::Numeric]),
-    // Animation
     ("aniopts", &[ValueType::String]),
     ("ffmpeg-format", &[ValueType::String]),
-    // Quarto-specific code display
     ("code-fold", &[ValueType::Boolean, ValueType::String]), // true/false or "show"/"hide"
     ("code-summary", &[ValueType::String]),
     ("code-overflow", &[ValueType::String]), // "wrap" or "scroll"
     ("code-line-numbers", &[ValueType::Boolean]),
-    // Output classes/attributes
     ("classes", &[ValueType::String]),
 ];
 
@@ -176,14 +156,12 @@ pub fn get_comment_prefix(language: &str) -> Option<&'static str> {
 ///
 /// First checks the override table, then falls back to replacing dots with dashes.
 pub fn normalize_option_name(name: &str) -> String {
-    // Check override table first
     for (old, new) in OPTION_NAME_OVERRIDES {
         if name == *old {
             return (*new).to_string();
         }
     }
 
-    // Default: replace dots with dashes
     name.replace('.', "-")
 }
 
@@ -262,9 +240,6 @@ pub fn split_options_from_cst_with_content(
         value: String,
         is_quoted: bool,
     ) {
-        // Dedup against inline-source keys via the normalized form, but emit
-        // the original key so user-written dotted YAML keys (e.g. knitr's
-        // `cache.extra`) are preserved verbatim.
         let normalized_key = normalize_option_name(&key);
         let rendered = if is_quoted {
             format!("\"{}\"", value)
@@ -283,7 +258,6 @@ pub fn split_options_from_cst_with_content(
     let mut had_content_hashpipe = false;
     let mut pending_label_parts: Vec<String> = Vec::new();
 
-    // 1) Inline options from CODE_INFO CHUNK_OPTIONS (highest precedence)
     let Some(info) = CodeInfo::cast(info_node.clone()) else {
         return ((Vec::new(), Vec::new()), false);
     };
@@ -297,9 +271,6 @@ pub fn split_options_from_cst_with_content(
                 }
             }
             ChunkInfoItem::Class(class) => {
-                // Classes stay on the fence line — hashpipe YAML has no class
-                // syntax, so they belong with `complex` (which the caller
-                // re-emits between the language and the comma options).
                 let text = class.text();
                 if !text.is_empty() {
                     fence_attrs.push(ChunkOptionRepr::Class(text));
@@ -341,11 +312,6 @@ pub fn split_options_from_cst_with_content(
         );
     }
 
-    // 2) Existing leading hashpipe options from the embedded YAML preamble
-    // (lower precedence). The parser already stripped the `#|` markers into
-    // `YAML_LINE_PREFIX` trivia and embedded a real YAML subtree; reconstruct the
-    // prefix-stripped text from it and reuse the value-extraction logic. Parsing
-    // multiline quoted values lets rewrapping normalize them.
     if let Some(content_node) = embedded_hashpipe_content(code_block_node) {
         let normalized_yaml = preamble_normalized_yaml(&content_node);
         if let Some(options) = extract_options_from_normalized_yaml(&normalized_yaml) {
@@ -357,8 +323,6 @@ pub fn split_options_from_cst_with_content(
     }
 
     let mut simple = Vec::new();
-    // Classes/ids lead the fence-side group so the renderer can emit them
-    // directly after the language token (pandoc-canonical shape).
     let mut complex: Vec<ChunkOptionRepr> = fence_attrs;
     for (_, entry) in entries {
         match entry {
@@ -387,27 +351,19 @@ fn hashpipe_map_entry_value_text(normalized_yaml: &str, entry: &YamlBlockMapEntr
     };
 
     match value.as_node() {
-        // Plain / quoted scalar: raw text (quotes preserved), multi-line plain
-        // scalars folded for deterministic re-wrap, with any tag re-prepended.
-        // Block scalars (`|` / `>`) are scalars too but must round-trip as block
-        // values, so they take the block-preserving path below.
         Some(YamlNode::Scalar(scalar)) => match scalar.style() {
             YamlScalarStyle::Literal | YamlScalarStyle::Folded => {
                 let (start, end) = range_usize(scalar.text_range());
                 block_value_text(normalized_yaml, start, end)
             }
             YamlScalarStyle::Plain if scalar.raw().contains('\n') => {
-                // Normalize wrapped plain scalars to a single logical line.
                 let folded = fold_multiline_plain_scalar(&scalar.raw());
                 prepend_tag(value.tag(), folded)
             }
             _ => prepend_tag(value.tag(), scalar.raw()),
         },
-        // Flow container: slice its range and trim (single logical line).
         Some(YamlNode::FlowSequence(n)) => slice_trim(normalized_yaml, n.syntax()),
         Some(YamlNode::FlowMap(n)) => slice_trim(normalized_yaml, n.syntax()),
-        // Block container: preserve as a block value (issue #172) with the
-        // omitted-first-line indent restored.
         Some(YamlNode::BlockMap(n)) => {
             let (start, end) = range_usize(n.syntax().text_range());
             block_value_text(normalized_yaml, start, end)
@@ -416,7 +372,6 @@ fn hashpipe_map_entry_value_text(normalized_yaml: &str, entry: &YamlBlockMapEntr
             let (start, end) = range_usize(n.syntax().text_range());
             block_value_text(normalized_yaml, start, end)
         }
-        // Empty value: slice the value node range verbatim.
         None => {
             let (start, end) = range_usize(value.syntax().text_range());
             normalized_yaml[start..end].to_string()
@@ -568,22 +523,18 @@ fn classify_option_for_hashpipe(
 ) -> Option<ChunkOptionValue> {
     use panache_parser::parser::utils::chunk_options::{is_boolean_literal, is_numeric_literal};
 
-    // Find allowed value types for this option
     let allowed_types = HASHPIPE_SAFE_OPTIONS
         .iter()
         .find(|(name, _)| *name == key)
         .map(|(_, types)| *types)?;
 
-    // Check if value type matches allowed types
     if is_quoted {
-        // Quoted string - safe if String or QuotedStringOnly is allowed
         if allowed_types.contains(&ValueType::String)
             || allowed_types.contains(&ValueType::QuotedStringOnly)
         {
             return Some(ChunkOptionValue::Simple(format!("\"{}\"", value)));
         }
     } else {
-        // Unquoted - check boolean, numeric, or simple bareword
         if allowed_types.contains(&ValueType::Boolean)
             && (is_boolean_literal(value) || matches!(value, "true" | "false"))
         {
@@ -592,20 +543,14 @@ fn classify_option_for_hashpipe(
         if is_numeric_literal(value) && allowed_types.contains(&ValueType::Numeric) {
             return Some(ChunkOptionValue::Simple(value.to_string()));
         }
-        // Unquoted string (bareword) - only if String is allowed (not QuotedStringOnly)
         if allowed_types.contains(&ValueType::String) && is_simple_bareword(value) {
             return Some(ChunkOptionValue::Simple(value.to_string()));
         }
     }
 
-    // Doesn't match allowed types or is complex expression - keep inline
     None
 }
 
-/// Check if a value is a simple bareword (identifier), not an expression.
-///
-/// Always returns false - we don't convert barewords to be safe.
-/// Inline format requires quotes for string values (e.g., results="asis" not results=asis).
 fn is_simple_bareword(_s: &str) -> bool {
     false
 }
@@ -647,16 +592,13 @@ pub fn format_hashpipe_option_with_wrap(
 
     let first_line = format!("{} {}: {}", prefix, key, value);
 
-    // Check if wrapping is needed
     if first_line.len() <= line_width {
         return vec![first_line];
     }
 
-    // Calculate available space
     let first_prefix = format!("{} {}: ", prefix, key);
     let available_first = line_width.saturating_sub(first_prefix.len());
 
-    // If even the prefix is too long, return as-is (don't break mid-word)
     if available_first < 10 {
         return vec![first_line];
     }
@@ -675,11 +617,9 @@ pub fn format_hashpipe_option_with_wrap(
             available_continuation
         };
 
-        // Find word boundary at or before available length
         let break_point = if remaining.len() <= available {
             remaining.len()
         } else {
-            // Find last space before or at available
             let upper = floor_char_boundary(remaining, available);
             if upper == 0 {
                 remaining
@@ -725,17 +665,10 @@ pub fn format_as_hashpipe(
     let mut yaml_entries: Vec<(String, String)> = Vec::new();
 
     for (key, value) in options {
-        // Only format simple values
         if let ChunkOptionValue::Simple(v) = value {
-            // Keys arrive pre-normalized from the inline-source path; the
-            // hashpipe-content path intentionally preserves the user's original
-            // form (e.g. knitr's dotted `cache.extra`), so trust them as-is.
             let norm_key = key.clone();
             let norm_val = normalize_value(v);
 
-            // Handle bare options (no value).
-            // `label` is a string field; keep empty as an empty string instead of
-            // coercing to boolean true.
             let mut value_str = if norm_val.is_empty() {
                 if norm_key == "label" {
                     String::new()
@@ -746,9 +679,6 @@ pub fn format_as_hashpipe(
                 norm_val
             };
 
-            // Quote labels only when needed to keep YAML parsing stable across
-            // passes (e.g., `label: warning: false ...`), while preserving
-            // existing plain-label output for normal labels.
             if norm_key == "label" && label_needs_yaml_quotes(&value_str) {
                 value_str = canonicalize_label_yaml_value(&value_str);
             }
@@ -798,19 +728,12 @@ pub fn format_as_hashpipe(
                     }
                     rendered
                 } else if value.ends_with('\n') {
-                    // Block scalars (`>` / `|`) arrive already terminated by
-                    // their content newline; appending another would inject a
-                    // blank line inside the scalar before the next key.
                     format!("{key}: {value}")
                 } else {
                     format!("{key}: {value}\n")
                 }
             })
             .collect::<String>();
-        // The YAML formatter wraps to the width of the raw YAML text. Hashpipe
-        // output adds a comment prefix (`#| `, `//| `, `--| `) before every
-        // rendered line, so subtract that width to keep final emitted lines
-        // within line_width.
         let yaml_print_width = line_width.saturating_sub(prefix.len() + 1);
         let yaml_config = crate::config::Config {
             line_width: yaml_print_width,
@@ -859,7 +782,6 @@ fn label_needs_yaml_quotes(value: &str) -> bool {
     {
         return false;
     }
-    // YAML plain scalars become ambiguous for this case.
     trimmed.contains(':')
 }
 
@@ -950,7 +872,6 @@ mod tests {
         assert!(lines[0].starts_with("#| fig-cap:"));
         assert!(lines[1].starts_with("#|   ")); // 3-space indent
         assert!(lines[0].len() <= 80);
-        // Continuation lines might be slightly over due to word boundaries
     }
 
     #[test]
@@ -1008,7 +929,6 @@ mod tests {
 
     #[test]
     fn test_format_as_hashpipe_simple() {
-        // Keys arrive pre-normalized at this layer.
         let options = vec![
             (
                 "echo".to_string(),
@@ -1028,11 +948,6 @@ mod tests {
 
     #[test]
     fn test_format_as_hashpipe_folded_scalar_no_extra_blank() {
-        // A folded (`>`) block-scalar value arrives from the content path
-        // already terminated by a newline. `format_as_hashpipe` must not
-        // append a second newline, which would otherwise inject a blank
-        // `#|` line inside the folded scalar before the next key (and
-        // silently change the scalar's value by adding a trailing newline).
         let options = vec![
             (
                 "fig-cap".to_string(),
@@ -1086,7 +1001,6 @@ mod tests {
             ChunkOptionValue::Simple("TRUE".to_string()),
         )];
 
-        // Unknown language should return None
         let result = format_as_hashpipe("fortran", &options, 80, None);
         assert!(result.is_none());
     }

@@ -49,10 +49,6 @@ fn test_pipe_table_idempotency() {
     assert_eq!(first_format, second_format);
 }
 
-// An escaped pipe `\|` inside a table-cell code span is a literal pipe, not a
-// column delimiter. The cell must stay one intact code span and the table must
-// keep its original column count (regression: the row was re-split on `|`,
-// producing a phantom 3rd column and rewriting `\|` to `\ |`).
 #[test]
 fn test_pipe_table_escaped_pipe_in_code_span() {
     let input = "| cmd | run |\n| --- | --- |\n| go | `curl x \\| sh` |";
@@ -64,7 +60,6 @@ fn test_pipe_table_escaped_pipe_in_code_span() {
     assert_eq!(format(&result, None, None), result);
 }
 
-// Guard: a genuine 3-column table (unescaped pipes) still formats as 3 columns.
 #[test]
 fn test_pipe_table_genuine_three_columns() {
     let input = "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |";
@@ -185,9 +180,6 @@ fn test_pipe_table_without_edge_pipes() {
     assert_eq!(result, expected);
 }
 
-// Grid table tests
-// ============================================================================
-
 #[test]
 fn test_basic_grid_table() {
     let input = "+-------+--------+\n| Left  | Right  |\n+=======+========+\n| A     | B      |\n+-------+--------+\n| C     | D      |\n+-------+--------+";
@@ -277,10 +269,6 @@ fn test_grid_table_with_spanning_style_rows_stays_idempotent() {
 
 #[test]
 fn test_grid_table_with_spanning_style_caption_before_normalizes_after() {
-    // Headerless, no alignment colons: the unified span-aware engine reads
-    // alignment from the source (none -> left) instead of inventing a centered
-    // column 0, and preserves the source border widths. The rowspan cell text
-    // sitting on a sub-row separator (`| Temperature +---+---+`) is preserved.
     let input = ": My caption\n\n+-------------+-------+----------+\n|             | min   | -89.2 °C |\n| Temperature +-------+----------+\n| 1961-1990   | mean  | 14 °C    |\n|             +-------+----------+\n|             | min   | 56.7 °C  |\n+-------------+-------+----------+\n";
     let expected = "+-------------+-------+----------+\n|             | min   | -89.2 °C |\n| Temperature +-------+----------+\n| 1961-1990   | mean  | 14 °C    |\n|             +-------+----------+\n|             | min   | 56.7 °C  |\n+-------------+-------+----------+\n\n: My caption\n";
     let result = format(input, None, None);
@@ -289,10 +277,6 @@ fn test_grid_table_with_spanning_style_caption_before_normalizes_after() {
 
 #[test]
 fn test_grid_table_rowspan_reads_alignment_from_colons() {
-    // A rowspan cell (`group/spans/rows` in column 0) with a numeric column
-    // whose alignment is right per the separator colons (`=======:`). The
-    // unified engine reads alignment from the source, not by guessing from the
-    // numeric content, so the values are right-aligned and column 0 centered.
     let input = "+--------+--------+\n| Name   | Value  |\n+:======:+=======:+\n| group  | 1.5    |\n| spans  +--------+\n| rows   | 22.0   |\n+--------+--------+\n";
     let expected = "+--------+--------+\n|  Name  |  Value |\n+:======:+=======:+\n| group  |    1.5 |\n| spans  +--------+\n|  rows  |   22.0 |\n+--------+--------+\n";
     let result = format(input, None, None);
@@ -381,10 +365,6 @@ fn test_grid_table_center_alignment() {
 
 #[test]
 fn test_grid_table_in_list_item_keeps_container_indent() {
-    // Top-level grid tables sit at column 0, but a grid nested in a list item
-    // must keep the container indent so it still parses as a table (pandoc
-    // strips the list prefix before recognizing the `+---+` border). The
-    // formatter threads the container indent instead of a hardcoded one.
     let input = "- An item:\n\n  +---+---+\n  | a | b |\n  +===+===+\n  | 1 | 2 |\n  +===+===+\n";
     let first = format(input, None, None);
     let second = format(&first, None, None);
@@ -397,9 +377,6 @@ fn test_grid_table_in_list_item_keeps_container_indent() {
 
 #[test]
 fn test_grid_table_preserves_wide_source_columns() {
-    // Grid column widths carry relative-width info pandoc propagates to HTML
-    // (<col style="width:X%">); the formatter must NOT shrink a wide column
-    // down to its short content. See issue #323.
     let input = "+----------------+-----+\n| A              | B   |\n\
                  +================+=====+\n| C              | D   |\n\
                  +----------------+-----+\n";
@@ -442,8 +419,6 @@ fn test_multiline_table_with_wide_chars_stays_idempotent() {
     assert_eq!(first, second);
 }
 
-// Output geometry is recomputed from content (pandoc-style: dash run =
-// max-content-width + 2), so oversized source separators are normalized away.
 #[test]
 fn test_simple_table_normalizes_oversized_separator_columns() {
     let input = "   Right     Left\n -------     --------------\n     12         12\n   123          123\n       1        1\n";
@@ -453,7 +428,6 @@ fn test_simple_table_normalizes_oversized_separator_columns() {
     assert_eq!(result, expected);
 }
 
-// `table-indent = 0` keeps a top-level pipe table flush at column 0.
 #[test]
 fn test_pipe_table_indent_zero_is_flush() {
     let input = "| A | B |\n|---|---|\n| C | D |";
@@ -465,7 +439,6 @@ fn test_pipe_table_indent_zero_is_flush() {
     assert_eq!(format(&result, Some(config), None), result);
 }
 
-// The default indent of 2 keeps the historical two-column offset.
 #[test]
 fn test_pipe_table_default_indent_is_two() {
     let input = "| A | B |\n|---|---|\n| C | D |";
@@ -475,7 +448,6 @@ fn test_pipe_table_default_indent_is_two() {
     assert_eq!(result, expected);
 }
 
-// A non-default indent of 3 shifts a top-level pipe table three columns.
 #[test]
 fn test_pipe_table_indent_three() {
     let input = "| A | B |\n|---|---|\n| C | D |";
@@ -486,7 +458,6 @@ fn test_pipe_table_indent_three() {
     assert_eq!(result, expected);
 }
 
-// `table-indent` governs simple tables too, not just pipe tables.
 #[test]
 fn test_simple_table_honors_table_indent() {
     let input = "   Right     Left\n -------     --------------\n     12         12\n   123          123\n       1        1\n";
@@ -497,14 +468,8 @@ fn test_simple_table_honors_table_indent() {
     assert_eq!(result, expected);
 }
 
-// --- Column-spanning grid tables (issue #359) -------------------------------
-
 #[test]
 fn test_grid_colspan_preserves_all_cells_and_reflows() {
-    // A header cell spanning both body columns must keep its span and the body
-    // cells must not be truncated/padded away. Column widths floor to the source
-    // border widths (col 1's `:===:` interior 3 is kept, not shrunk). See #359,
-    // #323.
     let input = "+---------+\n|a        |\n+:=:+:===:+\n| aa|  ab |\n+---+-----+\n";
     let expected = "+----------+\n|    a     |\n+:==:+:===:+\n| aa | ab  |\n+----+-----+\n";
     assert_eq!(format(input, None, None), expected);
@@ -512,8 +477,6 @@ fn test_grid_colspan_preserves_all_cells_and_reflows() {
 
 #[test]
 fn test_grid_colspan_headerless_span_top_separator_alignment() {
-    // The wide second column (`----------`, interior 10) is preserved, not shrunk
-    // to the content width.
     let input =
         "+:-----------:+\n|           a |\n+--+----------+\n|aa|ab        |\n+--+----------+\n";
     let expected = "+:-------------:+\n|       a       |\n+----+----------+\n| aa |    ab    |\n+----+----------+\n";
@@ -522,9 +485,6 @@ fn test_grid_colspan_headerless_span_top_separator_alignment() {
 
 #[test]
 fn test_grid_colspan_does_not_drop_spanned_columns() {
-    // Five fine columns with a two-cell spanning header. The structured path
-    // used to truncate every row to the first separator's 3 columns, dropping
-    // the 4th/5th cells; the span-aware path keeps them.
     let input = concat!(
         "+-----+-------------------+-------------------+\n",
         "|     | $s = 3$           | $s = 2$           |\n",
@@ -549,9 +509,6 @@ fn test_grid_colspan_is_idempotent() {
 
 #[test]
 fn test_grid_colspan_misaligned_pipe_is_preserved_losslessly() {
-    // A content pipe that lands on no separator boundary can't be laid out on
-    // the grid; the table is preserved verbatim rather than emitting borders
-    // that don't line up.
     let input = "+---+---+\n| a | b |\n+---+---+\n| a very wide spanning header |\n+---+---+\n| c | d |\n+---+---+\n";
     let result = format(input, None, None);
     assert!(result.contains("| a very wide spanning header |"));
@@ -560,10 +517,6 @@ fn test_grid_colspan_misaligned_pipe_is_preserved_losslessly() {
 
 #[test]
 fn test_simple_table_cell_wider_than_dash_run_is_not_truncated() {
-    // A pandoc simple-table column spans to the start of the next column, so a
-    // cell whose content overruns its (short) dash run still belongs to that
-    // column. Slicing at the dash-run end used to truncate it
-    // ("boysenberries" -> "boyse").
     let input = "Fruit            Price\n-----            -----\nboysenberries    9\n";
     let result = format(input, None, None);
     assert!(
@@ -573,11 +526,6 @@ fn test_simple_table_cell_wider_than_dash_run_is_not_truncated() {
     assert_eq!(format(&result, None, None), result, "must be idempotent");
 }
 
-// Simple-table output is normalized purely from content, so the incoming dash
-// widths and inter-column padding do not affect the result: each column's dash
-// run is `max-content-width + 2`, columns separated by one space. (The source
-// column *start* positions still define which text belongs to which cell, so
-// both inputs below must keep `Price`/`9` past the `boysenberries` column.)
 #[test]
 fn test_simple_table_spacing_is_normalized_independent_of_source() {
     let a = "Fruit            Price\n-------------    -----\nboysenberries    9\n";
@@ -588,10 +536,6 @@ fn test_simple_table_spacing_is_normalized_independent_of_source() {
     assert_eq!(format(b, None, None), expected);
 }
 
-// Headerless simple tables carry no header row, so pandoc derives each
-// column's alignment from the *first data row's* position relative to the dash
-// runs (verified with `pandoc -f markdown -t native`). col0 is flush-right,
-// col1 flush-left, col2 centered, col3 flush-right.
 #[test]
 fn test_headerless_simple_table_alignment_from_first_data_row() {
     let config = ConfigBuilder::default().table_indent(0).build();
@@ -614,26 +558,14 @@ fn test_headerless_simple_table_alignment_from_first_data_row() {
     assert_eq!(format(&result, Some(config), None), result, "idempotent");
 }
 
-// Dash-run width equals the widest cell in the column plus two, regardless of
-// which row (header or body) is widest.
 #[test]
 fn test_simple_table_dash_run_is_content_width_plus_two() {
     let config = ConfigBuilder::default().table_indent(0).build();
-    // col1 widest = "boysenberries" (13) -> 15 dashes; col2 widest = "Price" (5)
-    // -> 7 dashes.
     let input = "Fruit           Price\n--------------- -------\nboysenberries   9\n";
     let result = format(input, Some(config), None);
     let sep = result.lines().nth(1).unwrap();
     assert_eq!(sep, "--------------- -------", "got:\n{result}");
 }
-
-// ---------------------------------------------------------------------------
-// The delimiter row owns the column count
-//
-// Pandoc reads a pipe table's column count off the delimiter row and pads or
-// truncates every other row to it. The formatter must not re-emit a count of
-// its own: doing so silently changes what pandoc renders.
-// ---------------------------------------------------------------------------
 
 /// A row short of the delimiter's count is padded out, so the delimiter row
 /// keeps all three of its columns (`pandoc -f markdown` reads three columns,
@@ -677,10 +609,6 @@ fn surplus_cells_in_a_list_item_leave_the_table_verbatim() {
     assert_eq!(format(&result, Some(config), None), result, "idempotent");
 }
 
-// ---------------------------------------------------------------------------
-// Alignment must not depend on the emitted line width
-// ---------------------------------------------------------------------------
-
 /// Pandoc reads a simple table's alignment off the header's position against
 /// the dash runs, and the emitted table is *wider* than the source whenever a
 /// body cell is the widest in its column. Bounding the header slice at the
@@ -689,10 +617,6 @@ fn surplus_cells_in_a_list_item_leave_the_table_verbatim() {
 #[test]
 fn test_simple_table_alignment_survives_a_widened_column() {
     let config = ConfigBuilder::default().table_indent(0).build();
-    // `pandoc -f markdown -t native` reads [AlignDefault, AlignCenter]: the
-    // header's `y` neither starts at the second dash run nor reaches its end.
-    // `zz   w` (collapsed to `zz w`) is the widest cell in that column, so
-    // the emitted dash run outruns the header line.
     let input = "bb  x  y\n----- ---\nx  y  zz   w\n";
     let expected = "bb x     y\n------ ------\nx y     zz w\n";
 

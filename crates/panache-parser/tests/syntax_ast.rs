@@ -6,31 +6,23 @@
 
 use panache_parser::{parse, syntax::SyntaxKind};
 
-// Import AST wrappers
 use panache_parser::syntax::{
     AstNode, Figure, GridTable, Heading, ImageAlt, ImageLink, Link, LinkDest, LinkRef, LinkText,
     MultilineTable, PipeTable, SimpleTable, TableCaption, TableCell, TableRow,
 };
-
-// =============================================================================
-// Link Tests
-// =============================================================================
 
 #[test]
 fn link_cast_and_accessors() {
     let input = "[text](url)\n";
     let tree = parse(input, None);
 
-    // Find the LINK node
     let link_node = tree
         .descendants()
         .find(|n| n.kind() == SyntaxKind::LINK)
         .expect("Should find LINK node");
 
-    // Cast to Link
     let link = Link::cast(link_node).expect("Should cast to Link");
 
-    // Test text() accessor
     let link_text = link.text().expect("Link should have text");
     let text_content = link_text.text_content();
     assert!(
@@ -38,12 +30,10 @@ fn link_cast_and_accessors() {
         "Link text should contain 'text'"
     );
 
-    // Test dest() accessor
     let link_dest = link.dest().expect("Link should have destination");
     let url = link_dest.url_content();
     assert_eq!(url, "url", "Link destination should be 'url'");
 
-    // reference() should be None for inline links
     assert!(
         link.reference().is_none(),
         "Inline link should not have reference"
@@ -55,7 +45,6 @@ fn link_reference_style() {
     let input = "[text][ref]\n\n[ref]: url\n";
     let tree = parse(input, None);
 
-    // Find the LINK node
     let link_node = tree
         .descendants()
         .find(|n| n.kind() == SyntaxKind::LINK)
@@ -63,10 +52,8 @@ fn link_reference_style() {
 
     let link = Link::cast(link_node).expect("Should cast to Link");
 
-    // Should have text
     assert!(link.text().is_some(), "Reference link should have text");
 
-    // Should have reference
     let link_ref = link
         .reference()
         .expect("Reference link should have reference");
@@ -108,14 +95,12 @@ fn link_dest_url_with_parentheses() {
 
     let dest = LinkDest::cast(dest_node).expect("Should cast to LinkDest");
 
-    // url() includes parentheses from CST
     let url_with_parens = dest.url();
     assert!(
         url_with_parens.contains("https://example.com"),
         "URL should contain the full URL"
     );
 
-    // url_content() strips parentheses
     let url_content = dest.url_content();
     assert_eq!(
         url_content, "https://example.com",
@@ -135,10 +120,6 @@ fn link_can_cast_rejects_wrong_kind() {
     );
 }
 
-// =============================================================================
-// Image Tests
-// =============================================================================
-
 #[test]
 fn image_link_cast_and_accessors() {
     let input = "![alt text](image.png)\n";
@@ -151,7 +132,6 @@ fn image_link_cast_and_accessors() {
 
     let image = ImageLink::cast(image_node).expect("Should cast to ImageLink");
 
-    // Test alt() accessor
     let alt = image.alt().expect("Image should have alt text");
     let alt_text = alt.text();
     assert!(
@@ -159,7 +139,6 @@ fn image_link_cast_and_accessors() {
         "Image alt should contain 'alt text'"
     );
 
-    // Test dest() accessor
     let dest = image.dest().expect("Image should have destination");
     let url = dest.url_content();
     assert_eq!(url, "image.png", "Image destination should be 'image.png'");
@@ -223,7 +202,6 @@ fn figure_with_image() {
     let input = "![Caption](image.png)\n\n";
     let tree = parse(input, None);
 
-    // Look for FIGURE node (if parser creates them for captioned images)
     if let Some(figure_node) = tree.descendants().find(|n| n.kind() == SyntaxKind::FIGURE) {
         let figure = Figure::cast(figure_node).expect("Should cast to Figure");
         let image = figure.image().expect("Figure should contain image");
@@ -233,10 +211,6 @@ fn figure_with_image() {
         );
     }
 }
-
-// =============================================================================
-// Table Tests - Pipe Tables
-// =============================================================================
 
 #[test]
 fn pipe_table_cast_and_rows() {
@@ -250,7 +224,6 @@ fn pipe_table_cast_and_rows() {
 
     let table = PipeTable::cast(table_node).expect("Should cast to PipeTable");
 
-    // Check rows
     assert!(
         table.rows().next().is_some(),
         "Table should have at least 1 row"
@@ -268,7 +241,6 @@ fn pipe_table_with_caption() {
     {
         let table = PipeTable::cast(table_node).expect("Should cast to PipeTable");
 
-        // Check for caption
         if let Some(caption) = table.caption() {
             let text = caption.text();
             assert!(
@@ -291,7 +263,6 @@ fn table_row_and_cells() {
 
     let row = TableRow::cast(row_node).expect("Should cast to TableRow");
 
-    // Check cells
     assert!(row.cells().count() >= 2, "Row should have at least 2 cells");
 }
 
@@ -306,12 +277,7 @@ fn table_cell_cast() {
         .expect("Should find TABLE_CELL node");
 
     let _cell = TableCell::cast(cell_node).expect("Should cast to TableCell");
-    // Just verify casting works
 }
-
-// =============================================================================
-// Table Tests - Grid Tables
-// =============================================================================
 
 #[test]
 fn grid_table_cast() {
@@ -324,17 +290,11 @@ fn grid_table_cast() {
     {
         let table = GridTable::cast(table_node).expect("Should cast to GridTable");
 
-        // Check rows accessor works
         assert!(table.rows().next().is_some(), "Grid table should have rows");
 
-        // Check caption accessor (should be None without caption)
         let _ = table.caption();
     }
 }
-
-// =============================================================================
-// Table Tests - Simple Tables
-// =============================================================================
 
 #[test]
 fn simple_table_cast() {
@@ -347,20 +307,14 @@ fn simple_table_cast() {
     {
         let table = SimpleTable::cast(table_node).expect("Should cast to SimpleTable");
 
-        // Check rows accessor works
         assert!(
             table.rows().next().is_some(),
             "Simple table should have rows"
         );
 
-        // Check caption accessor
         let _ = table.caption();
     }
 }
-
-// =============================================================================
-// Table Tests - Multiline Tables
-// =============================================================================
 
 #[test]
 fn multiline_table_cast() {
@@ -373,20 +327,17 @@ fn multiline_table_cast() {
     {
         let table = MultilineTable::cast(table_node).expect("Should cast to MultilineTable");
 
-        // Check rows accessor works
         assert!(
             table.rows().next().is_some(),
             "Multiline table should have rows"
         );
 
-        // Check caption accessor
         let _ = table.caption();
     }
 }
 
 #[test]
 fn table_caption_text() {
-    // Create any table with a caption
     let input = "| A |\n|---|\n| 1 |\n\n: My Caption\n";
     let tree = parse(input, None);
 
@@ -404,10 +355,6 @@ fn table_caption_text() {
     }
 }
 
-// =============================================================================
-// Heading Tests
-// =============================================================================
-
 #[test]
 fn heading_cast_and_level() {
     let input = "# Level 1\n";
@@ -420,11 +367,9 @@ fn heading_cast_and_level() {
 
     let heading = Heading::cast(heading_node).expect("Should cast to Heading");
 
-    // Test level() accessor
     let level = heading.level();
     assert_eq!(level, 1, "Heading level should be 1");
 
-    // Test text() accessor
     let text = heading.text();
     assert!(
         text.contains("Level 1"),
@@ -472,8 +417,6 @@ fn heading_with_inline_formatting() {
 
     let heading = Heading::cast(heading_node).expect("Should cast to Heading");
 
-    // The text() method extracts only TEXT tokens from HEADING_CONTENT
-    // (not from nested inline elements like EMPHASIS or CODE_SPAN)
     let text = heading.text();
     assert!(
         text.contains("Heading with") && text.contains(" and "),
@@ -481,14 +424,12 @@ fn heading_with_inline_formatting() {
         text
     );
 
-    // But the full heading should have inline children with their content
     let full_text = heading.syntax().text().to_string();
     assert!(
         full_text.contains("*emphasis*") && full_text.contains("`code`"),
         "Full heading should preserve formatting with content"
     );
 
-    // Verify inline elements are present as children
     let has_emphasis = heading
         .syntax()
         .descendants()
@@ -532,13 +473,11 @@ fn astnode_cast_returns_none_for_wrong_node() {
         .find(|n| n.kind() == SyntaxKind::HEADING)
         .expect("Should find HEADING node");
 
-    // Try to cast heading to Link - should return None
     assert!(
         Link::cast(heading_node.clone()).is_none(),
         "Should not cast Heading node to Link"
     );
 
-    // Try to cast heading to PipeTable - should return None
     assert!(
         PipeTable::cast(heading_node).is_none(),
         "Should not cast Heading node to PipeTable"
@@ -557,7 +496,6 @@ fn astnode_syntax_returns_underlying_node() {
 
     let link = Link::cast(link_node.clone()).expect("Should cast to Link");
 
-    // syntax() should return reference to the same node
     assert_eq!(
         link.syntax().kind(),
         SyntaxKind::LINK,
@@ -569,10 +507,6 @@ fn astnode_syntax_returns_underlying_node() {
         "syntax() should preserve node text"
     );
 }
-
-// =============================================================================
-// Support Module Tests (indirect)
-// =============================================================================
 
 #[test]
 fn support_child_finds_correct_child() {
@@ -586,10 +520,8 @@ fn support_child_finds_correct_child() {
 
     let link = Link::cast(link_node).expect("Should cast to Link");
 
-    // support::child should find LINK_TEXT
     assert!(link.text().is_some(), "Should find LINK_TEXT child");
 
-    // support::child should find LINK_DEST
     assert!(link.dest().is_some(), "Should find LINK_DEST child");
 }
 
@@ -604,12 +536,10 @@ fn support_children_iterator() {
     {
         let table = PipeTable::cast(table_node).expect("Should cast to PipeTable");
 
-        // support::children should iterate all TABLE_ROW children
         let mut rows = table.rows();
         let first_row = rows.next();
         assert!(first_row.is_some(), "Should find TABLE_ROW children");
 
-        // Check first row has cells
         if let Some(first_row) = first_row {
             assert!(
                 first_row.cells().next().is_some(),
@@ -618,12 +548,6 @@ fn support_children_iterator() {
         }
     }
 }
-
-// =============================================================================
-// Text Extraction from Nested Inline Elements
-// =============================================================================
-// These tests verify that text extraction methods correctly extract text
-// from nested inline elements (emphasis, code, etc.), not just direct children.
 
 #[test]
 fn heading_text_with_nested_emphasis() {
@@ -637,7 +561,6 @@ fn heading_text_with_nested_emphasis() {
 
     let heading = Heading::cast(heading_node).expect("Should cast to Heading");
 
-    // Should extract text from nested inline elements
     let text = heading.text();
     assert_eq!(
         text, "Heading with emphasis and code",
@@ -657,7 +580,6 @@ fn link_text_with_nested_emphasis() {
 
     let link_text = LinkText::cast(link_text_node).expect("Should cast to LinkText");
 
-    // Should extract text from nested inline elements
     let content = link_text.text_content();
     assert_eq!(
         content, "text with emphasis",
@@ -677,7 +599,6 @@ fn image_alt_with_nested_emphasis() {
 
     let alt = ImageAlt::cast(alt_node).expect("Should cast to ImageAlt");
 
-    // Should extract text from nested inline elements
     let text = alt.text();
     assert_eq!(
         text, "alt with emphasis",
@@ -696,7 +617,6 @@ fn table_caption_with_nested_emphasis() {
     {
         let caption = TableCaption::cast(caption_node).expect("Should cast to TableCaption");
 
-        // Should extract text from nested inline elements
         let text = caption.text();
         assert_eq!(
             text, "Caption with emphasis",
@@ -716,13 +636,8 @@ fn link_ref_label_extraction() {
     {
         let link_ref = LinkRef::cast(link_ref_node).expect("Should cast to LinkRef");
 
-        // NOTE: In this case, the parser doesn't create nested EMPHASIS nodes inside LINK_REF,
-        // so the text contains the raw "*emphasis* ref" string.
-        // This test documents the current behavior - need to verify if this is correct.
         let label = link_ref.label();
 
-        // Currently returns "*emphasis* ref" (with asterisks, no nested emphasis parsing)
-        // This may be correct Pandoc behavior - reference labels might not parse inline formatting
         println!("Link ref label: '{}'", label);
         assert!(
             label.contains("emphasis") || label.contains("*emphasis*"),
@@ -732,10 +647,6 @@ fn link_ref_label_extraction() {
     }
 }
 
-// =============================================================================
-// Edge Cases
-// =============================================================================
-
 #[test]
 fn empty_link_text() {
     let input = "[](url)\n";
@@ -744,10 +655,8 @@ fn empty_link_text() {
     if let Some(link_node) = tree.descendants().find(|n| n.kind() == SyntaxKind::LINK) {
         let link = Link::cast(link_node).expect("Should cast to Link");
 
-        // Should still have text node, even if empty
         if let Some(text) = link.text() {
             let content = text.text_content();
-            // Empty or whitespace only
             assert!(
                 content.is_empty() || content.trim().is_empty(),
                 "Empty link should have empty text content"
@@ -764,7 +673,6 @@ fn heading_without_text() {
     if let Some(heading_node) = tree.descendants().find(|n| n.kind() == SyntaxKind::HEADING) {
         let heading = Heading::cast(heading_node).expect("Should cast to Heading");
         assert_eq!(heading.level(), 1, "Should still recognize level");
-        // Text may be empty
         let _ = heading.text();
     }
 }
@@ -780,7 +688,6 @@ fn table_without_caption() {
     {
         let table = PipeTable::cast(table_node).expect("Should cast to PipeTable");
 
-        // caption() should return None without caption
         assert!(
             table.caption().is_none(),
             "Table without caption should return None"

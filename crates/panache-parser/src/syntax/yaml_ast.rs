@@ -109,10 +109,6 @@ fn node_child(parent: &SyntaxNode) -> Option<YamlNode> {
     scalar_token(parent).map(YamlNode::Scalar)
 }
 
-/// First direct `YAML_SCALAR` node child of `parent`, wrapped. A scalar is a
-/// node whose leaves are the per-line `YAML_SCALAR_TEXT` fragments (and any
-/// `NEWLINE` between them); flow punctuation is `YAML_FLOW_INDICATOR`, so it
-/// never matches here.
 fn scalar_token(parent: &SyntaxNode) -> Option<YamlScalar> {
     parent
         .children()
@@ -539,9 +535,6 @@ mod tests {
 
     #[test]
     fn content_range_excludes_trailing_trivia() {
-        // A nested block map's `text_range()` runs up to the next sibling key
-        // (it owns the trailing newline); `content_range()` ends at the last
-        // content byte so a diagnostic does not bleed onto the sibling line.
         let input = "outer:\n  a: 1\n  b: 2\nsibling: x\n";
         let doc = parse_yaml_document(input).expect("document");
         let inner = doc.block_map().unwrap().value_of("outer").unwrap();
@@ -590,9 +583,6 @@ mod tests {
     fn value_skips_embedded_line_prefix() {
         use crate::parser::yaml::parse_stream_with_prefix;
 
-        // Double-quoted multi-line scalar inside hashpipe-prefixed YAML: the
-        // `#|` continuation prefix is carried as a `YAML_LINE_PREFIX` leaf for
-        // losslessness, but it must not bleed into the cooked value.
         let tree = parse_stream_with_prefix("#| key: \"foo\n#|   bar\"\n", "#|");
         let scalar = first_document(&tree)
             .and_then(|d| d.block_map())
@@ -602,7 +592,6 @@ mod tests {
         let value = scalar.value();
         assert!(!value.contains("#|"), "prefix leaked into value: {value:?}");
         assert_eq!(value, "foo bar");
-        // raw() stays byte-exact (lossless contract): the prefix leaf is kept.
         assert!(
             scalar.raw().contains("#|"),
             "raw() must retain the prefix leaf: {:?}",

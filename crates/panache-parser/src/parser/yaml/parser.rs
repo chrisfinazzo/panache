@@ -38,10 +38,6 @@ use super::model::{YamlDiagnostic, YamlParseReport};
 use super::profile::YamlValidationContext;
 use super::scanner::{Scanner, TokenKind, TriviaKind};
 
-/// Strip a per-line `prefix` (marker plus at most one following space)
-/// from every line, joining with `\n`. The stripped baseline a
-/// prefix-aware parse is validated against (see
-/// [`validate_yaml_with_prefix`]).
 fn strip_line_prefix(input: &str, prefix: &str) -> String {
     input
         .lines()
@@ -77,10 +73,8 @@ fn strip_line_prefix_with_offsets(input: &str, prefix: &str) -> (String, Vec<usi
     let mut offsets = Vec::new();
     let base = input.as_ptr() as usize;
     for (line_idx, line) in input.lines().enumerate() {
-        // `line` is a subslice of `input`; recover its byte offset.
         let line_off = line.as_ptr() as usize - base;
         if line_idx > 0 {
-            // The join `\n` maps to the original line break preceding this line.
             offsets.push(line_off.saturating_sub(1));
             stripped.push('\n');
         }
@@ -124,9 +118,6 @@ pub fn locate_yaml_diagnostic_ctx(
         let end = diag.byte_end.min(input.len()).max(start);
         return Some((diag, start, end));
     }
-    // Validate cheaply first (no offset table) — the common, valid path returns
-    // here. Only build the lockstep offset map when there's actually a
-    // diagnostic to locate.
     let diag =
         super::validator::validate_yaml_with_context(&strip_line_prefix(input, prefix), ctx)?;
     let (_stripped, offsets) = strip_line_prefix_with_offsets(input, prefix);
@@ -202,35 +193,9 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
         None => Scanner::new(input),
     };
     let mut doc_open = false;
-    // True when the open YAML_DOCUMENT has only seen directives + trivia
-    // (no body content yet, no `---`). YAML 1.2 says directives belong to
-    // the document the following `---` opens, so when DocumentStart
-    // arrives in this state the marker stays inside the same document
-    // rather than splitting it. Cleared as soon as any non-directive
-    // body content lands.
     let mut doc_only_has_directives = false;
-    // Stack of currently-open block containers. Each frame tracks
-    // whether its current `YAML_BLOCK_MAP_ENTRY` / `YAML_BLOCK_SEQUENCE_ITEM`
-    // sub-wrapper is still open and waiting to be closed (by the next
-    // `Key` / `BlockEntry` peer or by `BlockEnd`).
     let mut block_stack: Vec<BlockFrame> = Vec::new();
-    // Kind of the last non-trivia, non-stream-marker, non-decoration
-    // token emitted. An indentless block sequence is only valid when
-    // its `-` directly follows the map entry's `:` (the value is
-    // otherwise empty), so the `BlockEntry` handler consults this to
-    // tell RLU9 (`foo:\n- 42`, value is purely the sequence) apart from
-    // G9HC (`seq:\n&anchor\n- a` with the anchor at column 0 — an
-    // error the validator must still catch on the unwrapped shape).
-    // Anchor / Tag / Alias tokens are *decorations* of the next node
-    // and don't fill the empty-value slot; they're skipped here so a
-    // value-leading decoration still permits an indentless sequence
-    // (SKE5: `seq:\n &anchor\n- a`).
     let mut prev_significant: Option<TokenKind> = None;
-    // Smallest column among Anchor/Tag/Alias decorations seen since the
-    // last value-filling token. The indentless detector uses this to
-    // distinguish SKE5 (decoration indented past parent → wrap) from
-    // G9HC (decoration at parent indent → leave unwrapped for the
-    // validator). `None` when no decoration is pending.
     let mut decoration_col_floor: Option<usize> = None;
     while let Some(tok) = scanner.next_token() {
         let last_significant = prev_significant;
@@ -277,15 +242,8 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 continue;
             }
             TokenKind::BlockEnd => {
-                // Indentless sequences have no scanner BlockEnd of their
-                // own, so a BlockEnd arriving while one is on top is meant
-                // for the real container beneath it. Close the indentless
-                // frame(s) first, then consume the BlockEnd normally.
                 close_indentless_sequences(&mut builder, &mut block_stack);
                 close_open_sub_wrapper(&mut builder, &mut block_stack);
-                // Defensive: only close if the scanner gave us an open
-                // container. A stray BlockEnd would otherwise pop the
-                // YAML_DOCUMENT or YAML_STREAM frame.
                 if block_stack.pop().is_some() {
                     builder.finish_node();
                 }
@@ -295,8 +253,6 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 ensure_doc_open(&mut builder, &mut doc_open);
                 doc_only_has_directives = false;
                 ensure_flow_seq_item_open(&mut builder, &mut block_stack);
-                // If nested inside a Map's open KEY/VALUE wrapper, the
-                // current open scope is the appropriate parent.
                 builder.start_node(SyntaxKind::YAML_FLOW_SEQUENCE.into());
                 block_stack.push(BlockFrame::FlowSequence { item_open: false });
                 let text = &input[tok.start.index..tok.end.index];
@@ -343,22 +299,13 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 continue;
             }
             TokenKind::FlowEntry => {
-                // `,` closes the current entry/item and lives at the
-                // container level (between peer entries/items).
                 close_open_sub_wrapper(&mut builder, &mut block_stack);
                 let text = &input[tok.start.index..tok.end.index];
                 builder.token(SyntaxKind::YAML_FLOW_INDICATOR.into(), text);
                 continue;
             }
             TokenKind::Key => {
-                // A `Key` at the parent map's level terminates any
-                // open indentless sequence value first, revealing the
-                // map frame below.
                 close_indentless_sequences(&mut builder, &mut block_stack);
-                // Both the synthetic 0-width splice and the source-backed
-                // `?` indicator open a new map entry. Close the previous
-                // entry first if still open. After this, the current
-                // open scope is the new key wrapper.
                 if matches!(
                     block_stack.last(),
                     Some(BlockFrame::BlockMap { .. } | BlockFrame::FlowMap { .. })
@@ -366,17 +313,11 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                     open_map_entry_with_key(&mut builder, &mut block_stack);
                 }
                 if tok.start.index == tok.end.index {
-                    // Synthetic Key splice carries no bytes.
                     continue;
                 }
-                // Source-backed `?`: ensure we have somewhere to put it.
                 ensure_flow_seq_item_open(&mut builder, &mut block_stack);
-                // Fall through to emit `?` inside the open KEY (or
-                // current scope if not in a Map frame).
             }
             TokenKind::Value => {
-                // An empty-key `:` at the parent map's level likewise
-                // terminates an open indentless sequence value first.
                 close_indentless_sequences(&mut builder, &mut block_stack);
                 let map_state = match block_stack.last().copied() {
                     Some(BlockFrame::BlockMap {
@@ -390,30 +331,15 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                     _ => None,
                 };
                 if let Some((is_flow, mut entry_open, mut in_value)) = map_state {
-                    // A bare `:` arriving while the current block-map
-                    // entry is already in its VALUE phase starts a NEW
-                    // entry whose key is empty (`: a\n: b`, 2JQS/S3PD) —
-                    // not a double-colon inside that value. The scanner's
-                    // indent machinery guarantees we only reach here for a
-                    // peer at the map's column (a deeper colon rolls a
-                    // fresh BlockMappingStart; a shallower one unwinds with
-                    // BlockEnd first), so close the current entry and fall
-                    // through to open the new one. Flow maps separate
-                    // entries with `,`, which already closes the entry, so
-                    // their in_value is false here — leave them alone.
                     if !is_flow && entry_open && in_value {
                         close_open_sub_wrapper(&mut builder, &mut block_stack);
                         entry_open = false;
                         in_value = false;
                     }
-                    // Empty-key shorthand: `:` arriving without a prior
-                    // Key opens an ENTRY+KEY before consuming the colon.
                     if !entry_open {
                         open_map_entry_with_key(&mut builder, &mut block_stack);
                     }
                     if !in_value {
-                        // The colon is the last token of KEY. After it
-                        // we close KEY and open VALUE.
                         let text = &input[tok.start.index..tok.end.index];
                         if !text.is_empty() {
                             builder.token(SyntaxKind::YAML_COLON.into(), text);
@@ -434,30 +360,10 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                         }
                         continue;
                     }
-                    // Already in_value: pathological double-colon. Fall
-                    // through and emit at the current scope (inside
-                    // VALUE) for losslessness.
                 }
-                // Not a Map frame: ensure flow-seq ITEM is open, then
-                // fall through to emit `:` at current scope.
                 ensure_flow_seq_item_open(&mut builder, &mut block_stack);
             }
             TokenKind::BlockEntry => {
-                // An indentless sequence opens when a `-` lands directly
-                // in a block-map VALUE: the scanner pushed no indent
-                // level (the `-` is at the parent key's column), so no
-                // `BlockSequenceStart` arrived. Synthesize the
-                // `YAML_BLOCK_SEQUENCE` frame inside the open VALUE so the
-                // tree matches the indented form (spec 8.2.1). Only when
-                // the `:` is the last significant token — i.e. the value
-                // is otherwise empty; a `-` after scalar content in the
-                // value is a structural error left unwrapped for the
-                // validator to reject.
-                // Decorations between `:` and `-` are allowed only when
-                // they sit inside the value scope — strictly indented
-                // past the indentless `-`. Otherwise the anchor is at
-                // the parent mapping's level (G9HC) and the sequence
-                // shouldn't wrap.
                 let decorations_inside_value =
                     decorations_so_far.is_none_or(|c| c > tok.start.column);
                 let indentless_value = last_significant == Some(TokenKind::Value)
@@ -466,12 +372,6 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                         Some(BlockFrame::BlockMap { in_value: true, .. })
                     )
                     && decorations_inside_value;
-                // The mirror case: a `-` landing directly after the `?`
-                // explicit-key indicator opens an indentless sequence as
-                // the KEY's content (6PBE). The scanner likewise pushes no
-                // indent level, so synthesize the `YAML_BLOCK_SEQUENCE`
-                // inside the open KEY. `close_indentless_sequences` later
-                // pops it when the entry's `:` (`Value`) arrives.
                 let indentless_key = last_significant == Some(TokenKind::Key)
                     && matches!(
                         block_stack.last(),
@@ -497,18 +397,9 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                         *item_open = true;
                     }
                 }
-                // Fall through to emit the `-` byte inside the new ITEM
-                // (or at current scope if not in a Sequence frame).
             }
-            TokenKind::Trivia(_) => {
-                // Trivia bypasses item-opening: pre-content trivia in a
-                // flow sequence stays at SEQUENCE level.
-            }
+            TokenKind::Trivia(_) => {}
             _ => {
-                // Any other source-backed content (Scalar, Anchor, Tag,
-                // Alias, Directive, doc markers): if we're inside a
-                // FlowSequence with no open ITEM, open one before
-                // emitting. Doc markers are handled below.
                 if !matches!(tok.kind, TokenKind::DocumentStart | TokenKind::DocumentEnd) {
                     ensure_flow_seq_item_open(&mut builder, &mut block_stack);
                 }
@@ -516,22 +407,11 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
         }
         let text = &input[tok.start.index..tok.end.index];
         if text.is_empty() {
-            // Defensive: never emit zero-width tokens (rowan rejects).
             continue;
         }
         let kind = map_token_to_syntax_kind(tok.kind);
         match tok.kind {
             TokenKind::DocumentStart => {
-                // `---` begins a fresh document. Two cases:
-                //  - The currently-open document only has directives so
-                //    far: per YAML 1.2 the directives belong to the doc
-                //    that this `---` opens. Stay inside, just emit the
-                //    marker.
-                //  - Otherwise: close the previous doc (and any open
-                //    block containers) and open a new YAML_DOCUMENT.
-                //    The scanner unwinds the indent stack at column 0,
-                //    but a same-indent map at indent==0 leaves them
-                //    open, so close them defensively.
                 if doc_open && doc_only_has_directives {
                     builder.token(kind.into(), text);
                     doc_only_has_directives = false;
@@ -547,9 +427,6 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 }
             }
             TokenKind::DocumentEnd => {
-                // `...` closes the current document. Close any open
-                // block containers first so the marker is a child of
-                // the document, not buried in a block container.
                 close_block_containers(&mut builder, &mut block_stack);
                 if !doc_open {
                     builder.start_node(SyntaxKind::YAML_DOCUMENT.into());
@@ -560,16 +437,9 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 doc_only_has_directives = false;
             }
             TokenKind::Trivia(_) => {
-                // Trivia goes to whichever level is currently open;
-                // pre-document trivia stays at YAML_STREAM, in-document
-                // trivia stays inside the YAML_DOCUMENT, the open
-                // block container, or the open ENTRY/ITEM sub-wrapper.
                 builder.token(kind.into(), text);
             }
             TokenKind::Directive => {
-                // Directives belong inside a YAML_DOCUMENT but don't by
-                // themselves count as body content — a following `---`
-                // should not split into a separate doc.
                 let was_open = doc_open;
                 ensure_doc_open(&mut builder, &mut doc_open);
                 if !was_open {
@@ -578,32 +448,17 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
                 builder.token(kind.into(), text);
             }
             TokenKind::Scalar(_) => {
-                // A scalar is emitted as a `YAML_SCALAR` *node* whose
-                // leaves are the per-physical-line content fragments
-                // (`YAML_SCALAR_TEXT`) interleaved with `NEWLINE` tokens.
-                // The byte slice is unchanged, so this is lossless; the
-                // node shape lets the formatter/LSP navigate scalar lines
-                // (and, later, hashpipe line prefixes) as real structure.
                 ensure_doc_open(&mut builder, &mut doc_open);
                 doc_only_has_directives = false;
                 emit_scalar_node(&mut builder, text, line_prefix);
             }
             _ => {
-                // Any other non-trivia content (Anchor, Tag, Alias, ...)
-                // opens an implicit document when one isn't already in
-                // progress and counts as body content (clears the
-                // directives-only flag).
                 ensure_doc_open(&mut builder, &mut doc_open);
                 doc_only_has_directives = false;
                 builder.token(kind.into(), text);
             }
         }
     }
-    // Close any open block containers (and their open ENTRY/ITEM
-    // sub-wrappers) and the open document. The scanner emits BlockEnd
-    // on stream end via `unwind_indent(-1)`, so this is normally a
-    // no-op for `block_stack`; kept for safety against truncated
-    // inputs and future scanner quirks.
     close_block_containers(&mut builder, &mut block_stack);
     if doc_open {
         builder.finish_node();
@@ -612,15 +467,6 @@ fn parse_stream_inner(input: &str, line_prefix: Option<&str>) -> SyntaxNode {
     SyntaxNode::new_root(builder.finish())
 }
 
-/// Tracks an open container in the streaming builder's stack. Block and
-/// flow contexts share state shape, but their containers and
-/// sub-wrappers use different `SyntaxKind` variants and they close on
-/// different tokens (`BlockEnd` / dedent vs. `]` / `}` / `,`).
-///
-/// For maps, `entry_open` records whether the entry sub-wrapper is
-/// still open, and `in_value` selects between the KEY and VALUE
-/// sub-sub-wrapper. For sequences, `item_open` records whether the
-/// item sub-wrapper is still open.
 #[derive(Debug, Clone, Copy)]
 enum BlockFrame {
     BlockMap {
@@ -653,10 +499,6 @@ fn ensure_doc_open(builder: &mut GreenNodeBuilder<'_>, doc_open: &mut bool) {
     }
 }
 
-/// In a flow sequence, source-backed content opens a new
-/// `YAML_FLOW_SEQUENCE_ITEM` lazily — there is no `-` token to drive
-/// the boundary the way `BlockEntry` drives block sequences. Trivia
-/// arriving before the first item stays at the container level.
 fn ensure_flow_seq_item_open(builder: &mut GreenNodeBuilder<'_>, stack: &mut [BlockFrame]) {
     if let Some(BlockFrame::FlowSequence { item_open }) = stack.last_mut()
         && !*item_open
@@ -865,7 +707,6 @@ fn emit_scalar_fragments(
     let mut i = 0;
     let mut line_index = 0usize;
     while i < bytes.len() {
-        // Peel an embedded line prefix on continuation lines only.
         if line_index > 0
             && let Some(prefix) = line_prefix
             && let Some(len) = prefix_match_len(&text[i..], prefix)
@@ -873,7 +714,6 @@ fn emit_scalar_fragments(
             builder.token(SyntaxKind::YAML_LINE_PREFIX.into(), &text[i..i + len]);
             i += len;
         }
-        // Content up to the next line break.
         let content_start = i;
         while i < bytes.len() && !matches!(bytes[i], b'\n' | b'\r') {
             i += 1;
@@ -881,7 +721,6 @@ fn emit_scalar_fragments(
         if content_start < i {
             builder.token(SyntaxKind::YAML_SCALAR_TEXT.into(), &text[content_start..i]);
         }
-        // Line break (if any).
         if i < bytes.len() {
             let nl_len = if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
                 2
@@ -895,9 +734,6 @@ fn emit_scalar_fragments(
     }
 }
 
-/// Match an embedded line prefix at the start of `s`: the `marker` plus
-/// at most one following space (mirroring `strip_line_prefix` and the
-/// scanner's `prefix_byte_len_at`). Returns the matched byte length.
 fn prefix_match_len(s: &str, marker: &str) -> Option<usize> {
     let after = s.strip_prefix(marker)?;
     Some(marker.len() + usize::from(after.starts_with(' ')))
@@ -922,16 +758,8 @@ fn map_token_to_syntax_kind(kind: TokenKind) -> SyntaxKind {
         TokenKind::Anchor => SyntaxKind::YAML_ANCHOR,
         TokenKind::Alias => SyntaxKind::YAML_ALIAS,
         TokenKind::Tag => SyntaxKind::YAML_TAG,
-        // Scalar tokens are emitted as a `YAML_SCALAR` *node* (split into
-        // per-line `YAML_SCALAR_TEXT` leaves) via `emit_scalar_node`, not
-        // through this token-kind map. This arm is the leaf kind for a
-        // scalar's content fragment, used by that helper.
         TokenKind::Scalar(_) => SyntaxKind::YAML_SCALAR_TEXT,
-        // Source-backed `Key` (the explicit `?` indicator) — there is
-        // no dedicated SyntaxKind yet, route to YAML_KEY for now.
         TokenKind::Key => SyntaxKind::YAML_KEY,
-        // Synthetic markers handled before this map; defensive
-        // fallback (never emitted as bytes).
         TokenKind::StreamStart
         | TokenKind::StreamEnd
         | TokenKind::BlockSequenceStart
@@ -982,7 +810,6 @@ mod tests {
 
     #[test]
     fn locate_maps_composite_marker_error() {
-        // List-indented cell: the marker includes the container indent.
         let input = "   #| echo: [\n";
         let (_diag, start, _end) = locate_yaml_diagnostic(input, "   #|").expect("diagnostic");
         assert_eq!(start, input.find('[').unwrap());
@@ -1011,9 +838,6 @@ mod tests {
 
     #[test]
     fn block_scalar_followed_by_option_is_not_swallowed_as_comment() {
-        // Regression: a prefixed option after a `|` block scalar was scanned as a
-        // YAML comment (the terminating line's `#|` prefix wasn't peeled), which
-        // dropped the option. Both keys must survive as structure.
         let input = "#| fig-cap: |\n#|   A caption\n#| echo: false\n";
         let tree = parse_stream_with_prefix(input, "#|");
         assert_eq!(tree.to_string(), input, "byte-lossless");
@@ -1067,20 +891,11 @@ mod tests {
 
     #[test]
     fn preserves_explicit_key_indicator_byte_in_flow_context() {
-        // The `?` explicit-key indicator carries a 1-byte source span
-        // even in flow context, so the builder must NOT drop it
-        // (only zero-width `Key` splices from `fetch_value` should be
-        // dropped). Regression: an earlier draft filtered every Key.
         assert_lossless("{ ?foo: bar }\n");
     }
 
     #[test]
     fn does_not_absorb_terminator_line_break_into_flow_scalar() {
-        // Regression: in flow context the multi-line plain
-        // continuation must abort if the next non-blank char is a
-        // flow terminator (`}`/`]`/`,`). Otherwise the trailing
-        // newline got swallowed into the scalar (`42\n` instead of
-        // `42`) and the closer's byte position drifted.
         assert_lossless("{a: 42\n}\n");
     }
 
@@ -1092,8 +907,6 @@ mod tests {
 
     #[test]
     fn implicit_document_wraps_body_with_no_markers() {
-        // No explicit `---` or `...` — the body still belongs to one
-        // YAML_DOCUMENT so projection has a node to walk.
         let input = "key: value\n";
         let tree = parse_stream(input);
         assert_eq!(document_count(&tree), 1);
@@ -1146,9 +959,6 @@ mod tests {
 
     #[test]
     fn pre_document_trivia_stays_at_stream_level() {
-        // A leading newline before the first document content should
-        // sit under YAML_STREAM, not inside a YAML_DOCUMENT — there is
-        // no document yet at that point.
         let input = "\n---\nkey: value\n";
         let tree = parse_stream(input);
         let stream_token_kinds: Vec<SyntaxKind> = tree
@@ -1165,9 +975,6 @@ mod tests {
 
     #[test]
     fn bare_doc_end_at_stream_start_opens_synthetic_empty_document() {
-        // Pathological but lossless: a stream that begins with `...`
-        // wraps the marker in an empty YAML_DOCUMENT so no source
-        // bytes leak out at YAML_STREAM level uncoupled from a doc.
         let input = "...\n";
         let tree = parse_stream(input);
         assert_eq!(document_count(&tree), 1);
@@ -1220,12 +1027,6 @@ mod tests {
 
     #[test]
     fn consecutive_empty_key_colons_open_separate_entries() {
-        // `: a\n: b` is two block-map entries, each with an empty
-        // (null) key and a value (2JQS). The scanner emits two bare
-        // `Value` tokens with no Key/BlockEnd between them, so the
-        // builder must close the first entry when the second `:`
-        // arrives at the map's column rather than absorbing it into
-        // the first value.
         let input = ": a\n: b\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1234,7 +1035,6 @@ mod tests {
         assert_eq!(entries.len(), 2, "expected two empty-key ENTRY nodes");
         for (entry, scalar) in entries.iter().zip(["a", "b"]) {
             let key = entry_key(entry);
-            // Empty key: the KEY holds only the `:` value indicator.
             assert!(
                 !key.children().any(|n| n.kind() == SyntaxKind::YAML_SCALAR),
                 "empty key should carry no scalar, got {key:?}",
@@ -1260,7 +1060,6 @@ mod tests {
         assert_eq!(entries.len(), 1, "expected one ENTRY for `key: value`");
         let key = entry_key(&entries[0]);
         let value = entry_value(&entries[0]);
-        // Colon ends the KEY (last token); VALUE has the scalar.
         assert!(
             key.children_with_tokens().any(|el| el
                 .as_token()
@@ -1284,7 +1083,6 @@ mod tests {
         let seq = block_seq_under(&doc).expect("YAML_BLOCK_SEQUENCE child");
         let items = block_seq_items(&seq);
         assert_eq!(items.len(), 2, "expected 2 YAML_BLOCK_SEQUENCE_ITEM");
-        // Each item must own its own `-` entry token.
         for item in &items {
             let dash_count = item
                 .children_with_tokens()
@@ -1343,12 +1141,6 @@ mod tests {
 
     #[test]
     fn dedent_closes_inner_block_map_before_next_outer_key() {
-        // outer:
-        //   inner: x
-        // sibling: y
-        // The dedent before `sibling` must close the inner map and
-        // its outer ENTRY so `sibling: y` lands as a sibling ENTRY
-        // under the outer map.
         let input = "outer:\n  inner: x\nsibling: y\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1359,7 +1151,6 @@ mod tests {
             2,
             "outer map should have two entries (`outer:` and `sibling:`)",
         );
-        // Only the first entry's VALUE has a nested map; the second is flat.
         let first_value = entry_value(&entries[0]);
         let nested_in_first = first_value
             .children()
@@ -1387,9 +1178,6 @@ mod tests {
 
     #[test]
     fn explicit_key_indicator_question_mark_lives_inside_key() {
-        // `? a\n: b\n` — the `?` is a source-backed Key token. It
-        // opens the ENTRY and lives inside the resulting KEY node
-        // (alongside the scalar `a` and the trailing `:`).
         let input = "? a\n: b\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1407,12 +1195,6 @@ mod tests {
 
     #[test]
     fn explicit_key_indentless_sequence_wraps_inside_key() {
-        // `?\n- a\n- b\n:\n- c\n- d\n` (6PBE) — the explicit `?` key's
-        // content is a zero-indented block sequence. As with an indentless
-        // sequence in a VALUE, the scanner pushes no indent level and emits
-        // no BlockSequenceStart, so the builder must synthesize a
-        // YAML_BLOCK_SEQUENCE inside the KEY (mirroring the VALUE side)
-        // rather than leaving the `- a` / `- b` entries flat.
         let input = "?\n- a\n- b\n:\n- c\n- d\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1437,9 +1219,6 @@ mod tests {
 
     #[test]
     fn empty_key_shorthand_opens_entry_with_empty_key() {
-        // `: value\n` — bare `:` at column 0 is the empty-implicit-key
-        // shorthand. The builder must open ENTRY+KEY before the colon
-        // arrives so the colon ends up as the only KEY child.
         let input = ": value\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1447,7 +1226,6 @@ mod tests {
         let entries = block_map_entries(&map);
         assert_eq!(entries.len(), 1);
         let key = entry_key(&entries[0]);
-        // KEY has no scalar; only the colon.
         assert!(
             !key.children().any(|n| n.kind() == SyntaxKind::YAML_SCALAR),
             "empty-key shorthand has no scalar in KEY",
@@ -1470,9 +1248,6 @@ mod tests {
 
     #[test]
     fn document_end_marker_lives_at_document_level_not_inside_block_map() {
-        // `...` must not be buried inside the block map; it is a
-        // document-level marker. The builder closes any open block
-        // containers before consuming `DocumentEnd`.
         let input = "key: value\n...\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);
@@ -1519,8 +1294,6 @@ mod tests {
         let seq = flow_seq_under(&doc).expect("YAML_FLOW_SEQUENCE child");
         let items = flow_seq_items(&seq);
         assert_eq!(items.len(), 3);
-        // The opening `[` and closing `]` live at SEQUENCE level
-        // (siblings of items).
         let bracket_count = seq
             .children_with_tokens()
             .filter(|el| {
@@ -1621,10 +1394,6 @@ mod tests {
 
     #[test]
     fn directive_prelude_stays_inside_document_opened_by_marker() {
-        // YAML 1.2 §6.8.1: directives belong to the document the
-        // following `---` opens. The builder must not split the
-        // directive line into a separate doc — the entire input is one
-        // YAML_DOCUMENT.
         let input = "%TAG !e! tag:example.com,2000:app/\n---\n!e!foo \"bar\"\n";
         let tree = parse_stream(input);
         assert_eq!(document_count(&tree), 1);
@@ -1639,9 +1408,6 @@ mod tests {
 
     #[test]
     fn explicit_key_without_value_emits_empty_value_for_shape_parity() {
-        // `? a\n? b\n` — neither entry has a `:`. Each ENTRY must still
-        // hold both KEY and VALUE children (VALUE empty) so projection
-        // walkers don't have to special-case missing children.
         let input = "? a\n? b\n";
         let tree = parse_stream(input);
         let doc = first_document(&tree);

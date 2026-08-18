@@ -72,10 +72,6 @@ fn document_parses_an_mmd_title_block_and_a_fragment_does_not() {
 
 #[test]
 fn commonmark_reads_a_leading_dash_rule_as_yaml_only_in_a_document() {
-    // The CommonMark readers recognize YAML as frontmatter and nothing else,
-    // so a body `---` is a thematic break. This is also the only one of the
-    // three that can manufacture *syntax errors*, malformed YAML being their
-    // only source.
     let input = "---\ntitle: t\n---\n\nBody\n";
     let config = commonmark();
 
@@ -148,7 +144,5 @@ fn fragment_parses_are_lossless() {
 
 #[test]
 fn parse_origin_defaults_to_document() {
-    // Guards against the flag being inverted: `Parser::new` must keep
-    // recognizing every document-start construct it recognized before.
     assert_eq!(ParseOrigin::default(), ParseOrigin::Document);
 }

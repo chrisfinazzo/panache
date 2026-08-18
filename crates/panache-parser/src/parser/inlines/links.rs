@@ -16,7 +16,6 @@ use super::sink::InlineSink;
 use crate::options::ParserOptions;
 use crate::syntax::SyntaxKind;
 
-// Import attribute parsing
 use crate::parser::utils::attributes::{emit_attribute_node, try_parse_trailing_attributes};
 
 /// Flags that control which inline spans the link-bracket scanner treats as
@@ -108,10 +107,6 @@ fn find_link_close_bracket(text: &str, start: usize, ctx: LinkScanContext) -> Op
                 }
             }
             b'<' => {
-                // Order matters: autolinks are the more specific `<...>`
-                // shape (URI/email between angle brackets), so try that
-                // before falling through to general inline raw HTML which
-                // would also match `<bar attr="...">`-style tags.
                 if ctx.skip_autolinks
                     && let Some((len, _)) = try_parse_autolink(&text[i..], true)
                 {
@@ -197,9 +192,6 @@ fn find_dest_close_paren(remaining: &str) -> Option<usize> {
     None
 }
 
-/// Byte length of the UTF-8 character starting at byte index `i` in `s`.
-/// Used to advance an index loop char-by-char without incurring `char_indices`
-/// overhead and without splitting on a UTF-8 boundary.
 fn step(s: &str, i: usize) -> usize {
     s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)
 }
@@ -294,43 +286,34 @@ pub fn try_parse_inline_image(
         return None;
     }
 
-    // Find the closing ]
     let close_bracket = find_link_close_bracket(text, 2, ctx)?;
     let alt_text = &text[2..close_bracket];
 
-    // Check for immediate ( after ]
     let after_bracket = close_bracket + 1;
     if text.len() <= after_bracket || !text[after_bracket..].starts_with('(') {
         return None;
     }
 
-    // Find closing ) for destination (reuse same logic as links)
     let dest_start = after_bracket + 1;
     let remaining = &text[dest_start..];
 
     let close_paren = find_dest_close_paren(remaining)?;
     let dest_content = &remaining[..close_paren];
 
-    // Check for trailing attributes {#id .class key=value}
     let after_paren = dest_start + close_paren + 1;
     let after_close = &text[after_paren..];
 
-    // Attributes must start immediately after closing paren (no whitespace/newlines)
-    if after_close.starts_with('{') {
-        // Find the closing brace
-        if let Some(close_brace_pos) = after_close.find('}') {
-            let attr_text = &after_close[..=close_brace_pos];
-            // Try to parse as attributes to validate
-            if let Some((_attrs, _)) = try_parse_trailing_attributes(attr_text) {
-                let total_len = after_paren + close_brace_pos + 1;
-                // Return raw attribute string for lossless parsing
-                let raw_attrs = attr_text;
-                return Some((total_len, alt_text, dest_content, Some(raw_attrs)));
-            }
+    if after_close.starts_with('{')
+        && let Some(close_brace_pos) = after_close.find('}')
+    {
+        let attr_text = &after_close[..=close_brace_pos];
+        if let Some((_attrs, _)) = try_parse_trailing_attributes(attr_text) {
+            let total_len = after_paren + close_brace_pos + 1;
+            let raw_attrs = attr_text;
+            return Some((total_len, alt_text, dest_content, Some(raw_attrs)));
         }
     }
 
-    // No attributes, just return the image
     let total_len = after_paren;
     Some((total_len, alt_text, dest_content, None))
 }
@@ -348,33 +331,24 @@ pub fn emit_inline_image(
 ) {
     builder.start_node(SyntaxKind::IMAGE_LINK.into());
 
-    // Opening ![
     builder.start_node(SyntaxKind::IMAGE_LINK_START.into());
     builder.token(SyntaxKind::IMAGE_LINK_START.into(), "![");
     builder.finish_node();
 
-    // Alt text (recursively parse inline elements)
     builder.start_node(SyntaxKind::IMAGE_ALT.into());
-    // Use the standalone parse_inline_text function for recursive parsing
-    // Note: nested contexts don't resolve references
     parse_inline_text(builder, alt_text, config, false, suppress_footnote_refs);
     builder.finish_node();
 
-    // Closing ]
     builder.token(SyntaxKind::IMAGE_ALT_END.into(), "]");
 
-    // Opening (
     builder.token(SyntaxKind::IMAGE_DEST_START.into(), "(");
 
-    // Destination
     builder.start_node(SyntaxKind::LINK_DEST.into());
     builder.token(SyntaxKind::TEXT.into(), dest);
     builder.finish_node();
 
-    // Closing )
     builder.token(SyntaxKind::IMAGE_DEST_END.into(), ")");
 
-    // Emit raw attributes if present (preserve original formatting)
     if let Some(raw_attrs) = raw_attributes {
         emit_attribute_node(builder, raw_attrs);
     }
@@ -515,15 +489,12 @@ fn is_valid_email_label(label: &str) -> bool {
 pub fn emit_autolink(builder: &mut impl InlineSink, _text: &str, url: &str) {
     builder.start_node(SyntaxKind::AUTO_LINK.into());
 
-    // Opening <
     builder.start_node(SyntaxKind::AUTO_LINK_MARKER.into());
     builder.token(SyntaxKind::AUTO_LINK_MARKER.into(), "<");
     builder.finish_node();
 
-    // URL content
     builder.token(SyntaxKind::TEXT.into(), url);
 
-    // Closing >
     builder.start_node(SyntaxKind::AUTO_LINK_MARKER.into());
     builder.token(SyntaxKind::AUTO_LINK_MARKER.into(), ">");
     builder.finish_node();
@@ -531,15 +502,8 @@ pub fn emit_autolink(builder: &mut impl InlineSink, _text: &str, url: &str) {
     builder.finish_node();
 }
 
-// Recognized URI schemes for pandoc's `autolink_bare_uris` extension.
-// Generated at build time by `build.rs`
-// from the vendored IANA registry plus pandoc's nonstandard additions,
-// as a sorted `const BARE_URI_SCHEMES: &[&str]`.
-// A `scheme:` prefix outside this set stays literal.
 include!(concat!(env!("OUT_DIR"), "/uri_schemes.rs"));
 
-/// Returns `true` if `scheme` (matched case-insensitively) is a recognized URI scheme.
-/// See [`BARE_URI_SCHEMES`].
 fn is_known_bare_uri_scheme(scheme: &str) -> bool {
     let lower = scheme.to_ascii_lowercase();
     BARE_URI_SCHEMES.binary_search(&lower.as_str()).is_ok()
@@ -602,8 +566,6 @@ pub fn try_parse_bare_uri(text: &str) -> Option<(usize, &str)> {
         return None;
     }
 
-    // If trimming terminal punctuation leaves a dangling backslash, the match
-    // came from escaped punctuation (e.g., `a:\]`) and should stay literal.
     if text[..trimmed].ends_with('\\') {
         return None;
     }
@@ -631,17 +593,14 @@ pub fn try_parse_inline_link(
         return None;
     }
 
-    // Find the closing ]
     let close_bracket = find_link_close_bracket(text, 1, ctx)?;
     let link_text = &text[1..close_bracket];
 
-    // Check for immediate ( after ]
     let after_bracket = close_bracket + 1;
     if text.len() <= after_bracket || !text[after_bracket..].starts_with('(') {
         return None;
     }
 
-    // Find closing ) for destination
     let dest_start = after_bracket + 1;
     let remaining = &text[dest_start..];
 
@@ -652,32 +611,24 @@ pub fn try_parse_inline_link(
         return None;
     }
 
-    // CommonMark §6.4: outer link is rejected when its text contains a valid
-    // inner inline link or image, so the inner-most definition wins.
     if ctx.disallow_inner_links && link_text_contains_inner_link(link_text, ctx, strict_dest) {
         return None;
     }
 
-    // Check for trailing attributes {#id .class key=value}
     let after_paren = dest_start + close_paren + 1;
     let after_close = &text[after_paren..];
 
-    // Attributes must start immediately after closing paren (no whitespace/newlines)
-    if after_close.starts_with('{') {
-        // Find the closing brace
-        if let Some(close_brace_pos) = after_close.find('}') {
-            let attr_text = &after_close[..=close_brace_pos];
-            // Try to parse as attributes to validate
-            if let Some((_attrs, _)) = try_parse_trailing_attributes(attr_text) {
-                let total_len = after_paren + close_brace_pos + 1;
-                // Return raw attribute string for lossless parsing
-                let raw_attrs = attr_text;
-                return Some((total_len, link_text, dest_content, Some(raw_attrs)));
-            }
+    if after_close.starts_with('{')
+        && let Some(close_brace_pos) = after_close.find('}')
+    {
+        let attr_text = &after_close[..=close_brace_pos];
+        if let Some((_attrs, _)) = try_parse_trailing_attributes(attr_text) {
+            let total_len = after_paren + close_brace_pos + 1;
+            let raw_attrs = attr_text;
+            return Some((total_len, link_text, dest_content, Some(raw_attrs)));
         }
     }
 
-    // No attributes, just return the link
     let total_len = after_paren;
     Some((total_len, link_text, dest_content, None))
 }
@@ -749,7 +700,6 @@ fn dest_and_title_ok_commonmark(content: &str) -> bool {
             return false;
         }
         if end == 0 {
-            // bare destination must be nonempty if the field is non-blank
             return false;
         }
         &trimmed[end..]
@@ -812,7 +762,6 @@ fn trim_start_link_ws(s: &str) -> &str {
             break;
         }
     }
-    // SAFETY: stripped only ASCII whitespace bytes.
     unsafe { std::str::from_utf8_unchecked(&bytes[i..]) }
 }
 
@@ -836,35 +785,24 @@ pub fn emit_inline_link(
 ) {
     builder.start_node(SyntaxKind::LINK.into());
 
-    // Opening [
     builder.start_node(SyntaxKind::LINK_START.into());
     builder.token(SyntaxKind::LINK_START.into(), "[");
     builder.finish_node();
 
-    // Link text (recursively parse inline elements). Pandoc-native:
-    // links cannot contain other links, so suppress inner LINK / ref-link
-    // recognition during the recursion. Images, emphasis, code, etc. are
-    // still recognised. CommonMark relies on outer-level process_brackets
-    // to prevent nested links, but the flag is harmless under CM.
     builder.start_node(SyntaxKind::LINK_TEXT.into());
     parse_inline_text(builder, link_text, config, true, suppress_footnote_refs);
     builder.finish_node();
 
-    // Closing ]
     builder.token(SyntaxKind::LINK_TEXT_END.into(), "]");
 
-    // Opening (
     builder.token(SyntaxKind::LINK_DEST_START.into(), "(");
 
-    // Destination
     builder.start_node(SyntaxKind::LINK_DEST.into());
     builder.token(SyntaxKind::TEXT.into(), dest);
     builder.finish_node();
 
-    // Closing )
     builder.token(SyntaxKind::LINK_DEST_END.into(), ")");
 
-    // Emit raw attributes if present (preserve original formatting)
     if let Some(raw_attrs) = raw_attributes {
         emit_attribute_node(builder, raw_attrs);
     }
@@ -912,7 +850,6 @@ pub fn try_parse_reference_link(
         return None;
     }
 
-    // Don't match citations (which start with [@) or suppress-author citations (which start with [-@)
     if text.len() > 1 {
         let bytes = text.as_bytes();
         if bytes[1] == b'@' {
@@ -923,43 +860,21 @@ pub fn try_parse_reference_link(
         }
     }
 
-    // Find the closing ] for the text. Uses the shared helper so that a
-    // `]` inside a code span doesn't terminate the link text (CommonMark
-    // §6 — code spans bind tighter than links). See spec examples #342
-    // and #525. Raw HTML and (CommonMark-only) autolink spans are also
-    // opaque per `ctx`.
     let close_bracket = find_link_close_bracket(text, 1, ctx)?;
     let link_text = &text[1..close_bracket];
 
-    // CommonMark §6.4: outer reference link is rejected when its text contains
-    // a valid inner inline link/image (spec example #532). Reference-link
-    // nesting (#533/#569/#571) is not handled here; it requires resolving
-    // labels against the document refdef map.
     if ctx.disallow_inner_links
         && link_text_contains_inner_link(link_text, ctx, ctx.disallow_inner_links)
     {
         return None;
     }
 
-    // Check what follows the ]
     let after_bracket = close_bracket + 1;
 
-    // `[content]{...}` is reserved for bracketed spans / attribute
-    // trailers, never a shortcut.
     if after_bracket < text.len() && text[after_bracket..].starts_with('{') {
         return None;
     }
 
-    // `[text](...)` is the inline-link shape. CommonMark spec example
-    // #568 (`[foo](not a link)` with `[foo]: /url`) requires the shortcut
-    // to succeed for `[foo]`, leaving `(not a link)` as literal text when
-    // the upstream inline-link parse was rejected by `strict_dest`. We
-    // only fall through to shortcut here when the caller has already
-    // tried the inline-link form (`inline_link_attempted`) — otherwise
-    // disabling the `inline_links` extension would silently let
-    // `[text](url)` become a shortcut + literal text, which the
-    // `inline_links_disabled_keeps_inline_link_literal` test guards
-    // against.
     if after_bracket < text.len()
         && text[after_bracket..].starts_with('(')
         && (!allow_shortcut || !inline_link_attempted)
@@ -967,10 +882,6 @@ pub fn try_parse_reference_link(
         return None;
     }
 
-    // Pandoc `spaced_reference_links`: allow whitespace (space, tab, and a
-    // single LF — block parsing already enforces blank-line boundaries) between
-    // the link-text `]` and the label `[`. Without the extension, gap stays
-    // empty and the next byte must be `[` directly.
     let gap_end = if allow_spaced {
         let bytes = text.as_bytes();
         let mut p = after_bracket;
@@ -991,9 +902,7 @@ pub fn try_parse_reference_link(
     };
     let gap = &text[after_bracket..gap_end];
 
-    // Check for explicit reference [text][label] or implicit [text][]
     if gap_end < text.len() && text[gap_end..].starts_with('[') {
-        // Find the closing ] for the label
         let label_start = gap_end + 1;
         let mut label_end = None;
 
@@ -1002,7 +911,6 @@ pub fn try_parse_reference_link(
                 label_end = Some(i + label_start);
                 break;
             }
-            // Labels can't contain newlines
             if ch == '\n' {
                 return None;
             }
@@ -1011,27 +919,19 @@ pub fn try_parse_reference_link(
         let label_end = label_end?;
         let label = &text[label_start..label_end];
 
-        // Total length includes both bracket pairs (and any gap between them)
         let total_len = label_end + 1;
 
-        // Implicit reference: empty label means emit [text][]
         if label.is_empty() {
             return Some((total_len, link_text, String::new(), gap, false));
         }
 
-        // Explicit reference: use the provided label
         Some((total_len, link_text, label.to_string(), gap, false))
     } else if allow_shortcut {
-        // Shortcut reference: [text] with no second bracket pair
-        // The text is both the display text and the label. Any whitespace we
-        // tentatively consumed for the spaced-form lookahead belongs to the
-        // surrounding text, so we report the shortcut at its strict length.
         if link_text.is_empty() {
             return None;
         }
         Some((after_bracket, link_text, link_text.to_string(), "", true))
     } else {
-        // No second bracket pair and shortcut not allowed - not a reference link
         None
     }
 }
@@ -1051,42 +951,30 @@ pub fn emit_reference_link(
 ) {
     builder.start_node(SyntaxKind::LINK.into());
 
-    // Opening [
     builder.start_node(SyntaxKind::LINK_START.into());
     builder.token(SyntaxKind::LINK_START.into(), "[");
     builder.finish_node();
 
-    // Link text (recursively parse inline elements). Pandoc-native:
-    // links cannot contain other links, so suppress inner LINK / ref-link
-    // recognition during the recursion. Images, emphasis, code, etc. are
-    // still recognised.
     builder.start_node(SyntaxKind::LINK_TEXT.into());
     parse_inline_text(builder, link_text, config, true, suppress_footnote_refs);
     builder.finish_node();
 
-    // Closing ] and reference label
     builder.token(SyntaxKind::TEXT.into(), "]");
 
     if !is_shortcut {
-        // Explicit or implicit reference: [text][label] or [text][]
         emit_reference_link_gap(builder, gap);
         builder.token(SyntaxKind::TEXT.into(), "[");
         builder.start_node(SyntaxKind::LINK_REF.into());
-        // For implicit references, label is empty and we emit [text][]
-        // For explicit references, emit the label to get [text][label]
         if !label.is_empty() {
             builder.token(SyntaxKind::TEXT.into(), label);
         }
         builder.finish_node();
         builder.token(SyntaxKind::TEXT.into(), "]");
     }
-    // For shortcut references, just [text] - no second bracket pair
 
     builder.finish_node();
 }
 
-/// Emit the whitespace gap between `]` and `[` of a spaced reference link,
-/// preserving exact bytes by splitting into WHITESPACE / NEWLINE tokens.
 fn emit_reference_link_gap(builder: &mut impl InlineSink, gap: &str) {
     if gap.is_empty() {
         return;
@@ -1138,7 +1026,6 @@ pub fn try_parse_reference_image(
     let mut bracket_depth = 1;
     let alt_start = pos;
 
-    // Find the end of the alt text (allowing nested brackets)
     while pos < bytes.len() && bracket_depth > 0 {
         match bytes[pos] {
             b'[' => bracket_depth += 1,
@@ -1156,8 +1043,6 @@ pub fn try_parse_reference_image(
     let alt_text = &text[alt_start..pos - 1];
     let after_alt_close = pos;
 
-    // Pandoc `spaced_reference_links` applies to reference images too: allow
-    // whitespace (space, tab, single LF) between `]` and `[`.
     if allow_spaced {
         let mut saw_newline = false;
         while pos < bytes.len() {
@@ -1173,7 +1058,6 @@ pub fn try_parse_reference_image(
     }
     let gap = &text[after_alt_close..pos];
 
-    // Now check for the label part
     if pos >= bytes.len() {
         if allow_shortcut && gap.is_empty() {
             let label = alt_text.to_string();
@@ -1182,12 +1066,10 @@ pub fn try_parse_reference_image(
         return None;
     }
 
-    // Explicit reference: `![alt][label]`
     if bytes[pos] == b'[' {
         pos += 1;
         let label_start = pos;
 
-        // Find the end of the label (no nested brackets, no newlines)
         while pos < bytes.len() && bytes[pos] != b']' && bytes[pos] != b'\n' && bytes[pos] != b'\r'
         {
             pos += 1;
@@ -1200,8 +1082,6 @@ pub fn try_parse_reference_image(
         let label_text = &text[label_start..pos];
         pos += 1;
 
-        // Return the original label text for formatting preservation
-        // Empty label means implicit reference
         let label = if label_text.is_empty() {
             alt_text.to_string() // For implicit references, use alt text as label for equality check
         } else {
@@ -1211,10 +1091,7 @@ pub fn try_parse_reference_image(
         return Some((pos, alt_text, label, gap, false));
     }
 
-    // Shortcut reference: `![alt]` (only if enabled). Any whitespace we
-    // tentatively consumed past the alt-text `]` belongs to surrounding text.
     if allow_shortcut {
-        // Check if next char is ( - if so, not a reference
         if bytes[after_alt_close] == b'(' {
             return None;
         }
@@ -1239,32 +1116,26 @@ pub fn emit_reference_image(
 ) {
     builder.start_node(SyntaxKind::IMAGE_LINK.into());
 
-    // Emit as reference image (preserve original syntax)
     builder.start_node(SyntaxKind::IMAGE_LINK_START.into());
     builder.token(SyntaxKind::IMAGE_LINK_START.into(), "![");
     builder.finish_node();
 
-    // Alt text (recursively parse inline elements)
     builder.start_node(SyntaxKind::IMAGE_ALT.into());
     parse_inline_text(builder, alt_text, config, false, suppress_footnote_refs);
     builder.finish_node();
 
-    // Closing ] and reference label
     builder.token(SyntaxKind::TEXT.into(), "]");
 
     if !is_shortcut {
-        // Explicit or implicit reference: ![alt][label] or ![alt][]
         emit_reference_link_gap(builder, gap);
         builder.token(SyntaxKind::TEXT.into(), "[");
         builder.start_node(SyntaxKind::LINK_REF.into());
-        // For implicit references, emit empty label (label == alt means implicit from parser)
         if label != alt_text {
             builder.token(SyntaxKind::TEXT.into(), label);
         }
         builder.finish_node();
         builder.token(SyntaxKind::TEXT.into(), "]");
     }
-    // For shortcut references, just ![alt] - no second bracket pair
 
     builder.finish_node();
 }
@@ -1308,9 +1179,6 @@ pub fn emit_unresolved_reference(
     builder.token(SyntaxKind::TEXT.into(), "]");
 
     if let Some(suffix) = label_suffix {
-        // suffix is either "[label]" or "[]"; preserve original bytes.
-        // Split as `[` + LINK_REF(label) + `]` so wrapper accessors find
-        // the label via `support::child::<LinkRef>()`.
         debug_assert!(suffix.starts_with('[') && suffix.ends_with(']'));
         builder.token(SyntaxKind::TEXT.into(), "[");
         let label = &suffix[1..suffix.len() - 1];
@@ -1378,8 +1246,6 @@ mod tests {
 
     #[test]
     fn test_parse_autolink_commonmark_strict_scheme() {
-        // Scheme too short (1 char) — invalid under CommonMark, lax-accepted
-        // under Pandoc dialect (matches historical behavior).
         let input = "<m:abc>";
         assert_eq!(try_parse_autolink(input, true), None);
         assert_eq!(try_parse_autolink(input, false), Some((7, "m:abc")));
@@ -1582,13 +1448,11 @@ mod tests {
 
     #[test]
     fn test_parse_inline_image_attributes_must_be_adjacent() {
-        // Space between ) and { should not parse as attributes
         let input = "![alt](img.png) {.large}";
         let result = try_parse_inline_image(input, LinkScanContext::default());
         assert_eq!(result, Some((15, "alt", "img.png", None)));
     }
 
-    // Link attribute tests
     #[test]
     fn test_parse_inline_link_with_id() {
         let input = "[text](url){#link-1}";
@@ -1617,7 +1481,6 @@ mod tests {
 
     #[test]
     fn test_parse_inline_link_attributes_must_be_adjacent() {
-        // Space between ) and { should not parse as attributes
         let input = "[text](url) {.class}";
         let result = try_parse_inline_link(input, false, LinkScanContext::default());
         assert_eq!(result, Some((11, "text", "url", None)));
@@ -1636,7 +1499,6 @@ mod tests {
         assert_eq!(attrs, "{.external}");
     }
 
-    // Reference link tests
     #[test]
     fn test_parse_reference_link_explicit() {
         let input = "[link text][label]";
@@ -1691,8 +1553,6 @@ mod tests {
 
     #[test]
     fn test_parse_reference_link_not_inline_link() {
-        // With shortcut disabled, `[text](url)` is rejected so the inline
-        // link form upstream gets exclusive ownership.
         let input = "[text](url)";
         let result =
             try_parse_reference_link(input, false, true, false, LinkScanContext::default());
@@ -1701,10 +1561,6 @@ mod tests {
 
     #[test]
     fn test_parse_reference_link_shortcut_falls_through_inline_link() {
-        // CommonMark spec example #568: when an inline-link attempt would
-        // fail (here we model the reachability — the caller tries inline
-        // link first; if that returns None, we should still see `[text]`
-        // as a shortcut and leave `(url)` to be parsed as following text).
         let input = "[text](url)";
         let result = try_parse_reference_link(input, true, true, false, LinkScanContext::default());
         assert_eq!(result, Some((6, "text", "text".to_string(), "", true)));
@@ -1731,8 +1587,6 @@ mod tests {
 
     #[test]
     fn test_parse_reference_link_spaced_disabled() {
-        // Without `spaced_reference_links`, a space between brackets blocks the
-        // explicit form; shortcut takes over so `[foo]` matches at length 5.
         let input = "[foo] [bar]";
         let result = try_parse_reference_link(input, true, true, false, LinkScanContext::default());
         assert_eq!(result, Some((5, "foo", "foo".to_string(), "", true)));
@@ -1761,13 +1615,11 @@ mod tests {
 
     #[test]
     fn test_parse_reference_link_spaced_implicit() {
-        // Pandoc: with the extension, `[foo] []` resolves to implicit `[foo][]`.
         let input = "[foo] []";
         let result = try_parse_reference_link(input, true, true, true, LinkScanContext::default());
         assert_eq!(result, Some((8, "foo", String::new(), " ", false)));
     }
 
-    // Reference image tests
     #[test]
     fn test_parse_reference_image_explicit() {
         let input = "![alt text][label]";
@@ -1807,7 +1659,6 @@ mod tests {
 
     #[test]
     fn test_parse_reference_image_not_inline() {
-        // Should not match inline images with (url)
         let input = "![alt](url)";
         let result = try_parse_reference_image(input, true, false);
         assert_eq!(result, None);
@@ -1832,12 +1683,10 @@ mod tests {
 
     #[test]
     fn test_reference_link_label_with_crlf() {
-        // Reference link labels should not span lines with CRLF
         let input = "[foo\r\nbar]";
         let result =
             try_parse_reference_link(input, false, true, false, LinkScanContext::default());
 
-        // Should fail to parse because label contains line break
         assert_eq!(
             result, None,
             "Should not parse reference link with CRLF in label"
@@ -1846,22 +1695,18 @@ mod tests {
 
     #[test]
     fn test_reference_link_label_with_lf() {
-        // Reference link labels should not span lines with LF either
         let input = "[foo\nbar]";
         let result =
             try_parse_reference_link(input, false, true, false, LinkScanContext::default());
 
-        // Should fail to parse because label contains line break
         assert_eq!(
             result, None,
             "Should not parse reference link with LF in label"
         );
     }
 
-    // Multiline link text tests
     #[test]
     fn test_parse_inline_link_multiline_text() {
-        // Per Pandoc spec, link text CAN contain newlines (soft breaks)
         let input = "[text on\nline two](url)";
         let result = try_parse_inline_link(input, false, LinkScanContext::default());
         assert_eq!(
@@ -1873,7 +1718,6 @@ mod tests {
 
     #[test]
     fn test_parse_inline_link_multiline_with_formatting() {
-        // Link text with newlines and other inline elements
         let input =
             "[A network graph. Different edges\nwith probability](../images/networkfig.png)";
         let result = try_parse_inline_link(input, false, LinkScanContext::default());
@@ -1885,7 +1729,6 @@ mod tests {
 
     #[test]
     fn test_parse_inline_image_multiline_alt() {
-        // Per Pandoc spec, image alt text CAN contain newlines
         let input = "![alt on\nline two](img.png)";
         let result = try_parse_inline_image(input, LinkScanContext::default());
         assert_eq!(
@@ -1897,7 +1740,6 @@ mod tests {
 
     #[test]
     fn test_parse_inline_image_multiline_with_attributes() {
-        // Image with multiline alt text and attributes
         let input = "![network graph\ndiagram](../images/fig.png){width=70%}";
         let result = try_parse_inline_image(input, LinkScanContext::default());
         assert!(
@@ -1913,8 +1755,6 @@ mod tests {
 
     #[test]
     fn test_parse_inline_link_with_attributes_after_newline() {
-        // Test for regression: when text is concatenated with newlines,
-        // attributes after ) should still be recognized
         let input = "[A network graph.](../images/networkfig.png){width=70%}\nA word\n";
         let result = try_parse_inline_link(input, false, LinkScanContext::default());
         assert!(

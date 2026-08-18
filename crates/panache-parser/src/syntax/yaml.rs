@@ -427,10 +427,6 @@ pub fn collect_parsed_yaml_regions(tree: &SyntaxNode) -> Vec<ParsedYamlRegion> {
     collect_yaml_regions(tree)
         .into_iter()
         .map(|region| {
-            // Validity and document shape come from the host-embedded subtree the
-            // parser produced — no standalone re-parse. `None` (malformed YAML,
-            // opaque fallback) means invalid; the parser's syntax-error channel
-            // carries the diagnostic for those.
             let embedded = match &region.kind {
                 YamlRegionKind::Frontmatter => embedded_frontmatter.clone(),
                 YamlRegionKind::Hashpipe => embedded_hashpipe_stream(tree, &region.region_range),
@@ -440,13 +436,6 @@ pub fn collect_parsed_yaml_regions(tree: &SyntaxNode) -> Vec<ParsedYamlRegion> {
         .collect()
 }
 
-/// Locate the embedded YAML subtree under the frontmatter's
-/// YAML_METADATA_CONTENT node, if the host parser embedded one (valid
-/// frontmatter). The content node plays the stream container role for the
-/// singleton-stream embedding, so we return it directly when the parser
-/// embedded YAML. Returns `None` for malformed frontmatter, where the content
-/// node holds opaque line tokens and the syntax-error channel carries the
-/// diagnostic.
 fn embedded_frontmatter_stream(tree: &SyntaxNode) -> Option<SyntaxNode> {
     let metadata = tree
         .descendants()
@@ -457,11 +446,6 @@ fn embedded_frontmatter_stream(tree: &SyntaxNode) -> Option<SyntaxNode> {
     (!is_opaque_yaml_fallback(&content_node)).then_some(content_node)
 }
 
-/// Locate the embedded YAML subtree under the hashpipe preamble's
-/// `HASHPIPE_YAML_CONTENT` node whose range matches `region_range`, when the
-/// host parser embedded one (valid hashpipe YAML). Mirrors
-/// [`embedded_frontmatter_stream`]. Returns `None` for malformed YAML (opaque
-/// fallback).
 fn embedded_hashpipe_stream(tree: &SyntaxNode, region_range: &Range<usize>) -> Option<SyntaxNode> {
     tree.descendants()
         .filter(|node| node.kind() == SyntaxKind::HASHPIPE_YAML_CONTENT)
@@ -473,12 +457,6 @@ fn embedded_hashpipe_stream(tree: &SyntaxNode, region_range: &Range<usize>) -> O
         .filter(|node| !is_opaque_yaml_fallback(node))
 }
 
-/// Whether a host YAML content node holds the parser's *opaque fallback* — raw
-/// `TEXT` line tokens emitted when the YAML failed to validate — rather than an
-/// embedded YAML subtree. Valid embeddings carry `YAML_*` nodes (or, for empty
-/// content, nothing) and never a raw `TEXT` token, so its presence is the
-/// reliable malformed-YAML fingerprint. Empty content (valid empty YAML) is not
-/// opaque.
 fn is_opaque_yaml_fallback(content_node: &SyntaxNode) -> bool {
     content_node
         .children_with_tokens()
@@ -578,10 +556,6 @@ fn extract_hashpipe_region(
     if lines.is_empty() {
         return None;
     }
-    // Rebuild the prefix-stripped YAML payload (used for the region's `content`
-    // shape view). Host↔stripped offset mapping is no longer needed here: the
-    // parser embeds a host-aligned YAML subtree and surfaces malformed-YAML
-    // diagnostics through its own syntax-error channel.
     let mut collected = String::new();
     let mut offset = 0usize;
     for line in &lines {
@@ -647,7 +621,6 @@ mod tests {
             extensions: crate::options::Extensions::for_flavor(crate::options::Flavor::Quarto),
             ..Default::default()
         };
-        // Malformed hashpipe YAML: no embedded subtree → invalid, no root.
         let bad = crate::parser::parse("```{r}\n#| echo: [\n1 + 1\n```\n", Some(config.clone()));
         let bad_region = collect_parsed_yaml_regions(&bad)
             .into_iter()
@@ -656,7 +629,6 @@ mod tests {
         assert!(!bad_region.is_valid());
         assert!(bad_region.root().is_none());
 
-        // Well-formed hashpipe YAML: embedded subtree → valid, root present.
         let good = crate::parser::parse("```{r}\n#| echo: false\n1 + 1\n```\n", Some(config));
         let good_region = collect_parsed_yaml_regions(&good)
             .into_iter()
@@ -668,8 +640,6 @@ mod tests {
 
     #[test]
     fn empty_frontmatter_is_valid() {
-        // Valid empty YAML embeds an empty content node (no document, no opaque
-        // TEXT). It must still count as valid — not malformed.
         let tree = crate::parser::parse("---\n---\n\nbody\n", None);
         let parsed = collect_parsed_frontmatter_region(&tree).expect("frontmatter");
         assert!(parsed.is_valid());

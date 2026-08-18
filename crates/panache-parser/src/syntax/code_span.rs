@@ -44,15 +44,10 @@ pub fn code_span_payload(node: &SyntaxNode, tab_width: usize) -> String {
                     out.push_str(&expanded);
                 }
                 if t.kind() == SyntaxKind::LINE_PREFIX {
-                    // Container prefix re-injected on a continuation line
-                    // (indent or `>` bytes); the line's indent run continues
-                    // past it.
                     in_indent = true;
                 }
             }
             NodeOrToken::Node(n) => {
-                // Only an `ATTRIBUTE` nests here, and it follows the closing
-                // marker — walked for its columns, never for payload.
                 expand_span_tabs(
                     &n.text().to_string(),
                     &mut col,
@@ -66,15 +61,6 @@ pub fn code_span_payload(node: &SyntaxNode, tab_width: usize) -> String {
     out
 }
 
-/// Expand the tabs in `text` from column `*col`, leaving `*col` on the column
-/// the expansion ended on and `*in_indent` set for whether the line is still
-/// in its leading indent run.
-///
-/// While in that run, a tab's columns below `gobble` belong to the enclosing
-/// list item's content indent and are dropped — see [`code_span_payload`].
-/// Spaces never need that treatment: the parser already peels every gobbled
-/// space out of the payload, so a space that survives into it is past the
-/// content column by construction.
 fn expand_span_tabs(
     text: &str,
     col: &mut usize,
@@ -113,9 +99,6 @@ fn expand_span_tabs(
     out
 }
 
-/// Column `token` starts on in its source line (tabs expanded to `tab_width`
-/// stops), plus whether everything before it on that line is indent —
-/// whitespace, or a blockquote marker the emitter re-injected.
 fn token_line_context(token: &SyntaxToken, tab_width: usize) -> (usize, bool) {
     let mut pieces: Vec<String> = Vec::new();
     let mut in_indent = true;
@@ -210,8 +193,6 @@ fn list_gobble_columns(node: &SyntaxNode, tab_width: usize) -> usize {
         token_line_context(marker, tab_width).0,
         tab_width,
     );
-    // A bare marker (content starting on a later line) owns no trailing space,
-    // and its content column is the marker width — pandoc's own fallback.
     if let Some(ws) = tokens.get(i + 1)
         && ws.kind() == SyntaxKind::WHITESPACE
         && !ws.text().contains('\n')

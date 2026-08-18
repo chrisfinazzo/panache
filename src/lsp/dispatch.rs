@@ -887,7 +887,7 @@ impl GlobalState {
 
         // Write phase: load every open document's referenced files first. A
         // keystroke burst may have added an include/bibliography since the last
-        // pass; `file_text` no longer lazy-loads (audit §3.2), so the writer loads
+        // pass; `file_text` does not lazy-load, so the writer loads
         // them here, coalesced onto the settle boundary.
         //
         // This runs on the main thread, so a large project graph (e.g. a bookdown

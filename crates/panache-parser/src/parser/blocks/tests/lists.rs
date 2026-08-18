@@ -26,7 +26,6 @@ fn simple_bullet_list() {
 fn bullet_list_requires_space_after_marker() {
     let input = "*one\n*two\n";
     let tree = parse_blocks(input);
-    // Should not parse as list
     assert!(find_first(&tree, SyntaxKind::LIST).is_none());
 }
 
@@ -34,7 +33,6 @@ fn bullet_list_requires_space_after_marker() {
 fn bullet_list_with_different_markers() {
     let input = "* item\n+ item\n- item\n";
     let tree = parse_blocks(input);
-    // Should create ONE list (bullet markers are all equivalent per Pandoc)
     let lists = find_all(&tree, SyntaxKind::LIST);
     assert_eq!(lists.len(), 1);
 }
@@ -43,7 +41,6 @@ fn bullet_list_with_different_markers() {
 fn bullet_list_indented_1_to_3_spaces() {
     let input = " * one space\n  * two spaces\n   * three spaces\n";
     let tree = parse_blocks(input);
-    // All should be valid list items
     let list_items = find_all(&tree, SyntaxKind::LIST_ITEM);
     assert_eq!(list_items.len(), 3);
 }
@@ -52,7 +49,6 @@ fn bullet_list_indented_1_to_3_spaces() {
 fn bullet_list_indented_4_spaces_is_code() {
     let input = "    * not a list\n";
     let tree = parse_blocks(input);
-    // Should be code block, not list
     assert!(find_first(&tree, SyntaxKind::LIST).is_none());
 }
 
@@ -100,7 +96,6 @@ fn nested_bullet_lists() {
     let outer_list = find_first(&tree, SyntaxKind::LIST).expect("should find outer list");
     assert_eq!(count_children(&outer_list, SyntaxKind::LIST_ITEM), 2);
 
-    // Should have nested list inside first item
     let nested_lists = find_all(&tree, SyntaxKind::LIST);
     assert!(
         nested_lists.len() >= 2,
@@ -205,7 +200,6 @@ fn ordered_list_with_hash_marker() {
 fn ordered_list_requires_space_after_marker() {
     let input = "1.one\n2.two\n";
     let tree = parse_blocks(input);
-    // Should not parse as list
     assert!(find_first(&tree, SyntaxKind::LIST).is_none());
 }
 
@@ -213,7 +207,6 @@ fn ordered_list_requires_space_after_marker() {
 fn mixed_markers_create_separate_lists() {
     let input = "(2) Two\n(5) Three\n1. Four\n* Five\n";
     let tree = parse_blocks(input);
-    // Should create separate lists for each marker type
     let lists = find_all(&tree, SyntaxKind::LIST);
     assert!(lists.len() >= 3, "should have at least 3 separate lists");
 }
@@ -286,8 +279,6 @@ fn list_item_with_valid_fenced_divs_parses_as_fenced_div_nodes() {
         "expected two fenced divs inside list item"
     );
 }
-
-// Fancy lists tests - require fancy_lists extension
 
 #[test]
 fn fancy_list_lower_alpha_period() {
@@ -363,12 +354,10 @@ fn fancy_list_upper_alpha_period_requires_two_spaces() {
         },
         ..Default::default()
     };
-    // One space should NOT parse as list (to avoid false positives like "B. Russell")
     let input = "A. first\nB. second\n";
     let tree = crate::parser::Parser::new(input, &config).parse();
     assert!(find_first(&tree, SyntaxKind::LIST).is_none());
 
-    // Two spaces SHOULD parse as list
     let input_valid = "A.  first\nB.  second\n";
     let tree_valid = crate::parser::Parser::new(input_valid, &config).parse();
     let list = find_first(&tree_valid, SyntaxKind::LIST).expect("should find list with 2 spaces");
@@ -433,9 +422,6 @@ fn fancy_list_upper_roman_period() {
         },
         ..Default::default()
     };
-    // Pandoc requires 2 spaces after a single-character upper Roman + period
-    // (avoids confusion with initials like "I. M. Pei"). Multi-character
-    // markers like `II.` only need 1 space.
     let input = "I.  first\nII. second\nIII. third\n";
     let tree = crate::parser::Parser::new(input, &config).parse();
     let list = find_first(&tree, SyntaxKind::LIST).expect("should find list");
@@ -478,7 +464,6 @@ fn fancy_list_upper_roman_right_paren() {
 
 #[test]
 fn fancy_list_disabled_when_extension_off() {
-    // With fancy_lists disabled, alphabetic markers should not parse as lists
     use crate::options::{Extensions, ParserOptions};
     let config = ParserOptions {
         extensions: Extensions {
@@ -554,8 +539,6 @@ fn fancy_list_complex_roman() {
     assert_eq!(count_children(&list, SyntaxKind::LIST_ITEM), 7);
 }
 
-// Example lists tests - require example_lists extension
-
 #[test]
 fn example_list_basic() {
     use crate::options::{Extensions, ParserOptions};
@@ -614,20 +597,16 @@ fn example_list_separated_by_text() {
         },
         ..Default::default()
     };
-    // According to spec, example lists can be separated and continue numbering
     let input = "(@) First example\n\nSome text.\n\n(@) Second example\n";
     let tree = crate::parser::Parser::new(input, &config).parse();
     let lists = find_all(&tree, SyntaxKind::LIST);
-    // Should have 2 separate lists
     assert_eq!(lists.len(), 2);
-    // Each should have 1 item
     assert_eq!(count_children(&lists[0], SyntaxKind::LIST_ITEM), 1);
     assert_eq!(count_children(&lists[1], SyntaxKind::LIST_ITEM), 1);
 }
 
 #[test]
 fn example_list_disabled_when_extension_off() {
-    // With example_lists disabled, (@) should not parse as a list
     use crate::options::{Extensions, ParserOptions};
     let config = ParserOptions {
         extensions: Extensions {
@@ -682,7 +661,6 @@ fn nested_lower_roman_with_uneven_marker_width_stays_single_nested_list() {
     assert_eq!(count_children(&nested_lists[0], SyntaxKind::LIST_ITEM), 3);
 }
 
-/// Count LIST_ITEM ancestors of a node (nesting depth of item content).
 fn list_item_depth(node: &SyntaxNode) -> usize {
     node.ancestors()
         .filter(|a| a.kind() == SyntaxKind::LIST_ITEM)
@@ -691,9 +669,6 @@ fn list_item_depth(node: &SyntaxNode) -> usize {
 
 #[test]
 fn horizontal_rule_in_depth_two_list_item() {
-    // pandoc (both -f markdown and -f commonmark): HorizontalRule nested in
-    // the inner item. The item indent (4 columns) must not trip the
-    // CommonMark 4-space guard in `try_parse_horizontal_rule`.
     let input = "- outer\n\n  - inner\n\n    ***\n\n    deep\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -703,11 +678,6 @@ fn horizontal_rule_in_depth_two_list_item() {
 
 #[test]
 fn spaced_dash_rule_after_list_is_sibling() {
-    // pandoc (both dialects): a spaced dash run after a blank line is a
-    // thematic break, never a new list item (`bulletListStart` runs
-    // `notFollowedBy' hrule`; CommonMark 4.1 gives the break precedence).
-    // The list must close so the rule is the document's block, not the
-    // list's child.
     let input = "- a\n- b\n\n- - - -\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -723,7 +693,6 @@ fn spaced_dash_rule_after_list_is_sibling() {
 
 #[test]
 fn spaced_star_rule_after_list_is_sibling() {
-    // Same precedence rule for the `*` bullet/rule collision.
     let input = "* a\n* b\n\n* * *\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -736,8 +705,6 @@ fn spaced_star_rule_after_list_is_sibling() {
 
 #[test]
 fn spaced_dash_rule_at_item_content_col_stays_in_item() {
-    // pandoc (both dialects): `BulletList [[Para "a", HorizontalRule]]` --- a
-    // rule indented to the item's content column belongs to the item.
     let input = "- a\n\n  - - - -\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -747,9 +714,6 @@ fn spaced_dash_rule_at_item_content_col_stays_in_item() {
 
 #[test]
 fn deeply_indented_spaced_dash_rule_stays_in_item_without_sublist() {
-    // pandoc (both dialects): still `BulletList [[Para "a", HorizontalRule]]`.
-    // Four raw columns are two effective columns inside the item, so the line
-    // is a rule there --- not a sublist whose first item swallows a `- - -`.
     let input = "- a\n\n    - - - -\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -764,9 +728,6 @@ fn deeply_indented_spaced_dash_rule_stays_in_item_without_sublist() {
 
 #[test]
 fn spaced_dash_rule_without_blank_line_is_lazy_text() {
-    // pandoc -f markdown: a rule cannot interrupt a paragraph, and the line
-    // is not a sibling item either, so it folds into item b's text
-    // (`Plain [Str "b", SoftBreak, Str "-", ...]`).
     let input = "- a\n- b\n- - - -\n";
     let tree = parse_blocks(input);
     assert!(
@@ -783,8 +744,6 @@ fn spaced_dash_rule_without_blank_line_is_lazy_text() {
 
 #[test]
 fn spaced_dash_rule_without_blank_line_interrupts_under_commonmark() {
-    // pandoc -f commonmark: a thematic break interrupts the paragraph and
-    // ends the list --- the dialect counterpart of the lazy-text test above.
     let input = "- a\n- b\n- - - -\n";
     let config = ParserOptions {
         flavor: Flavor::CommonMark,
@@ -805,7 +764,6 @@ fn spaced_dash_rule_without_blank_line_interrupts_under_commonmark() {
 
 #[test]
 fn atx_heading_in_depth_two_list_item() {
-    // pandoc (both dialects): Header nested in the inner item.
     let input = "- outer\n\n  - inner\n\n    # head\n";
     let tree = parse_blocks(input);
     let heading =
@@ -815,10 +773,6 @@ fn atx_heading_in_depth_two_list_item() {
 
 #[test]
 fn atx_heading_then_text_in_quoted_list_item() {
-    // pandoc (both dialects): BlockQuote [BulletList [[Header 1, Plain]]].
-    // The item's buffer holds the continuation line's `>` marker as a
-    // structural segment; the multi-line ATX split must see past it and
-    // re-inject the `>` bytes into the trailing block.
     let input = "> - # h\n>   text\n";
     let tree = parse_blocks(input);
     let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("should find list item");
@@ -837,8 +791,6 @@ fn atx_heading_then_text_in_quoted_list_item() {
 
 #[test]
 fn html_block_then_text_in_quoted_list_item() {
-    // pandoc: BlockQuote [BulletList [[Div [Plain "foo"], Plain "after"]]].
-    // Same marker-segment shape as the ATX case, through the HTML lift.
     let input = "> - <div>foo</div>\n>   after\n";
     let tree = parse_blocks(input);
     let item = find_first(&tree, SyntaxKind::LIST_ITEM).expect("should find list item");
@@ -857,8 +809,6 @@ fn html_block_then_text_in_quoted_list_item() {
 
 #[test]
 fn atx_heading_then_text_in_depth_two_list_item() {
-    // pandoc (both dialects): Header followed by a separate Para/Plain,
-    // both inside the inner item (multi-line buffer chunk).
     let input = "- outer\n\n  - inner\n\n    # head\n    more\n";
     let tree = parse_blocks(input);
     let heading =
@@ -876,8 +826,6 @@ fn atx_heading_then_text_in_depth_two_list_item() {
 
 #[test]
 fn horizontal_rule_three_extra_spaces_in_list_item() {
-    // Content column + up to 3 extra spaces is still a thematic break in
-    // pandoc (both dialects): `- item` with a rule indented 5 columns.
     let input = "- item\n\n     ---\n\n  text\n";
     let tree = parse_blocks(input);
     let hr = find_first(&tree, SyntaxKind::HORIZONTAL_RULE)
@@ -887,8 +835,6 @@ fn horizontal_rule_three_extra_spaces_in_list_item() {
 
 #[test]
 fn horizontal_rule_four_extra_spaces_in_list_item_is_not_a_rule() {
-    // Content column + 4 spaces is indented-code territory in pandoc, not a
-    // thematic break; detection must not claim it after indent stripping.
     let input = "- item\n\n      ---\n\n  text\n";
     let tree = parse_blocks(input);
     assert!(
@@ -899,9 +845,6 @@ fn horizontal_rule_four_extra_spaces_in_list_item_is_not_a_rule() {
 
 #[test]
 fn continuation_indent_is_stripped_from_inline_code_content() {
-    // pandoc's `listLine` gobbles the item's content column off every
-    // continuation line, so the code span reads `x  y` (one space from the
-    // newline, one left over from the 3-column indent), not `x    y`.
     let input = "- a\n   `x\n   y`\n";
     let tree = parse_blocks(input);
     let code = find_first(&tree, SyntaxKind::INLINE_CODE).expect("should find inline code");
@@ -917,9 +860,6 @@ fn continuation_indent_is_stripped_from_inline_code_content() {
 
 #[test]
 fn ordered_marker_at_content_column_opens_nested_list_under_pandoc_3_9() {
-    // Under the 3.9 target `pandoc -f markdown -t native` nests every one of
-    // these as an `OrderedList` inside the outer item; only the outer item's
-    // content column matters, not the marker's number or delimiter style.
     for input in [
         "1.  a\n    10.  b\n",
         "1.  a\n    2.  b\n",
@@ -961,9 +901,6 @@ fn ordered_sublist_must_start_at_one_under_pandoc_3_10() {
     }
 }
 
-/// The restriction is about *starting* a sublist, not about the numbers a
-/// list may run through: a marker that continues an already-open list is
-/// still a sibling item whatever its number.
 #[test]
 fn ordered_sublist_start_rule_leaves_sibling_items_alone() {
     for (input, expected_lists) in [
@@ -1042,8 +979,6 @@ fn drifted_marker_short_of_content_col_is_a_sibling_item() {
     }
 }
 
-/// A `LIST` is never a direct child of a `LIST`; every list nests through a
-/// `LIST_ITEM`. Guards the whole drift band around a closed item's list.
 #[test]
 fn no_list_is_a_direct_child_of_a_list() {
     for input in [

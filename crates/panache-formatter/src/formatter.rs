@@ -11,6 +11,7 @@ mod indent_utils;
 mod inline;
 mod inline_layout;
 mod lists;
+pub mod math;
 mod metadata;
 mod paragraphs;
 mod preserve;
@@ -19,25 +20,15 @@ mod shortcodes;
 mod smart;
 mod tables;
 mod utils;
-// In-tree YAML formatter: `yaml_engine.rs` routes live YAML output
-// through `yaml::format_yaml` (pretty_yaml retired from the formatting
-// path, kept only as the cross-validation reference in
-// `tests/yaml_cross_validation.rs`).
 #[allow(dead_code)]
 pub mod yaml;
-// In-tree math content formatter (experimental, opt-in via
-// `Config::experimental_format_math`). Off → callers emit math verbatim; on →
-// `math::format_math` reformats content structurally.
-pub mod math;
 
-// Re-export the main types
 pub use code_blocks::ExternalCodeBlock;
 pub use code_blocks::FormattedCodeMap;
 pub use code_blocks::collect_code_blocks;
 pub use core::Formatter;
 pub use indent_utils::continuation_indent_at;
 
-// Public API functions
 pub fn format_tree(tree: &SyntaxNode, config: &Config, range: Option<(usize, usize)>) -> String {
     format_tree_with_formatted_code(tree, config, range, FormattedCodeMap::new())
 }
@@ -60,7 +51,6 @@ pub fn format_tree_with_formatted_code(
         .as_ref()
         .map(|region| region.content.trim_end().to_string());
 
-    // Step 1: Run YAML frontmatter formatter synchronously with built-in YAML engine
     #[cfg(not(target_arch = "wasm32"))]
     let formatted_yaml = if let Some(yaml_content) = frontmatter_yaml.clone() {
         match crate::yaml_engine::format_yaml_with_config(&yaml_content, config) {
@@ -74,10 +64,8 @@ pub fn format_tree_with_formatted_code(
     #[cfg(target_arch = "wasm32")]
     let formatted_yaml: Option<(String, String)> = None;
 
-    // Step 2: Format markdown, applying externally formatted code blocks inline
     let mut output = Formatter::new(config.clone(), formatted_code, range).format(tree);
 
-    // Step 3: Apply formatted YAML if available
     if let Some((original_yaml, formatted_yaml)) = formatted_yaml {
         log::debug!(
             "Applying formatted YAML: {} bytes -> {} bytes",
@@ -99,7 +87,6 @@ pub fn format_tree_with_formatted_code(
 
     log::debug!("Formatting complete: {} bytes output", output.len());
 
-    // Ensure exactly one trailing newline
     output.trim_end().to_string() + "\n"
 }
 

@@ -59,9 +59,6 @@ fn pretty_yaml_opts(in_tree: &YamlFormatOptions) -> FormatOptions {
     let mut opts = FormatOptions::default();
     opts.layout.print_width = in_tree.line_width;
     opts.language.prose_wrap = match in_tree.wrap {
-        // pretty_yaml has no sentence/semantic prose modes; the reflow
-        // family maps to `Always`, preserve to `Preserve`. The harness
-        // only ever runs the default (`Reflow`) mode.
         WrapMode::Reflow | WrapMode::Sentence | WrapMode::Semantic => ProseWrap::Always,
         WrapMode::Preserve => ProseWrap::Preserve,
     };
@@ -113,10 +110,6 @@ fn corpus_cross_validates_against_pretty_yaml() {
 
         let in_tree = format_yaml(&input, &opts);
 
-        // Folded scalars deliberately diverge (rules 15 and 17); skip
-        // parity but still assert idempotency below. Checking the
-        // *output* covers both the input-was-folded (rule 15) and
-        // double-quoted-folded-to-`>-` (rule 17) cases.
         if !contains_folded_scalar(&in_tree) {
             let pretty = match pretty_yaml::format_text(&input, &pretty_opts) {
                 Ok(s) => s,

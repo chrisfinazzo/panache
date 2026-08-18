@@ -1,4 +1,4 @@
-//! A `vfs`-style path<->id<->input map (mirrors rust-analyzer's `vfs` crate).
+//! File identity and text inputs shared by the LSP and Salsa.
 //!
 //! Owns the single source of truth for file *identity*: the path<->[`FileId`]
 //! bimap and the id->[`FileText`] input table. Only the writer mutates it
@@ -18,8 +18,8 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::salsa::{Db, FileSet, FileText};
 
-/// Opaque, process-stable identity for a file (mirrors rust-analyzer's
-/// `vfs::FileId`). A plain newtype --- not a salsa interned struct --- because
+/// Opaque, process-stable identity for a file. This is a plain newtype rather
+/// than a Salsa interned struct because
 /// the LSP boundary must convert URI -> `FileId` synchronously on the main
 /// thread, outside any salsa query. Intra-query path interning still goes
 /// through [`crate::salsa::InternedPath`].
@@ -48,8 +48,7 @@ struct VfsInner {
     /// a fresh id.
     path_to_id: HashMap<PathBuf, FileId>,
     /// Reverse map: a [`FileText`] input back to its id, so path-keyed queries
-    /// can resolve a document's path from its `FileText` identity rather than
-    /// threading a `PathBuf` parameter (audit §3.3 / G3).
+    /// can resolve a document's path from its `FileText` identity.
     input_to_id: HashMap<FileText, FileId>,
 }
 
@@ -59,9 +58,8 @@ impl VfsInner {
     }
 }
 
-/// A `vfs`-style path<->id map that subsumes the former `file_cache`
-/// (audit §3.3 / G3). The single owner of file identity: the path<->id<->input
-/// table *and* the structural [`FileSet`] input handle. Owned by
+/// Owns the path-to-id-to-input table and the structural [`FileSet`] input.
+/// Owned by
 /// [`crate::salsa::SalsaDb`]; both fields are shared behind `Arc`, so cloned
 /// worker handles observe the same table and the same `FileSet` input.
 ///

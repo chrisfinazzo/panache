@@ -53,10 +53,6 @@ fn parse_reference_definition(node: &SyntaxNode) -> Option<(String, RefDef)> {
                     }
                 }
             }
-            // The parser now emits the destination and title as structured
-            // nodes (REFERENCE_URL keeps any `<>` delimiters; REFERENCE_TITLE
-            // keeps its quote/paren delimiters), so read them directly instead
-            // of re-splitting the raw tail tokens.
             SyntaxKind::REFERENCE_URL => url_raw = Some(child.text().to_string()),
             SyntaxKind::REFERENCE_TITLE => title_raw = Some(child.text().to_string()),
             _ => {}
@@ -77,9 +73,6 @@ fn parse_reference_definition(node: &SyntaxNode) -> Option<(String, RefDef)> {
     ))
 }
 
-/// Split an inline link's destination region (`<url> "title"` or
-/// `url "title"`) into `(url, title)`. Still used for inline links, whose
-/// destination tokens are not yet structured the way reference definitions are.
 fn split_dest_and_title(text: &str) -> (String, Option<String>) {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix('<')
@@ -97,11 +90,6 @@ fn split_dest_and_title(text: &str) -> (String, Option<String>) {
     let mut url_end = text.len();
     let mut title = None;
     for (i, c) in text.char_indices() {
-        // CommonMark §6.6: only ASCII whitespace (space, tab, newline, line
-        // tabulation, form feed, carriage return) separates the destination
-        // from the title. Unicode whitespace such as NBSP (U+00A0) is *part*
-        // of the destination and must be percent-encoded — see spec example
-        // #507 (`[link](/url\u{a0}"title")`).
         if matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r') {
             url_end = i;
             let rest = text[i..].trim();
@@ -133,17 +121,6 @@ fn parse_title(text: &str) -> Option<String> {
 }
 
 fn normalize_label(label: &str) -> String {
-    // CommonMark §6.4: matching is performed on normalized *raw* strings,
-    // not parsed inline content. Backslash escapes are NOT decoded — see
-    // spec example #545 (`[bar][foo\!]` does not match `[foo!]:`).
-    //
-    // Spec mandates Unicode case folding (not lowercasing). They diverge for
-    // characters whose lowercase form is shorter than the case-folded form,
-    // most notably the German sharp S: `ẞ` (U+1E9E) lowercases to `ß`
-    // (U+00DF) but case-folds to `ss`; `ß` lowercases to itself but
-    // case-folds to `ss`. Spec example #540 exercises this. We expand both
-    // sharp-S codepoints to `ss` after lowercasing — the only multi-char
-    // fold spec.txt actually exercises beyond ASCII.
     label
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -176,8 +153,6 @@ fn render_blocks(parent: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut 
             SyntaxKind::REFERENCE_DEFINITION => {} // not rendered
             SyntaxKind::HTML_BLOCK => render_html_block(&child, out),
             SyntaxKind::BLANK_LINE => {}
-            // Anything we don't model yet: render its inline-projected text
-            // verbatim wrapped in a paragraph as a best-effort fallback.
             _ => {
                 let text = child.text().to_string();
                 if !text.trim().is_empty() {
@@ -234,17 +209,6 @@ fn heading_level(node: &SyntaxNode) -> usize {
 fn render_paragraph(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut String) {
     let mut inner = String::new();
     render_inlines(node, refs, &mut inner);
-    // CommonMark: trailing newlines of a paragraph are not part of its
-    // content, and any hard line breaks at the end of the block are removed.
-    //
-    // Neither hard-break syntax needs a carve-out here: under
-    // `Dialect::CommonMark` the parser declines to call a trailing whitespace
-    // run *or* a trailing backslash on the last line of a block a hard break,
-    // so both arrive as ordinary text and are stripped by §4.8's "removing
-    // initial and final whitespace" rule (the backslash itself survives, which
-    // is what `foo\` ⇒ `<p>foo\</p>` wants). `decode_entities` has already
-    // swapped entity-produced whitespace for placeholders, so that survives
-    // the strip.
     loop {
         let trimmed = inner.trim_end_matches([' ', '\t', '\n']);
         if trimmed.len() < inner.len() {
@@ -284,7 +248,6 @@ fn strip_paragraph_line_indent(inner: &str) -> String {
             continue;
         }
         if ch == '\n' {
-            // Trim trailing whitespace before pushing the newline.
             while let Some(c) = out.chars().last() {
                 if c == ' ' || c == '\t' {
                     out.pop();
@@ -342,21 +305,11 @@ fn list_tag_and_start(node: &SyntaxNode) -> (&'static str, String) {
 }
 
 fn is_loose_list(node: &SyntaxNode) -> bool {
-    // CommonMark §5.3: a list is loose if any of its constituent list items
-    // are separated by blank lines, or if any item directly contains two
-    // block-level elements separated by a blank line.
-    //
-    // The parser uses PLAIN for tight item content and (in some cases)
-    // PARAGRAPH for content that is separated from another block by a blank
-    // line. Looseness must be checked at the *direct* child level — a
-    // PARAGRAPH inside a nested blockquote or sublist is not a loose-list
-    // signal for the outer list.
     let items: Vec<SyntaxNode> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
         .collect();
 
-    // (a) Items separated by blank lines.
     let mut prev_was_item = false;
     for child in node.children_with_tokens() {
         if let NodeOrToken::Node(n) = child {
@@ -373,9 +326,6 @@ fn is_loose_list(node: &SyntaxNode) -> bool {
         }
     }
 
-    // The blank-line separator can also live *inside* the trailing portion of
-    // the previous item (commonly inside a sublist's last child) — the source
-    // still has a blank line between the outer items.
     let last_idx = items.len().saturating_sub(1);
     for item in items.iter().take(last_idx) {
         if list_item_ends_with_blank(item) {
@@ -383,9 +333,6 @@ fn is_loose_list(node: &SyntaxNode) -> bool {
         }
     }
 
-    // (b) Any item directly contains two block-level children separated by a
-    // blank line, or has an inline PARAGRAPH child (parser-level signal that
-    // the item's content was preceded or followed by a blank).
     for item in &items {
         if item.children().any(|c| c.kind() == SyntaxKind::PARAGRAPH) {
             return true;
@@ -399,11 +346,6 @@ fn is_loose_list(node: &SyntaxNode) -> bool {
 }
 
 fn list_item_ends_with_blank(item: &SyntaxNode) -> bool {
-    // Walk descendants but stay within the outer list's structural space:
-    // a BLANK_LINE inside a BLOCK_QUOTE (or other strict container that owns
-    // its own blank lines, like CODE_BLOCK / HTML_BLOCK) is *that container's*
-    // blank, not a blank in the source between outer items. Only blanks that
-    // transit through nested LISTs / LIST_ITEMs count for outer-list looseness.
     let end = item.text_range().end();
     descendant_blank_at_end(item, end)
 }
@@ -478,7 +420,6 @@ fn render_list_item(
     if loose {
         out.push('\n');
     }
-    let mut wrote_block = false;
     for child in item.children() {
         match child.kind() {
             SyntaxKind::PLAIN => {
@@ -491,34 +432,24 @@ fn render_list_item(
                     render_inlines(&child, refs, &mut inner);
                     out.push_str(&strip_paragraph_line_indent(&inner));
                 }
-                wrote_block = true;
             }
             SyntaxKind::PARAGRAPH => {
                 render_paragraph(&child, refs, out);
-                wrote_block = true;
             }
             SyntaxKind::LIST => {
-                if !loose && !wrote_block {
-                    // edge: list item starts with a nested list
-                }
                 render_list(&child, refs, out);
-                wrote_block = true;
             }
             SyntaxKind::CODE_BLOCK => {
                 render_code_block(&child, out);
-                wrote_block = true;
             }
             SyntaxKind::BLOCK_QUOTE => {
                 render_block_quote(&child, refs, out);
-                wrote_block = true;
             }
             SyntaxKind::HEADING => {
                 render_heading(&child, refs, out);
-                wrote_block = true;
             }
             SyntaxKind::HORIZONTAL_RULE => {
                 out.push_str("<hr />\n");
-                wrote_block = true;
             }
             SyntaxKind::BLANK_LINE => {}
             _ => {}
@@ -595,9 +526,6 @@ fn code_block_content(node: &SyntaxNode) -> String {
     let li_indent = enclosing_list_item_content_column(node);
     let mut content = String::new();
     if is_fenced {
-        // Per CommonMark §4.5: if the opening fence is indented, content lines
-        // have an equivalent amount of leading whitespace removed (capped at
-        // the opener's indent — extra indentation is preserved verbatim).
         let opener_indent = fenced_opener_indent(node);
         for child in node.children() {
             if child.kind() == SyntaxKind::CODE_CONTENT {
@@ -607,10 +535,6 @@ fn code_block_content(node: &SyntaxNode) -> String {
                 } else {
                     raw
                 };
-                // Inside a list item the parser keeps the list-item content
-                // column on each content line for losslessness. Strip it
-                // before applying the opener-indent rule so the rendered
-                // payload matches what the source meant.
                 let raw = if li_indent > 0 {
                     strip_leading_spaces_per_line(&raw, li_indent)
                 } else {
@@ -634,23 +558,6 @@ fn code_block_content(node: &SyntaxNode) -> String {
             }
         }
     } else {
-        // Indented code block: strip `li_indent + 4` leading columns from
-        // each line, with column-aware tab expansion (tabstop = 4) and
-        // partial-tab slack emitted as virtual spaces. Whitespace-only
-        // lines shorter than the strip target collapse to just the
-        // newline, matching CommonMark's blank-line treatment.
-        //
-        // Inside a blockquote, each `>` marker contributes 2 source columns
-        // (the marker plus its mandatory or virtual trailing space). The
-        // body bytes after `strip_blockquote_prefix` start partway into
-        // those source columns: if the bq strip ate `> ` (2 bytes) the
-        // body's first byte is at source col `2*depth`; if it ate `>` only
-        // (because a tab/non-space followed), the body's first byte is at
-        // source col `2*depth - 1`, where the `-1` represents the virtual
-        // space the bq's optional-space rule consumed from the leading
-        // tab. Pass that adjusted starting column into the col walker so
-        // tab expansion lines up with the source-column tab-stops cmark
-        // uses for indent boundary detection.
         let first_line_is_marker_line = code_block_is_first_block_in_list_item(node);
         for child in node.children() {
             if child.kind() == SyntaxKind::CODE_CONTENT {
@@ -666,16 +573,6 @@ fn code_block_content(node: &SyntaxNode) -> String {
                     let body_len = line.len() - if line.ends_with('\n') { 1 } else { 0 };
                     let body = &line[..body_len];
                     let bq_start_col = bq_depth * 2 - virtual_absorbed;
-                    // CommonMark §5.2: when an indented code block opens on
-                    // the *marker line* of a list item (rule #2 case — ≥ 5
-                    // post-marker cols of WS), the first line's body bytes
-                    // start at the list item's content column, not col 0,
-                    // because the leading WS that precedes the body on the
-                    // source line was the marker's whitespace, not part of
-                    // the code-block's own indent run. Subsequent lines in
-                    // the same CODE_BLOCK (parser appends via the normal
-                    // indented-code continuation path) start at col 0 of
-                    // their own line and need no shift.
                     let li_first_line_shift = if idx == 0 && first_line_is_marker_line {
                         li_indent
                     } else {
@@ -959,7 +856,6 @@ fn render_token(t: &rowan::SyntaxToken<panache_parser::syntax::PanacheLanguage>,
     match t.kind() {
         SyntaxKind::TEXT => out.push_str(&escape_html(&decode_entities(t.text()))),
         SyntaxKind::ESCAPED_CHAR => {
-            // \x — emit just the escaped character, HTML-escaped
             let text = t.text();
             let ch = text.chars().nth(1).unwrap_or(' ');
             out.push_str(&escape_html(&ch.to_string()));
@@ -968,8 +864,6 @@ fn render_token(t: &rowan::SyntaxToken<panache_parser::syntax::PanacheLanguage>,
         SyntaxKind::NEWLINE => out.push('\n'),
         SyntaxKind::WHITESPACE => out.push_str(t.text()),
         SyntaxKind::NONBREAKING_SPACE => out.push(' '),
-        // Various stray tokens we skip silently; they'll show up as parser
-        // bugs in the harness if they materially affect output.
         _ => {}
     }
 }
@@ -1002,11 +896,6 @@ fn render_inline_node(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &m
         SyntaxKind::IMAGE_LINK => render_image(node, refs, out),
         SyntaxKind::AUTO_LINK => render_autolink(node, out),
         SyntaxKind::INLINE_HTML => {
-            // Emit verbatim — entities and backslashes are not processed
-            // inside raw HTML spans (CommonMark §6.6). Whitespace inside the
-            // span must survive `strip_paragraph_line_indent`, so substitute
-            // private-use placeholders that `restore_entity_placeholders`
-            // reverses before the final HTML is returned.
             for el in node.children_with_tokens() {
                 if let NodeOrToken::Token(t) = el
                     && t.kind() == SyntaxKind::INLINE_HTML_CONTENT
@@ -1018,7 +907,6 @@ fn render_inline_node(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &m
             }
         }
         _ => {
-            // Fallback: descend into children, treating everything as inline
             for el in node.children_with_tokens() {
                 match el {
                     NodeOrToken::Token(t) => render_token(&t, out),
@@ -1034,11 +922,6 @@ fn render_link(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Stri
     let dest_node = node.children().find(|c| c.kind() == SyntaxKind::LINK_DEST);
 
     let (url, title) = if let Some(d) = dest_node.as_ref() {
-        // LINK_DEST never contains the surrounding `(` / `)` — those are
-        // emitted as LINK_DEST_START / LINK_DEST_END siblings — so don't
-        // strip them off here. Trimming would corrupt destinations whose
-        // payload legitimately ends with an escaped paren, e.g.
-        // `[link](\(foo\))` (spec example #495).
         let raw = d.text().to_string();
         let (url, title) = split_dest_and_title(raw.trim());
         (
@@ -1046,7 +929,6 @@ fn render_link(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Stri
             title.map(|t| decode_entities(&decode_backslash_escapes(&t))),
         )
     } else if let Some(label_node) = node.children().find(|c| c.kind() == SyntaxKind::LINK_REF) {
-        // Collapsed reference `[text][]`: empty `[]`, fall back to text as label.
         let label_raw = collect_label_text(&label_node);
         let label = if label_raw.trim().is_empty() {
             text_node
@@ -1059,11 +941,6 @@ fn render_link(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Stri
         match refs.get(&normalize_label(&label)) {
             Some(def) => (def.url.clone(), def.title.clone()),
             None => {
-                // Unresolved reference: render verbatim
-                // Per CommonMark §6.4 example #545, an unresolved reference
-                // link still has its label content decoded for display
-                // (backslash escapes resolved), even though matching uses
-                // the raw form.
                 out.push_str(&escape_html(&decode_backslash_escapes(
                     &node.text().to_string(),
                 )));
@@ -1071,7 +948,6 @@ fn render_link(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Stri
             }
         }
     } else {
-        // Shortcut reference [label] resolves with text as the label
         let label = text_node
             .as_ref()
             .map(collect_label_text)
@@ -1079,13 +955,6 @@ fn render_link(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Stri
         match refs.get(&normalize_label(&label)) {
             Some(def) => (def.url.clone(), def.title.clone()),
             None => {
-                // Unresolved shortcut: render `[` + LINK_TEXT children + `]`
-                // so that any inner inlines (emphasis, code, or even a
-                // resolved nested LINK as in spec #559) still emit their
-                // proper HTML rather than appearing as raw `[*foo*]`-style
-                // text. `render_inlines` handles `ESCAPED_CHAR` decoding,
-                // matching the prior fallback's `decode_backslash_escapes`
-                // behavior for the simple `[bar\!]` case.
                 out.push('[');
                 if let Some(text) = text_node.as_ref() {
                     render_inlines(text, refs, out);
@@ -1117,9 +986,6 @@ fn render_image(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Str
     let ref_node = node.children().find(|c| c.kind() == SyntaxKind::LINK_REF);
 
     let (url, title) = if let Some(d) = dest_node.as_ref() {
-        // See render_link: LINK_DEST does not contain surrounding parens,
-        // so do not strip them off (they are emitted as LINK_DEST_START /
-        // LINK_DEST_END siblings).
         let raw = d.text().to_string();
         let (url, title) = split_dest_and_title(raw.trim());
         (
@@ -1127,14 +993,6 @@ fn render_image(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Str
             title.map(|t| decode_entities(&decode_backslash_escapes(&t))),
         )
     } else {
-        // Reference-style image. CommonMark §6.4: a link label is normalized
-        // by case-folding and collapsing whitespace.
-        // - Full reference: `![alt][label]` — use LINK_REF text.
-        // - Collapsed: `![alt][]` — empty LINK_REF, use IMAGE_ALT raw source.
-        // - Shortcut: `![alt]` — no LINK_REF, use IMAGE_ALT raw source.
-        // The IMAGE_ALT raw source preserves emphasis markers so labels match
-        // the reference definition's bracket text byte-for-byte after
-        // normalization.
         let label = match ref_node.as_ref() {
             Some(rn) => {
                 let l = rn.text().to_string();
@@ -1155,10 +1013,6 @@ fn render_image(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &mut Str
         match refs.get(&normalize_label(&label)) {
             Some(def) => (def.url.clone(), def.title.clone()),
             None => {
-                // Per CommonMark §6.4 example #545, an unresolved reference
-                // link still has its label content decoded for display
-                // (backslash escapes resolved), even though matching uses
-                // the raw form.
                 out.push_str(&escape_html(&decode_backslash_escapes(
                     &node.text().to_string(),
                 )));
@@ -1261,9 +1115,6 @@ fn render_autolink(node: &SyntaxNode, out: &mut String) {
         .filter(|t| t.kind() == SyntaxKind::TEXT)
         .map(|t| t.text().to_string())
         .collect();
-    // Per CommonMark §6.4–6.5, an autolink is a URI autolink if its content has
-    // a valid scheme (2–32 chars: letter then letter/digit/+./-, then `:`).
-    // Otherwise, if it contains `@`, it's an email autolink (prepend mailto:).
     let href = if has_uri_scheme(&target) {
         target.clone()
     } else if target.contains('@') {
@@ -1295,9 +1146,6 @@ fn has_uri_scheme(s: &str) -> bool {
 }
 
 fn normalize_code_span(raw: &str) -> String {
-    // CommonMark §6.1: line endings → spaces; if the result both begins and
-    // ends with a single ASCII space and is not entirely spaces, strip one
-    // leading and one trailing space.
     let spaced: String = raw
         .chars()
         .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
@@ -1364,10 +1212,6 @@ fn is_hex(b: u8) -> bool {
 }
 
 fn is_url_safe(b: u8) -> bool {
-    // Per CommonMark: alphanumerics + URI-reserved characters, *minus* `[` and
-    // `]` which carry markdown-specific meaning and so are always
-    // percent-encoded in rendered HTML output (e.g. spec §6.4 example with
-    // `https://example.com/?search=][ref]` → `%5D%5Bref%5D`).
     matches!(b,
         b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'
         | b'-' | b'.' | b'_' | b'~'
@@ -1410,8 +1254,6 @@ fn decode_entities(input: &str) -> String {
     out
 }
 
-/// Map ASCII whitespace produced by entity decoding to private-use
-/// placeholders so they survive the source-indent strip.
 fn protect_entity_whitespace(c: char) -> char {
     match c {
         '\t' => '\u{E001}',
@@ -1457,8 +1299,6 @@ fn find_entity_end(s: &str) -> Option<usize> {
         }
         return None;
     }
-    // Named: `[A-Za-z][A-Za-z0-9]*;`. The longest HTML5 entity name is 31 chars
-    // (`CounterClockwiseContourIntegral`).
     if !bytes[1].is_ascii_alphabetic() {
         return None;
     }
@@ -1476,9 +1316,6 @@ fn find_entity_end(s: &str) -> Option<usize> {
     None
 }
 
-/// Decode a complete entity reference of the form `&NAME;`, `&#NNNN;`, or
-/// `&#xHHHH;`. Returns `None` for unknown names so the caller can leave the
-/// source bytes alone.
 fn decode_one_entity(ent: &str) -> Option<String> {
     let body = ent.strip_prefix('&')?.strip_suffix(';')?;
     if let Some(rest) = body.strip_prefix('#') {

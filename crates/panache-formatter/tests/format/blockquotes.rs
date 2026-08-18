@@ -55,9 +55,6 @@ fn nested_blockquote_is_not_double_prefixed() {
 fn nested_blockquote_inside_fenced_div_keeps_its_depth() {
     let input = "> ::: note\n>\n> > inner quote\n>\n> :::\n";
 
-    // The blank lines around the inner quote are dropped by the fenced div
-    // formatter itself (it does the same at the top level); what matters here
-    // is that the div stays quoted and the inner quote stays at depth two.
     let result = format(input, None, None);
     assert_eq!(result, "> ::: note\n> > inner quote\n> :::\n");
     assert_eq!(format(&result, None, None), result);

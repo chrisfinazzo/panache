@@ -118,10 +118,6 @@ fn definition_item_with_code_block_formats_as_loose() {
 
 #[test]
 fn reflowed_paragraph_leading_definition_marker_is_escaped() {
-    // Reflow joins `aaa\nbbb` into one line, which turns the `: def`
-    // paragraph below it into a definition body on reparse. Escaping the
-    // marker keeps the second pass a no-op; `\: def` is `Para [":", Space,
-    // "def"]` for pandoc and panache alike.
     let input = "aaa\nbbb\n\n: def\n";
 
     let output1 = format(input, None, None);
@@ -146,9 +142,6 @@ fn reflowed_blockquote_paragraph_leading_definition_marker_is_escaped() {
 
 #[test]
 fn paragraph_definition_marker_after_a_multi_line_block_is_left_alone() {
-    // The guard reads the *emitted* text, which is what the reparse sees.
-    // This paragraph is still two lines after wrapping, so the marker below
-    // it cannot become a definition and escaping would be gratuitous.
     let input = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp qqq rrr sss ttt uuu vvv www\n\n: def\n";
 
     let output1 = format(input, None, None);
@@ -175,9 +168,6 @@ fn lone_paragraph_definition_marker_is_left_alone() {
 
 #[test]
 fn definition_list_on_the_list_marker_line_keeps_its_marker() {
-    // The item's only child is a DEFINITION_LIST, so it has no content node
-    // and the generic list-item path never emits the bullet. Without the
-    // leading-block arm the marker is dropped entirely.
     for (input, expected) in [
         ("- Term\n  : def\n", "- Term\n  :   def\n"),
         ("- Term\n  ~ def\n", "- Term\n  :   def\n"),
@@ -193,9 +183,6 @@ fn definition_list_on_the_list_marker_line_keeps_its_marker() {
 
 #[test]
 fn definition_list_nested_two_levels_deep_is_idempotent() {
-    // The term's own indent is a WHITESPACE token, not inline text, so the
-    // formatter re-applies the indent it is rendering at instead of stacking
-    // a second copy on top of the one already in the text.
     let input = "- - foo\n\n    bar\n\n    : baz\n";
 
     let output1 = format(input, None, None);

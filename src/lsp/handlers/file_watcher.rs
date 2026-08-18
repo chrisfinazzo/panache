@@ -12,14 +12,8 @@ use crate::lsp::global_state::GlobalState;
 use crate::lsp::uri_ext::UriExt;
 
 pub(crate) fn did_change_watched_files(gs: &mut GlobalState, params: DidChangeWatchedFilesParams) {
-    // A watcher event means the filesystem changed in a way salsa cannot see
-    // through its inputs: `collect_includes` / `find_project_documents` probe the
-    // filesystem directly (residual G3 reads), so a newly-created include is
-    // invisible to a memoized `project_graph`. Interning each changed path adds
-    // any new file to the `FileSet`, which re-runs `project_graph` (the only
-    // reader of the set) so those probes are re-evaluated --- a targeted, in-graph
-    // replacement for the former global `CacheGeneration` bump, which also
-    // invalidated every document's `metadata` memo (audit §3.3 / G3).
+    // Filesystem probes are not Salsa inputs, so intern changed paths to make
+    // newly created references visible to `project_graph` through `FileSet`.
     let changed_paths: Vec<PathBuf> = params
         .changes
         .iter()

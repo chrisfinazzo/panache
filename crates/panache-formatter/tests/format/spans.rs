@@ -52,7 +52,6 @@ fn span_with_multiple_classes() {
 fn span_with_attributes() {
     let input = "A span with [attributes]{.class key=\"value\"}.\n";
     let output = format(input, None, None);
-    // Attributes should be normalized (collapse whitespace)
     assert!(output.contains("[attributes]{.class key=\"value\"}"));
 }
 
@@ -98,9 +97,6 @@ fn span_in_list() {
 fn span_across_wrapped_lines() {
     let input = "This is a very long line with [some small caps text that might get wrapped]{.smallcaps} in it.\n";
     let output = format(input, None, None);
-    // Span content reflows across lines (matching pandoc), but the open
-    // bracket stays glued to the first word and the closing `]{...}` stays
-    // glued to the last word.
     assert!(output.contains("[some small caps"));
     assert!(output.contains("wrapped]{.smallcaps}"));
 }
@@ -124,16 +120,11 @@ fn complex_nested_span() {
 fn span_whitespace_normalization() {
     let input = "Text with [content]{.class    key=\"val\"   foo=\"bar\"}.\n";
     let output = format(input, None, None);
-    // Attributes should have normalized whitespace
     assert!(output.contains("{.class key=\"val\" foo=\"bar\"}"));
 }
 
 #[test]
 fn span_multiline_content_reflows() {
-    // Regression: issue #291 — bracketed spans whose content spans multiple
-    // source lines used to be emitted verbatim (formatter treated the whole
-    // span as a single unbreakable piece), so paragraphs/footnotes containing
-    // them were never reflowed.
     let input = "This is a long paragraph with [a span containing several words that should wrap nicely across multiple lines because the content is much longer than the line width allows]{lang=en-US} embedded in it.\n";
     let output = format(input, None, None);
     let max_line_width = output.lines().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -149,9 +140,6 @@ fn span_multiline_content_reflows() {
 
 #[test]
 fn footnote_with_bracketed_span_indents_continuation() {
-    // Regression: issue #291 — footnote definitions whose body was wrapped in
-    // a bracketed span were left unindented because the span was treated as
-    // a single atomic piece.
     let input = "[^e]: [As in [Figure 3](#fig-3), we easily predict a house's\nfuture number, simply from its coordinates. No\nneed to consult road network data, nor look at aerial imagery. A\nhouse that has coordinates slightly lower than 400 will get an even\nRoad 400 address.]{lang=en-US}\n";
     let output = format(input, None, None);
     let lines: Vec<&str> = output.lines().collect();

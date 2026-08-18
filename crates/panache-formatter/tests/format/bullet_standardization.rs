@@ -27,7 +27,6 @@ fn plus_marker_converts_to_hyphen() {
 #[test]
 fn mixed_bullet_markers_all_convert_to_hyphen() {
     let input = "- Item 1\n* Item 2\n+ Item 3\n";
-    // Different bullet markers merge into one tight list (Pandoc behavior)
     let expected = "- Item 1\n- Item 2\n- Item 3\n";
     let result = format(input, None, None);
     assert_eq!(result, expected);
@@ -44,7 +43,6 @@ fn nested_bullet_lists_all_use_hyphen() {
 #[test]
 fn bullet_and_ordered_lists_mixed() {
     let input = "* Bullet item\n\n1. Ordered item\n2. Another ordered\n\n+ Another bullet\n";
-    // Bullet items with blank lines become one loose list; ordered list separate
     let expected = "- Bullet item\n\n1. Ordered item\n2. Another ordered\n\n- Another bullet\n";
     let result = format(input, None, None);
     assert_eq!(result, expected);

@@ -34,7 +34,6 @@ Body.\n";
 fn vignette_directives_keep_their_line_breaks() {
     let out = format(VIGNETTE, Some(reflow80()), None);
 
-    // Each directive must stay on its own physical line — R reads them raw.
     for directive in [
         "  %\\VignetteIndexEntry{mappings}\n",
         "  %\\VignetteEngine{knitr::rmarkdown}\n",
@@ -45,7 +44,6 @@ fn vignette_directives_keep_their_line_breaks() {
             "directive folded away: {directive:?}\n{out}"
         );
     }
-    // The folded header is preserved as-is.
     assert!(out.contains("\nvignette: >\n"), "header changed:\n{out}");
 }
 
@@ -56,9 +54,6 @@ fn vignette_is_idempotent() {
     assert_eq!(once, twice, "not idempotent:\n{once}");
 }
 
-/// Sanity guard: a non-verbatim folded scalar still reflows (rule 15),
-/// so the exemption is scoped to the allowlist rather than disabling
-/// folded wrapping wholesale.
 #[test]
 fn non_verbatim_folded_scalar_still_reflows() {
     let long = "This is a fairly long abstract that runs well beyond eighty \

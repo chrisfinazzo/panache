@@ -10,8 +10,6 @@
 //! diagnostics, and block scalars (`|` literal, `>` folded). Anchors,
 //! tags, and aliases land alongside the parser cutover (step 12).
 
-// No production callers yet — the line-based lexer remains the live
-// path until step 12. Remove once the scanner is wired into parsing.
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
@@ -143,8 +141,6 @@ impl<'a> Scanner<'a> {
             tokens_taken: 0,
             indent: -1,
             indent_stack: Vec::new(),
-            // Slot for the implicit block-context level (flow_level 0).
-            // Each flow open pushes another slot; flow close pops.
             simple_keys: vec![None],
             flow_level: 0,
             allow_simple_key: true,
@@ -172,10 +168,6 @@ impl<'a> Scanner<'a> {
         scanner
     }
 
-    /// Match the configured line prefix at byte `offset` (a physical line
-    /// start). Returns the matched length in bytes — the marker plus at
-    /// most one following space, mirroring `strip_line_prefix` — or
-    /// `None` when no prefix is configured or the bytes don't match.
     fn prefix_byte_len_at(&self, offset: usize) -> Option<usize> {
         let marker = self.line_prefix.as_deref()?;
         let after = self.input.get(offset..)?.strip_prefix(marker)?;
@@ -186,11 +178,6 @@ impl<'a> Scanner<'a> {
         Some(len)
     }
 
-    /// At a physical line start, consume the configured line prefix (if
-    /// it matches) as a `Trivia(LinePrefix)` token and reset the column
-    /// so the prefix is excluded from indent/column accounting. Returns
-    /// `true` if a prefix was consumed. No-op (returns `false`) when no
-    /// prefix is configured.
     fn consume_line_prefix_token(&mut self) -> bool {
         let Some(len) = self.prefix_byte_len_at(self.cursor.index) else {
             return false;
@@ -210,11 +197,6 @@ impl<'a> Scanner<'a> {
         true
     }
 
-    /// Within a multi-line scalar, skip the configured line prefix at the
-    /// current line start without emitting a token: the prefix bytes stay
-    /// inside the scalar's span (the builder peels them into
-    /// `YAML_LINE_PREFIX` leaves) while the column is reset so they don't
-    /// count as scalar indentation.
     fn skip_embedded_line_prefix(&mut self) {
         if let Some(len) = self.prefix_byte_len_at(self.cursor.index) {
             let target = self.cursor.index + len;
@@ -236,13 +218,6 @@ impl<'a> Scanner<'a> {
         tok
     }
 
-    /// Should the caller fetch more tokens before popping the queue
-    /// head? True when the queue is empty (and the stream is still
-    /// open), or when the queue head is itself a registered simple-key
-    /// candidate that may still be spliced before. The latter is what
-    /// makes `Key` / `BlockMappingStart` splicing work — we keep
-    /// fetching past the candidate until either a `:` confirms it
-    /// (cancelling the slot) or a stale check expires it.
     fn need_more_tokens(&mut self) -> bool {
         if self.stream_end_emitted {
             return false;
@@ -264,8 +239,6 @@ impl<'a> Scanner<'a> {
             .min()
     }
 
-    /// Drain trivia and one meaningful token into the queue. Called
-    /// repeatedly from `next_token` while `need_more_tokens` is true.
     fn fetch_more_tokens(&mut self) {
         self.scan_trivia();
         self.stale_simple_keys();
@@ -274,8 +247,6 @@ impl<'a> Scanner<'a> {
             self.fetch_stream_end();
             return;
         }
-        // Document markers and directives only apply at column 0 in
-        // block context. Flow context (inside `[]` / `{}`) ignores them.
         if self.flow_level == 0 && self.cursor.column == 0 {
             if self.check_document_indicator(b"---") {
                 self.fetch_document_marker(TokenKind::DocumentStart);
@@ -353,23 +324,15 @@ impl<'a> Scanner<'a> {
             }
             _ => {}
         }
-        // Default: anything else opens a plain scalar.
         self.fetch_plain_scalar();
     }
 
     fn fetch_flow_collection_start(&mut self, kind: TokenKind) {
-        // Register the flow collection as a simple-key candidate at the
-        // current (outer) flow level. A subsequent `:` on the same line
-        // (e.g. `{x: y}: value`, `[a, b]: value`, `{[a,b]: c}`) splices
-        // a Key marker before the flow start — and a BlockMappingStart
-        // earlier when entering block context from level 0.
         self.save_simple_key();
         let start = self.cursor;
         self.advance();
         let end = self.cursor;
         self.flow_level += 1;
-        // New nest: a flow scalar can immediately register as the
-        // inner level's simple-key candidate (e.g. `a` in `{a: b}`).
         self.allow_simple_key = true;
         self.simple_keys.push(None);
         self.tokens.push_back(Token { kind, start, end });
@@ -387,8 +350,6 @@ impl<'a> Scanner<'a> {
     }
 
     fn fetch_flow_entry(&mut self) {
-        // `,` separates flow items. Subsequent entries can be implicit
-        // keys, so re-open candidacy and clear the current slot.
         self.allow_simple_key = true;
         self.remove_simple_key();
         let start = self.cursor;
@@ -447,8 +408,6 @@ impl<'a> Scanner<'a> {
                 });
             }
         }
-        // After `?`, the next thing in block context can itself be an
-        // implicit key (the explicit-key path opens a fresh entry).
         self.allow_simple_key = self.flow_level == 0;
         self.remove_simple_key();
         let start = self.cursor;
@@ -463,10 +422,6 @@ impl<'a> Scanner<'a> {
 
     fn fetch_value(&mut self) {
         if let Some(key) = self.simple_keys[self.flow_level].take() {
-            // Implicit key confirmed: splice `Key` (and possibly
-            // `BlockMappingStart`) before the candidate token in the
-            // queue. Both go at the same queue index, with
-            // `BlockMappingStart` inserted last so it ends up first.
             let queue_pos = key.token_number.saturating_sub(self.tokens_taken);
             self.tokens.insert(
                 queue_pos,
@@ -488,9 +443,6 @@ impl<'a> Scanner<'a> {
             }
             self.allow_simple_key = false;
         } else {
-            // No candidate: explicit `:` (e.g. `? key\n: value`) or
-            // an empty-key shorthand. In block context this needs to
-            // be at a position where a fresh key could appear.
             if self.flow_level == 0 {
                 if !self.allow_simple_key {
                     self.push_diagnostic(
@@ -520,34 +472,11 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Plain scalar with internal whitespace and multi-line
-    /// continuation (YAML 1.2 §7.3.3). Each iteration reads a
-    /// non-whitespace "chunk", then peeks past trailing whitespace
-    /// and line breaks to decide whether the scalar continues. A
-    /// scalar terminates on:
-    /// - EOF or a `#` after whitespace (comment),
-    /// - dedent below `parent_indent + 1` after a line break,
-    /// - a column-0 document marker (`---` / `...`) on a continuation
-    ///   line, or a block indicator (`-`/`?`/`:` followed by EOL/space)
-    ///   at the head of a continuation line in block context,
-    /// - in flow context, a flow indicator (`,`/`[`/`]`/`{`/`}`/`?`).
-    ///
-    /// Trailing whitespace that does NOT lead to continuation is left
-    /// unconsumed so the next fetch can emit it as trivia.
     fn fetch_plain_scalar(&mut self) {
         self.save_simple_key();
         self.allow_simple_key = false;
         let start = self.cursor;
         let min_indent = self.indent + 1;
-        // Bridge for absent tag tokenization: a plain scalar that begins
-        // with `!` is an emulation placeholder for a tag. Keep a following
-        // block-indicator line (`-`/`?`) separate so the projection can
-        // attach the placeholder to the collection that follows (e.g.
-        // J7PZ `--- !!omap\n- ...`). Genuine plain scalars instead fold
-        // such lines per libyaml (AB8U). `&`/`*` are dispatched separately
-        // by `fetch_anchor`/`fetch_alias` and never reach this path at
-        // start-of-token. Remove this guard once the scanner emits real
-        // tag tokens.
         let placeholder = matches!(self.input[start.index..].chars().next(), Some('!'));
         loop {
             let chunk_start = self.cursor.index;
@@ -555,9 +484,6 @@ impl<'a> Scanner<'a> {
             if self.cursor.index == chunk_start {
                 break;
             }
-            // Peek past inter-chunk whitespace and any line break to
-            // determine if the scalar continues. If not, rewind so
-            // the trailing whitespace becomes trivia.
             let saved = self.cursor;
             while matches!(self.peek_char(), Some(' ' | '\t')) {
                 self.advance();
@@ -573,18 +499,11 @@ impl<'a> Scanner<'a> {
                         break;
                     }
                 }
-                Some(_) => {
-                    // Same-line continuation: the consumed spaces are
-                    // internal whitespace; keep going.
-                }
+                Some(_) => {}
             }
         }
         let end = self.cursor;
         if start.index == end.index {
-            // Pathological: dispatch landed here on a char we can't
-            // consume (a stray `?`/`-`/`:` not followed by whitespace
-            // at EOF, etc.). Advance one codepoint so the loop makes
-            // progress.
             self.advance();
             let end = self.cursor;
             self.tokens.push_back(Token {
@@ -601,9 +520,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Consume one run of non-whitespace, non-special chars belonging
-    /// to a plain scalar. Stops at whitespace/break, at `: ` (value
-    /// indicator), and — in flow context — at `,`/`[`/`]`/`{`/`}`/`?`.
     fn consume_plain_chunk(&mut self) {
         loop {
             match self.peek_char() {
@@ -635,9 +551,6 @@ impl<'a> Scanner<'a> {
     fn try_consume_plain_line_break(&mut self, min_indent: i32, placeholder: bool) -> bool {
         let saved = self.cursor;
         self.consume_one_line_break();
-        // Skip this continuation line's embedded prefix so the column
-        // check below measures post-prefix indentation and the `#` of a
-        // `#|` prefix isn't mistaken for a comment that ends the scalar.
         self.skip_embedded_line_prefix();
         loop {
             while matches!(self.peek_char(), Some(' ' | '\t')) {
@@ -664,7 +577,6 @@ impl<'a> Scanner<'a> {
                         return false;
                     }
                     if self.flow_level == 0 {
-                        // Document marker at column 0 ends the scalar.
                         if col == 0
                             && (self.check_document_indicator(b"---")
                                 || self.check_document_indicator(b"..."))
@@ -672,15 +584,6 @@ impl<'a> Scanner<'a> {
                             self.cursor = saved;
                             return false;
                         }
-                        // A value indicator (`:` followed by EOL or
-                        // whitespace) at the head of the next line always
-                        // aborts the plain scalar: `consume_plain_chunk`
-                        // refuses to consume it, which would otherwise
-                        // leave the cursor stranded past the line break
-                        // with an empty chunk. `-`/`?` only abort for
-                        // anchor/tag/alias placeholders (see `placeholder`
-                        // above); for genuine plain scalars they fold in
-                        // as content per libyaml (yaml-test-suite AB8U).
                         let aborts = if placeholder {
                             matches!(self.peek_char(), Some('-' | '?' | ':'))
                         } else {
@@ -693,10 +596,6 @@ impl<'a> Scanner<'a> {
                             return false;
                         }
                     } else if matches!(self.peek_char(), Some(',' | ']' | '}')) {
-                        // In flow context, a flow terminator/separator
-                        // at the head of the next line closes the
-                        // surrounding container — it doesn't continue
-                        // the scalar.
                         self.cursor = saved;
                         return false;
                     }
@@ -706,11 +605,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Quoted scalar (`'...'` or `"..."`). Both styles can span
-    /// multiple lines and can be implicit keys; the scanner emits the
-    /// raw source span and surfaces escape/termination diagnostics.
-    /// Cooking (escape decoding, line folding) is the projection
-    /// layer's job.
     fn fetch_flow_scalar(&mut self, style: ScalarStyle) {
         self.save_simple_key();
         self.allow_simple_key = false;
@@ -720,14 +614,11 @@ impl<'a> Scanner<'a> {
             ScalarStyle::DoubleQuoted => '"',
             _ => unreachable!("fetch_flow_scalar called with non-quoted style"),
         };
-        // Opening quote.
         self.advance();
         let mut closed = false;
         while let Some(c) = self.peek_char() {
             if c == quote {
                 if style == ScalarStyle::SingleQuoted && self.peek_at(1) == Some('\'') {
-                    // `''` is a literal single quote inside a
-                    // single-quoted scalar — not a terminator.
                     self.advance();
                     self.advance();
                     continue;
@@ -741,21 +632,12 @@ impl<'a> Scanner<'a> {
                 self.consume_double_quoted_escape();
                 continue;
             }
-            // Document markers at column 0 inside an unterminated
-            // quoted scalar abort the scalar (libyaml convention) so
-            // we don't swallow the next document. Bail out before
-            // consuming the marker.
             if self.flow_level == 0
                 && self.cursor.column == 0
                 && (self.check_document_indicator(b"---") || self.check_document_indicator(b"..."))
             {
                 break;
             }
-            // A line break inside the scalar: consume it, then skip the
-            // continuation line's embedded prefix so its bytes stay in
-            // the scalar span (peeled by the builder) while the column-0
-            // document-marker check above lands on the post-prefix
-            // content.
             if matches!(c, '\n' | '\r') {
                 self.advance();
                 if c == '\r' && self.peek_char() == Some('\n') {
@@ -782,21 +664,10 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Consume one escape sequence inside a double-quoted scalar,
-    /// starting AFTER the introducing `\`. Recognised escapes follow
-    /// YAML 1.2 §5.7 (`\0`, `\a`, …, `\xHH`, `\uHHHH`, `\UHHHHHHHH`,
-    /// and `\<line-break>` for continuation). Unrecognised escapes
-    /// emit a diagnostic; the cursor still advances by one codepoint
-    /// to make progress.
     fn consume_double_quoted_escape(&mut self) {
-        // The backslash is already past the cursor; record its index
-        // for diagnostic spans (one byte before).
         let backslash_index = self.cursor.index.saturating_sub(1);
         match self.peek_char() {
-            None => {
-                // EOF after backslash; the unterminated-scalar branch
-                // will fire.
-            }
+            None => {}
             Some('\n') => {
                 self.advance();
             }
@@ -856,7 +727,6 @@ impl<'a> Scanner<'a> {
     }
 
     fn is_double_quoted_single_byte_escape(c: char) -> bool {
-        // YAML 1.2 §5.7 escape characters that take no payload.
         matches!(
             c,
             '0' | 'a'
@@ -879,28 +749,12 @@ impl<'a> Scanner<'a> {
         )
     }
 
-    /// Block scalar (`|` literal, `>` folded). The header is `|`/`>`
-    /// optionally followed by an indent indicator (`1`–`9`) and/or a
-    /// chomping indicator (`+`/`-`), then trailing spaces/comment, then
-    /// a line break. Content lines whose indentation falls below the
-    /// resolved minimum terminate the scalar — at which point the
-    /// cursor is left at the start of the dedented line so the main
-    /// loop can pick up the next token.
-    ///
-    /// As with quoted scalars, the source span is emitted raw; folding
-    /// and chomping live in projection.
     fn fetch_block_scalar(&mut self, style: ScalarStyle) {
-        // Block scalars are values, not keys, so they don't register
-        // a simple-key candidate; but they DO close any pending
-        // candidate at the current level (e.g. `key: |` confirms `key`
-        // as the candidate before we get here).
         self.allow_simple_key = true;
         self.remove_simple_key();
         let start = self.cursor;
         let parent_indent = self.indent;
-        // Header indicator (`|` or `>`).
         self.advance();
-        // Optional indent + chomping indicators (in either order).
         let mut explicit_increment: Option<u32> = None;
         for _ in 0..2 {
             match self.peek_char() {
@@ -914,19 +768,14 @@ impl<'a> Scanner<'a> {
                 _ => break,
             }
         }
-        // Header trailing whitespace.
         while matches!(self.peek_char(), Some(' ' | '\t')) {
             self.advance();
         }
-        // Optional trailing comment on the header line.
         if self.peek_char() == Some('#') {
             while !matches!(self.peek_char(), None | Some('\n' | '\r')) {
                 self.advance();
             }
         }
-        // The header must end at a line break (or EOF, for an empty
-        // body). Non-blank trailing content is malformed; libyaml
-        // diagnoses but we just consume to end-of-line for resilience.
         match self.peek_char() {
             Some('\n') => {
                 self.advance();
@@ -938,7 +787,6 @@ impl<'a> Scanner<'a> {
                 }
             }
             None => {
-                // Empty body at EOF.
                 let end = self.cursor;
                 self.tokens.push_back(Token {
                     kind: TokenKind::Scalar(style),
@@ -948,7 +796,6 @@ impl<'a> Scanner<'a> {
                 return;
             }
             Some(_) => {
-                // Trailing junk on header — skip to end of line.
                 while !matches!(self.peek_char(), None | Some('\n' | '\r')) {
                     self.advance();
                 }
@@ -966,11 +813,6 @@ impl<'a> Scanner<'a> {
                 }
             }
         }
-        // Determine the minimum content indent. Per YAML 1.2 §8.1.1.1
-        // content indent must be strictly greater than the parent's
-        // indent. At doc root parent_indent = -1, so column-0 content
-        // is permitted (floor = 0). Otherwise the floor is parent+1.
-        // An explicit indicator m gives content indent max(parent,0)+m.
         let base = parent_indent.max(0);
         let auto_floor = (parent_indent + 1).max(0);
         let min_indent = match explicit_increment {
@@ -980,15 +822,9 @@ impl<'a> Scanner<'a> {
                 .unwrap_or(auto_floor)
                 .max(auto_floor),
         };
-        // Walk content lines via lookahead so a dedented line stays
-        // unconsumed and the main fetch loop sees it.
         loop {
             let line_start = self.cursor.index;
             let bytes = self.input.as_bytes();
-            // Skip an embedded line prefix (e.g. hashpipe `#|`) before
-            // measuring indentation: the prefix bytes stay part of the
-            // scalar content (consumed below, peeled by the builder) but
-            // must not count toward the block-scalar indent.
             let content_start = line_start + self.prefix_byte_len_at(line_start).unwrap_or(0);
             let mut probe = content_start;
             while bytes.get(probe) == Some(&b' ') {
@@ -998,8 +834,6 @@ impl<'a> Scanner<'a> {
             match bytes.get(probe) {
                 None => break,
                 Some(b'\n' | b'\r') => {
-                    // Blank line — entirely whitespace. Consume the
-                    // spaces and the line break as content.
                     while self.cursor.index < probe {
                         self.advance();
                     }
@@ -1009,7 +843,6 @@ impl<'a> Scanner<'a> {
                 _ => {}
             }
             if (leading_spaces as i32) < min_indent {
-                // Dedent below content — terminate without consuming.
                 break;
             }
             if leading_spaces == 0
@@ -1020,10 +853,8 @@ impl<'a> Scanner<'a> {
                     None | Some(b' ' | b'\t' | b'\n' | b'\r')
                 )
             {
-                // Document marker terminates the scalar.
                 break;
             }
-            // Consume the rest of the line as content.
             while !matches!(self.peek_char(), None | Some('\n' | '\r')) {
                 self.advance();
             }
@@ -1038,26 +869,13 @@ impl<'a> Scanner<'a> {
             start,
             end,
         });
-        // The loop breaks at the *start* of the terminating (dedented) line,
-        // before its embedded prefix. `consume_one_line_break` (unlike
-        // `scan_newline`) doesn't peel the next line's prefix, so consume it
-        // here — otherwise the main trivia loop sees the `#` of `#|` and
-        // mis-scans the following option (e.g. `#| echo: false` after a block
-        // scalar) as a YAML comment, dropping it. No-op for prefix-less YAML.
         self.consume_line_prefix_token();
     }
 
-    /// Look ahead through blank lines to find the first non-blank
-    /// content line, returning its leading-space count. Pure peek;
-    /// the cursor does not move.
     fn auto_detect_block_scalar_indent(&self) -> Option<i32> {
         let bytes = self.input.as_bytes();
         let mut i = self.cursor.index;
         while i < bytes.len() {
-            // Skip an embedded line prefix (e.g. hashpipe `#|`) so the
-            // detected indent is measured from the post-prefix content
-            // column, matching the prefix-excluded accounting the rest of
-            // the scanner uses.
             let line_start = i + self.prefix_byte_len_at(i).unwrap_or(0);
             i = line_start;
             while bytes.get(i) == Some(&b' ') {
@@ -1104,9 +922,6 @@ impl<'a> Scanner<'a> {
             return;
         }
         self.unwind_indent(-1);
-        // Drain any pending simple-key candidates. Required candidates
-        // that never met a `:` are diagnosed; non-required ones are
-        // dropped silently.
         for slot in self.simple_keys.iter_mut() {
             if let Some(key) = slot.take()
                 && key.required
@@ -1133,11 +948,6 @@ impl<'a> Scanner<'a> {
         matches!(self.peek_at(1), None | Some(' ' | '\t' | '\n' | '\r'))
     }
 
-    /// `?` opens an explicit key only when followed by whitespace,
-    /// end-of-input, or end-of-line — in both block and flow context.
-    /// A `?` that's followed by any other character is plain-scalar
-    /// text (e.g. `value?`, `another ? string`, `?key`). yaml-test-suite
-    /// JR7V pins this for flow context; libyaml `check_key` agrees.
     fn check_key(&self) -> bool {
         matches!(self.peek_at(1), None | Some(' ' | '\t' | '\n' | '\r'))
     }
@@ -1153,9 +963,6 @@ impl<'a> Scanner<'a> {
         matches!(self.peek_at(1), None | Some(' ' | '\t' | '\n' | '\r'))
     }
 
-    /// Push a new indent level if `column` exceeds the current one.
-    /// Returns true if the level was newly opened, signalling the
-    /// caller should emit a `BlockSequenceStart` / `BlockMappingStart`.
     fn add_indent(&mut self, column: i32) -> bool {
         if self.indent < column {
             self.indent_stack.push(self.indent);
@@ -1166,8 +973,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Pop indent levels above `column`, emitting `BlockEnd` for each.
-    /// Flow context never owns indent levels, so this is a no-op there.
     fn unwind_indent(&mut self, column: i32) {
         if self.flow_level > 0 {
             return;
@@ -1183,12 +988,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Tentatively register a simple-key candidate at the current flow
-    /// level. The candidate's `token_number` is the global index where
-    /// the next token will be appended — i.e. the scalar/anchor that
-    /// triggered registration. A subsequent `:` confirms the candidate
-    /// (splicing `Key` before that token); a line break or required
-    /// expiration cancels it.
     fn save_simple_key(&mut self) {
         if !self.allow_simple_key {
             return;
@@ -1203,10 +1002,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Cancel the simple-key candidate at the current flow level. If it
-    /// was required, surface a diagnostic — required candidates that
-    /// fail to confirm indicate malformed YAML (e.g. an indent change
-    /// before the expected `:`).
     fn remove_simple_key(&mut self) {
         if let Some(key) = self.simple_keys[self.flow_level].take()
             && key.required
@@ -1254,9 +1049,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// `---` / `...` are document markers only at column 0 followed by
-    /// whitespace, newline, or end-of-input. `---abc` is a plain
-    /// scalar, not a marker.
     fn check_document_indicator(&self, marker: &[u8; 3]) -> bool {
         let bytes = self.input.as_bytes();
         let i = self.cursor.index;
@@ -1267,16 +1059,6 @@ impl<'a> Scanner<'a> {
     }
 
     fn fetch_document_marker(&mut self, kind: TokenKind) {
-        // A document marker terminates the previous document's block
-        // structure: any indent levels held by an open block map or
-        // sequence must close before the marker so the next document
-        // starts from a clean indent stack. Without this, a
-        // multi-document stream where doc N closed at column 0 leaves
-        // `self.indent == 0`, which prevents `add_indent(0)` from
-        // emitting a fresh `BlockMappingStart` / `BlockSequenceStart`
-        // for doc N+1's body — its content lands at document level
-        // instead of inside a container. Mirrors libyaml/PyYAML's
-        // `fetch_document_indicator`.
         self.unwind_indent(-1);
         self.remove_simple_key();
         self.allow_simple_key = false;
@@ -1288,9 +1070,6 @@ impl<'a> Scanner<'a> {
         self.tokens.push_back(Token { kind, start, end });
     }
 
-    /// A directive is `%name args` running to end-of-line. Trailing
-    /// whitespace/comment/newline emit as separate trivia on the next
-    /// fetch.
     fn fetch_directive(&mut self) {
         let start = self.cursor;
         debug_assert_eq!(self.peek_char(), Some('%'));
@@ -1309,10 +1088,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Anchor (`&name`) at start-of-token. Anchors can occupy the
-    /// implicit-key slot (e.g. `&b *alias : value` in SU74), so we
-    /// `save_simple_key` first, then close key candidacy for this
-    /// token.
     fn fetch_anchor(&mut self) {
         self.save_simple_key();
         self.allow_simple_key = false;
@@ -1328,8 +1103,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Alias (`*name`) at start-of-token. Like an anchor, an alias can
-    /// be the implicit-key slot's candidate.
     fn fetch_alias(&mut self) {
         self.save_simple_key();
         self.allow_simple_key = false;
@@ -1345,11 +1118,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Tag (`!handle suffix`, `!!type`, or `!<verbatim>`) at start-of-token.
-    /// Tags annotate the *next* node, so they're emitted as a separate
-    /// token (decoration) and the parser carries them through without
-    /// closing the implicit-key candidate slot. Like an anchor, a tag
-    /// can occupy the implicit-key position (e.g. `!!str key: value`).
     fn fetch_tag(&mut self) {
         self.save_simple_key();
         self.allow_simple_key = false;
@@ -1357,9 +1125,6 @@ impl<'a> Scanner<'a> {
         debug_assert_eq!(self.peek_char(), Some('!'));
         self.advance();
         if self.peek_char() == Some('<') {
-            // Verbatim form `!<uri>`: consume up to and including the
-            // closing `>`. We don't validate the URI body — projection
-            // and downstream tools surface tag-shape diagnostics.
             self.advance();
             while let Some(c) = self.peek_char() {
                 self.advance();
@@ -1368,9 +1133,6 @@ impl<'a> Scanner<'a> {
                 }
             }
         } else {
-            // Handle + suffix: any non-whitespace, non-flow-indicator
-            // char. Relaxed (libyaml/PyYAML) name class so suffix chars
-            // like `:`, `/`, `!`, `%` all land inside the tag token.
             while let Some(c) = self.peek_char() {
                 match c {
                     ' ' | '\t' | '\n' | '\r' => break,
@@ -1389,10 +1151,6 @@ impl<'a> Scanner<'a> {
         });
     }
 
-    /// Consume an anchor/alias name. Relaxed (libyaml/PyYAML) name
-    /// class: any non-whitespace, non-flow-indicator codepoint. This
-    /// lets `&a:` in 2SXE land as an anchor with name `a:` rather than
-    /// splitting on the colon.
     fn scan_anchor_name(&mut self) {
         while let Some(c) = self.peek_char() {
             match c {
@@ -1405,13 +1163,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Consume runs of whitespace, newlines, and comments, emitting
-    /// one `Trivia` token per run. Stops at the first meaningful char
-    /// or EOF.
     fn scan_trivia(&mut self) {
-        // First-line bootstrap: the very first line has no preceding
-        // newline, so consume its embedded prefix here. Subsequent lines
-        // are handled by `scan_newline`.
         if self.cursor.index == 0 {
             self.consume_line_prefix_token();
         }
@@ -1453,10 +1205,6 @@ impl<'a> Scanner<'a> {
             _ => unreachable!("scan_newline called on non-newline char"),
         }
         let end = self.cursor;
-        // Line breaks in block context re-open simple-key candidacy:
-        // the next non-trivia token starts a fresh line and may be a
-        // key. Flow context ignores indentation, so candidacy is
-        // governed by `,`/`[`/`{` instead.
         if self.flow_level == 0 {
             self.allow_simple_key = true;
         }
@@ -1465,10 +1213,6 @@ impl<'a> Scanner<'a> {
             start,
             end,
         });
-        // Consume this new line's embedded prefix (if any) as a
-        // `LinePrefix` trivia token before the trivia loop sees the `#`
-        // and mistakes it for a comment. Resets the column so the
-        // prefix is excluded from indent accounting.
         self.consume_line_prefix_token();
     }
 
@@ -1528,9 +1272,6 @@ impl<'a> Scanner<'a> {
                 self.cursor.column = 0;
             }
             '\r' => {
-                // CRLF: defer the line break to the following '\n' so
-                // each byte updates the cursor exactly once. Lone '\r'
-                // takes the line break itself.
                 if self.peek_char() != Some('\n') {
                     self.cursor.line += 1;
                     self.cursor.column = 0;
@@ -1580,7 +1321,6 @@ mod tests {
     fn stream_end_marks_cursor_position_after_trivia_only_input() {
         let input = "   \n";
         let mut scanner = Scanner::new(input);
-        // StreamStart, Whitespace, Newline, StreamEnd
         let mut last = None;
         while let Some(tok) = scanner.next_token() {
             last = Some(tok);
@@ -1738,7 +1478,6 @@ mod tests {
 
     #[test]
     fn multibyte_utf8_advances_index_by_byte_length_and_column_by_one() {
-        // 'é' is 2 bytes in UTF-8 (0xC3 0xA9), one codepoint.
         let mut scanner = Scanner::new("é!");
         scanner.advance();
         assert_eq!(
@@ -1762,7 +1501,6 @@ mod tests {
 
     #[test]
     fn mixed_line_endings_track_correctly() {
-        // LF, CRLF, lone CR — three logical breaks.
         let mut scanner = Scanner::new("a\nb\r\nc\rd");
         while scanner.advance().is_some() {}
         assert_eq!(scanner.cursor().line, 3);
@@ -1790,8 +1528,6 @@ mod tests {
     }
 
     fn assert_byte_complete(input: &str, tokens: &[Token]) {
-        // Synthetic StreamStart/StreamEnd carry zero-width spans; trivia
-        // tokens between them must cover the full input contiguously.
         let mut cursor = 0usize;
         for tok in tokens {
             match tok.kind {
@@ -1847,7 +1583,6 @@ mod tests {
                 TriviaKind::Newline,
             ],
         );
-        // First comment span equals "# hello".
         let comment_tok = tokens
             .iter()
             .find(|t| matches!(t.kind, TokenKind::Trivia(TriviaKind::Comment)))
@@ -1876,9 +1611,6 @@ mod tests {
 
     #[test]
     fn pure_trivia_input_round_trips_byte_complete() {
-        // Mixed whitespace/newlines/comments with CRLF — the kind of
-        // input we'll hit between meaningful tokens once the scanner
-        // is wired up.
         let input = " \t# c1\r\n\n  # c2\n\r";
         let tokens = collect_tokens(input);
         assert_byte_complete(input, &tokens);
@@ -1950,7 +1682,6 @@ mod tests {
 
     #[test]
     fn three_dashes_followed_by_non_break_is_not_a_marker() {
-        // `---abc` at col 0 is a plain scalar starter, not a marker.
         let tokens = collect_tokens("---abc\n");
         let kinds = meaningful_kinds(&tokens);
         assert!(!kinds.contains(&TokenKind::DocumentStart), "got {kinds:?}",);
@@ -1962,7 +1693,6 @@ mod tests {
 
     #[test]
     fn three_dashes_indented_is_not_a_marker() {
-        // ` ---` at col 1 is not a doc marker.
         let tokens = collect_tokens(" ---\n");
         let kinds = meaningful_kinds(&tokens);
         assert!(!kinds.contains(&TokenKind::DocumentStart), "got {kinds:?}",);
@@ -1985,7 +1715,6 @@ mod tests {
 
     #[test]
     fn directive_indented_is_not_recognized() {
-        // Directives MUST be at column 0; ` %YAML 1.2` is not a directive.
         let tokens = collect_tokens(" %YAML 1.2\n");
         let kinds = meaningful_kinds(&tokens);
         assert!(!kinds.contains(&TokenKind::Directive), "got {kinds:?}",);
@@ -1993,7 +1722,6 @@ mod tests {
 
     #[test]
     fn document_start_then_marker_on_new_line() {
-        // Two markers separated by a newline: both detected.
         let input = "---\n...\n";
         let tokens = collect_tokens(input);
         assert_eq!(
@@ -2031,7 +1759,6 @@ mod tests {
         let kinds = meaningful_kinds(&tokens);
         assert_eq!(kinds[0], TokenKind::StreamStart);
         assert_eq!(kinds[1], TokenKind::DocumentStart);
-        // " " is whitespace trivia; "foo" is now a plain scalar.
         assert_eq!(kinds[2], TokenKind::Scalar(ScalarStyle::Plain));
         assert_eq!(*kinds.last().unwrap(), TokenKind::StreamEnd);
         assert_byte_complete(input, &tokens);
@@ -2125,7 +1852,6 @@ mod tests {
 
     #[test]
     fn comma_outside_flow_is_not_a_flow_entry() {
-        // Outside flow context, `,` is plain text, not an indicator.
         let tokens = collect_tokens(",");
         let kinds = meaningful_kinds(&tokens);
         assert!(!kinds.contains(&TokenKind::FlowEntry), "got {kinds:?}");
@@ -2133,8 +1859,6 @@ mod tests {
 
     #[test]
     fn doc_markers_inside_flow_context_are_not_recognized() {
-        // `[---]` — the `---` inside flow context is plain text, not a
-        // doc marker.
         let tokens = collect_tokens("[---]");
         let kinds = meaningful_kinds(&tokens);
         assert!(!kinds.contains(&TokenKind::DocumentStart), "got {kinds:?}");
@@ -2145,7 +1869,6 @@ mod tests {
     fn flow_brackets_with_whitespace_emit_trivia_between() {
         let input = "[ , ]";
         let tokens = collect_tokens(input);
-        // FlowSequenceStart, Whitespace, FlowEntry, Whitespace, FlowSequenceEnd.
         assert_eq!(
             tokens
                 .iter()
@@ -2165,9 +1888,6 @@ mod tests {
 
     #[test]
     fn block_mapping_implicit_key_splices_block_mapping_start_and_key() {
-        // The classic case: `key: value` registers `key` as a simple-key
-        // candidate; the `:` confirms it, splicing BlockMappingStart and
-        // Key before the scalar.
         let input = "key: value";
         let tokens = collect_tokens(input);
         assert_eq!(
@@ -2208,9 +1928,6 @@ mod tests {
 
     #[test]
     fn explicit_key_indicator_emits_key_and_value_without_splice() {
-        // `? a\n: b` — the `?` opens an explicit-key entry, so when `:`
-        // arrives there's no implicit-key candidate to confirm (the
-        // candidate registered for `a` aged out at the line break).
         let input = "? a\n: b\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
@@ -2232,16 +1949,9 @@ mod tests {
 
     #[test]
     fn multi_line_plain_scalar_does_not_confirm_simple_key_on_next_line() {
-        // `a\nb: c\n` — under multi-line plain rules `a\nb` is one
-        // continuation scalar, terminated by `: `. The simple-key
-        // candidate registered when the scalar started on line 0 must
-        // age out before the `:` arrives (it lives on line 1), so the
-        // `:` does NOT splice a Key before the multi-line scalar.
         let input = "a\nb: c\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // The first plain scalar token must precede any Key token —
-        // proving the multi-line scalar wasn't retroactively keyed.
         let scalar_pos = kinds
             .iter()
             .position(|&k| k == TokenKind::Scalar(ScalarStyle::Plain))
@@ -2252,7 +1962,6 @@ mod tests {
                 "multi-line scalar must precede any key: {kinds:?}",
             );
         }
-        // The scalar's source span covers both lines.
         let scalar = tokens
             .iter()
             .find(|t| matches!(t.kind, TokenKind::Scalar(ScalarStyle::Plain)))
@@ -2262,8 +1971,6 @@ mod tests {
 
     #[test]
     fn flow_mapping_with_implicit_key_emits_only_flow_indicators() {
-        // Inside `{}`, `a: b` triggers the simple-key splice for `a`
-        // but DOES NOT emit BlockMappingStart (we're in flow context).
         let input = "{a: b}";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
@@ -2289,51 +1996,31 @@ mod tests {
 
     #[test]
     fn flow_explicit_key_indicator_emits_key_token() {
-        // `?` inside flow context is always a key indicator (no
-        // whitespace lookahead needed).
         let input = "{? a: b}";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
         assert_eq!(kinds[0], TokenKind::StreamStart);
         assert_eq!(kinds[1], TokenKind::FlowMappingStart);
         assert_eq!(kinds[2], TokenKind::Key);
-        // After the `?`, the rest is implicit-key-style: candidate for
-        // `a` is confirmed by `:`.
         assert!(kinds.contains(&TokenKind::Value));
         assert_byte_complete(input, &tokens);
     }
 
     #[test]
     fn nested_block_mapping_emits_block_end_on_dedent() {
-        // outer:
-        //   inner: x
-        // y: z
-        // The dedent before `y` must emit BlockEnd, popping the inner
-        // mapping's indent level.
         let input = "outer:\n  inner: x\ny: z\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
         let block_ends = kinds.iter().filter(|&&k| k == TokenKind::BlockEnd).count();
-        // One BlockEnd for the inner mapping (popped before `y`),
-        // one for the outer mapping at stream end.
         assert_eq!(block_ends, 2, "got {kinds:?}");
         assert_byte_complete(input, &tokens);
     }
 
     #[test]
     fn nested_block_sequence_inside_mapping_unwinds_correctly() {
-        // items:
-        //   - a
-        //   - b
-        // status: ok
-        //
-        // The dedent before `status:` pops the inner sequence's indent
-        // level, emitting BlockEnd before the next outer mapping key.
         let input = "items:\n  - a\n  - b\nstatus: ok\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // Find the position of the SECOND Key (`status`) and the
-        // BlockEnd that should precede it (closing the sequence).
         let key_positions: Vec<_> = kinds
             .iter()
             .enumerate()
@@ -2348,7 +2035,6 @@ mod tests {
             preceding_block_end.is_some(),
             "BlockEnd must precede second key: {kinds:?}",
         );
-        // Final two tokens are BlockEnd (outer mapping), StreamEnd.
         let n = kinds.len();
         assert_eq!(kinds[n - 1], TokenKind::StreamEnd);
         assert_eq!(kinds[n - 2], TokenKind::BlockEnd);
@@ -2357,30 +2043,21 @@ mod tests {
 
     #[test]
     fn value_indicator_with_no_simple_key_emits_block_mapping_start() {
-        // A bare `: value` at column 0 (empty key shorthand) opens a
-        // block mapping with no Key splice; the parser will treat it
-        // as "empty implicit key, then value".
         let input = ": value\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
         assert_eq!(kinds[0], TokenKind::StreamStart);
         assert_eq!(kinds[1], TokenKind::BlockMappingStart);
         assert_eq!(kinds[2], TokenKind::Value);
-        // No Key token before Value — the parser handles empty key.
         assert!(!kinds[..3].contains(&TokenKind::Key), "got {kinds:?}",);
         assert_byte_complete(input, &tokens);
     }
 
     #[test]
     fn block_mapping_unwinds_indents_at_stream_end() {
-        // a:
-        //   b: c
-        // (no trailing newline) — must still emit two BlockEnd tokens
-        // before StreamEnd as the indent stack unwinds.
         let input = "a:\n  b: c";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // Last meaningful tokens should be BlockEnd, BlockEnd, StreamEnd.
         let n = kinds.len();
         assert_eq!(kinds[n - 1], TokenKind::StreamEnd);
         assert_eq!(kinds[n - 2], TokenKind::BlockEnd);
@@ -2390,8 +2067,6 @@ mod tests {
 
     #[test]
     fn colon_inside_plain_scalar_token_does_not_break_scalar() {
-        // `https://example.com` — the `:` is not followed by whitespace
-        // so it stays inside the plain scalar.
         let input = "https://example.com";
         let tokens = collect_tokens(input);
         let scalar = tokens
@@ -2447,8 +2122,6 @@ mod tests {
 
     #[test]
     fn single_quoted_scalar_treats_doubled_quote_as_escape() {
-        // `'it''s'` is a single scalar containing `it's`. The middle
-        // `''` must NOT terminate the scalar.
         let input = "'it''s'";
         let tokens = collect_tokens(input);
         let scalars: Vec<_> = tokens
@@ -2464,8 +2137,6 @@ mod tests {
 
     #[test]
     fn double_quoted_scalar_with_escaped_quote_does_not_terminate_early() {
-        // `"a\"b"` — the middle `\"` is an escaped quote; the closer
-        // is the final `"`.
         let input = "\"a\\\"b\"";
         let tokens = collect_tokens(input);
         let scalars: Vec<_> = tokens
@@ -2482,7 +2153,6 @@ mod tests {
 
     #[test]
     fn double_quoted_scalar_recognises_common_single_byte_escapes() {
-        // Each escape advances by exactly one char after `\`.
         let input = "\"\\n\\t\\r\\0\\\\\\\"\"";
         let tokens = collect_tokens(input);
         let scalar = find_scalar(&tokens);
@@ -2528,7 +2198,6 @@ mod tests {
     #[test]
     fn double_quoted_scalar_with_short_hex_escape_emits_diagnostic() {
         // `\x4` is missing one hex digit; the `"` after closes the
-        // scalar but the truncated escape is reported.
         let input = "\"\\x4\"";
         let mut scanner = Scanner::new(input);
         while scanner.next_token().is_some() {}
@@ -2544,22 +2213,16 @@ mod tests {
 
     #[test]
     fn double_quoted_scalar_spans_multiple_lines() {
-        // A literal newline inside the quotes is part of the scalar.
         let input = "\"line1\nline2\"";
         let tokens = collect_tokens(input);
         let scalar = find_scalar(&tokens);
         assert_eq!(scalar.kind, TokenKind::Scalar(ScalarStyle::DoubleQuoted));
-        // The entire input is the scalar (no Newline trivia between
-        // the two lines — line breaks inside quoted scalars belong to
-        // the scalar's source span).
         assert_eq!(scalar.start.index, 0);
         assert_eq!(scalar.end.index, input.len());
     }
 
     #[test]
     fn line_continuation_escape_consumes_newline_inside_quoted_scalar() {
-        // `\<newline>` is a folding line break: the `\` plus the
-        // following newline are together one escape.
         let input = "\"a\\\nb\"";
         let mut scanner = Scanner::new(input);
         while scanner.next_token().is_some() {}
@@ -2875,17 +2538,13 @@ mod tests {
 
     #[test]
     fn multi_line_plain_scalar_continues_under_indent() {
-        // `key: hello\n  world\n` — the `world` line is indented past
-        // the parent indent (0+1=1), so it continues the scalar.
         let input = "key: hello\n  world\n";
         let tokens = collect_tokens(input);
         let plain_scalars: Vec<_> = tokens
             .iter()
             .filter(|t| matches!(t.kind, TokenKind::Scalar(ScalarStyle::Plain)))
             .collect();
-        // Two plain scalars: `key`, and the multi-line value.
         assert_eq!(plain_scalars.len(), 2, "got {tokens:?}");
-        // The value scalar spans both lines.
         let value = plain_scalars[1];
         assert!(
             input[value.start.index..value.end.index].contains("hello"),
@@ -2901,7 +2560,6 @@ mod tests {
 
     #[test]
     fn plain_scalar_terminates_at_blank_line_continuation() {
-        // A blank line between content terminates the plain scalar.
         let input = "key: hello\n\n  world\n";
         let tokens = collect_tokens(input);
         let plain_scalars: Vec<_> = tokens
@@ -2909,10 +2567,6 @@ mod tests {
             .filter(|t| matches!(t.kind, TokenKind::Scalar(ScalarStyle::Plain)))
             .map(|t| &input[t.start.index..t.end.index])
             .collect();
-        // Hmm — actually a blank line in YAML plain-scalar continuation
-        // is allowed as folding whitespace. Verify what we emit: at
-        // minimum, `hello` and `world` should both be present, but we
-        // accept either (one merged scalar OR separate). Check both.
         let merged = plain_scalars.iter().any(|s| s.contains("world"));
         assert!(
             merged || plain_scalars.contains(&"world"),
@@ -2922,16 +2576,11 @@ mod tests {
 
     #[test]
     fn plain_scalar_terminates_on_dedent() {
-        // `outer:\n  hello\nnext: x` — `next:` at column 0 is below
-        // the continuation indent (parent=2, min=3), so the value
-        // scalar ends at end-of-line-1 and `next:` opens a new entry.
         let input = "outer:\n  hello\nnext: x\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // Two Key tokens (outer, next).
         let key_count = kinds.iter().filter(|&&k| k == TokenKind::Key).count();
         assert_eq!(key_count, 2, "got {kinds:?}");
-        // Three plain scalars: `outer`, `hello`, `next`, `x`.
         let plain_count = kinds
             .iter()
             .filter(|&&k| k == TokenKind::Scalar(ScalarStyle::Plain))
@@ -2941,15 +2590,9 @@ mod tests {
 
     #[test]
     fn plain_scalar_terminates_on_following_block_entry_indicator() {
-        // `outer:\n  - a` — under the value `outer:` we have a block
-        // sequence whose first entry `- a` is on line 1. The (empty)
-        // value of `outer:` must NOT swallow `- a` as a continuation.
         let input = "outer:\n  - a\n  - b\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // Should see at least one BlockEntry (we'd see two for the
-        // two items, but the bigger point is that `- a` was NOT
-        // absorbed into the plain-scalar continuation).
         let block_entry_count = kinds
             .iter()
             .filter(|&&k| k == TokenKind::BlockEntry)
@@ -2959,11 +2602,6 @@ mod tests {
 
     #[test]
     fn more_indented_dash_line_folds_into_plain_scalar() {
-        // yaml-test-suite AB8U: `- single multiline\n - sequence entry\n`.
-        // The second line's `-` sits at column 1, deeper than the
-        // sequence indent (0), so per libyaml it folds into the plain
-        // scalar rather than opening a nested sequence. Expect a single
-        // BlockEntry and a single plain scalar spanning both lines.
         let input = "- single multiline\n - sequence entry\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
@@ -2986,10 +2624,6 @@ mod tests {
 
     #[test]
     fn flow_context_plain_scalar_does_not_absorb_terminator_line_break() {
-        // `{a: 42\n}\n` — the `\n` between `42` and `}` must NOT be
-        // swallowed into the scalar's continuation. The plain scalar
-        // ends at `42`; the line break is trivia between scalar and
-        // closer.
         let input = "{a: 42\n}\n";
         let tokens = collect_tokens(input);
         let scalars: Vec<_> = tokens
@@ -3010,35 +2644,19 @@ mod tests {
             .filter(|t| matches!(t.kind, TokenKind::Scalar(ScalarStyle::Plain)))
             .map(|t| &input[t.start.index..t.end.index])
             .collect();
-        // `a b` is one scalar (internal whitespace allowed); `c` is
-        // another. The `,` separates them.
         assert_eq!(plain_scalars, vec!["a b", "c"]);
     }
 
     #[test]
     fn multi_line_plain_scalar_does_not_register_as_simple_key() {
-        // `hello\n  world: value\n` — after the multi-line plain
-        // scalar emerges, a `:` would be on a different line from the
-        // candidate's mark.line. stale_simple_keys must drop the
-        // candidate so the `:` does NOT splice a Key before
-        // `hello\n  world`.
-        //
-        // This is the case that motivated the scanner rewrite.
         let input = "hello\n  world: value\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);
-        // Find positions of the first plain Scalar and the first Key.
         let scalar_pos = kinds
             .iter()
             .position(|&k| k == TokenKind::Scalar(ScalarStyle::Plain));
         let key_pos = kinds.iter().position(|&k| k == TokenKind::Key);
         assert!(scalar_pos.is_some(), "no scalar: {kinds:?}");
-        // If there is a Key, the multi-line scalar must NOT be its
-        // body (i.e., the Scalar must not appear AFTER Key without
-        // first having been emitted standalone). The simplest check:
-        // the first scalar must come before any Key — because the
-        // multi-line scalar is committed to the queue before the `:`
-        // would even be reached.
         if let Some(k) = key_pos {
             let s = scalar_pos.unwrap();
             assert!(s < k, "multi-line scalar must precede any key: {kinds:?}",);
@@ -3047,9 +2665,6 @@ mod tests {
 
     #[test]
     fn plain_scalar_preserves_single_line_simple_key_behaviour() {
-        // Single-line `hello world: value` — the scalar `hello world`
-        // (with internal space) IS still a valid implicit key because
-        // it stays on one line.
         let input = "hello world: value\n";
         let tokens = collect_tokens(input);
         let kinds = meaningful_kinds(&tokens);

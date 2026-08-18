@@ -74,11 +74,6 @@ fn all_case_paths() -> Vec<(String, PathBuf)> {
             entries.push((name, path));
             continue;
         }
-        // No in.yaml at top level. The yaml-test-suite layout uses two kinds
-        // of non-leaf directories: 4-char hashed parents that hold numbered
-        // subcases (e.g. `2G84/00/in.yaml`), and `name/` / `tags/` index
-        // directories built from symlinks back to the hashed parents.
-        // Recurse only into the hashed parents to avoid double-counting.
         let is_hashed_parent = name.len() == 4
             && name
                 .chars()
@@ -109,11 +104,6 @@ fn fixture_case_events(case_path: &Path) -> Vec<String> {
     let event_path = case_path.join("test.event");
     let event_text = fs::read_to_string(&event_path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", event_path.display()));
-    // Strip only the line ending, not trailing spaces: yaml-test-suite events
-    // can carry significant trailing whitespace (e.g. a folded scalar whose
-    // value ends in a space, `=VAL " ... non-empty `), and the projected event
-    // stream reproduces it. `lines()` already drops `\n`/`\r\n`; event lines
-    // never carry leading indentation, so no further trimming is needed.
     event_text
         .lines()
         .filter(|line| !line.is_empty())
@@ -561,12 +551,6 @@ fn yaml_flat_map_with_empty_value_projected_events() {
     );
 }
 
-/// Pins the post-PR-C empty-stream contract: inputs that contain only
-/// trivia (comments / whitespace / a bare `...` marker) produce a
-/// `YAML_STREAM` with no `YAML_DOCUMENT` children, which the events
-/// projection emits as just `+STR -STR`. Regressing this would re-introduce
-/// the comment-only-document bug fixed while building the YAML parser's
-/// empty-stream handling.
 #[test]
 fn yaml_empty_stream_projects_no_document_events() {
     for input in ["# Comment only.\n", "...\n", "# comment\n...\n"] {

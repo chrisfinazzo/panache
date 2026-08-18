@@ -53,8 +53,6 @@ use panache_parser::{Dialect, Extensions, Flavor, ParserOptions};
 mod common;
 use common::reparse_or_full_with_cost_guards;
 
-/// One parser-option configuration to fuzz under, with its share of the
-/// per-snippet budget.
 struct Tier {
     name: &'static str,
     flavor: Flavor,
@@ -125,7 +123,6 @@ const TIERS: &[Tier] = &[
     },
 ];
 
-/// Knuth's MMIX linear congruential generator. Deterministic, dependency-free.
 struct Lcg(u64);
 
 impl Lcg {
@@ -137,16 +134,11 @@ impl Lcg {
         self.0
     }
 
-    /// A pseudo-random value in `0..n` (`n > 0`), using the high bits.
     fn below(&mut self, n: usize) -> usize {
         ((self.next() >> 33) % n as u64) as usize
     }
 }
 
-/// Insert alphabet biased toward strings that can restructure blocks at a
-/// distance. Every entry is a hazard: fence/div delimiters, setext
-/// underlines, list and quote markers, table pipes, math and HTML
-/// delimiters, refdef-shaped lines, hard breaks, and multibyte text.
 const INSERTS: &[&str] = &[
     "", // pure deletion
     "\n",
@@ -195,123 +187,66 @@ const INSERTS: &[&str] = &[
     "-->",
     "α",
     "παρά",
-    // CRLF terminators, so a mixed-ending document is reachable from every
-    // snippet rather than only from the two that start out that way.
     "\r\n",
     "\r\n\r\n",
-    // Document-start-only shapes: a window is parsed standalone, so its first
-    // line is a document's first line to the block dispatcher.
     "%",
     "% Title\n",
     ":",
     "Key: value\n",
     "---\nk: v\n---\n",
-    // Hashpipe with malformed YAML: the only error source besides frontmatter.
     "#| echo: [\n",
 ];
 
-/// Hand-written hazard snippets. Each comment names the trap the snippet
-/// encodes — the way an edit near it can change block structure at a
-/// distance.
 const HAZARD_SNIPPETS: &[(&str, &str)] = &[
-    // A paragraph followed by a line that an inserted `---`/`===` can turn
-    // into a setext underline, retroactively changing the paragraph's kind.
     ("setext_candidate", "alpha\nbeta\n\ngamma\ndelta\n"),
-    // Lazy continuation: the unprefixed line belongs to the blockquote;
-    // edits around the boundary move it in or out.
     ("lazy_blockquote", "> quoted\ncontinuation\n\ntail para\n"),
-    // Same trap for list items; also indent-sensitive.
     ("lazy_list", "- item one\ncontinuation\n\n- item two\n"),
-    // A closed backtick fence; deleting either delimiter makes the rest of
-    // the document code.
     ("fenced_code", "```r\ncode <- 1\n```\n\npara\n"),
-    // Tilde fences pair only with tildes; mixing is a paragraph.
     ("tilde_fence", "~~~\nliteral\n~~~\n\npara\n"),
-    // Already-unterminated fence: everything after the opener is code, so
-    // edits far below the opener still land inside one block.
     ("unterminated_fence", "```\ncode\n\npara after\n"),
-    // Pandoc fenced div; `:::` runs open and close with loose matching.
     ("fenced_div", "::: note\nbody\n:::\n\npara\n"),
-    // Nested divs: closing runs pair innermost-first, so an edit can
-    // re-pair the outer fence.
     (
         "nested_div",
         ":::: outer\n::: inner\nbody\n:::\n::::\n\npara\n",
     ),
-    // Loose/tight is a property of the whole list; inserting or deleting a
-    // blank line between items flips every item's rendering.
     ("list_tightness", "- one\n\n- two\n- three\n\npara\n"),
     ("ordered_list", "1. first\n2. second\n\npara\n"),
-    // The delimiter row decides whether the line above is a header or a
-    // paragraph — the same backward dependency as setext.
     ("pipe_table", "| a | b |\n|---|---|\n| 1 | 2 |\n\npara\n"),
-    // Reference definitions are document-scoped: adding/removing one
-    // changes link resolution in *unedited* regions.
     ("refdef", "[foo]: /url\n\nsee [foo] and [bar] here\n"),
-    // Use sites *before* the definitions: an edit near the tail that adds
-    // or removes a definition changes resolution in the retained prefix.
     (
         "use_before_refdef",
         "see [x] and [foo] here\n\nmore prose\n\n[foo]: /url\n",
     ),
-    // YAML frontmatter exists only when the delimiter sits at offset 0.
     ("frontmatter", "---\ntitle: x\n---\n\nbody para\n"),
-    // HTML block (type 6) runs to a blank line.
     ("html_block", "<div>\nhtml body\n</div>\n\npara\n"),
-    // HTML comment (type 2) runs to `-->`, across blank lines.
     ("html_comment", "<!-- note\n\nstill comment -->\n\npara\n"),
-    // Display math: `$$` pairs like a fence.
     ("display_math", "$$\nx^2 + y\n$$\n\npara\n"),
-    // Inline delimiter runs: `$`, backticks, emphasis.
     ("inline_spans", "text $x$ and `code` and *emph* span\n"),
-    // Footnote definitions are block-level and referenced at a distance.
     ("footnote", "text[^1] more\n\n[^1]: note body\n"),
-    // Escaped line break at line end glues lines inside one paragraph.
     ("hard_break", "line one\\\nline two\n\ntail\n"),
-    // Multibyte text: every offset clamp must respect char boundaries.
     ("unicode", "αβγ δε ζη\n\nπαρά two λ\n"),
-    // Nested blockquotes: marker runs stack.
     ("nested_blockquote", "> outer\n> > inner\n\npara\n"),
-    // `---` is a thematic break, a setext underline, or a list bullet's
-    // sibling depending on what surrounds it.
     ("hr_vs_setext", "- a\n\n---\n\n- b\n"),
-    // Minimal document: edits at offsets 0 and EOF.
     ("tiny", "a\n"),
-    // Resolved and unresolved reference-link shapes together.
     (
         "link_shapes",
         "[text](url) and [ref][foo] end\n\n[foo]: /u\n",
     ),
-    // ATX headings: the section-window strategy anchors on these.
     (
         "atx_sections",
         "# One\n\nbody one\n\n## Two\n\nbody two\n\n# Three\n\nbody three\n",
     ),
-    // Pandoc `%` title block: recognized only on the document's first line,
-    // so a window starting on one manufactures it.
     ("pandoc_title", "% Title\n% Author\n% Date\n\nbody para\n"),
-    // Same trap for MultiMarkdown's `Key: Value` title block.
     ("mmd_title", "Title: Doc\nAuthor: Me\n\nbody para\n"),
-    // A frontmatter-shaped block in the *body*: pandoc metadata, but a
-    // thematic break plus a setext heading under CommonMark-family dialects.
     (
         "mid_document_yaml",
         "intro para\n\n---\nkey: value\n---\n\ntail para\n",
     ),
-    // Malformed frontmatter: puts a syntax error in the retained prefix, so
-    // the splice must carry it rather than re-derive it.
     ("bad_frontmatter", "---\ntitle: [\n---\n\nbody para\n"),
-    // Hashpipe options: a second error site, and one that can sit anywhere in
-    // the document rather than only at its start.
     (
         "hashpipe",
         "intro\n\n```{r}\n#| echo: false\n1 + 1\n```\n\ntail\n",
     ),
-    // CRLF: every seam and blank-line test in the guard cascade is textual, so
-    // a line ending it does not recognize refuses the whole document silently.
-    // These two mirror `atx_sections` and `lazy_blockquote` byte for byte apart
-    // from the terminator, so a splice rate that collapses here is the line
-    // ending and nothing else.
     (
         "crlf_sections",
         "# One\r\n\r\nbody one\r\n\r\n## Two\r\n\r\nbody two\r\n\r\n# Three\r\n\r\nbody three\r\n",
@@ -345,7 +280,6 @@ fn clamp_to_char_boundary(text: &str, mut pos: usize) -> usize {
     pos
 }
 
-/// What a fuzz run exercised, beside passing.
 #[derive(Default)]
 struct FuzzStats {
     /// Edits whose *full* parse was lossy or panicked, so the splice could not
@@ -387,12 +321,6 @@ impl FuzzStats {
         self.spliced as f64 / judged as f64
     }
 
-    /// Report the run and fail if too few edits reached the splice at all.
-    ///
-    /// The floor is deliberately far below the measured rates (78% and 76% on
-    /// the snippets, 60% on the real-document corpus): it is there to catch a
-    /// guard that turns the harness into full-parse-versus-full-parse, not to
-    /// pin the exact rate, which every new snippet moves.
     fn assert_exercised_the_splice(&self, what: &str) {
         eprintln!(
             "{what}: {} spliced, {} declined ({:.1}% spliced), {} skipped with a lossy full \
@@ -482,14 +410,12 @@ impl FuzzStats {
     }
 }
 
-/// What a driver holds constant across the edits it generates.
 struct Run<'a> {
     options: &'a ParserOptions,
     cost_guards: CostGuards,
     stats: &'a mut FuzzStats,
 }
 
-/// A pseudo-random `(delete_range, insert)` for `text`, char-boundary safe.
 fn random_edit(rng: &mut Lcg, text: &str) -> ((usize, usize), &'static str) {
     let start = clamp_to_char_boundary(text, rng.below(text.len() + 1));
     let max_delete = (text.len() - start).min(24);
@@ -555,15 +481,6 @@ const PROSE_INSERTS: &[&str] = &[
     "www.example.com",
 ];
 
-/// A pseudo-random edit landing *inside* a `TEXT` token of `base`.
-///
-/// The uniform generator picks an offset anywhere in the document, which on
-/// these snippets almost never lands strictly inside a prose token -- so it
-/// exercises the window tiers and leaves the token tier nearly untouched. This
-/// one samples a `TEXT` token first, then an offset within it, which is the
-/// only way the token tier's guards get hit in anger.
-///
-/// Returns `None` when the tree holds no `TEXT` token at all.
 fn prose_edit(rng: &mut Lcg, base: &Base) -> Option<((usize, usize), &'static str)> {
     let tokens: Vec<_> = base
         .tree
@@ -619,14 +536,6 @@ fn region_edit(rng: &mut Lcg, base: &Base) -> Option<((usize, usize), &'static s
     Some(((start, end), INSERTS[rng.below(INSERTS.len())]))
 }
 
-/// Chain region-placed edits, re-sampling a child from the *spliced* tree at
-/// every step.
-///
-/// Chaining is what makes this driver worth having: the tier replaces a run of
-/// green children, so step *n+1* samples a child out of a tree step *n*
-/// produced. A splice that put the wrong children in, or put them at the wrong
-/// offsets, shows up as the next step editing at an offset the tree no longer
-/// means -- which no single-edit driver can see.
 fn fuzz_region_edits(
     tier: &Tier,
     name: &str,
@@ -680,14 +589,6 @@ struct Base {
 }
 
 impl Base {
-    /// Parse the text a chain of edits starts from, or `None` when the *base*
-    /// parse is itself lossy or panics.
-    ///
-    /// The per-edit precondition checks the full parse of the *edited* text;
-    /// this checks the parse the splice builds on. A base whose tree is
-    /// shorter than its text hands the reparse offsets that do not resolve
-    /// against that tree, which judges nothing and reaches rowan as a
-    /// panic.
     fn parse(text: &str, options: &ParserOptions) -> Option<Self> {
         let (tree, errors) = catch_unwind(AssertUnwindSafe(|| {
             parse_with_errors(text, Some(options.clone()))
@@ -718,10 +619,6 @@ fn check_edit(
     let updated = apply_edit(before, old_edit, insert);
     let new_edit = (old_edit.0, old_edit.0 + insert.len());
 
-    // A full-parser panic or lossy full parse means the oracle itself is
-    // broken for this input: skip the case and count it. The known
-    // instances are pinned as red tests in `incremental_regressions.rs`;
-    // a growing skip count on unchanged seeds means a new parser bug.
     let (full, full_errors) = match catch_unwind(AssertUnwindSafe(|| {
         parse_with_errors(&updated, Some(run.options.clone()))
     })) {
@@ -745,8 +642,6 @@ fn check_edit(
         return None;
     }
 
-    // The in-crate debug oracle panics inside the call on divergence; catch
-    // it so the failure report carries the reproducing case.
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         reparse_or_full_with_cost_guards(
             &updated,
@@ -877,13 +772,8 @@ fn fuzz_chained_edits(
                 "snippet {name}, tier {}, seed {seed}, batch #{batch}, chain step #{step}",
                 tier.name
             );
-            // The spliced errors feed the next step exactly as the spliced
-            // tree does: a chain that reset them to empty would never
-            // exercise the prefix-carry path past its first step.
             let Some(next) = check_edit(&context, &current, &mut run, &base, old_edit, insert)
             else {
-                // The chain's text walked into full-parser-lossy territory;
-                // later steps would judge splices against a broken oracle.
                 break;
             };
             base = next;
@@ -892,14 +782,6 @@ fn fuzz_chained_edits(
     }
 }
 
-/// Chain prose-placed edits, re-sampling a `TEXT` token from the *spliced*
-/// tree at every step.
-///
-/// Chaining is what makes this driver worth having over single edits: the tier
-/// splices a token in place, so step *n+1* samples a token out of a tree step
-/// *n* produced. A splice that silently corrupted a token's text or range would
-/// show up as the next step editing at an offset that no longer means what the
-/// tree says it means.
 fn fuzz_prose_edits(
     tier: &Tier,
     name: &str,
@@ -1002,9 +884,6 @@ fn hazard_snippets_chained_edits() {
 #[test]
 fn real_documents_random_edits() {
     let docs_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benches/documents");
-    // Every name here must be one `benches/documents/download.sh` produces
-    // (or a tracked file): an absent document is *skipped*, so a stale name
-    // silently shrinks this tier instead of failing.
     let names = ["small.qmd", "configuration.qmd", "tables.qmd", "math.qmd"];
     let mut stats = FuzzStats::default();
     for (tier_index, tier) in TIERS.iter().enumerate() {
@@ -1189,8 +1068,6 @@ fn region_snippets() -> Vec<(String, String)> {
     }
     snippets.push(("code_blocks_between_paragraphs".to_owned(), fences));
 
-    // Every seam test in the cascade is textual, so a CRLF twin is the only
-    // thing that keeps the line-ending handling measured rather than assumed.
     snippets.push((
         "many_paragraphs_crlf".to_owned(),
         paragraphs.replace('\n', "\r\n"),
@@ -1199,14 +1076,6 @@ fn region_snippets() -> Vec<(String, String)> {
     snippets
 }
 
-/// Prose-shaped snippets, for the token tier.
-///
-/// [`HAZARD_SNIPPETS`] is built to break the *window* tiers, so it is almost
-/// all construct: fences, markers, delimiters. Very little of it is the plain
-/// multi-word prose the token tier is for, and a driver that only walks those
-/// snippets would spend its time watching the tier decline. These add the
-/// shapes that make it accept -- and the near-misses that make it decline for
-/// the right reason.
 const PROSE_SNIPPETS: &[(&str, &str)] = &[
     (
         "plain_paragraphs",

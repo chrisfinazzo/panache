@@ -100,7 +100,6 @@ pub(crate) fn try_parse_wikilink(
         }
         if b == b']' && bytes[i + 1] == b']' {
             if i == body_start {
-                // Empty body — `[[]]` is literal text per pandoc.
                 return None;
             }
             return Some(WikiLinkSpan {
@@ -148,11 +147,9 @@ pub(crate) fn emit_wikilink<S: InlineSink>(
             let url;
             let title;
             if opts.extensions.wikilinks_title_after_pipe {
-                // [[url|title]]
                 url = body_start..p;
                 title = (p + 1)..body_end;
             } else {
-                // [[title|url]] (only before-pipe is on)
                 title = body_start..p;
                 url = (p + 1)..body_end;
             }
@@ -161,9 +158,6 @@ pub(crate) fn emit_wikilink<S: InlineSink>(
         None => (body_start..body_end, None),
     };
 
-    // URL slot first by CST order when there is no pipe, or in the
-    // source order when there is one. We preserve the source byte
-    // sequence so the formatter can round-trip verbatim.
     let url_first = match span.pipe {
         Some(_) => opts.extensions.wikilinks_title_after_pipe,
         None => true,
@@ -187,7 +181,6 @@ pub(crate) fn emit_wikilink<S: InlineSink>(
         emit_url(builder);
         emit_pipe_and_title(builder);
     } else {
-        // Before-pipe: source order is title, |, url.
         if let Some((_p, ref tr)) = title_range {
             builder.start_node(SyntaxKind::WIKI_LINK_TITLE.into());
             builder.token(SyntaxKind::TEXT.into(), &text[tr.clone()]);
@@ -262,7 +255,6 @@ mod tests {
 
     #[test]
     fn rejects_empty_body() {
-        // Pandoc: `[[]]` renders as literal text.
         assert!(try_parse_wikilink("[[]]", 0, &opts_after()).is_none());
         assert!(try_parse_wikilink("![[]]", 0, &opts_after()).is_none());
     }
@@ -275,21 +267,18 @@ mod tests {
 
     #[test]
     fn rejects_newline_inside() {
-        // Pandoc: `[[a\nb]]` is literal text (single-line shape).
         assert!(try_parse_wikilink("[[a\nb]]", 0, &opts_after()).is_none());
         assert!(try_parse_wikilink("[[a\r\nb]]", 0, &opts_after()).is_none());
     }
 
     #[test]
     fn rejects_when_disabled() {
-        // No wikilink when neither extension is enabled.
         assert!(try_parse_wikilink("[[a|b]]", 0, &opts_off()).is_none());
         assert!(try_parse_wikilink("[[just url]]", 0, &opts_off()).is_none());
     }
 
     #[test]
     fn non_greedy_close() {
-        // `[[a]]b]]` → wikilink is `[[a]]`, the rest is literal.
         let text = "[[a]]b]]";
         let span = try_parse_wikilink(text, 0, &opts_after()).unwrap();
         assert_eq!(span.end, 5); // just `[[a]]`
@@ -297,7 +286,6 @@ mod tests {
 
     #[test]
     fn first_pipe_is_separator() {
-        // `[[a|b|c]]` → pipe is at position of the first `|`.
         let text = "[[a|b|c]]";
         let span = try_parse_wikilink(text, 0, &opts_after()).unwrap();
         assert_eq!(span.pipe, Some(3));
@@ -312,7 +300,6 @@ mod tests {
 
     #[test]
     fn both_extensions_enabled_still_matches() {
-        // Detection is identical; only emission differs.
         let text = "[[a|b]]";
         let span = try_parse_wikilink(text, 0, &opts_both()).unwrap();
         assert_eq!(span.pipe, Some(3));
@@ -320,7 +307,6 @@ mod tests {
 
     #[test]
     fn parse_at_offset() {
-        // Wikilink not at position 0.
         let text = "prefix [[url|title]] suffix";
         let span = try_parse_wikilink(text, 7, &opts_after()).unwrap();
         assert_eq!(span.start, 7);

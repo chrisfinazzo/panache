@@ -257,10 +257,6 @@ fn can_canonicalize_flow(node: &SyntaxNode) -> bool {
         .any(|c| matches!(c, rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::YAML_COMMENT))
 }
 
-/// Canonical flow sequence: `[item1, item2, ...]`. No space inside the
-/// brackets; one space after each comma. Items are recursively emitted
-/// (so nested flows get their canonical form) then trimmed of stray
-/// whitespace the parser may have absorbed.
 fn emit_flow_sequence(out: &mut String, node: &SyntaxNode) {
     out.push('[');
     let items: Vec<_> = node
@@ -426,43 +422,16 @@ fn canonical_indent_depth(root: &SyntaxNode, offset: usize) -> Option<usize> {
             .parent()
             .filter(|p| p.kind() == SyntaxKind::YAML_SCALAR)
     {
-        // Scalar value on its own line. The scanner splits a multi-line
-        // scalar into per-line `YAML_SCALAR_TEXT` fragments interleaved
-        // with `NEWLINE`, so the multi-line check, the scalar's start
-        // offset, and the `|`/`>` block-indicator probe all read the
-        // parent `YAML_SCALAR` node (not the individual fragment leaf).
-        // Block scalars (`|`/`>`) bake their interior indent into the
-        // source — proper canonicalization needs a real block-scalar
-        // renderer, so preserve verbatim. Plain / single- / double-quoted
-        // scalars are canonicalized to the parent value's content column
-        // (depth * 2 spaces — one level deeper than rule 1's default
-        // formula, matching pretty_yaml) whenever the value sits below
-        // its key, whether that's a multi-line scalar's continuation
-        // lines or a single-line scalar that opens its own line
-        // (`key:\n  "value"`). A value sharing the key's line
-        // (`key: value`) doesn't hit this carve-out: the line's first
-        // non-WS byte is the key, so `offset < scalar_start`.
         let scalar_text = scalar.text().to_string();
         let scalar_start = usize::from(scalar.text_range().start());
         let is_block_scalar = scalar_text.starts_with('|') || scalar_text.starts_with('>');
         if scalar_text.contains('\n') && is_block_scalar {
-            // Block scalars (`|`/`>`) bake their interior indent into
-            // the source — preserve continuation lines verbatim until a
-            // real block-scalar renderer exists. The indicator line
-            // (offset == scalar_start) falls through to rule 1's formula.
             if offset > scalar_start {
                 return None;
             }
         } else if offset >= scalar_start
             && (scalar_text.contains('\n') || scalar_value_opens_own_line(&scalar, scalar_start))
         {
-            // Plain / single- / double-quoted value scalar that opens its
-            // own line. Both the first line (offset == scalar_start) and
-            // any continuation lines (offset > scalar_start) canonicalize
-            // to the value's content column (depth * 2 spaces). Anchoring
-            // the first line here keeps the scalar aligned with its key;
-            // the default formula would de-indent it to the key's column,
-            // splitting the entry into invalid YAML (`key:\n"value"`).
             let mut entry_item_ancestors = 0usize;
             let mut node = scalar.parent();
             while let Some(n) = node {
@@ -478,12 +447,6 @@ fn canonical_indent_depth(root: &SyntaxNode, offset: usize) -> Option<usize> {
         }
     }
 
-    // Multi-line flow continuation: rule 6 owns the indent for wrapped
-    // flow content. If `offset` lands on a continuation line of an
-    // enclosing `YAML_FLOW_SEQUENCE` / `YAML_FLOW_MAP` (its text spans
-    // a newline between the flow's start and this offset), preserve the
-    // existing indent — rule 1's block-context depth formula doesn't
-    // apply inside a wrapped flow.
     let mut probe = token.parent();
     while let Some(n) = probe {
         if matches!(
@@ -827,10 +790,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
         if value_has_decoration(&value_node) {
             continue;
         }
-        // Verbatim frontmatter fields (STYLE.md rule 16): a top-level key
-        // whose value a non-YAML consumer reads line-by-line. Reflow
-        // would be loss-free YAML but breaks that consumer, so skip the
-        // whole wrap pass for this value.
         if top_level_key_name(&value_node)
             .is_some_and(|key| VERBATIM_FRONTMATTER_FIELDS.contains(&key.as_str()))
         {
@@ -845,11 +804,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
         let text = scalar.text().to_string();
         let scalar_start = usize::from(scalar.text_range().start());
         let scalar_end = usize::from(scalar.text_range().end());
-        // Folded block scalars (`>`, `>-`, `>+`) reflow per wrap mode —
-        // their single line breaks fold to spaces, so joining and
-        // re-breaking is loss-free (STYLE.md rule 15). Literal (`|`)
-        // scalars never wrap (newlines are significant); quoted scalars
-        // never wrap either.
         if text.starts_with('>') {
             if let Some(wrapped) = reflow_folded_scalar(&text, opts, profile)
                 && wrapped != text
@@ -858,14 +812,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
             }
             continue;
         }
-        // A long, single-line double-quoted scalar is folded into a `>-`
-        // block scalar so its prose can wrap (STYLE.md rule 17), but only
-        // when the value is losslessly foldable. Build a one-line folded
-        // candidate from the decoded value and run it through the same
-        // reflow path; pass 2 re-runs that path on the result, so the
-        // conversion is idempotent by construction. Apply only when
-        // reflow actually splits the value (>=2 body lines), otherwise
-        // leave the short value quoted.
         if text.starts_with('"') {
             let depth = block_entry_depth(&value_node);
             if depth > 0
@@ -877,15 +823,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
                 if let Some(folded) = reflow_folded_scalar(&candidate, opts, profile)
                     && folded.matches('\n').count() >= 2
                 {
-                    // Hoist the `>-` indicator onto the key line. The
-                    // value-node span between the colon and the scalar is
-                    // pure whitespace/newline trivia (guards above reject
-                    // comments/decorations), so collapsing it to a single
-                    // space and emitting ` >-` there yields the same shape
-                    // for both same-line and next-line sources. A `>-` left
-                    // on its own indented line is not a fixpoint of the
-                    // indent pass, which would relocate it on a second
-                    // format (issue #400).
                     let gap_start = usize::from(value_node.text_range().start());
                     edits.push((gap_start, scalar_end, format!(" {folded}")));
                 }
@@ -895,8 +832,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
         if text.starts_with('\'') || text.starts_with('|') {
             continue;
         }
-        // Multi-line plain scalars are left to the continuation-indent
-        // rule; only single-line plain values wrap here.
         if text.contains('\n') {
             continue;
         }
@@ -918,9 +853,6 @@ fn apply_plain_scalar_wrap(buf: String, opts: &YamlFormatOptions) -> String {
                 }
                 wrap_plain_scalar_text(&text, scalar_col, indent, opts.line_width)
             }
-            // For a single-line plain value, semantic == sentence (there
-            // are no author line breaks to preserve): both split into one
-            // sentence per line at the value column.
             WrapMode::Sentence | WrapMode::Semantic => {
                 let sentences = sentence_wrap::split_sentence_text(&text, profile);
                 if sentences.len() <= 1 {
@@ -1050,12 +982,6 @@ fn block_entry_depth(value_node: &SyntaxNode) -> usize {
 /// the chunk), and chunks are greedily packed. A chunk wider than `width`
 /// overflows its line, like a long URL.
 fn wrap_plain_scalar_text(text: &str, start_col: usize, indent: usize, width: usize) -> String {
-    // Build (separator, chunk) units. The separator is the single-space
-    // (or other single-whitespace) break point preceding the chunk, kept
-    // so a non-break emits the author's exact byte; the first unit's
-    // separator is the text's leading whitespace. A >=2 whitespace run
-    // glues its word onto the previous chunk rather than starting a new
-    // (breakable) unit.
     let mut units: Vec<(String, String)> = Vec::new();
     let mut rest = text;
     let mut first = true;
@@ -1101,7 +1027,6 @@ fn wrap_plain_scalar_text(text: &str, start_col: usize, indent: usize, width: us
     out
 }
 
-/// Number of leading ASCII spaces on `line`.
 fn leading_spaces(line: &str) -> usize {
     line.len() - line.trim_start_matches(' ').len()
 }
@@ -1134,7 +1059,6 @@ fn reflow_folded_scalar(
 ) -> Option<String> {
     let nl = text.find('\n')?;
     let header = &text[..nl];
-    // Chars after `>`: only an optional chomping indicator is in scope.
     let chomping = header.trim_end().get(1..)?;
     if !(chomping.is_empty() || chomping == "-" || chomping == "+") {
         return None;
@@ -1153,8 +1077,6 @@ fn reflow_folded_scalar(
     let mut out_lines: Vec<String> = Vec::with_capacity(lines.len());
     let mut para: Vec<&str> = Vec::new();
     for line in &lines {
-        // Blank and more-indented (literal) lines are folding-significant:
-        // they break the current paragraph and pass through verbatim.
         if line.trim().is_empty() || leading_spaces(line) != base_indent {
             if !para.is_empty() {
                 emit_folded_paragraph(

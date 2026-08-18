@@ -96,12 +96,10 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
         if let NodeOrToken::Node(n) = child {
             match n.kind() {
                 SyntaxKind::CODE_FENCE_OPEN => {
-                    // Look for CodeInfo node, then extract CodeLanguage from inside it
                     for fence_child in n.children_with_tokens() {
                         if let NodeOrToken::Node(info_node) = fence_child
                             && info_node.kind() == SyntaxKind::CODE_INFO
                         {
-                            // Search for CodeLanguage token inside CodeInfo node
                             for info_token in info_node.children_with_tokens() {
                                 if let NodeOrToken::Token(t) = info_token
                                     && t.kind() == SyntaxKind::CODE_LANGUAGE
@@ -119,11 +117,7 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
                     }
                 }
                 SyntaxKind::CODE_CONTENT => {
-                    // Dedented: container prefix bytes (`> ` markers, list
-                    // item indent) are `LINE_PREFIX` tokens inside the node
-                    // and must not reach external tools as code bytes.
                     content = text_without_line_prefixes(&n);
-                    // Track where the actual code content starts and ends (not the fence)
                     let range = n.text_range();
                     content_start_offset = Some(range.start().into());
                     content_end_offset = Some(range.end().into());
@@ -133,20 +127,16 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
         }
     }
 
-    // Extract language - now from CodeLanguage token inside CodeInfo node
     let language = language?;
 
-    // Skip if language is empty or content is empty
     if language.is_empty() || content.is_empty() {
         return None;
     }
 
-    // Calculate start line from where content actually starts (after the fence line)
     let (start_line, original_range) =
         if let (Some(start), Some(end)) = (content_start_offset, content_end_offset) {
             (offset_to_line(input, start), start..end)
         } else {
-            // Fallback to block range if we can't find content offset
             let start: usize = node.text_range().start().into();
             let end: usize = node.text_range().end().into();
             (offset_to_line(input, start), start..end)
@@ -162,9 +152,7 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
 
 /// Convert byte offset to 1-indexed line number.
 pub fn offset_to_line(input: &str, offset: usize) -> usize {
-    // Count how many newlines precede this offset
     let newline_count = input[..offset].chars().filter(|&c| c == '\n').count();
-    // Line number is newlines + 1
     newline_count + 1
 }
 
@@ -355,7 +343,6 @@ mod tests {
         assert_eq!(hard_break_marker("\\\n"), "\\");
         assert_eq!(hard_break_marker(" \\\n"), "\\");
         assert_eq!(hard_break_marker("\t \\\r\n"), "\\");
-        // The heading form has no line ending of its own.
         assert_eq!(hard_break_marker(" \\"), "\\");
     }
 

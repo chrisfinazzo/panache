@@ -32,11 +32,9 @@ stay the same.
 ";
 
     let out = format(input, Some(cfg_preserve()), None);
-    // Idempotency
     let out2 = format(&out, Some(cfg_preserve()), None);
     assert_eq!(out, out2);
 
-    // Preserve mode should keep paragraph line breaks exactly
     assert_eq!(out, input);
 }
 
@@ -49,11 +47,9 @@ fn block_quote_preserve_keeps_line_breaks() {
 ";
 
     let out = format(input, Some(cfg_preserve()), None);
-    // Idempotency
     let out2 = format(&out, Some(cfg_preserve()), None);
     assert_eq!(out, out2);
 
-    // Preserve mode should keep quoted line breaks exactly
     assert_eq!(out, input);
 }
 
@@ -70,8 +66,6 @@ fn list_item_preserve_keeps_line_breaks() {
     let out = format(input, Some(cfg_preserve()), None);
     let out2 = format(&out, Some(cfg_preserve()), None);
     assert_eq!(out, out2);
-    // The stray single trailing spaces the input carries are padding, not hard
-    // breaks, so preserve mode drops them along with the extra item indent.
     let expected = "\
 1. **Simple model**: Convert each of the `r length(levels(forested_train$county))` counties to binary indicators and drop any predictors with zero-variance.
 2. **Normalization model**: Begin with the simple model and add a normalization step that applies the ORD transformation to all numeric predictors.
@@ -152,8 +146,6 @@ fn sentence_keeps_inline_heading_marker_off_line_start() {
 
 #[test]
 fn reflow_keeps_inline_heading_marker_off_line_start() {
-    // The width break lands exactly before the lone `#`; letting it through
-    // would put `#` at column 1 and open an ATX heading on reparse.
     let input = "Alpha beta gamma delta epsilon # zeta eta theta iota kappa\n";
     let expected = "Alpha beta gamma delta epsilon #\nzeta eta theta iota kappa\n";
 
@@ -165,8 +157,6 @@ fn reflow_keeps_inline_heading_marker_off_line_start() {
 
 #[test]
 fn reflow_keeps_inline_setext_marker_off_line_start() {
-    // A trailing `===` pushed to its own line turns the paragraph into a
-    // setext heading on reparse (flavor-independent in pandoc).
     let input = "Alpha beta gamma delta epsilon ===\n";
     let expected = "Alpha beta gamma delta epsilon ===\n";
 
