@@ -118,12 +118,6 @@ linter tests additionally require the corresponding tool on `PATH`.
 
 ## Working in Core Areas
 
-An in-depth architecture guide lives in
-[`AGENTS.md`](https://github.com/jolars/panache/blob/main/AGENTS.md) at the
-repository root. It covers the CST/AST split, the single-pass parsing
-invariants, the crate layout, and the test topology in more detail than this
-document.
-
 ### Parser + Formatter
 
 - Keep parser behavior lossless (preserve all input bytes/markers in CST).
@@ -337,5 +331,4 @@ monorepo produces (`panache-parser-v*`, `panache-formatter-v*`,
 `panache-code-v*`, `panache-zed-v*`) must stay asset-free. The Zed extension
 resolves its binary with `latest_github_release(..., require_assets: true)`,
 which cannot filter by tag prefix, so any extra asset-bearing release shadows
-the CLI stream and breaks the download. See the "Release Management" section in
-[`AGENTS.md`](https://github.com/jolars/panache/blob/main/AGENTS.md).
+the CLI stream and breaks the download.
