@@ -178,16 +178,6 @@ publish over an *unchanged* document --- the cell a settle repeats once per open
 document --- went 22.89 -> 1.29 us on a 112 KB document, and is now flat across
 a 44x size range (1.05 / 0.90 / 1.29 us) instead of tracking document size.
 
-- [ ] **`set_text_if_changed`'s content compare is *not* a second scan and does
-  not need bypassing.** Established by reading it, not by the clock: its
-  `**current == *text` bottoms out in a slice compare that checks length
-  first, so any insert or delete short-circuits, and only an equal-length
-  edit (typing over a same-length selection, an equal-length completion, a
-  full resync) reaches the memcmp at all. Recorded so the "second near-full
-  scan per keystroke" is not re-derived. The guard stays the single point of
-  truth for spurious invalidation, which
-  `an_identical_write_executes_nothing` pins.
-
 - [ ] **`did_change` writes text by *path* but reads its input by
   `salsa_file`.** A preceding `did_delete_files`/`did_rename_files` evicts
   the path->id binding, so a later write can mint a fresh `FileText` while
@@ -256,23 +246,14 @@ no reason.
 
 #### Cost ceilings
 
-- [ ] **`splice_children` and `replace_with` rebuild every ancestor's child
-  vector**, so both are `O(top-level arity)` --- about 220 us on the pandoc
-  manual's 2662 children. Now that the region and token tiers have removed
-  the parse from a cheap splice, this is what is left of one: it is the
-  floor under every tier, and the reason a 186-byte region on a 300 KB
-  document still costs \~1.1 ms. Attacking it needs either a
-  structural-sharing splice rowan does not offer, or a nested `DOCUMENT`
-  shape --- and that shape is visible to every consumer that walks top-level
-  children, so it is not a local change.
+- [x] **Defer `refdef_set`'s whole-document scan until reparse fallback.** A
+  successful reparse proves its edit cannot change a reference definition,
+  so it retains the previous set; only a declined attempt scans before the
+  full parse.
 
-- [ ] **`refdef_set` re-scans the whole document on every revision**
-  (`src/salsa.rs`), which is `O(document)` per keystroke and is paid whether
-  or not a reparse is attempted. The parser side is fine --- the host passes
-  the cached set through `reparse_with_refdefs`, so `populate_refdef_labels`
-  short-circuits --- so the work to do is incrementalizing the *set*, not
-  the scan's caller. `diff_edit` re-deriving an edit the LSP already knows
-  is the same shape of waste and is cheaper to fix.
+- [ ] **`diff_edit` re-derives an edit the LSP already knows.** Carry the
+  coalesced edit through the reparse side channel instead of walking both
+  whole texts before every attempt.
 
 - [ ] **`Parser::new` builds a `BlockParserRegistry` per parse.** That fixed
   cost is why three small parses lose to one on a 74-byte document, which is
