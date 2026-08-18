@@ -157,7 +157,8 @@ impl ReparseCache {
 }
 
 /// Host-level oracle: an incrementally reused parse must equal a full parse of
-/// the same text under the same config and refdef set, tree *and* errors.
+/// the same text under the same config and a freshly scanned refdef set, tree
+/// and errors.
 ///
 /// The parser crate already asserts this on every splice in debug builds; this
 /// second layer runs where the reuse *keys* live, so a base recorded under a
@@ -181,8 +182,16 @@ pub fn assert_reuse_matches_full_parse(
         return;
     }
 
+    let fresh_refdefs = crate::parser::collect_refdef_labels(
+        text,
+        panache_parser::Dialect::for_flavor(config.flavor),
+    );
+    assert_eq!(
+        refdefs, &fresh_refdefs,
+        "reused parse carried a stale reference-definition set",
+    );
     let (full, full_errors) =
-        crate::parser::parse_with_refdefs_and_errors(text, Some(config.clone()), refdefs.clone());
+        crate::parser::parse_with_refdefs_and_errors(text, Some(config.clone()), fresh_refdefs);
     let reused_root = crate::syntax::SyntaxNode::new_root(reused.green.clone());
     assert_eq!(
         panache_parser::parser::fingerprint(&reused_root),

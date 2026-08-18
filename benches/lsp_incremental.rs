@@ -17,20 +17,13 @@
 //! * **A chained base.** Step *n* splices against the tree step *n-1*
 //!   produced, not against the original parse. That is what makes a typing
 //!   stream a stream and not *n* independent one-shot edits.
-//! * **The host's refdef check, then the parser's.** `refdef_set` is a salsa
-//!   query keyed on the text, so a changed document rescans; the incremental
-//!   path is charged for that scan exactly as the full path is. A changed
-//!   *set* declines host-side, before the parser is called at all.
-//! * **`refdef_set` backdates, so both paths pay its comparison.** Salsa
-//!   compares the recomputed set against the old one and hands back the *same*
-//!   `Arc` when they are equal, which is what makes `parsed_document`'s
-//!   `prev.refdefs != refdefs` a pointer compare rather than a walk of the set.
-//!   Modelling the query as a bare scan instead charged that walk to the
-//!   incremental path alone. [`refdef_query`] models the backdating and both
-//!   step functions call it, so the comparison lands on both paths as it does
-//!   in production. (This costs the synthetic cases nothing --- their documents
-//!   carry no reference definitions, so the sets are empty either way. It is
-//!   the refdef-carrying documents where a bare scan would have lied.)
+//! * **The parser's refdef guard before the host scan.** A successful reparse
+//!   proves its edit cannot change a definition, so it retains the base's map.
+//!   A decline executes `refdef_set` before the inevitable full parse.
+//! * **`refdef_set` backdates on fallback.** Salsa compares the recomputed set
+//!   against the old one and hands back the same `Arc` when they are equal.
+//!   [`refdef_query`] models that scan and comparison on both the full path and
+//!   incremental fallback; successful incremental steps never call it.
 //!
 //! Applying the client's changes to the text buffer is *not* timed: it happens
 //! on the LSP main thread and costs both strategies the same, so the step
@@ -44,9 +37,10 @@
 //!
 //! * **full** --- refdef scan + full parse, i.e. what the query cost before
 //!   incremental parsing existed.
-//! * **incremental** --- refdef scan + diff + [`reparse_with_refdefs`], plus a
-//!   full parse when it declines. A declined step is strictly *more*
-//!   expensive than a full parse; that surcharge is the bail cost.
+//! * **incremental** --- diff + [`reparse_with_refdefs`], retaining the cached
+//!   refdef set when it succeeds; a decline adds a refdef scan and full parse.
+//!   A declined step is strictly *more* expensive than a full parse; that
+//!   surcharge is the bail cost.
 //!
 //! and three accounting numbers the speedup alone hides:
 //!
@@ -85,26 +79,27 @@
 //!
 //! ```text
 //! case                               bytes  steps    full    incr  speedup  fallback   bail%  window%
-//! single_change_small                 1620      1    53.1     1.8    29.1x      0.0%       -     3.7%
-//! multi_change_small_4                1620      1    54.6    54.4     1.0x      0.0%       -    78.5%
-//! multi_change_medium_4              15922      1   521.8   483.0     1.1x      0.0%       -    75.8%
-//! multi_change_medium_clustered_4    15922      1   525.4    12.3    42.7x      0.0%       -     0.4%
-//! multi_change_large_8               76542      1  2466.8  2623.5     0.9x    100.0%    0.0%        -
-//! multi_change_utf16_4                  74      1     5.3     7.4     0.7x    100.0%   40.2%        -
-//! full_replace                        1620      1     2.8     3.3     0.9x    100.0%    4.0%        -
-//! typing_stream_medium               15922     14   451.7    15.5    29.1x      0.0%       -     0.4%
-//! window_cutoff_accepted             15922      1   415.5   381.8     1.1x      0.0%       -    79.9%
-//! window_cutoff_declined             15922      1   415.6   414.0     1.0x    100.0%    0.1%        -
-//! bail_refdef_edit                    2687      1    95.6   110.8     0.9x    100.0%   15.9%        -
-//! pandoc_manual_early_edit          304665      1  9412.7  9491.8     1.0x    100.0%    0.0%        -
-//! pandoc_manual_refdef_label_edit   304665      1  9390.2  9339.2     1.0x    100.0%       -        -
-//! pandoc_manual_late_edit           304665      1  9715.3  2007.3     4.8x      0.0%       -     7.5%
-//! pandoc_manual_typing_stream       304665     12  9575.6  2002.1     4.8x      0.0%       -     7.5%
-//! pandoc_manual_midline_edit        304665      1  9458.2   221.2    42.8x      0.0%       -     0.0%
-//! pandoc_manual_typing_stream_midline 304665    11  9616.3   220.7    43.6x      0.0%       -     0.0%
-//! large_authoring_single_edit        25477      1   757.6   769.0     1.0x    100.0%    0.1%        -
-//! tables_single_edit                 25179      1   799.5   786.1     1.0x    100.0%    0.1%        -
-//! math_single_edit                   30112      1   553.2   549.5     1.0x    100.0%    0.1%        -
+//! single_change_small                 1620      1    55.9     1.9    29.2x      0.0%       -     3.7%
+//! multi_change_small_4                1620      1    61.4    62.0     1.0x      0.0%       -    78.5%
+//! multi_change_medium_4              15922      1   626.1   565.5     1.1x      0.0%       -    75.8%
+//! multi_change_medium_clustered_4    15922      1   648.0    15.2    42.5x      0.0%       -     0.4%
+//! multi_change_large_8               76542      1  3268.2  3371.6     1.0x    100.0%    0.0%        -
+//! multi_change_utf16_4                  74      1     6.1     8.4     0.7x    100.0%   34.7%        -
+//! full_replace                        1620      1     3.5     4.3     0.8x    100.0%    5.2%        -
+//! typing_stream_medium               15922     14   643.7    21.7    29.7x      0.0%       -     0.4%
+//! region_width_accepted              22121      1   328.6    67.4     4.9x      0.0%       -     0.3%
+//! region_width_declined              22121      1   322.7   233.5     1.4x      0.0%       -    49.4%
+//! window_cutoff_declined             22121      1   307.0   316.8     1.0x    100.0%    0.4%        -
+//! bail_refdef_edit                    2687      1   143.0   145.2     1.0x    100.0%    1.2%        -
+//! pandoc_manual_early_edit          304665      1 15104.5  4632.5     3.3x      0.0%       -     3.5%
+//! pandoc_manual_refdef_label_edit   304665      1 15259.1 14677.6     1.0x    100.0%    0.0%        -
+//! pandoc_manual_late_edit           304665      1 14953.1  1576.2     9.5x      0.0%       -     0.1%
+//! pandoc_manual_typing_stream       304665     12 15001.3  1658.9     9.0x      0.0%       -     0.1%
+//! pandoc_manual_midline_edit        304665      1 14357.9   162.9    88.1x      0.0%       -     0.0%
+//! pandoc_manual_typing_stream_midline 304665    11 14385.1   173.1    83.1x      0.0%       -     0.0%
+//! large_authoring_single_edit        25477      1  1137.1   284.6     4.0x      0.0%       -     6.2%
+//! tables_single_edit                 25179      1  1179.8   284.4     4.1x      0.0%       -     2.0%
+//! math_single_edit                   30112      1   813.0   248.2     3.3x      0.0%       -     5.0%
 //! ```
 //!
 //! What the table says:
@@ -123,18 +118,18 @@
 //!   scale with the document at all. The way to read that off the table is the
 //!   `pandoc_manual_typing_stream` / `..._midline` pair: same document, same
 //!   line, same keystrokes, one column apart, and only the tier differs.
-//!   Column 0 re-parses 7.5% of a 300 KB file for 4.8x; column 40 re-parses
-//!   0.0% of it for 43.6x, taking a keystroke from 2002 us to 221 us. That is
-//!   the step change --- 9x over the tier it displaces, from a change in what is
-//!   parsed rather than how much.
-//! * **The tier's remaining cost is not the token.** 221 us to splice a ~70-byte
+//!   Column 0 re-parses 0.1% of a 300 KB file for 9.0x; column 40 re-parses
+//!   0.0% of it for 83.1x, taking a keystroke from 1659 us to 173 us. That is
+//!   the step change --- nearly 10x over the tier it displaces, from a change
+//!   in what is parsed rather than how much.
+//! * **The tier's remaining cost is not the token.** 173 us to splice a ~70-byte
 //!   token is not O(token); it is `rowan`'s `replace_with` rebuilding each
 //!   ancestor's whole child vector, which at the root of a 300 KB document is a
 //!   few thousand `Arc` clones. The window tiers pay that same term through
 //!   `splice_children`, so the tier is strictly cheaper than what it replaces,
 //!   but the floor it leaves is what a future phase would have to attack to go
-//!   further. Compare `typing_stream_medium` (15 KB, 15.5 us) against
-//!   `..._midline` (300 KB, 221 us): the tokens are the same size and the times
+//!   further. Compare `typing_stream_medium` (15 KB, 21.7 us) against
+//!   `..._midline` (300 KB, 173 us): the tokens are the same size and the times
 //!   are not.
 //! * **A wide reparse loses to a full parse even when it succeeds**, which is
 //!   what the cutoff is for. Before it, `pandoc_manual_early_edit` accepted,
@@ -151,15 +146,15 @@
 //!   lines takes `diff_edit`'s span from one line to most of the document: 16%
 //!   window to 76%, 3.2x to 1.1x.
 //! * **The typing streams are the workload the feature exists for**, and they
-//!   are where it pays: 2.8x on a 16 KB document, 5.7x on the 300 KB pandoc
+//!   are where it pays: 29.7x on a 16 KB document, 9.0x on the 300 KB pandoc
 //!   manual, with no step declining. Each stream agrees with its equivalent
 //!   single edit (`pandoc_manual_late_edit`) to within noise, which is the
 //!   evidence that chaining the base does not degrade across keystrokes.
 //! * **Bail cost is small, and the fallback rate is what governs it.** A
 //!   cutoff decline is under a microsecond even at 300 KB, because it is
 //!   arithmetic on the edit offset. The correctness guards cost more: the
-//!   parser's `]:`-proximity cascade prices at 15.4% of a full parse
-//!   (`bail_refdef_edit`), and a host-side decline
+//!   parser's `]:`-proximity cascade prices at 1.2% of a full parse
+//!   (`bail_refdef_edit`), and a definition-changing decline
 //!   (`pandoc_manual_refdef_label_edit`, whose edit rewrites a refdef *label*)
 //!   costs one extra refdef scan, inside the noise at 300 KB. Both land under
 //!   the 20%-of-a-full-parse budget the default flip is gated on.
@@ -172,8 +167,7 @@
 //! * `bail_refdef_edit` (0.9x) exists to price a decline. A decline is a full
 //!   parse plus the cascade that reached it, so it is *definitionally* slower;
 //!   the number to read on this case is `bail%`, not the speedup. In absolute
-//!   terms it is ~16 us, which is the largest a single cascade costs anywhere
-//!   in the table and is where [`MAX_ABSOLUTE_OVERHEAD_US`] comes from.
+//!   terms it is under 2 us, well below [`MAX_ABSOLUTE_OVERHEAD_US`].
 //! * `multi_change_utf16_4` (0.6-0.7x) is 74 bytes, and an attempt has a fixed
 //!   cost --- cloning the options, materializing a cursor root over the previous
 //!   green tree, walking it for the window --- that is under 2 us against a
@@ -623,31 +617,6 @@ fn incremental_step(
     config: &Config,
 ) -> (Duration, StepOutcome) {
     let start = Instant::now();
-    let refdefs = refdef_query(Some(&base.refdefs), new_text, config);
-
-    // The host's exact set comparison runs ahead of the parser's textual
-    // guard: retained blocks keep the reference resolution they were parsed
-    // with, so a changed set invalidates them at a distance. An unchanged set
-    // came back from the query as the same allocation, so this is the pointer
-    // compare `parsed_document` performs, not a second walk of the set.
-    if refdefs != base.refdefs {
-        let (green, errors) = full_parse(new_text, config, refdefs.clone());
-        let elapsed = start.elapsed();
-        *base = ReparseBase {
-            text: new_text.to_owned(),
-            green,
-            errors,
-            refdefs,
-        };
-        return (
-            elapsed,
-            StepOutcome::Fallback {
-                reason: "refdef_set_changed",
-                bail: None,
-            },
-        );
-    }
-
     let edit = diff_edit(&base.text, new_text);
     let attempt = Instant::now();
     let reparsed = reparse_with_refdefs(
@@ -656,7 +625,7 @@ fn incremental_step(
         &edit,
         new_text,
         Some(config.clone()),
-        refdefs.clone(),
+        base.refdefs.clone(),
     );
     let attempt_elapsed = attempt.elapsed();
 
@@ -692,11 +661,13 @@ fn incremental_step(
                 text: new_text.to_owned(),
                 green: reparsed.green,
                 errors: reparsed.errors,
-                refdefs,
+                refdefs: base.refdefs.clone(),
             };
             (elapsed, outcome)
         }
         None => {
+            let refdefs = refdef_query(Some(&base.refdefs), new_text, config);
+            let refdefs_changed = refdefs != base.refdefs;
             let (green, errors) = full_parse(new_text, config, refdefs.clone());
             let elapsed = start.elapsed();
             *base = ReparseBase {
@@ -708,7 +679,11 @@ fn incremental_step(
             (
                 elapsed,
                 StepOutcome::Fallback {
-                    reason: "guard_declined",
+                    reason: if refdefs_changed {
+                        "refdef_set_changed"
+                    } else {
+                        "guard_declined"
+                    },
                     bail: Some(attempt_elapsed),
                 },
             )
@@ -1333,9 +1308,9 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
             expect: Expect::reuses().strategy("region").min_speedup(2.9),
         });
         // Line 200 is `[`setspace`]: ...`, and the replacement rewrites the
-        // *label*. The host's set comparison declines before the parser is
-        // called at all, so this prices the cheapest decline there is: one
-        // refdef scan, then the full parse that would have happened anyway.
+        // *label*. The parser's proximity guard declines, then the host scans
+        // the new set and full-parses. This prices the safety fallback for a
+        // document-scoped definition change.
         cases.push(BenchCase {
             id: "pandoc_manual_refdef_label_edit".to_owned(),
             input: doc.clone(),
@@ -1356,12 +1331,9 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         // paragraph at line 7600, where the section window re-parsed the 22 KB
         // from the previous heading to EOF.
         //
-        // What is left is not the parse. At 0.1% of the document re-parsed, a
-        // keystroke costs ~1.16 ms against a 9.5 ms full parse, and that
-        // residue is the `splice_children` root rebuild over 2662 top-level
-        // children plus the whole-text refdef scan --- both `O(document)`, and
-        // both recorded in `TODO.md` as what a further phase would have to
-        // attack.
+        // At 0.1% of the document re-parsed, the remaining scalable term is the
+        // `splice_children` root rebuild over 2662 top-level children. The
+        // whole-text refdef scan no longer runs on these accepted steps.
         //
         // Both edits sit at **column 0**, which is what keeps them on the
         // section window now that the token tier exists: the tier refuses an
@@ -1386,8 +1358,8 @@ fn real_document_cases(default_iterations: usize) -> Vec<BenchCase> {
         // token tier.
         //
         // Same document, same line, same keystrokes. Column 0 reaches the
-        // section window and re-parses 7.5% of a 300 KB document per
-        // keystroke; column 40 replaces a single green token. Reading the two
+        // region tier and re-parses 0.1% of a 300 KB document per keystroke;
+        // column 40 replaces a single green token. Reading the two
         // side by side on every run is a better statement of the step change
         // than any one case getting faster, because it holds everything but the
         // tier constant.

@@ -137,9 +137,10 @@ pub fn refdef_set(db: &dyn Db, file: FileText, config: FileConfig) -> crate::par
 /// atomic clone) and gives each caller its own cursor without leaking the
 /// salsa cell.
 ///
-/// The refdef set is consumed via the [`refdef_set`] query so that
-/// edits which don't change refdefs short-circuit at the refdef layer
-/// without re-scanning the document inside `parse`.
+/// Full parses consume the refdef set via [`refdef_set`]. An admitted
+/// incremental parse first attempts reuse with the previous parse's set: every
+/// successful reparse has already proved that its edit cannot change a
+/// definition, so the whole-document scan is deferred until fallback.
 /// A cached parse: the green tree plus the embedded-sublanguage syntax errors
 /// (host-ranged malformed YAML) the parser surfaced. Parsed once and cached
 /// together so both the tree and the diagnostics are available without a second
@@ -201,7 +202,6 @@ fn splice_length_agrees(reparsed: &crate::parser::Reparsed, text: &str) -> bool 
 /// whole prefix at a distance.
 #[salsa::tracked(returns(ref), lru = 512, no_eq, unsafe(non_salsa_values))]
 pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> ParsedDocument {
-    let refdefs = refdef_set(db, file, config).clone();
     let text = file.text(db).clone().unwrap_or_else(|| Arc::from(""));
     let cfg = config.config(db);
 
@@ -218,9 +218,7 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
     if let Some(prev) = prev.as_ref().filter(|prev| {
         // The base stores the very `Arc` salsa holds, so an unmoved text proves
         // itself by pointer rather than by walking the document.
-        (Arc::ptr_eq(&prev.text, &text) || prev.text == text)
-            && prev.config == *cfg
-            && prev.refdefs == refdefs
+        (Arc::ptr_eq(&prev.text, &text) || prev.text == text) && prev.config == *cfg
     }) {
         return ParsedDocument {
             green: prev.green.clone(),
@@ -228,12 +226,13 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
         };
     }
 
+    // Try the cached set before asking salsa to scan the new text. The parser's
+    // reparse guard declines every edit that can add, remove, or alter a
+    // document-scoped definition; therefore a successful splice proves that
+    // `prev.refdefs` is still the set a fresh scan would produce.
     let reused = prev
         .and_then(|prev| {
-            // `RefdefMap` is an `Arc<HashSet<_>>` and `refdef_set` backdates on
-            // set-equality, so an unchanged set is literally the same allocation
-            // and this comparison short-circuits on the pointer.
-            if prev.config != *cfg || prev.refdefs != refdefs {
+            if prev.config != *cfg {
                 return None;
             }
             let edit = crate::parser::diff_edit(&prev.text, &text);
@@ -243,13 +242,14 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
                 &edit,
                 &text,
                 Some(cfg.clone()),
-                refdefs.clone(),
+                prev.refdefs.clone(),
             )
+            .map(|reparsed| (reparsed, prev.refdefs.clone()))
         })
-        .filter(|reparsed| splice_length_agrees(reparsed, &text));
+        .filter(|(reparsed, _)| splice_length_agrees(reparsed, &text));
 
-    let parsed = match reused {
-        Some(reparsed) => {
+    let (parsed, refdefs) = match reused {
+        Some((reparsed, refdefs)) => {
             let parsed = ParsedDocument {
                 green: reparsed.green,
                 errors: reparsed.errors,
@@ -260,18 +260,22 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
                 reparsed.strategy.as_str(),
                 reparsed.reparse_range
             );
-            parsed
+            (parsed, refdefs)
         }
         None => {
+            let refdefs = refdef_set(db, file, config).clone();
             let (tree, errors) = crate::parser::parse_with_refdefs_and_errors(
                 &text,
                 Some(cfg.clone()),
                 refdefs.clone(),
             );
-            ParsedDocument {
-                green: tree.green().to_owned(),
-                errors,
-            }
+            (
+                ParsedDocument {
+                    green: tree.green().to_owned(),
+                    errors,
+                },
+                refdefs,
+            )
         }
     };
 
@@ -4403,6 +4407,82 @@ mod tests {
             .iter()
             .filter(|key| key.starts_with(&needle))
             .count()
+    }
+
+    #[test]
+    fn successful_reparse_does_not_execute_refdef_set() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/virtual/deferred-refdefs.md");
+        let before = "# One\n\nAlpha paragraph.\n\n# Two\n\nBeta paragraph.\n";
+        let after = "# One\n\nAlpha paragraph.\n\n# Two\n\nBeta paragraph edited.\n";
+        let file = db.update_file_text(path.clone(), before.to_owned());
+        let config = FileConfig::new(&db, Config::default());
+        db.reparse_admit(file, config);
+        parsed_document(&db, file, config);
+        log.lock().unwrap().clear();
+
+        db.update_file_text(path, after.to_owned());
+        let parsed = parsed_document(&db, file, config);
+
+        assert_eq!(executed(&log, "parsed_document"), 1);
+        assert_eq!(
+            executed(&log, "refdef_set"),
+            0,
+            "an accepted reparse must retain the previous refdef set without scanning"
+        );
+        assert_eq!(
+            SyntaxNode::new_root(parsed.green.clone()).to_string(),
+            after
+        );
+    }
+
+    #[test]
+    fn refdef_edit_scans_on_reparse_fallback() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/virtual/changed-refdefs.md");
+        let before = "A [link][ref].\n\n[ref]: https://example.com\n";
+        let after = "A [link][ref].\n\n[other]: https://example.com\n";
+        let file = db.update_file_text(path.clone(), before.to_owned());
+        let config = FileConfig::new(&db, Config::default());
+        db.reparse_admit(file, config);
+        parsed_document(&db, file, config);
+        log.lock().unwrap().clear();
+
+        db.update_file_text(path, after.to_owned());
+        let parsed = parsed_document(&db, file, config);
+
+        assert_eq!(executed(&log, "refdef_set"), 1);
+        let fresh = crate::parser::parse(after, Some(Config::default()));
+        assert_eq!(
+            panache_parser::parser::fingerprint(&SyntaxNode::new_root(parsed.green.clone())),
+            panache_parser::parser::fingerprint(&fresh),
+        );
+    }
+
+    #[test]
+    fn unchanged_duplicate_refdef_set_still_scans_after_guard_decline() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/virtual/duplicate-refdefs.md");
+        let before = "[ref]: /one\n[ref]: /two\n\nA [link][ref].\n";
+        let after = "[ref]: /one-edited\n[ref]: /two\n\nA [link][ref].\n";
+        let file = db.update_file_text(path.clone(), before.to_owned());
+        let config = FileConfig::new(&db, Config::default());
+        db.reparse_admit(file, config);
+        parsed_document(&db, file, config);
+        log.lock().unwrap().clear();
+
+        db.update_file_text(path, after.to_owned());
+        let parsed = parsed_document(&db, file, config);
+
+        assert_eq!(
+            executed(&log, "refdef_set"),
+            1,
+            "a guard decline must scan even when set equality later backdates the map"
+        );
+        assert_eq!(
+            SyntaxNode::new_root(parsed.green.clone()).to_string(),
+            after
+        );
     }
 
     /// A two-document Quarto project (`root.qmd` + `child.qmd`, both loaded) on
