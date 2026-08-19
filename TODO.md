@@ -145,52 +145,6 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Auto-fix capability per rule (infrastructure exists, rules need
   implementation)
 
-### Write-phase performance
-
-The write phase is what `did_change` does before any parse: splice the text,
-update the line index, hand salsa a new input. `benches/lsp_write_phase.rs`
-times it (`task bench:write-phase-gate`) and its module doc carries the tables;
-the three findings from fatou's 2026-08-16 `Arc<str>`-vs-rope survey that
-prompted the bench are all fixed, and so is the per-keystroke line-index rebuild
-that survived them --- taking a keystroke on a 297 KB document from 282 us to
-8.5 us. What is left is the two splice passes that are the floor for an
-`Arc<str>` input on stable, so that row is now memory bandwidth and nothing
-else.
-
-The reader-side half of that rebuild is fixed too. It was measured first, as the
-item asked: one rebuild per keystroke (`tests/lsp/test_line_index_reuse.rs`
-counts them), each 68.6 us on a 297 KB document, 5.5% of an end-to-end
-keystroke. The two caches --- a main-thread-only one for the writer, a salsa
-memo for readers --- are now one `LineIndexCache`, and the
-`read_after_keystroke` row sits on the keystroke it follows (81.94 -> 9.51 us),
-with the write-phase rows unmoved. Retiring the memo also removed a second live
-`Arc` to the index that had been turning the write phase's in-place patch into a
-table copy whenever a reader had run: with a read placed before it, `batch4` on
-the large document was 34.24 -> 143.71 us.
-
-The settle path's half is fixed as well. `handlers/diagnostics.rs` took the
-shared index for its own diagnostics and then built a second one over a fresh
-`String` copy of the same document to map the by-path group covering that same
-document; the cached `Arc` is now threaded through the loop, and the external
-linters read the index's own allocation instead of a copy. It was off every
-bench this repo had, so `benches/lsp_settle.rs` was written to price it: the
-publish over an *unchanged* document --- the cell a settle repeats once per open
-document --- went 22.89 -> 1.29 us on a 112 KB document, and is now flat across
-a 44x size range (1.05 / 0.90 / 1.29 us) instead of tracking document size.
-
-- [x] **`did_change` writes text by *path* but reads its input by
-  `salsa_file`.** A preceding `did_delete_files`/`did_rename_files` evicts
-  the path->id binding, so a later write can mint a fresh `FileText` while
-  the document map still names the old one. Predates the line-index cache
-  (whose store-side freshness check turns it into a missed reuse rather than
-  a wrong answer), but it is a real divergence and worth closing by writing
-  through `salsa_file` directly.
-
-- [x] **Bypass `diff_edit` with the LSP's staged edit.** The token tier made the
-  old 7.1 us scan material: `pandoc_manual_midline_edit` fell from 106 us to
-  40 us once the side channel carried coalesced byte spans. Keeping spans
-  lazy preserves the write phase's 8.5 us single-edit and 35 us batch rows.
-
 ## Parser
 
 ### Issues
@@ -304,16 +258,6 @@ no reason.
   the same ask-the-old-tree treatment as the item above. Pinned by
   `definition_marker_suffix_after_a_retained_definition_list` and
   `definition_list_grown_below_a_retained_definition_list`.
-
-#### Infrastructure
-
-- [x] **Keep `panache-parser`'s `range_utils` as the canonical implementation.**
-  The host re-exports its public range-formatting helpers, preserving both
-  published API paths without maintaining a second copy.
-
-**Explicit non-goal:** NodePtr re-anchoring across edits (arity's
-`map_range_through_edits`) is only needed if panache starts caching NodePtrs
-across edits. It does not.
 
 ### Coverage
 
