@@ -306,23 +306,6 @@ no reason.
 
 #### Infrastructure
 
-- [ ] **Neither bench gate runs in CI.** Both need
-  `benches/documents/download.sh` and a release build, and a timing assert
-  on shared runners would land flaky. The corpus is pinned and the gates are
-  one task target each, so wiring them is a small job whenever someone
-  decides flakiness is acceptable --- or when the gates grow a non-timing
-  mode.
-
-- [ ] **A gate run dirties the working tree.** `benches/documents/download.sh`
-  rewrites `pandoc_testsuite.md`, which is tracked in git, on every run.
-
-- [ ] **`experimental.incrementalParsing` is deprecated toward removal.** It is
-  still honored and still warns once at `initialize`;
-  `PANACHE_INCREMENTAL_PARSING` does the one job it has left. Remove it a
-  release after the deprecation shipped, along with the internal
-  `runtime_settings.experimental_incremental_parsing` name, which has no
-  wire impact and can be renamed freely.
-
 - [ ] **`panache-parser`'s `pub mod range_utils` has no consumer outside the
   crate**, and the host keeps its own copy of `expand_byte_range_to_blocks`
   in `src/range_utils.rs`. Narrowing the module is semver-visible on a
@@ -650,22 +633,6 @@ for initial implementation.
 
 - Format-specific output conventions (e.g., `gutenberg` for plain text output)
 
-### Quarto Shortcodes
-
-- [x] Parser support for `{{< name args >}}` syntax
-
-- [x] Parser support for `{{{< name args >}}}` escape syntax
-
-- [x] Formatter with normalized spacing
-
-- [x] Extension flag `quarto_shortcodes` (enabled for Quarto flavor)
-
-- [x] Golden test coverage
-
-- [x] LSP diagnostics for malformed shortcodes
-
-- [x] Completion for built-in shortcode names
-
 ## Additional Markdown flavors
 
 ### mdsvex / Svelte-flavored Markdown
@@ -723,26 +690,6 @@ extension flags, never on `Flavor::Myst` directly, so other flavors can borrow
 the same shapes. Markup extras (`myst-colon-fence`, `myst-substitutions`,
 dollar-math, deflists, ...) stay opt-in.
 
-- [x] **AST wrappers (`syntax/myst.rs`).** Typed wrappers over the existing
-  `MYST_*` CST kinds, wired through `syntax.rs`, each with cast-from-`parse`
-  unit tests (follow the `syntax/shortcodes.rs` pattern). Landed:
-
-  - `MystTarget` (`label()`) --- the anchor side of MyST's cross-reference
-    graph; keystone for goto-def/rename/undefined-target lint.
-
-  - `MystRole` (`name()` brace-stripped, `content()`) --- the reference side
-    (`` {ref}`label` ``); pairs with `MystTarget` for reference resolution.
-
-  - `MystDirective` (`name()`, `argument()`, `options()` over
-    `MystDirectiveOption` `name()`/`value()`, `body()`) --- richest construct;
-    unlocks the most lint rules.
-
-  - `MystSubstitution` (`name()`, trimmed) --- enables the "key not defined in
-    frontmatter `substitutions:`" lint.
-
-  - Skipped `MystComment`/`MystBlockBreak` wrappers (no name/label semantics to
-    expose yet); add when a rule needs them.
-
 - [ ] **LSP semantic tokens for MyST.** Wrapper-driven classification of
   directive/role names, target labels, and substitution names. Depends on
   the AST wrappers.
@@ -751,38 +698,3 @@ dollar-math, deflists, ...) stay opt-in.
   (never `Flavor::Myst` directly), via the `add-lint-rule` skill. Start with
   `undefined-references` (role target resolves to a `MystTarget`) and an
   unknown-directive/role check. Depends on the AST wrappers.
-
-## Math Parser and Formatter
-
-Multi-session effort --- see the `math-parser-formatter` skill
-(`.agents/skills/math-parser-formatter/`) for the phased roadmap, locked-in
-design decisions, and per-session workflow. Parser invariants:
-`.claude/rules/math-parser.md`.
-
-- [x] Math parser producing a lossless structural TeX CST for inline and display
-  math (`MATH_CONTENT` subtree; groups, environments, commands, alignment,
-  scripts, comments, and `\left`/`\right` delimiter pairs). Landed in
-  `crates/panache-parser/src/parser/math.rs`.
-
-- [x] Surface math diagnostics (unclosed/mismatched braces and environments,
-  unbalanced `\left`/`\right`) through the linter and LSP. Landed as the
-  always-on `math-syntax` lint rule (`src/linter/rules/math_content.rs`),
-  surfaced via the registry to CLI + LSP. All diagnostics derive from the
-  embedded `MATH_CONTENT` CST shape via the single shared
-  `syntax::math_diagnostics` (no re-parse, no side-channel; also consumed by
-  the formatter to leave malformed math verbatim); spans are the offending
-  tokens' host ranges.
-
-- [x] Migrate the math formatter's `\left`/`\right` line-break tracking to the
-  `MATH_DELIMITED` node. The break-candidate scan now treats each delimited
-  run as one opaque operand; `command_class` no longer classifies the
-  framing commands by text. Formatter output remains byte-identical.
-
-- [x] Math formatter that reformats content semantics-safely (align `&` columns,
-  indent environment bodies, normalize `\\`) while preserving idempotency
-  (`format(format(math)) == format(math)`), behind an experimental gate.
-  Landed as `[experimental] format-math` (default off) routing
-  `$$`/`$`/`\[`/`\(` math content through
-  `crates/panache-formatter/src/formatter/math/`. Standalone `\begin{env}`
-  TeX blocks stay opaque (parser keeps them as `TEX_BLOCK`) --- a possible
-  follow-up.
