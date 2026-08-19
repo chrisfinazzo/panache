@@ -32,21 +32,8 @@ matches the target.
   touches `builder.token()` / `builder.start_node()` shape needs the
   parser golden snapshots and the conformance allowlist green.
 
-## Related rules to read first
-
-- `.claude/rules/parser.md` — losslessness, dialect gating, no
-  formatter policy in parser code, TEXT-coalescence-vs-structural
-  rule.
-- `.claude/rules/integration-tests.md` — where parser vs formatter
-  goldens live (don't mix them).
-
-## Harness noise to ignore inside this skill
-
-The runtime occasionally injects a `system-reminder` nudging you to
-use `TaskCreate` / `TaskUpdate`. The workflow below is linear
-(baseline → profile → classify → fix → measure → commit → repeat), so
-task tools add overhead without value. Skip them unless the user
-explicitly asks.
+Follow the parser, formatter, and integration-test invariants in the
+repository's root `AGENTS.md`.
 
 ## Harness — parser
 

@@ -16,9 +16,8 @@ load-bearing; the code holds the full detail.
 ### Disk + tooling
 
 - **Disk lint cache `~/.cache/panache/`** serves stale linter results
-  after `cargo build` (`panache lint` emits old diagnostics, `eprintln!`
-  never fires). Fix: `rm -rf ~/.cache/panache/` or `cache.enabled =
-  false`. Validate via unit tests first.
+  after `cargo build`. Fix with `cargo run -- clean --all`, or disable the cache.
+  Validate via unit tests first.
 - **Conformance compare is whitespace-insensitive** (`normalize_native`
   collapses to one line) — visual diffs mislead.
 - **Config walks up from the INPUT FILE's dir, not CWD.** A stray
@@ -383,32 +382,17 @@ diffed against pandoc-native surfaced two new clusters; took the larger.
 
 Newest first. date — sub-target — pass delta — lever.
 
-- 2026-08-02 — Phase F unclosed-div + bq-nested-def later-line — html 292
-  → 295 — `allow_unclosed_div` threaded through `try_emit_html_block_lift`
-  / `emit_as_block` (item-close `true`, mid-flush `false`), then
-  `try_dispatch_bq_content_indent_html_block` +
-  `emit_html_block_lift_from_stripped` core (capture `&line[..len -
-  strip(line).len()]`, re-inject `bq_only`) made the bq-nested-def shape
-  byte-lossless; de-fang guard kept as fallback. Corpus 0494-0496 (the
-  bq-def shape stays goldens-only — blocked by the def-list-in-bq gap).
+- 2026-08-02 — Phase F unclosed-div + bq-nested-def later-line — html
+  292 → 295 — container-aware lift made the shape byte-lossless; corpus
+  0494-0496.
 - 2026-07-08 — Phases D/E/F marker-line + later-line container HTML —
-  html 282 → 292 — `try_dispatch_definition_html_block` (cascade arm,
-  multi-line probe branch, `try_fuse_definition_comment_trailing` with
-  list-stop guard), `try_dispatch_footnote_html_block` gated
-  `!html_block_cannot_interrupt` (+ formatter marker-space drop),
-  `try_dispatch_content_indent_html_block` + `line0_prefix`,
-  `SoftbreakFusion` enum; corpus 0480-0489.
+  html 282 → 292 — definition, footnote, and content-indent dispatch;
+  corpus 0480-0489.
 - 2026-07-02 — Phases A/B/C + 7e cluster — html 262 → 282 — softbreak
   `ToDocEnd` (0390), inter-tag peel (0479), `body_fence_depth` (0478),
   `same_line_trailing_forces_opaque` (0472/0475-0477), void strict-block
   (0470-0471).
-- 2026-06-17→07-02 — Phases 7a/7b/7c — html 259 → 271 —
-  `html_block_node_kind` retag (opaque → `HTML_BLOCK_RAW`, flat),
-  `try_parse_standalone_block_tags_split`, bq lifts via dropped
-  `bq_depth==0` guards (`emit_html_block_body_lifted_bq_messy`); corpus
-  0464-0469.
-- 2026-05-08→18 — Phases 1-6 seed + waves — html 0 → 257 —
-  `HTML_BLOCK_DIV`/`INLINE_HTML_SPAN`/`HTML_ATTRS`, projector
-  `inline_pending`, CM/Pandoc tag-set split, `PARAGRAPH→PLAIN`,
-  `isInlineTag` (#10643), structural lift family, bq-in-listitem
-  `BqDispatch` (0452/0453).
+- 2026-06-17→07-02 — Phases 7a/7b/7c — html 259 → 271 — raw retag,
+  standalone-tag splitting, and blockquote lifts; corpus 0464-0469.
+- 2026-05-08→18 — Phases 1-6 seed + waves — html 0 → 257 — structural
+  div/span/attribute lifts, tag categorization, and blockquote dispatch.

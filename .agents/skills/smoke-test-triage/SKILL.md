@@ -44,7 +44,7 @@ or `debug format` CI issues (especially idempotency/losslessness regressions).
      pandoc <repro>.md -f markdown -t native
      ```
      and compare to panache's CST (`cargo run -- parse < <repro>.md`).
-     Pandoc-native is the behavioral reference (per `.claude/rules/parser.md`).
+     Pandoc-native is the behavioral reference (per the root `AGENTS.md`).
      If panache's CST differs *structurally* from pandoc — different block
      types (e.g. BulletList where pandoc has CodeBlock), missing/extra
      nesting, wrong attribute attachment — **the bug is parser-side, no

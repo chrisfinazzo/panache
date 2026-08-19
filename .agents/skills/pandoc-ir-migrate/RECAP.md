@@ -49,8 +49,8 @@ updated to pandoc-native parity.
 
 ### Suggested next sub-targets, ranked
 
-1. **(Optional) Sweep `assets/`, `docs/`, and `.claude/rules/` for
-   stale IR-migration phase references.** Spot-check only.
+1. **(Optional) Sweep `assets/` and `docs/` for stale IR-migration phase
+   references.** Spot-check only.
 
 ### Don't redo / known traps (new this session)
 
@@ -100,12 +100,8 @@ suite green.
 1. **Bugs #1/#2: parser-as-source-of-truth path.** Out of scope for
    this skill; multi-session parser-linter-LSP cross-cut. Carried
    from recap-(xiv).
-2. **(Optional) Sweep `assets/`, `docs/`, and `.claude/rules/` for
-   stale IR-migration phase references.** Spot-check only — these are
-   the unsearched corners. Likely empty: `.claude/rules/parser.md`
-   already references migration *concepts* (TEXT-coalescence rule,
-   pandoc-native-as-reference) without phase numbers, which is the
-   intended end-state.
+2. **(Optional) Sweep `assets/` and `docs/` for stale IR-migration phase
+   references.** Spot-check only—these are the unsearched corners.
 
 ### Don't redo / known traps
 

@@ -9,8 +9,8 @@ Use this skill when asked to advance Panache's math parsing/formatting, fix a
 math-CST or math-formatting issue, or pick the next phase of this effort.
 
 This is a **long-horizon, multi-session effort**. Each session moves one phase
-or sub-task forward; do not attempt sweeping rewrites in one go. The standing
-design plan is `~/.claude/plans/i-want-to-plan-foamy-pascal.md`.
+or sub-task forward; do not attempt sweeping rewrites in one go. Current state
+and design decisions live in this skill and `RECAP.md`.
 
 ## Scope boundaries
 
@@ -44,7 +44,7 @@ design plan is `~/.claude/plans/i-want-to-plan-foamy-pascal.md`.
   `MATH_EQUATION_LABEL` token, gated on `bookdown_equation_references`.
 - **`MATH_SPACE`/`MATH_NEWLINE` stay distinct** from host `WHITESPACE`/`NEWLINE`
   so `math_content_text()` can strip container prefixes the block machinery
-  interleaves into `MATH_CONTENT` (blockquote `>` etc.). See `.claude/rules/math-parser.md`.
+  interleaves into `MATH_CONTENT` (blockquote `>` etc.).
 - **Operators are tokenized but never classified in the CST.** `+ - * = < >`
   emit a neutral `MATH_OPERATOR` token (one per char); bin/rel/precedence is
   *interpretation* (contextual unary minus, `\mathbin`, macro-dependent) — the
@@ -53,12 +53,8 @@ design plan is `~/.claude/plans/i-want-to-plan-foamy-pascal.md`.
   `MATH_BIN_OP`/`MATH_REL_OP` kinds. That module is the gateway to both
   precedence-aware spacing and semantic line-breaking.
 
-## Related rules to read first
-
-- `.claude/rules/math-parser.md` — the math-parser invariants.
-- `.claude/rules/parser.md` — single-pass + lossless CST.
-- `.claude/rules/formatter.md` — idempotency; idempotency drift is often a
-  parser-shape bug, not a formatter bug.
+Follow the math-parser, parser, and formatter invariants in the repository's
+root `AGENTS.md`.
 
 ## Phased plan (status)
 

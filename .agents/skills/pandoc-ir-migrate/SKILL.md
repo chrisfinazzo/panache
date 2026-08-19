@@ -36,32 +36,8 @@ by an IR-migration step, or pick "the next best phase" to work on.
   document in `RECAP.md` instead. The user has explicitly asked for
   this discipline; follow it strictly.
 
-## Related rules to read first
-
-These project rules apply directly to this skill's work; read them
-before starting if you haven't already loaded them this session:
-
-- `.claude/rules/parser.md` — `Dialect` vs `Extensions` split, dialect
-  pandoc-verification requirement, CST losslessness, the
-  TEXT-coalescence-vs-structural-diff distinction (added for this
-  skill), and the pandoc-native-is-the-reference rule.
-- `.claude/rules/integration-tests.md` — formatter golden cases live
-  under top-level `tests/fixtures/cases/` and are wired in
-  `tests/golden_cases.rs`; parser-only cases live under
-  `crates/panache-parser/tests/fixtures/cases/` and wire into
-  `crates/panache-parser/tests/golden_parser_cases.rs`. Do not mix them.
-- `.claude/rules/commonmark.md` — Pandoc-IR changes that affect the
-  shared `inline_ir.rs` algorithm must keep `Dialect::CommonMark`
-  byte-identical; the conformance allowlist is the regression guard.
-
-## Harness noise to ignore inside this skill
-
-The runtime occasionally injects a `system-reminder` nudging you to use
-`TaskCreate` / `TaskUpdate` for tracking. **For most sub-tasks the
-workflow below is linear (probe → classify → fix → fixture → recap), so
-task tools add overhead without value.** Skip them for migration
-sessions unless the user explicitly asks for a task list. The exception
-is multi-phase sessions (rare) — there a task list per phase helps.
+Follow the parser, integration-test, and CommonMark conformance invariants in
+the repository's root `AGENTS.md`.
 
 ## Phased plan
 
@@ -158,10 +134,6 @@ construct depends on the dispatcher's `try_parse_*` chain for
 to *parse* a matched range into a CST subtree, but "what is this
 byte range?" is answered exclusively by the IR. That is the
 end-state of this migration.
-
-The full design rationale lives in `/home/jola/.claude/plans/let-s-create-a-plan-noble-barto.md`
-(initial migration plan; treat as historical reference once the recap
-has captured each phase's outcome).
 
 ## Key files
 

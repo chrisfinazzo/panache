@@ -71,22 +71,16 @@ the parser.
   (inline-level). The pandoc allowlist
   (`crates/panache-parser/tests/pandoc/allowlist.txt`) gets new
   section header comments `# html-block` / `# html-inline`.
-- Out-of-scope and deferred to `tests/pandoc/blocked.txt`:
+- Out-of-scope and deferred to
+  `crates/panache-parser/tests/pandoc/blocked.txt`:
   `markdown="1"` / `markdown="0"` (Ext_markdown_attribute, default
   off in pandoc-flavored markdown); `<a id>` / `<a name>` legacy
   anchor lift (pandoc does NOT lift these in default `markdown` —
   treat as opaque RawInline); malformed/unbalanced tags (fall back
   to opaque `HTML_BLOCK` / `INLINE_HTML`).
 
-## Related rules to read first
-
-- `.claude/rules/pandoc-conformance.md` — general workflow for the
-  shared pandoc-conformance harness. This skill is a focused subset.
-- `.claude/rules/parser.md` — `Dialect` vs `Extensions` split, CST
-  losslessness, the pandoc-native-as-reference rule, the
-  TEXT-coalescence-vs-structural-diff distinction.
-- `.claude/rules/formatter.md` — idempotency divergences are often
-  parser-shape bugs; verify against pandoc-native first.
+Follow the Pandoc conformance, parser, and formatter invariants in the
+repository's root `AGENTS.md`.
 
 ## Phased plan
 
@@ -208,72 +202,10 @@ For Phase 2 (`<span>`), do the same thing inline:
 region into an `HTML_ATTRS` node so the same `AttributeNode` walk
 finds it automatically.
 
-### Phase 1 reality — what landed for `<div>`
-
-Phase 1 ships **two** structural changes, both byte-lossless:
-
-1. **Wrapper retag.** When the parser recognizes `<div ...>`
-   opening an HTML block under `Dialect::Pandoc`, the wrapper
-   node's `SyntaxKind` is `HTML_BLOCK_DIV` instead of
-   `HTML_BLOCK`. One `u16` differs at the wrapper level.
-2. **Open-tag tokenization.** Inside the open
-   `HTML_BLOCK_TAG`, the bytes `<div ATTRS>` are tokenized at
-   finer granularity:
-   ```
-   HTML_BLOCK_DIV
-     HTML_BLOCK_TAG (open)
-       TEXT "<div"
-       WHITESPACE " "
-       HTML_ATTRS                ← structural attribute region
-         TEXT "id=\"x\""
-       TEXT ">"
-       (TEXT trailing-content)?  ← for same-line <div>foo</div>
-       NEWLINE
-     HTML_BLOCK_CONTENT?         ← middle lines, raw TEXT (NOT
-                                    block-parsed at parse time)
-     HTML_BLOCK_TAG (close)
-       TEXT "</div>"
-       NEWLINE
-   ```
-   The bytes are byte-identical to source — the open-tag TEXT
-   is just split at finer granularity.
-
-`AttributeNode::can_cast(HTML_ATTRS)` returns true. The salsa
-indexer's existing `for attr in
-tree.descendants().filter_map(AttributeNode::cast)` walk picks
-up `<div id>` ids automatically — the same walk that handles
-fenced-div `DIV_INFO` and heading `ATTRIBUTE`. **No parallel
-salsa walk.** No new helper threading; the standard
-`AttributeNode::id()` machinery routes by kind to
-`parse_html_attribute_list` for HTML attrs vs.
-`try_parse_trailing_attributes` for `{...}` syntax.
-
-What Phase 1 still does NOT do:
-
-- **Recursive content parsing.** The bytes inside the div
-  (between open and close tags) are still raw TEXT tokens at
-  parse time. The pandoc-native projector still calls
-  `try_div_html_block` to byte-reparse them as markdown. A real
-  structural lift would have the parser produce `PARAGRAPH`,
-  `LIST`, etc. as direct children of `HTML_BLOCK_DIV`. That is
-  Phase 5 work, alongside depth-aware open/close pairing for
-  nested divs.
-- **Multi-line open tags.** `<div\n  id="x">` (open tag spanning
-  multiple lines) isn't recognized as `HTML_BLOCK_DIV` — the
-  parser's existing `try_parse_html_block_start` only inspects
-  the first line. Currently falls back to opaque `HTML_BLOCK`.
-  Edge case; revisit when corpus exercises it.
-
-So Phase 1 fully answers "where do `<div>` attributes live in
-the CST?" — the answer is **a real `HTML_ATTRS` structural
-node**, not a parallel byte-parser. It does NOT yet answer
-"where do the inner blocks live structurally?" — that's still
-opaque TEXT and reparsed on demand by the projector.
-
-Mirror this shape for Phase 2 (`<span>`): retag the existing
-`INLINE_HTML` to `INLINE_HTML_SPAN` when a matched `<span>...</span>`
-is recognized; do NOT introduce a new structural shape with child
-attribute nodes. Same pattern, different kind.
+Phase 1 established the reusable pattern: retag matched Pandoc wrappers,
+tokenize their existing attribute bytes as `HTML_ATTRS`, and let the standard
+`AttributeNode` walk expose them. Inner block content and multi-line open tags
+remain Phase 5 work. Phase 2 mirrors this shape for matched `<span>` wrappers.
 
 ## Failure buckets
 
@@ -416,12 +348,11 @@ byte-identical to `pandoc -f markdown -t native`.
   raw.
 - **Don't** edit `expected.native` files by hand. Generate via
   `pandoc -f markdown -t native input.md > expected.native` or
-  `scripts/update-pandoc-conformance-corpus.sh`.
+  `crates/panache-parser/scripts/update-pandoc-conformance-corpus.sh`.
 - **Don't** add a case to the allowlist without verifying it in
   the freshly regenerated `report.txt`.
 - **Don't** treat formatter idempotency divergence as a formatter
-  bug without first checking the CST against pandoc-native (see
-  `.claude/rules/formatter.md`).
+  bug without first checking the CST against pandoc-native.
 - **Don't** silence a regression by removing an allowlist entry —
   fix the underlying cause.
 
@@ -455,9 +386,9 @@ byte-identical to `pandoc -f markdown -t native`.
   rule output, the CLI may keep emitting the OLD diagnostic from
   cache even after `cargo build`. Symptoms: unit tests pass,
   `panache lint` still flags a fixed case, `eprintln!` from your
-  changed code never fires. Fix: `rm -rf ~/.cache/panache/` and
-  retry. Always run unit tests for the rule first; only chase
-  CLI behavior once those pass.
+  changed code never fires. Fix: run `cargo run -- clean --all` or use
+  `--no-cache`, then retry. Always run unit tests for the rule first;
+  only chase CLI behavior once those pass.
 - **`<div id="x">Content</div>` on one line puts everything
   (including the close tag) in a single `HTML_BLOCK_TAG` token.**
   Naive `strip_suffix('>')` on the open-tag text captures the
@@ -468,8 +399,8 @@ byte-identical to `pandoc -f markdown -t native`.
 - **The HTML-block scanner is depth-unaware.** Nested `<div>`s
   (case `0199-html-block-div-nested`) close the outer block at
   the first inner `</div>` rather than tracking tag depth. This
-  is in `tests/pandoc/blocked.txt` and is a Phase 5 target. Don't
-  chase it as part of Phase 2/3/4 — it requires changes in
+  is in `crates/panache-parser/tests/pandoc/blocked.txt` and is a Phase
+  5 target. Don't chase it as part of Phase 2/3/4 — it requires changes in
   `parser/blocks/html_blocks.rs` to do a depth-aware pre-scan.
 - **The salsa-tracked `symbol_usage_index` query is LRU-cached
   per process** (`#[salsa::tracked(returns(ref), lru = 64)]`). A

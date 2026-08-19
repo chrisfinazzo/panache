@@ -3,7 +3,7 @@ name: commonmark-conformance
 description: Grow Panache's CommonMark spec conformance under
   `Flavor::CommonMark` by running every `spec.txt` example through the
   shared parser, comparing rendered HTML against the spec's expected
-  HTML (byte-equality after `<li>` whitespace normalization), and
+  HTML (byte-equality after list-item whitespace normalization), and
   triaging failures into renderer / parser-shape / flavor-leak /
   dialect-divergence / missing-feature buckets. Use when asked to
   advance the CommonMark pass rate, grow the allowlist, or unblock a
@@ -19,20 +19,8 @@ disabled, leaving only constructs that appear in the
 tracked by running every `spec.txt` example through the parser and
 comparing rendered HTML against the spec's expected HTML.
 
-## Related rules to read first
-
-The detailed triage workflow and invariants live in the rules — this
-skill is the actionable entry point; the rules are the authority.
-
-- `.claude/rules/commonmark-conformance.md` — failure-bucket triage
-  (renderer gap / parser-shape gap / flavor leak / dialect divergence
-  / missing feature), the `probe_examples` triage harness, and the
-  step-by-step workflow. **Read this before triaging.**
-- `.claude/rules/commonmark.md` — the invariants this work must not
-  break (flavor gating, dialect handling, fixture-first discipline,
-  HTML byte-equality comparison, allowlist hygiene).
-- `.claude/rules/parser.md` — keep the parser CST-lossless and
-  parser/formatter policy separate.
+Follow the CommonMark conformance and parser invariants in the repository's
+root `AGENTS.md`; the workflow below supplies the task-specific procedure.
 
 ## Harness layout
 
@@ -65,8 +53,6 @@ artifacts beside the harness (no longer under `docs/`):
 Both are derived — regenerate them, don't hand-edit.
 
 ## Workflow (summary)
-
-Full detail in `.claude/rules/commonmark-conformance.md`. In short:
 
 ```bash
 # Regression guard: every allowlisted example must still pass.

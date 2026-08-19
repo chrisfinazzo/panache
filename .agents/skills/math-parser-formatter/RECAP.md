@@ -194,4 +194,4 @@ tokens) so formatter + linter + LSP share one interpretation.
   `MathParseReport` side-channel + `MathParseOptions`; embedded in all 8
   `inlines/math.rs` emit paths; bookdown `(\#eq:label)` → `MATH_EQUATION_LABEL`;
   fixed bookdown-crossref indexing + blockquote idempotency drift; added the
-  skill, `.claude/rules/math-parser.md`, `TODO.md` note.
+  skill and `TODO.md` note.
