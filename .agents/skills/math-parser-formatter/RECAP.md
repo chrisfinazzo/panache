@@ -68,39 +68,23 @@ still-relevant trap into Persistent traps. Keep it short.
 
 ## Latest session
 
-**Phase 6 — greedy line-fill explored, REJECTED; only the indent-budget fix
-kept (formatter).** *Not yet committed.* Implemented the queued sub-target #1
-(min-breaks-to-fit greedy packer in `break_binary_segment`) end-to-end, then
-**reverted it on user review**: greedy "pack until the next term won't fit"
-produces ragged, semantically-arbitrary break points (`aaaa + bbbb + cccc` /
-`+ dddd + eeee` / `+ ffff`) — worse for math than the regular
-**one-operator-per-line** layout, which is the usual amsmath `align`/`split`
-convention. **Decision (do not relitigate): keep break-before-every-binary-op
-(one term per line).** Greedy fill is a prose-reflow instinct; math wants the
-opposite.
+**`MATH_DELIMITED`-aware line-break scanning (formatter).** *Not yet committed.*
+The break-candidate walk now handles a `MATH_DELIMITED` node explicitly as one
+opaque, completed operand instead of re-deriving `\left`/`\right` depth from
+command text. The ordinary-delimiter depth counter remains for flat `(…)` and
+`[…]` token runs. Removed `left`/`right` from `operators::command_class`; the
+vendored symbol-class fixture now pins both as structurally handled commands
+whose table lookup returns `None`.
 
-- **Kept: width budget charges the flat `math-indent`** (Option B, the one
-  surviving change). `flush_free_rows` passes
-  `line_width.saturating_sub(indent.chars().count())` to `break_free_row`, fixing
-  a pre-existing overshoot (a display row was rendered up to `math-indent` wider
-  than `line-width`). Invisible to every existing golden/host test (none sat in
-  the boundary window), so it is covered by **new** tests:
-  golden `math_linebreak_indent_budget_experimental` + host
-  `experimental_line_break_budget_accounts_for_math_indent` — a 21-char chain at
-  `line-width=22`, `math-indent=2` now breaks (`  aa = bbbbbb` / `     = ccccccc`)
-  instead of emitting a 23-char line. STYLE.md Rule 7 + `formatting.qmd` got a
-  one-sentence budget note; all the greedy wording was reverted with the code.
-- The greedy revert was a clean `git checkout` of `linebreak.rs`, `STYLE.md`,
-  `formatting.qmd`, `tests/format/math.rs` (one-per-line is the committed state);
-  only `render.rs` (budget) is modified. `cargo test --workspace`, clippy
-  `-D warnings`, `cargo fmt --check` all clean.
-
-**Earlier Phase 6 commits** (committed): commit 2 `9d7c2e5b` (over-width relation
-breaking, `break_priority`, `linebreak.rs`, `split_logical_rows` idempotency +
-`%`-comment trap); commit 3 `0128da42` (nested binary breaking under relation
-chains, `spaced_operator_breaks` + `render_inline_seeded` seed); commit 4
-(binary breaking outside a relation chain — 3-way branch in `break_free_row`,
-one term per line).
+- Added focused coverage for a nested, null, asymmetric delimited run between
+  two relations and a binary chain following a bracket-delimited operand. Inner
+  operators remain invisible to the scanner; surrounding operators retain
+  their classes.
+- Updated STYLE.md, the fixture rationale, and TODO.md. Focused line-break and
+  symbol-class tests pass. `cargo check --workspace`, `cargo test --workspace`,
+  clippy with `-D warnings`, and `cargo fmt --check` are clean. The workspace
+  test needed temporary `GOCACHE`/`XDG_CACHE_HOME` paths because the sandboxed
+  user cache made the external-staticcheck CLI test fail before invocation.
 
 ### Suggested next sub-targets
 1. **Environment-body line-breaking** (interacts with the `&`-column engine).
@@ -123,6 +107,9 @@ tokens) so formatter + linter + LSP share one interpretation.
 
 ## Earlier sessions
 
+- **Phase 6 indent budget; greedy packing rejected.** The flat `math-indent` is
+  charged against `line-width`; binary breaks remain one operator per line
+  after a greedy line-fill experiment produced semantically arbitrary ragging.
 - **Phase 6 commit 1 — tokenize delimiters/punctuation** (`7249710c`). Parser
   splits `( [`→`MATH_OPEN`, `) ]`→`MATH_CLOSE`, `, ;`→`MATH_PUNCT` (`| . /` stay
   text); formatter's `text_tail_class` replaced by kind-keyed

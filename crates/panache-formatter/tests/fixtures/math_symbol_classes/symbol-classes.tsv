@@ -125,11 +125,9 @@
 # +/- to unary), so we keep Op and record the oracle's Function here.
 \lim	Op	function
 
-# --- delimiter commands (no standalone Content event) ---
-\left	Open	skip
-\right	Close	skip
-
 # --- ordinary controls (command_class returns None) ---
 \alpha	Ord	ordinary
 \beta	Ord	ordinary
 \frac	Ord	skip
+\left	Ord	skip
+\right	Ord	skip

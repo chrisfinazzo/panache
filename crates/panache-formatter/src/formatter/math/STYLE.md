@@ -93,9 +93,9 @@ Returned unchanged, never reflowed:
    `a\leq b` → `a \leq b`), classed via the `operators.rs` table. They are
    **never** made tight, though --- a command's terminating space is mandatory
    (stripping `\leq b` to `\leqb` would name a different control word), so a
-   unary-position command op, a large operator (`\sum`), a delimiter command
-   (`\left`/`\right`), and ordinary commands all keep their author space
-   verbatim. A break-priority column for line-breaking is a later phase.
+   unary-position command op, a large operator (`\sum`), and ordinary commands
+   all keep their author space verbatim. The structural `MATH_DELIMITED` node,
+   rather than the command table, identifies `\left`/`\right` framing.
 
    **The definition `:=`.** A `:` is an ordinary atom whose spacing is the
    author's (`x:y` and `f: A` are left alone), *except* when an `=` follows it
@@ -152,11 +152,11 @@ Returned unchanged, never reflowed:
    content, `line-width`, and `math-indent` --- the author's own line breaks and
    indentation are never preserved, only recomputed.
 
-   - **Top-level only.** An operator at delimiter depth > 0 --- inside `(…)`,
-     `[…]`, or `\left…\right` (tracked by an open/close counter, since those are
-     *flat token runs*, not nesting nodes), or anywhere inside a `{…}` brace
-     group (a node we never descend, so `\frac{…}{…}` arguments are opaque) ---
-     is never a break candidate.
+   - **Top-level only.** An operator at delimiter depth > 0 --- inside the flat
+     token runs `(…)` or `[…]` --- is never a break candidate. Structural
+     `MATH_DELIMITED` (`\left…\right`), `MATH_GROUP`, and `MATH_ENVIRONMENT`
+     nodes are opaque operands that the break scan never descends into, so their
+     interior operators are likewise excluded.
    - **Spaced operators only.** A candidate is a *spaced* operator
      (`operators::is_spaced` after `coerce`); a unary `+`/`-` is `Ord` and never
      a break site. A relation continuation re-spaces correctly in isolation

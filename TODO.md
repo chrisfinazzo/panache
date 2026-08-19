@@ -773,14 +773,10 @@ design decisions, and per-session workflow. Parser invariants:
   the formatter to leave malformed math verbatim); spans are the offending
   tokens' host ranges.
 
-- [ ] Migrate the math formatter's `\left`/`\right` line-break tracking to the
-  `MATH_DELIMITED` node. The break-candidate scan
-  (`crates/panache-formatter/src/formatter/math/linebreak.rs`) and
-  `command_class` (`operators.rs`) still track delimiter depth by command
-  *text* (`name == "left"`/`"right"`), which is now partly redundant with
-  the structural node. Harmless as a fallback today (formatter goldens are
-  byte-identical), but node-awareness would let the scan treat a delimited
-  run as one opaque operand instead of re-deriving depth.
+- [x] Migrate the math formatter's `\left`/`\right` line-break tracking to the
+  `MATH_DELIMITED` node. The break-candidate scan now treats each delimited
+  run as one opaque operand; `command_class` no longer classifies the
+  framing commands by text. Formatter output remains byte-identical.
 
 - [x] Math formatter that reformats content semantics-safely (align `&` columns,
   indent environment bodies, normalize `\\`) while preserving idempotency

@@ -31,18 +31,17 @@
 //!
 //! ## What "top-level" means, and why groups are opaque
 //!
-//! Breaks are only ever offered at operators sitting at **delimiter depth 0**:
-//! an operator inside `(…)`, `[…]`, or a `\left…\right` pair is not a candidate
-//! (we track an open/close depth counter, since — unlike `{…}` brace groups —
-//! those delimiter pairs are *flat token runs* in the CST, not nesting nodes).
-//! Brace groups (`{…}`, and therefore `\frac{…}{…}` arguments) are whole nodes
-//! we never descend into for break points. This is a *layout policy*, not a hard
-//! constraint (math ignores whitespace, so one could break inside `{…}`), chosen
-//! because (a) some interiors are whitespace/newline-sensitive (`\text{…}`,
-//! trailing `%` comments), (b) one breaks at the outermost structure by
-//! convention, and (c) it keeps the walk and its idempotency simple. The
-//! consequence we accept: a sub-unit wider than the line with no top-level
-//! operator stays over-width, like an unbreakable long word in prose reflow.
+//! Breaks are only ever offered at operators sitting at **delimiter depth 0**.
+//! Ordinary `(…)` and `[…]` pairs are flat token runs tracked with an open/close
+//! counter. `\left…\right` pairs, brace groups (`{…}`), and environments are
+//! structural nodes treated as opaque operands, so the scan never descends into
+//! them for break points. This is a *layout policy*, not a hard constraint (math
+//! ignores whitespace, so one could break inside `{…}`), chosen because (a) some
+//! interiors are whitespace/newline-sensitive (`\text{…}`, trailing `%`
+//! comments), (b) one breaks at the outermost structure by convention, and (c)
+//! it keeps the walk and its idempotency simple. The consequence we accept: a
+//! sub-unit wider than the line with no top-level operator stays over-width,
+//! like an unbreakable long word in prose reflow.
 //!
 //! ## Unary coercion
 //!
@@ -345,7 +344,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 prev = Some(AtomClass::Open);
                 i += 1;
             }
-            SyntaxKind::MATH_GROUP | SyntaxKind::MATH_ENVIRONMENT => {
+            SyntaxKind::MATH_GROUP | SyntaxKind::MATH_ENVIRONMENT | SyntaxKind::MATH_DELIMITED => {
                 prev = Some(AtomClass::Close);
                 i += 1;
             }
@@ -362,13 +361,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                     .map(|t| t.text().to_string())
                     .unwrap_or_default();
                 let name = text.strip_prefix('\\').unwrap_or(&text);
-                if name == "left" {
-                    depth += 1;
-                    prev = Some(AtomClass::Open);
-                } else if name == "right" {
-                    depth -= 1;
-                    prev = Some(AtomClass::Close);
-                } else if let Some(raw) = operators::command_class(name) {
+                if let Some(raw) = operators::command_class(name) {
                     let class = operators::coerce(raw, prev);
                     if depth == 0 && operators::is_spaced(class) {
                         out.push(Break {
@@ -516,6 +509,27 @@ mod tests {
     fn relations_inside_left_right_are_not_break_points() {
         let content = "ffff \\left( xxxx = yyyy \\right) gggg";
         assert_eq!(rel_indices(content), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn nested_null_and_asymmetric_delimited_run_is_opaque() {
+        let content = "aaaa = \\left. \\left( xxxx = yyyy \\right] \\right| = zzzz";
+        assert_eq!(rel_indices(content).len(), 2);
+        assert_eq!(
+            lines(content, 20),
+            vec![
+                "aaaa = \\left. \\left( xxxx = yyyy \\right] \\right|",
+                "     = zzzz",
+            ],
+        );
+    }
+
+    #[test]
+    fn binary_operator_after_delimited_run_stays_binary() {
+        assert_eq!(
+            lines("\\left[ a = b \\right] + cccccccc + dddddddd", 20),
+            vec!["\\left[ a = b \\right]", "+ cccccccc", "+ dddddddd"],
+        );
     }
 
     #[test]

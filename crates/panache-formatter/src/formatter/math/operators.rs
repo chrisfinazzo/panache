@@ -114,8 +114,6 @@ pub fn command_class(name: &str) -> Option<AtomClass> {
         | "wedge" | "vee" | "setminus" | "amalg" => AtomClass::Bin,
         "sum" | "prod" | "int" | "oint" | "coprod" | "bigcup" | "bigcap" | "bigoplus"
         | "bigotimes" | "bigvee" | "bigwedge" | "lim" => AtomClass::Op,
-        "left" => AtomClass::Open,
-        "right" => AtomClass::Close,
         _ => return None,
     };
     Some(class)
@@ -257,8 +255,8 @@ mod tests {
         assert_eq!(command_class("leq"), Some(AtomClass::Rel));
         assert_eq!(command_class("cdot"), Some(AtomClass::Bin));
         assert_eq!(command_class("sum"), Some(AtomClass::Op));
-        assert_eq!(command_class("left"), Some(AtomClass::Open));
-        assert_eq!(command_class("right"), Some(AtomClass::Close));
+        assert_eq!(command_class("left"), None);
+        assert_eq!(command_class("right"), None);
         assert_eq!(command_class("alpha"), None);
         assert_eq!(command_class("frac"), None);
         assert_eq!(command_class("text"), None);

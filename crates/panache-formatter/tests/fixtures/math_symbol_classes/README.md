@@ -32,10 +32,11 @@ each recorded class in a real LaTeX parser (assertion 2).
 
 ## `oracle = skip`
 
-`\left` / `\right` are delimiter framing --- pulldown emits no standalone
-`Content` event for them --- and `\frac` is a multi-argument visual, so the
-probe `a <token> b` is meaningless. These rows skip the oracle check but still
-pin their table class (assertion 1).
+`\left` / `\right` are delimiter framing represented by `MATH_DELIMITED`, not
+entries in `command_class`; pulldown emits no standalone `Content` event for
+them. `\frac` is a multi-argument visual, so the probe `a <token> b` is likewise
+meaningless. These rows skip the oracle check while still pinning that the
+command table returns `None` (assertion 1).
 
 ## Recorded divergences (do **not** "fix" them)
 
