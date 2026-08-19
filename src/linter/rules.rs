@@ -6,6 +6,7 @@ use crate::linter::index::LintIndex;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod adjacent_footnote_refs;
+pub mod blank_line_in_inline_footnote;
 pub mod chunk_label_spaces;
 pub mod citation_keys;
 pub mod citation_nonbreaking_space;

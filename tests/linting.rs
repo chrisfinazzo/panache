@@ -771,6 +771,35 @@ fn test_adjacent_footnote_refs() {
 }
 
 #[test]
+fn test_blank_line_in_inline_footnote() {
+    let diagnostics = lint_file("blank_line_in_inline_footnote.md");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "blank-line-in-inline-footnote")
+        .collect();
+
+    assert_eq!(issues.len(), 1, "expected 1 diagnostic, got {issues:#?}");
+    assert_eq!(issues[0].location.line, 3);
+    assert_eq!(issues[0].location.column, 33);
+    assert_eq!(u32::from(issues[0].location.range.len()), 2);
+    assert!(issues[0].fix.is_none());
+}
+
+#[test]
+fn test_blank_line_in_inline_footnote_needs_inline_footnotes() {
+    let diagnostics = lint_file_with_config(
+        "blank_line_in_inline_footnote.md",
+        "flavor = \"commonmark\"\n",
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "blank-line-in-inline-footnote"),
+        "rule should be gated off without extensions.inline-footnotes"
+    );
+}
+
+#[test]
 fn test_footnote_ref_in_footnote_def() {
     let diagnostics = lint_file("footnote_ref_in_footnote_def.md");
     let issues: Vec<_> = diagnostics

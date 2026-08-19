@@ -1261,6 +1261,43 @@ See the prior reports[^a][^b] for context.
 See the prior reports[^a] [^b] for context.
 ```
 
+### `blank-line-in-inline-footnote` {#blank-line-in-inline-footnote}
+
+Detects an apparent inline footnote whose opening `^[` and closing `]` are
+separated by a blank line.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No (removing the blank line would merge paragraphs and change document
+    structure based on inferred intent)
+
+Requirements
+:   Requires `extensions.inline-footnotes = true` in configuration
+
+Diagnostic codes
+:   [`blank-line-in-inline-footnote`](#blank-line-in-inline-footnote)
+
+Description
+
+:   Pandoc inline footnotes may wrap across ordinary line breaks, but they
+    cannot contain multiple paragraphs. A blank line ends the paragraph before
+    pandoc finds the closing bracket, so the entire apparent
+    footnote---including its `^[` and `]` markers---is rendered as literal text.
+
+    The rule reports an unescaped `^[` at the end of a paragraph only when the
+    paragraph after the blank line contains an apparent closing `]`. This avoids
+    warning about a lone `^[` used as literal notation.
+
+**Example violation:**
+
+```markdown
+This has an inline note.^[The note starts here.
+
+It appears to continue here.]
+```
+
 ### `footnote-swallowed-by-bracket` {#footnote-swallowed-by-bracket}
 
 Detects inline footnotes (`^[note]`) followed immediately by `[` or `(`, where
