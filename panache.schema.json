@@ -70,11 +70,11 @@
     },
     "FormatterDefinition": {
       "additionalProperties": false,
-      "description": "NEW: Named formatter definition (formatters.NAME sections in new format)\nOLD: Language-specific formatter config (formatters.LANG sections in old format)\n\nIn new format, if the definition name matches a built-in preset, unspecified fields\nwill inherit from that preset. This allows partial overrides like:\n\n```toml\n[formatters.air]\nargs = [\"format\", \"--custom\"]  # Overrides args, inherits cmd/stdin from built-in \"air\"\n```\n\nAdditionally, you can modify arguments incrementally using `prepend-args` and `append-args`:\n\n```toml\n[formatters.air]\nappend-args = [\"-i\", \"2\"]  # Adds args to end: [\"format\", \"{}\", \"-i\", \"2\"]\n```",
+      "description": "A named formatter definition from `[formatters.<name>]`.\n\nDefinitions named after a built-in preset inherit unspecified fields:\n\n```toml\n[formatters.air]\nargs = [\"format\", \"--custom\"]\n```\n\nArguments can also be modified with `prepend-args` and `append-args`:\n\n```toml\n[formatters.air]\nappend-args = [\"-i\", \"2\"]\n```",
       "properties": {
         "append-args": {
           "default": null,
-          "description": "Arguments to append to base args (from preset or explicit args)",
+          "description": "Arguments appended to the base arguments.",
           "items": {
             "type": "string"
           },
@@ -85,7 +85,7 @@
         },
         "args": {
           "default": null,
-          "description": "Arguments to pass (None = inherit from preset if name matches)",
+          "description": "Arguments, or the preset arguments when omitted.",
           "items": {
             "type": "string"
           },
@@ -96,7 +96,7 @@
         },
         "cmd": {
           "default": null,
-          "description": "Custom command to execute (None = inherit from preset if name matches)",
+          "description": "Custom command, or the preset command when omitted.",
           "type": [
             "string",
             "null"
@@ -104,7 +104,7 @@
         },
         "prepend-args": {
           "default": null,
-          "description": "Arguments to prepend to base args (from preset or explicit args)",
+          "description": "Arguments prepended to the base arguments.",
           "items": {
             "type": "string"
           },
@@ -115,7 +115,7 @@
         },
         "preset": {
           "default": null,
-          "description": "Reference to a built-in preset (e.g., \"air\", \"black\") - OLD FORMAT ONLY\nIn new format, presets are referenced directly in [formatters] mapping",
+          "description": "Legacy reference to a built-in preset.",
           "type": [
             "string",
             "null"
@@ -123,7 +123,7 @@
         },
         "stdin": {
           "default": null,
-          "description": "Whether the formatter reads from stdin (None = inherit from preset if name matches)",
+          "description": "Whether the formatter reads from standard input.",
           "type": [
             "boolean",
             "null"
