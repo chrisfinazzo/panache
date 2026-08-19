@@ -127,6 +127,9 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 - [ ] Unused reference definitions
 - [ ] Hard-wrapped text in code blocks
 - [ ] Use blanklines around horizontal rules
+- [ ] Rebindable R boolean aliases in chunk options—warn on unquoted `T` and `F`
+  where a boolean-valued inline R chunk option is expected; do not autofix
+  because either symbol may be rebound
 
 ### Linter bugs and performance (quarto-web triage, 2026-08)
 
