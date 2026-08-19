@@ -1499,7 +1499,9 @@ Output
 Complex structures, like the `dependson` option in the example above, are
 preserved as-is without attempting to convert them. Formatting of the options is
 handled by [`pretty_yaml`](https://github.com/g-plane/pretty_yaml)---as in the
-case of YAML frontmatter. If you want to ensure that your caption is wrapped,
+case of YAML frontmatter. Panache converts the reserved R constants `TRUE` and
+`FALSE` to YAML booleans, but leaves `T` and `F` inline because they are
+rebindable R variables. If you want to ensure that your caption is wrapped,
 don't use a quoted scalar value for the caption. Instead use a block scalar, via
 `>-`.
 

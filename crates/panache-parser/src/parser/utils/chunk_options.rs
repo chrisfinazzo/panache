@@ -88,9 +88,10 @@ fn is_simple_string(s: &str) -> bool {
 
 /// Check if a string is an R boolean literal.
 ///
-/// Accepts: TRUE, FALSE, T, F (R's boolean constants)
+/// `T` and `F` are rebindable variables, so treating them as literals could
+/// change the meaning of an inline R expression during hashpipe conversion.
 pub fn is_boolean_literal(s: &str) -> bool {
-    matches!(s, "TRUE" | "FALSE" | "T" | "F")
+    matches!(s, "TRUE" | "FALSE")
 }
 
 /// Check if a string is a numeric literal.
@@ -117,8 +118,8 @@ mod tests {
     fn test_is_boolean_literal() {
         assert!(is_boolean_literal("TRUE"));
         assert!(is_boolean_literal("FALSE"));
-        assert!(is_boolean_literal("T"));
-        assert!(is_boolean_literal("F"));
+        assert!(!is_boolean_literal("T"));
+        assert!(!is_boolean_literal("F"));
 
         assert!(!is_boolean_literal("true"));
         assert!(!is_boolean_literal("false"));
@@ -170,6 +171,15 @@ mod tests {
 
         let result = classify_value(&Some("FALSE".to_string()));
         assert_eq!(result, ChunkOptionValue::Simple("FALSE".to_string()));
+    }
+
+    #[test]
+    fn test_classify_rebindable_boolean_alias_as_expression() {
+        let result = classify_value(&Some("T".to_string()));
+        assert_eq!(result, ChunkOptionValue::Expression("T".to_string()));
+
+        let result = classify_value(&Some("F".to_string()));
+        assert_eq!(result, ChunkOptionValue::Expression("F".to_string()));
     }
 
     #[test]

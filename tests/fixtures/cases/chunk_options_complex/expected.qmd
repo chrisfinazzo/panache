@@ -13,6 +13,15 @@ Test parsing and formatting of complex R expressions in chunk options.
 plot(1:10)
 ```
 
+## Rebindable Boolean Aliases
+
+```{r, include=F, echo=T}
+#| label: aliases-chunk
+
+# T and F are ordinary R variables, so these options must stay inline
+plot(1:10)
+```
+
 ## Nested Function Calls
 
 ```{r, dependson=c("foo", "bar")}

@@ -171,8 +171,8 @@ pub fn normalize_option_name(name: &str) -> String {
 /// For quoted strings, preserves the quotes.
 pub fn normalize_value(value: &str) -> String {
     match value {
-        "TRUE" | "T" => "true".to_string(),
-        "FALSE" | "F" => "false".to_string(),
+        "TRUE" => "true".to_string(),
+        "FALSE" => "false".to_string(),
         _ => value.to_string(),
     }
 }
@@ -844,8 +844,8 @@ mod tests {
     fn test_normalize_value_booleans() {
         assert_eq!(normalize_value("TRUE"), "true");
         assert_eq!(normalize_value("FALSE"), "false");
-        assert_eq!(normalize_value("T"), "true");
-        assert_eq!(normalize_value("F"), "false");
+        assert_eq!(normalize_value("T"), "T");
+        assert_eq!(normalize_value("F"), "F");
     }
 
     #[test]

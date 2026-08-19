@@ -35,6 +35,16 @@ fn r_chunk_with_comma_separated_options() {
 }
 
 #[test]
+fn r_chunk_with_rebindable_boolean_aliases_stays_inline() {
+    let input = "```{r, include = F, echo = T}\n1 + 1\n```\n";
+    let output = format(input, Some(quarto_config()), None);
+
+    assert!(output.contains("```{r, include=F, echo=T}"));
+    assert!(!output.contains("#| include:"));
+    assert!(!output.contains("#| echo:"));
+}
+
+#[test]
 fn r_chunk_with_multiple_options() {
     let input = "```{r, echo=FALSE, warning=TRUE, message=FALSE}\nx <- 1\n```\n";
     let output = format(input, Some(quarto_config()), None);
