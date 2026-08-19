@@ -181,6 +181,7 @@ golden_test_cases!(
     blockquotes,
     bracketed_spans,
     bookdown,
+    gfm_bare_uri_trailing_delimiters,
     chunk_options_complex,
     code_blocks_executable,
     code_blocks_raw,

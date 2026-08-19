@@ -1,0 +1,48 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..101
+  PARAGRAPH@0..18
+    STRONG@0..15
+      STRONG_MARKER@0..2 "**"
+      TEXT@2..13 "Build Tool:"
+      STRONG_MARKER@13..15 "**"
+    TEXT@15..17 "**"
+    NEWLINE@17..18 "\n"
+  BLANK_LINE@18..19
+    BLANK_LINE@18..19 "\n"
+  PARAGRAPH@19..48
+    STRONG@19..47
+      STRONG_MARKER@19..21 "**"
+      TEXT@21..27 "Build "
+      AUTO_LINK@27..45
+        TEXT@27..45 "http://example.com"
+      STRONG_MARKER@45..47 "**"
+    NEWLINE@47..48 "\n"
+  BLANK_LINE@48..49
+    BLANK_LINE@48..49 "\n"
+  LIST@49..69
+    LIST_ITEM@49..69
+      LIST_MARKER@49..50 "-"
+      WHITESPACE@50..51 " "
+      PLAIN@51..69
+        STRONG@51..66
+          STRONG_MARKER@51..53 "**"
+          TEXT@53..64 "Build Tool:"
+          STRONG_MARKER@64..66 "**"
+        TEXT@66..68 "**"
+        NEWLINE@68..69 "\n"
+  BLANK_LINE@69..70
+    BLANK_LINE@69..70 "\n"
+  BLOCK_QUOTE@70..101
+    BLOCK_QUOTE_MARKER@70..71 ">"
+    WHITESPACE@71..72 " "
+    PARAGRAPH@72..101
+      STRONG@72..100
+        STRONG_MARKER@72..74 "__"
+        TEXT@74..80 "Build "
+        AUTO_LINK@80..98
+          TEXT@80..98 "http://example.com"
+        STRONG_MARKER@98..100 "__"
+      NEWLINE@100..101 "\n"

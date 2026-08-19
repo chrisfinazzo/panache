@@ -555,7 +555,10 @@ pub fn try_parse_bare_uri(text: &str) -> Option<(usize, &str)> {
     let mut trimmed = end;
     while trimmed > scheme_end + 1 {
         let ch = text[..trimmed].chars().last().unwrap();
-        if matches!(ch, '.' | ',' | ';' | ':' | ')' | ']' | '}') {
+        if matches!(
+            ch,
+            '.' | ',' | ';' | ':' | '?' | '!' | '*' | '_' | '~' | ')' | ']' | '}'
+        ) {
             trimmed -= ch.len_utf8();
         } else {
             break;
@@ -1367,6 +1370,20 @@ mod tests {
             Some((14, "mailto:a@b.com"))
         );
         assert_eq!(try_parse_bare_uri("doi:10.1/x"), Some((10, "doi:10.1/x")));
+    }
+
+    #[test]
+    fn test_parse_bare_uri_trims_gfm_trailing_punctuation() {
+        for punctuation in ['?', '!', '*', '_', '~'] {
+            let input = format!("http://example.com/path{punctuation}");
+            assert_eq!(
+                try_parse_bare_uri(&input),
+                Some((23, "http://example.com/path")),
+                "trailing {punctuation:?} must stay outside the URI"
+            );
+        }
+
+        assert_eq!(try_parse_bare_uri("Tool:****"), None);
     }
 
     #[test]

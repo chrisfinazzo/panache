@@ -180,6 +180,7 @@ golden_test_cases!(
     autolink_strict_validation_commonmark,
     autolink_strict_validation_pandoc,
     bare_uri_autolink_gfm,
+    gfm_bare_uri_trailing_delimiters,
     blankline_concatenation,
     blockquote_definition_later_line_html_div_pandoc,
     blockquote_depth_change,
