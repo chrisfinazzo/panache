@@ -1395,10 +1395,10 @@ mod tests {
 
     #[test]
     fn project_boundary_is_none_when_no_git_ancestor() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let sub = tmp.path().join("nogit");
-        std::fs::create_dir_all(&sub).unwrap();
-        assert!(project_boundary(&sub).is_none());
+        // A temporary directory may itself live below a Git checkout.
+        let temp_dir = std::env::temp_dir();
+        let root = temp_dir.ancestors().last().expect("filesystem root");
+        assert!(project_boundary(root).is_none());
     }
 
     #[test]

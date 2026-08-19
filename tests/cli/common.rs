@@ -24,6 +24,7 @@ fn test_help() {
 #[test]
 fn test_help_forced_color_outputs_ansi() {
     cargo_bin_cmd!("panache")
+        .env_remove("NO_COLOR")
         .env("CLICOLOR_FORCE", "1")
         .arg("--help")
         .assert()
