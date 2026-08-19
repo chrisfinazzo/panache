@@ -204,9 +204,9 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
     let cfg = config.config(db);
 
     let admission = db.reparse_base(file, config);
-    let prev = match &admission {
-        ReparseAdmission::Refused => None,
-        ReparseAdmission::Admitted(prev) => prev.clone(),
+    let (prev, supplied_edit) = match &admission {
+        ReparseAdmission::Refused => (None, None),
+        ReparseAdmission::Admitted { prev, edit } => (prev.clone(), edit.clone()),
     };
 
     // Text unchanged: the base already holds what a full parse would return.
@@ -233,7 +233,10 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
             if prev.config != *cfg {
                 return None;
             }
-            let edit = crate::parser::diff_edit(&prev.text, &text);
+            let edit = supplied_edit
+                .filter(|supplied| Arc::ptr_eq(&supplied.target, &text))
+                .and_then(|supplied| supplied.materialize())
+                .unwrap_or_else(|| crate::parser::diff_edit(&prev.text, &text));
             crate::parser::reparse_with_refdefs(
                 &prev.green,
                 &prev.errors,
@@ -282,13 +285,11 @@ pub fn parsed_document(db: &dyn Db, file: FileText, config: FileConfig) -> Parse
     // cancelled query simply stores nothing and the next one diffs from the
     // older base -- a wider edit, still a correct one.
     //
-    // Stores are *not* ordered across revisions: two cloned handles computing
-    // at different revisions can land theirs in either order, so an older
-    // `(text, green)` pair can overwrite a newer one. Each pair is internally
-    // consistent -- that is what the store-last rule buys -- and a stale base
-    // only widens the next `diff_edit`, so the channel needs no monotonicity
-    // and deliberately does not try for it.
-    if matches!(admission, ReparseAdmission::Admitted(_)) {
+    // Stores are *not* generally ordered across revisions. A staged LSP edit
+    // rejects an older store so its exact source remains available; unstaged
+    // callers retain the older behavior, where a stale base merely widens the
+    // next `diff_edit`.
+    if matches!(admission, ReparseAdmission::Admitted { .. }) {
         db.reparse_store(
             file,
             config,
@@ -2792,6 +2793,10 @@ impl SalsaDb {
         self.reparse_state().clear();
     }
 
+    fn reparse_invalidate_file_edits(&mut self, file: FileText) {
+        self.reparse_state().invalidate_file_edits(file);
+    }
+
     pub fn file_text_if_cached(&self, path: &Path) -> Option<FileText> {
         self.vfs.input_for_path(path)
     }
@@ -2896,6 +2901,25 @@ impl SalsaDb {
         file.set_text(self)
             .with_durability(durability)
             .to(Some(text));
+        self.reparse_invalidate_file_edits(file);
+        true
+    }
+
+    /// Update an admitted LSP input and retain the exact edit for reparsing.
+    pub fn update_input_text_with_reparse_edit(
+        &mut self,
+        file: FileText,
+        config: FileConfig,
+        text: Arc<str>,
+        durability: Durability,
+        span: crate::incremental::EditSpan,
+    ) -> bool {
+        let source = file.text(self).clone().unwrap_or_else(|| Arc::from(""));
+        if !self.set_text_if_changed(file, Arc::clone(&text), durability) {
+            return false;
+        }
+        self.reparse_state()
+            .stage((file, config), source, text, span);
         true
     }
 

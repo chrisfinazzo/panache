@@ -7,9 +7,9 @@
 //! approximating it, because the approximation is what made the old numbers
 //! wrong:
 //!
-//! * **One combined edit per notification.** The host keeps no staged edit
-//!   chain; it diffs whole texts (`diff_edit`) and hands the parser a single
-//!   contiguous edit. A notification carrying four content changes therefore
+//! * **One combined edit per notification.** The LSP side channel composes
+//!   byte spans against the last parsed text and materializes the replacement
+//!   only when a parse demands it. A notification carrying four changes therefore
 //!   still gets an incremental *attempt*, over the span from the first change
 //!   to the last. The old harness declined outright on `changes.len() != 1`
 //!   and reported the resulting full parse as if it were the incremental
@@ -27,9 +27,10 @@
 //!
 //! Applying the client's changes to the text buffer is *not* timed: it happens
 //! on the LSP main thread and costs both strategies the same, so the step
-//! texts are precomputed and the timed region is parse work only. That phase is
-//! not therefore free --- `benches/lsp_write_phase.rs` times exactly the region
-//! this one excludes.
+//! texts and coalesced spans are precomputed; materializing the replacement
+//! from the target text remains inside the timed parse region. The write phase
+//! is not therefore free --- `benches/lsp_write_phase.rs` times exactly the
+//! region this one excludes.
 //!
 //! # What the numbers mean
 //!
@@ -37,8 +38,9 @@
 //!
 //! * **full** --- refdef scan + full parse, i.e. what the query cost before
 //!   incremental parsing existed.
-//! * **incremental** --- diff + [`reparse_with_refdefs`], retaining the cached
-//!   refdef set when it succeeds; a decline adds a refdef scan and full parse.
+//! * **incremental** --- materialize a supplied span, then call
+//!   [`reparse_with_refdefs`], retaining the cached refdef set when it succeeds;
+//!   a decline adds a refdef scan and full parse.
 //!   A declined step is strictly *more* expensive than a full parse; that
 //!   surcharge is the bail cost.
 //!
@@ -79,27 +81,27 @@
 //!
 //! ```text
 //! case                               bytes  steps    full    incr  speedup  fallback   bail%  window%
-//! single_change_small                 1620      1    55.9     1.9    29.2x      0.0%       -     3.7%
-//! multi_change_small_4                1620      1    61.4    62.0     1.0x      0.0%       -    78.5%
-//! multi_change_medium_4              15922      1   626.1   565.5     1.1x      0.0%       -    75.8%
-//! multi_change_medium_clustered_4    15922      1   648.0    15.2    42.5x      0.0%       -     0.4%
-//! multi_change_large_8               76542      1  3268.2  3371.6     1.0x    100.0%    0.0%        -
-//! multi_change_utf16_4                  74      1     6.1     8.4     0.7x    100.0%   34.7%        -
-//! full_replace                        1620      1     3.5     4.3     0.8x    100.0%    5.2%        -
-//! typing_stream_medium               15922     14   643.7    21.7    29.7x      0.0%       -     0.4%
-//! region_width_accepted              22121      1   328.6    67.4     4.9x      0.0%       -     0.3%
-//! region_width_declined              22121      1   322.7   233.5     1.4x      0.0%       -    49.4%
-//! window_cutoff_declined             22121      1   307.0   316.8     1.0x    100.0%    0.4%        -
-//! bail_refdef_edit                    2687      1   143.0   145.2     1.0x    100.0%    1.2%        -
-//! pandoc_manual_early_edit          304665      1 15104.5  4632.5     3.3x      0.0%       -     3.5%
-//! pandoc_manual_refdef_label_edit   304665      1 15259.1 14677.6     1.0x    100.0%    0.0%        -
-//! pandoc_manual_late_edit           304665      1 14953.1  1576.2     9.5x      0.0%       -     0.1%
-//! pandoc_manual_typing_stream       304665     12 15001.3  1658.9     9.0x      0.0%       -     0.1%
-//! pandoc_manual_midline_edit        304665      1 14357.9   162.9    88.1x      0.0%       -     0.0%
-//! pandoc_manual_typing_stream_midline 304665    11 14385.1   173.1    83.1x      0.0%       -     0.0%
-//! large_authoring_single_edit        25477      1  1137.1   284.6     4.0x      0.0%       -     6.2%
-//! tables_single_edit                 25179      1  1179.8   284.4     4.1x      0.0%       -     2.0%
-//! math_single_edit                   30112      1   813.0   248.2     3.3x      0.0%       -     5.0%
+//! single_change_small                 1620      1    46.8     0.8    55.7x      0.0%       -     3.7%
+//! multi_change_small_4                1620      1    44.5    43.2     1.0x      0.0%       -    78.5%
+//! multi_change_medium_4              15922      1   435.9   393.2     1.1x      0.0%       -    75.8%
+//! multi_change_medium_clustered_4    15922      1   430.2     3.9   109.9x      0.0%       -     0.4%
+//! multi_change_large_8               76542      1  2015.4  2035.0     1.0x    100.0%    0.0%        -
+//! multi_change_utf16_4                  74      1     5.6     7.8     0.7x    100.0%   34.2%        -
+//! full_replace                        1620      1     2.3     2.7     0.9x    100.0%    4.2%        -
+//! typing_stream_medium               15922     14   432.3     8.4    51.4x      0.0%       -     0.4%
+//! region_width_accepted              22121      1   221.4    33.1     6.7x      0.0%       -     0.3%
+//! region_width_declined              22121      1   221.4   144.2     1.5x      0.0%       -    49.4%
+//! window_cutoff_declined             22121      1   221.3   223.1     1.0x    100.0%    0.5%        -
+//! bail_refdef_edit                    2687      1   101.0   100.6     1.0x    100.0%    1.1%        -
+//! pandoc_manual_early_edit          304665      1 10136.3  3092.5     3.3x      0.0%       -     3.5%
+//! pandoc_manual_refdef_label_edit   304665      1  9677.4  9714.5     1.0x    100.0%    0.0%        -
+//! pandoc_manual_late_edit           304665      1  9652.5  1002.3     9.6x      0.0%       -     0.1%
+//! pandoc_manual_typing_stream       304665     12 10004.7  1012.8     9.9x      0.0%       -     0.1%
+//! pandoc_manual_midline_edit        304665      1  9841.1    39.5   248.9x      0.0%       -     0.0%
+//! pandoc_manual_typing_stream_midline 304665    11  9748.6    39.3   248.3x      0.0%       -     0.0%
+//! large_authoring_single_edit        25477      1   765.7   175.4     4.4x      0.0%       -     6.2%
+//! tables_single_edit                 25179      1   801.2   179.9     4.5x      0.0%       -     2.0%
+//! math_single_edit                   30112      1   556.1   157.6     3.5x      0.0%       -     5.0%
 //! ```
 //!
 //! What the table says:
@@ -118,18 +120,18 @@
 //!   scale with the document at all. The way to read that off the table is the
 //!   `pandoc_manual_typing_stream` / `..._midline` pair: same document, same
 //!   line, same keystrokes, one column apart, and only the tier differs.
-//!   Column 0 re-parses 0.1% of a 300 KB file for 9.0x; column 40 re-parses
-//!   0.0% of it for 83.1x, taking a keystroke from 1659 us to 173 us. That is
+//!   Column 0 re-parses 0.1% of a 300 KB file for 9.9x; column 40 re-parses
+//!   0.0% of it for 248.3x, taking a keystroke from 1013 us to 39 us. That is
 //!   the step change --- nearly 10x over the tier it displaces, from a change
 //!   in what is parsed rather than how much.
-//! * **The tier's remaining cost is not the token.** 173 us to splice a ~70-byte
+//! * **The tier's remaining cost is not the token.** 39 us to splice a ~70-byte
 //!   token is not O(token); it is `rowan`'s `replace_with` rebuilding each
 //!   ancestor's whole child vector, which at the root of a 300 KB document is a
 //!   few thousand `Arc` clones. The window tiers pay that same term through
 //!   `splice_children`, so the tier is strictly cheaper than what it replaces,
 //!   but the floor it leaves is what a future phase would have to attack to go
-//!   further. Compare `typing_stream_medium` (15 KB, 21.7 us) against
-//!   `..._midline` (300 KB, 173 us): the tokens are the same size and the times
+//!   further. Compare `typing_stream_medium` (15 KB, 8.4 us) against
+//!   `..._midline` (300 KB, 39 us): the tokens are the same size and the times
 //!   are not.
 //! * **A wide reparse loses to a full parse even when it succeeds**, which is
 //!   what the cutoff is for. Before it, `pandoc_manual_early_edit` accepted,
@@ -143,10 +145,10 @@
 //!   flips its fallback rate between 0% and 100%.
 //! * **Clustering matters; change count does not.** The two medium
 //!   multi-change cases carry the same four changes. Scattering them over 150
-//!   lines takes `diff_edit`'s span from one line to most of the document: 16%
+//!   lines takes the coalesced span from one line to most of the document: 16%
 //!   window to 76%, 3.2x to 1.1x.
 //! * **The typing streams are the workload the feature exists for**, and they
-//!   are where it pays: 29.7x on a 16 KB document, 9.0x on the 300 KB pandoc
+//!   are where it pays: 51.4x on a 16 KB document, 9.9x on the 300 KB pandoc
 //!   manual, with no step declining. Each stream agrees with its equivalent
 //!   single edit (`pandoc_manual_late_edit`) to within noise, which is the
 //!   evidence that chaining the base does not degrade across keystrokes.
@@ -177,11 +179,9 @@
 //!   it would also refuse the small documents with *narrow* windows that do win
 //!   (`single_change_small`, 1.6 KB, 1.3x).
 //!
-//! `multi_change_large_8` used to be the third, and its ~95 us is now measured
-//! rather than guessed at --- and it is not the host-side per-step work it was
-//! assumed to be. On this case `diff_edit` costs 7.1 us, the config clone
-//! 0.1 us, and the declined attempt 0.2 us: under 8 us of the ~95, and the base
-//! text copy is not inside the timed region at all. What is left is the
+//! `multi_change_large_8` used to be the third. Before the supplied-span path,
+//! `diff_edit` cost 7.1 us, the config clone 0.1 us, and the declined attempt
+//! 0.2 us. The remaining spread was the
 //! *fallback full parse itself* running ~5% slower on the incremental path ---
 //! 1861 us against 1963 us for the same call on the same text --- with the
 //! previous green tree and the 64 KB edit buffer resident across it. That is
@@ -237,6 +237,7 @@ use std::hint::black_box;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use panache::incremental::EditSpan;
 use panache::parser::{
     RefdefMap, ReparseStrategy, SyntaxError, collect_refdef_labels, diff_edit,
     parse_with_refdefs_and_errors, reparse_with_refdefs,
@@ -367,7 +368,6 @@ struct BenchCase {
 /// four fields [`panache::incremental::PrevParse`] keeps, minus the config,
 /// which the bench never changes mid-stream.
 struct ReparseBase {
-    text: String,
     green: rowan::GreenNode,
     errors: Vec<SyntaxError>,
     refdefs: RefdefMap,
@@ -411,7 +411,7 @@ struct CaseResult {
     iterations: usize,
     /// Refdef scan + full parse, per step.
     full_parse: StrategyStats,
-    /// Refdef scan + diff + reparse attempt (+ full parse when declined), per
+    /// Supplied-edit reparse attempt (+ refdef scan and full parse when declined), per
     /// step.
     incremental: StrategyStats,
     speedup_vs_full: f64,
@@ -543,15 +543,28 @@ fn apply_change(text: &str, change: &BenchChange) -> String {
 
 /// The document text after each notification, so the timed region is parse
 /// work only.
-fn step_texts(input: &str, steps: &[Step]) -> Vec<String> {
+struct AppliedStep {
+    text: String,
+    edit: EditSpan,
+}
+
+fn applied_steps(input: &str, steps: &[Step]) -> Vec<AppliedStep> {
     let mut current = input.to_owned();
     steps
         .iter()
         .map(|changes| {
+            let before = current.clone();
             for change in changes {
                 current = apply_change(&current, change);
             }
-            current.clone()
+            let edit = diff_edit(&before, &current);
+            AppliedStep {
+                edit: EditSpan {
+                    old: edit.range.clone(),
+                    new: edit.range.start..edit.range.start + edit.insert.len(),
+                },
+                text: current.clone(),
+            }
         })
         .collect()
 }
@@ -602,7 +615,6 @@ fn fresh_base(text: &str, config: &Config) -> ReparseBase {
     let refdefs = refdef_query(None, text, config);
     let (green, errors) = full_parse(text, config, refdefs.clone());
     ReparseBase {
-        text: text.to_owned(),
         green,
         errors,
         refdefs,
@@ -614,10 +626,14 @@ fn fresh_base(text: &str, config: &Config) -> ReparseBase {
 fn incremental_step(
     base: &mut ReparseBase,
     new_text: &str,
+    edit: &EditSpan,
     config: &Config,
 ) -> (Duration, StepOutcome) {
     let start = Instant::now();
-    let edit = diff_edit(&base.text, new_text);
+    let edit = panache::parser::Edit {
+        range: edit.old.clone(),
+        insert: new_text[edit.new.clone()].to_owned(),
+    };
     let attempt = Instant::now();
     let reparsed = reparse_with_refdefs(
         &base.green,
@@ -658,7 +674,6 @@ fn incremental_step(
                 spliced_bytes: reparsed.reparse_range.1 - reparsed.reparse_range.0,
             };
             *base = ReparseBase {
-                text: new_text.to_owned(),
                 green: reparsed.green,
                 errors: reparsed.errors,
                 refdefs: base.refdefs.clone(),
@@ -671,7 +686,6 @@ fn incremental_step(
             let (green, errors) = full_parse(new_text, config, refdefs.clone());
             let elapsed = start.elapsed();
             *base = ReparseBase {
-                text: new_text.to_owned(),
                 green,
                 errors,
                 refdefs,
@@ -698,16 +712,16 @@ fn incremental_step(
 /// reports a speedup for a splice that does not match a full parse is
 /// measuring the wrong thing entirely. (Losing *reuse* is not a failure here
 /// --- that shows up honestly in the fallback rate.)
-fn verify_case(input: &str, texts: &[String], config: &Config, id: &str) {
+fn verify_case(input: &str, steps: &[AppliedStep], config: &Config, id: &str) {
     let mut base = fresh_base(input, config);
-    for (index, text) in texts.iter().enumerate() {
-        let (_, outcome) = incremental_step(&mut base, text, config);
+    for (index, step) in steps.iter().enumerate() {
+        let (_, outcome) = incremental_step(&mut base, &step.text, &step.edit, config);
         let path = match outcome {
             StepOutcome::Reused { strategy, .. } => strategy,
             StepOutcome::Fallback { reason, .. } => reason,
         };
         let (expected, expected_errors) =
-            full_parse(text, config, refdef_query(None, text, config));
+            full_parse(&step.text, config, refdef_query(None, &step.text, config));
         assert_eq!(
             fingerprint(&SyntaxNode::new_root(base.green.clone())),
             fingerprint(&SyntaxNode::new_root(expected)),
@@ -727,25 +741,25 @@ fn run_case(
     iterations: usize,
     config: &Config,
 ) -> CaseResult {
-    let texts = step_texts(input, steps);
-    verify_case(input, &texts, config, id);
+    let applied = applied_steps(input, steps);
+    verify_case(input, &applied, config, id);
 
     // Warm up both streams: the first parse of a document pays page faults and
     // branch-predictor cold start that no `didChange` in a live session does.
     for _ in 0..2 {
         let mut full_refdefs = refdef_query(None, input, config);
-        for text in &texts {
-            let (_, refdefs, green, errors) = full_step(Some(&full_refdefs), text, config);
+        for step in &applied {
+            let (_, refdefs, green, errors) = full_step(Some(&full_refdefs), &step.text, config);
             black_box((green, errors));
             full_refdefs = refdefs;
         }
         let mut base = fresh_base(input, config);
-        for text in &texts {
-            black_box(incremental_step(&mut base, text, config));
+        for step in &applied {
+            black_box(incremental_step(&mut base, &step.text, &step.edit, config));
         }
     }
 
-    let sample_count = iterations * texts.len();
+    let sample_count = iterations * applied.len();
     let mut full_samples = Vec::with_capacity(sample_count);
     let mut incremental_samples = Vec::with_capacity(sample_count);
     let mut bail_samples = Vec::new();
@@ -759,16 +773,18 @@ fn run_case(
         // incremental side chains its base: a `didChange` always has a previous
         // revision's refdef set to backdate against.
         let mut full_refdefs = refdef_query(None, input, config);
-        for text in &texts {
-            let (elapsed, refdefs, green, errors) = full_step(Some(&full_refdefs), text, config);
+        for step in &applied {
+            let (elapsed, refdefs, green, errors) =
+                full_step(Some(&full_refdefs), &step.text, config);
             black_box((green, errors));
             full_refdefs = refdefs;
             full_samples.push(elapsed);
         }
 
         let mut base = fresh_base(input, config);
-        for text in &texts {
-            let (elapsed, outcome) = incremental_step(&mut base, text, config);
+        for step in &applied {
+            let text = &step.text;
+            let (elapsed, outcome) = incremental_step(&mut base, text, &step.edit, config);
             incremental_samples.push(elapsed);
             match outcome {
                 StepOutcome::Reused {
@@ -1107,7 +1123,7 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: small.text.clone(),
             iterations: default_iterations,
-            // Scattered over 20 lines, so `diff_edit` spans most of a small
+            // Scattered over 20 lines, so the coalesced edit spans most of a small
             // document and the suffix window answers it. Pinned because "which
             // tier" is what silently changes when a cascade is reordered.
             expect: Expect::reuses().strategy("suffix_window"),
@@ -1127,7 +1143,7 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             expect: Expect::reuses().strategy("suffix_window"),
         },
         // Multi-cursor inside one paragraph: the same change count as the
-        // scattered case, but `diff_edit` spans one line instead of 150. The
+        // scattered case, but the coalesced edit spans one line instead of 150. The
         // pair is the whole argument that clustering, not count, is what the
         // incremental path cares about.
         //
@@ -1165,12 +1181,12 @@ fn synthetic_cases(default_iterations: usize) -> Vec<BenchCase> {
             ]],
             input: large.text.clone(),
             iterations: default_iterations / 4,
-            // Scattered over 1000 lines, so `diff_edit`'s span is most of the
+            // Scattered over 1000 lines, so the coalesced span is most of the
             // document and the cutoff refuses it.
             //
-            // The relaxed ceiling is profiled, not assumed. Of the ~95 us this
-            // case costs over a full parse, `diff_edit` is 7 us and the config
-            // clone 0.1 us; the rest is the *fallback full parse itself*
+            // The relaxed ceiling is profiled, not assumed. Before staged
+            // spans, `diff_edit` was 7 us and the config clone 0.1 us; the
+            // remaining spread is the *fallback full parse itself*
             // running slower, because the previous green tree and the 64 KB
             // edit buffer are resident across it. That residual sits within the
             // run-to-run spread of the same parse, which is why the case

@@ -225,14 +225,18 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     // changes arrive through the notifications routed to
     // `reload_open_documents_config`, and `did_save` re-resolves as a backstop
     // for clients whose file watching does not cover every config file.
-    let Some(salsa_file) = gs.document_map.get(&uri_string).map(|doc| doc.salsa_file) else {
+    let Some((salsa_file, salsa_config)) = gs
+        .document_map
+        .get(&uri_string)
+        .map(|doc| (doc.salsa_file, doc.salsa_config))
+    else {
         return;
     };
 
     // Any shape, any order: the changes are applied in the order the client
     // sent them, each against the text its predecessors produced, which is what
-    // the protocol specifies. Nothing here needs to derive an edit range --
-    // `parsed_document` recovers the one it needs by diffing the whole texts.
+    // the protocol specifies. The byte ranges are coalesced while they are in
+    // hand, so `parsed_document` need not recover them by diffing whole texts.
     //
     // One index serves the whole notification and is patched per change rather
     // than rebuilt. It is the one the previous edit left behind, taken out of
@@ -241,26 +245,52 @@ pub(crate) fn did_change(gs: &mut GlobalState, params: DidChangeTextDocumentPara
     // edit, or one whose text moved out from under us, falls back to the salsa
     // memo (which every keystroke invalidates, so during a burst it is cold).
     let mut index = gs.take_line_index(salsa_file);
-    for change in params.content_changes.iter() {
-        match change.range {
+    let mut edit = None;
+    for change in params.content_changes {
+        let middle = index.text_arc();
+        let next = match change.range {
             Some(range) => {
-                let index = std::sync::Arc::make_mut(&mut index);
-                let span = super::conversions::content_change_span(index, range);
-                index.replace_range(span, &change.text);
+                let span = super::conversions::content_change_span(&index, range);
+                crate::incremental::EditSpan {
+                    old: span.clone(),
+                    new: span.start..span.start + change.text.len(),
+                }
             }
             // A whole-document replacement has no span to resolve, and per the
             // protocol a later ranged change in the same notification resolves
             // against *this* text.
+            None => crate::incremental::EditSpan {
+                old: 0..index.len(),
+                new: 0..change.text.len(),
+            },
+        };
+        match change.range {
+            Some(_) => {
+                std::sync::Arc::make_mut(&mut index).replace_range(next.old.clone(), &change.text)
+            }
             None => index = std::sync::Arc::new(LineIndex::new(&change.text)),
         }
+        let target = index.text_arc();
+        edit = Some(match edit {
+            Some(prior) => {
+                crate::incremental::compose_spans(&prior, &next, middle.len(), target.len())
+                    .expect("valid sequential LSP edits must compose")
+            }
+            None => next,
+        });
     }
 
     // The index owns the very allocation salsa is about to hold, so handing the
     // text over is a refcount bump rather than a third copy of the document.
     let text = index.text_arc();
-    let doc_path_for_salsa = uri.to_file_path().map(|p| p.into_owned());
-    if let Some(path) = doc_path_for_salsa.as_ref() {
-        gs.salsa.update_file_text(path.clone(), text);
+    if let Some(edit) = edit {
+        gs.salsa.update_input_text_with_reparse_edit(
+            salsa_file,
+            salsa_config,
+            text,
+            Durability::LOW,
+            edit,
+        );
     } else {
         gs.salsa
             .update_input_text(salsa_file, text, Durability::LOW);

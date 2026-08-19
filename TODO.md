@@ -178,7 +178,7 @@ publish over an *unchanged* document --- the cell a settle repeats once per open
 document --- went 22.89 -> 1.29 us on a 112 KB document, and is now flat across
 a 44x size range (1.05 / 0.90 / 1.29 us) instead of tracking document size.
 
-- [ ] **`did_change` writes text by *path* but reads its input by
+- [x] **`did_change` writes text by *path* but reads its input by
   `salsa_file`.** A preceding `did_delete_files`/`did_rename_files` evicts
   the path->id binding, so a later write can mint a fresh `FileText` while
   the document map still names the old one. Predates the line-index cache
@@ -186,12 +186,10 @@ a 44x size range (1.05 / 0.90 / 1.29 us) instead of tracking document size.
   a wrong answer), but it is a real divergence and worth closing by writing
   through `salsa_file` directly.
 
-- [ ] **Bypassing `diff_edit` for a single staged edit is fatou's remaining
-  pipeline idea and does *not* pay here** --- measured, `diff_edit` is 7.1
-  us against a \~1.9 ms parse (`multi_change_large_8`). Recorded so it is
-  not re-derived; revisit only if the parse gets cheap enough for 7 us to
-  matter, which the incremental tier ladder is steadily making more
-  plausible.
+- [x] **Bypass `diff_edit` with the LSP's staged edit.** The token tier made the
+  old 7.1 us scan material: `pandoc_manual_midline_edit` fell from 106 us to
+  40 us once the side channel carried coalesced byte spans. Keeping spans
+  lazy preserves the write phase's 8.5 us single-edit and 35 us batch rows.
 
 ## Parser
 
@@ -251,7 +249,7 @@ no reason.
   so it retains the previous set; only a declined attempt scans before the
   full parse.
 
-- [ ] **`diff_edit` re-derives an edit the LSP already knows.** Carry the
+- [x] **`diff_edit` re-derives an edit the LSP already knows.** Carry the
   coalesced edit through the reparse side channel instead of walking both
   whole texts before every attempt.
 

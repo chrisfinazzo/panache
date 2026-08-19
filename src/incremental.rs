@@ -16,10 +16,11 @@
 //! nothing admitted, none of it runs.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::parser::{RefdefMap, SyntaxError};
+use crate::parser::{Edit, RefdefMap, SyntaxError};
 use crate::salsa::{FileConfig, FileText};
 
 /// A base is keyed on `(file, config)`, not on the file alone: project queries
@@ -50,12 +51,44 @@ pub enum ReparseAdmission {
     Refused,
     /// Admitted, carrying the base to splice against (`None` before the first
     /// parse, or after an eviction).
-    Admitted(Option<Arc<PrevParse>>),
+    Admitted {
+        prev: Option<Arc<PrevParse>>,
+        edit: Option<SuppliedEdit>,
+    },
+}
+
+#[derive(Clone)]
+pub struct SuppliedEdit {
+    pub target: Arc<str>,
+    pub span: EditSpan,
+}
+
+impl SuppliedEdit {
+    pub fn materialize(&self) -> Option<Edit> {
+        Some(Edit {
+            range: self.span.old.clone(),
+            insert: self.target.get(self.span.new.clone())?.to_owned(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditSpan {
+    pub old: Range<usize>,
+    pub new: Range<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct StagedEdit {
+    source: Arc<str>,
+    target: Arc<str>,
+    span: EditSpan,
 }
 
 #[derive(Debug, Default)]
 struct FileReparseState {
     prev: Option<Arc<PrevParse>>,
+    staged: Option<StagedEdit>,
     /// When this entry was last touched, for eviction. See [`ReparseCache`].
     used: u64,
 }
@@ -100,7 +133,13 @@ impl ReparseCache {
     /// even across a long run of parses of other documents.
     pub fn base(&mut self, key: ReparseKey) -> ReparseAdmission {
         match self.touch(key) {
-            Some(state) => ReparseAdmission::Admitted(state.prev.clone()),
+            Some(state) => ReparseAdmission::Admitted {
+                prev: state.prev.clone(),
+                edit: state.staged.as_ref().map(|staged| SuppliedEdit {
+                    target: Arc::clone(&staged.target),
+                    span: staged.span.clone(),
+                }),
+            },
             None => ReparseAdmission::Refused,
         }
     }
@@ -111,8 +150,62 @@ impl ReparseCache {
         let Some(state) = self.touch(key) else {
             return;
         };
+        if let Some(staged) = &state.staged {
+            if !Arc::ptr_eq(&staged.target, &prev.text) {
+                return;
+            }
+            state.staged = None;
+        }
         state.prev = Some(Arc::new(prev));
         self.evict_over_budget();
+    }
+
+    /// Stage an LSP edit against the exact text allocation it transformed.
+    pub fn stage(&mut self, key: ReparseKey, source: Arc<str>, target: Arc<str>, span: EditSpan) {
+        let Some(state) = self.touch(key) else {
+            return;
+        };
+        let Some(prev) = state.prev.as_ref() else {
+            state.staged = None;
+            return;
+        };
+
+        debug_assert_eq!(
+            Edit {
+                range: span.old.clone(),
+                insert: target[span.new.clone()].to_owned(),
+            }
+            .apply(&source),
+            &*target
+        );
+        let staged = if Arc::ptr_eq(&prev.text, &source) {
+            Some(StagedEdit {
+                source,
+                target,
+                span,
+            })
+        } else if let Some(prior) = state.staged.take()
+            && Arc::ptr_eq(&prior.source, &prev.text)
+            && Arc::ptr_eq(&prior.target, &source)
+        {
+            compose_spans(&prior.span, &span, source.len(), target.len()).map(|span| StagedEdit {
+                source: prior.source,
+                target,
+                span,
+            })
+        } else {
+            None
+        };
+        state.staged = staged;
+    }
+
+    /// Forget staged edit metadata for `file` after an unstaged text write.
+    pub fn invalidate_file_edits(&mut self, file: FileText) {
+        for ((entry, _), state) in &mut self.files {
+            if *entry == file {
+                state.staged = None;
+            }
+        }
     }
 
     /// Admit `key`, so parses of it start keeping a base.
@@ -154,6 +247,55 @@ impl ReparseCache {
         let threshold = stamps[over - 1];
         self.files.retain(|_, state| state.used > threshold);
     }
+}
+
+/// Compose two sequential edits without comparing their surrounding texts.
+pub(crate) fn compose_spans(
+    first: &EditSpan,
+    second: &EditSpan,
+    middle_len: usize,
+    final_len: usize,
+) -> Option<EditSpan> {
+    if first.old.start != first.new.start
+        || second.old.start != second.new.start
+        || first.new.end > middle_len
+        || second.old.end > middle_len
+    {
+        return None;
+    }
+    let delta = first.new.len() as isize - first.old.len() as isize;
+    let old_len = middle_len.checked_add_signed(-delta)?;
+    if first.old.end > old_len {
+        return None;
+    }
+
+    let map_start = |offset: usize| {
+        if offset <= first.old.start {
+            Some(offset)
+        } else if offset >= first.new.end {
+            offset.checked_add_signed(-delta)
+        } else {
+            Some(first.old.start)
+        }
+    };
+    let map_end = |offset: usize| {
+        if offset < first.old.start {
+            Some(offset)
+        } else if offset >= first.new.end {
+            offset.checked_add_signed(-delta)
+        } else {
+            Some(first.old.end)
+        }
+    };
+
+    let start = first.old.start.min(map_start(second.old.start)?);
+    let end = first.old.end.max(map_end(second.old.end)?);
+    let insert_len = final_len.checked_sub(old_len.checked_sub(end - start)?)?;
+    let insert_end = start.checked_add(insert_len)?;
+    (insert_end <= final_len).then_some(EditSpan {
+        old: start..end,
+        new: start..insert_end,
+    })
 }
 
 /// Host-level oracle: an incrementally reused parse must equal a full parse of
@@ -258,10 +400,19 @@ mod tests {
         let k = key(&db, "# Title\n");
 
         cache.admit(k);
-        assert!(matches!(cache.base(k), ReparseAdmission::Admitted(None)));
+        assert!(matches!(
+            cache.base(k),
+            ReparseAdmission::Admitted {
+                prev: None,
+                edit: None
+            }
+        ));
 
         cache.store(k, base("# Title\n"));
-        let ReparseAdmission::Admitted(Some(prev)) = cache.base(k) else {
+        let ReparseAdmission::Admitted {
+            prev: Some(prev), ..
+        } = cache.base(k)
+        else {
             panic!("a stored base must come back");
         };
         assert_eq!(&*prev.text, "# Title\n");
@@ -285,7 +436,7 @@ mod tests {
         ));
         assert!(matches!(
             cache.base((file, new_config)),
-            ReparseAdmission::Admitted(None)
+            ReparseAdmission::Admitted { prev: None, .. }
         ));
     }
 
@@ -307,7 +458,7 @@ mod tests {
         ));
         assert!(matches!(
             cache.base((other, config)),
-            ReparseAdmission::Admitted(None)
+            ReparseAdmission::Admitted { prev: None, .. }
         ));
     }
 
@@ -328,7 +479,7 @@ mod tests {
         assert!(cache.files.len() <= MAX_REPARSE_BASES);
         assert!(matches!(
             cache.base(*keys.last().unwrap()),
-            ReparseAdmission::Admitted(_)
+            ReparseAdmission::Admitted { .. }
         ));
     }
 
@@ -343,5 +494,154 @@ mod tests {
         cache.clear();
 
         assert!(matches!(cache.base(k), ReparseAdmission::Refused));
+    }
+
+    fn assert_composes(old: &str, first: Edit, second: Edit) {
+        let middle = first.apply(old);
+        let final_text = second.apply(&middle);
+        let first_span = EditSpan {
+            old: first.range.clone(),
+            new: first.range.start..first.range.start + first.insert.len(),
+        };
+        let second_span = EditSpan {
+            old: second.range.clone(),
+            new: second.range.start..second.range.start + second.insert.len(),
+        };
+        let composed = compose_spans(&first_span, &second_span, middle.len(), final_text.len())
+            .expect("valid edits must compose");
+        let edit = Edit {
+            range: composed.old,
+            insert: final_text[composed.new].to_owned(),
+        };
+        assert_eq!(edit.apply(old), final_text);
+    }
+
+    #[test]
+    fn sequential_edits_compose_without_scanning_surrounding_text() {
+        assert_composes(
+            "alpha beta gamma",
+            Edit {
+                range: 6..10,
+                insert: "BETA".to_owned(),
+            },
+            Edit {
+                range: 0..5,
+                insert: "ALPHA".to_owned(),
+            },
+        );
+        assert_composes(
+            "alpha beta gamma",
+            Edit {
+                range: 6..10,
+                insert: "long middle".to_owned(),
+            },
+            Edit {
+                range: 11..17,
+                insert: "center".to_owned(),
+            },
+        );
+        assert_composes(
+            "alpha beta gamma",
+            Edit {
+                range: 6..10,
+                insert: String::new(),
+            },
+            Edit {
+                range: 6..6,
+                insert: "new ".to_owned(),
+            },
+        );
+        assert_composes(
+            "café and tea",
+            Edit {
+                range: 0..5,
+                insert: "茶".to_owned(),
+            },
+            Edit {
+                range: 4..7,
+                insert: "&".to_owned(),
+            },
+        );
+    }
+
+    #[test]
+    fn staged_notifications_compose_against_the_stored_base() {
+        let db = SalsaDb::default();
+        let mut cache = ReparseCache::default();
+        let k = key(&db, "alpha beta gamma");
+        cache.admit(k);
+        cache.store(k, base("alpha beta gamma"));
+        let ReparseAdmission::Admitted {
+            prev: Some(prev), ..
+        } = cache.base(k)
+        else {
+            panic!("stored base");
+        };
+
+        let middle: Arc<str> = Arc::from("alpha BETA gamma");
+        cache.stage(
+            k,
+            Arc::clone(&prev.text),
+            Arc::clone(&middle),
+            EditSpan {
+                old: 6..10,
+                new: 6..10,
+            },
+        );
+        let target: Arc<str> = Arc::from("ALPHA BETA gamma");
+        cache.stage(
+            k,
+            middle,
+            Arc::clone(&target),
+            EditSpan {
+                old: 0..5,
+                new: 0..5,
+            },
+        );
+
+        let ReparseAdmission::Admitted {
+            edit: Some(staged), ..
+        } = cache.base(k)
+        else {
+            panic!("composed edit");
+        };
+        assert!(Arc::ptr_eq(&staged.target, &target));
+        assert_eq!(staged.materialize().unwrap().apply(&prev.text), &*target);
+    }
+
+    #[test]
+    fn an_older_parse_cannot_overwrite_a_staged_transition() {
+        let db = SalsaDb::default();
+        let mut cache = ReparseCache::default();
+        let k = key(&db, "before");
+        cache.admit(k);
+        cache.store(k, base("before"));
+        let ReparseAdmission::Admitted {
+            prev: Some(prev), ..
+        } = cache.base(k)
+        else {
+            panic!("stored base");
+        };
+        let target: Arc<str> = Arc::from("after");
+        cache.stage(
+            k,
+            Arc::clone(&prev.text),
+            Arc::clone(&target),
+            EditSpan {
+                old: 0..6,
+                new: 0..5,
+            },
+        );
+
+        cache.store(k, base("stale"));
+        let ReparseAdmission::Admitted {
+            prev: Some(still_prev),
+            edit: Some(staged),
+        } = cache.base(k)
+        else {
+            panic!("staged transition must survive");
+        };
+        assert!(Arc::ptr_eq(&still_prev.text, &prev.text));
+        assert!(Arc::ptr_eq(&staged.target, &target));
     }
 }

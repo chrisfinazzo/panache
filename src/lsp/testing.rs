@@ -651,7 +651,7 @@ impl LspTester {
             self.gs
                 .salsa
                 .reparse_base(state.salsa_file, state.salsa_config),
-            crate::incremental::ReparseAdmission::Admitted(_)
+            crate::incremental::ReparseAdmission::Admitted { .. }
         )
     }
 
