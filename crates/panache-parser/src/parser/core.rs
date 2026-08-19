@@ -138,7 +138,7 @@ pub struct Parser<'a> {
     builder: GreenNodeBuilder<'static>,
     containers: ContainerStack,
     config: &'a ParserOptions,
-    block_registry: BlockParserRegistry,
+    block_registry: &'static BlockParserRegistry,
     after_metadata_block: bool,
     at_note_body_start: bool,
     dispatch_list_marker_consumed: bool,
@@ -172,7 +172,7 @@ impl<'a> Parser<'a> {
             builder: GreenNodeBuilder::new(),
             containers: ContainerStack::new(),
             config,
-            block_registry: BlockParserRegistry::new(),
+            block_registry: BlockParserRegistry::shared(),
             after_metadata_block: false,
             at_note_body_start: false,
             dispatch_list_marker_consumed: false,
@@ -3783,7 +3783,7 @@ impl<'a> Parser<'a> {
             }
 
             let levels_to_keep = if peek < self.lines.len() {
-                ContinuationPolicy::new(self.config, &self.block_registry).compute_levels_to_keep(
+                ContinuationPolicy::new(self.config, self.block_registry).compute_levels_to_keep(
                     self.current_blockquote_depth(),
                     &self.containers,
                     &self.lines,
@@ -4813,7 +4813,7 @@ impl<'a> Parser<'a> {
                     && !stripped_content.starts_with(':');
             if content_indent == 0 && is_definition_marker {
             } else {
-                let policy = ContinuationPolicy::new(self.config, &self.block_registry);
+                let policy = ContinuationPolicy::new(self.config, self.block_registry);
                 let prev_line_blank = self.pos > 0 && {
                     let prev_line = self.lines[self.pos - 1];
                     let (prev_bq_depth, prev_inner) = count_blockquote_markers(prev_line);

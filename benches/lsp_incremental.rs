@@ -86,7 +86,7 @@
 //! multi_change_medium_4              15922      1   435.9   393.2     1.1x      0.0%       -    75.8%
 //! multi_change_medium_clustered_4    15922      1   430.2     3.9   109.9x      0.0%       -     0.4%
 //! multi_change_large_8               76542      1  2015.4  2035.0     1.0x    100.0%    0.0%        -
-//! multi_change_utf16_4                  74      1     5.6     7.8     0.7x    100.0%   34.2%        -
+//! multi_change_utf16_4                  74      1     3.9     5.1     0.8x    100.0%   31.9%        -
 //! full_replace                        1620      1     2.3     2.7     0.9x    100.0%    4.2%        -
 //! typing_stream_medium               15922     14   432.3     8.4    51.4x      0.0%       -     0.4%
 //! region_width_accepted              22121      1   221.4    33.1     6.7x      0.0%       -     0.3%
@@ -170,14 +170,14 @@
 //!   parse plus the cascade that reached it, so it is *definitionally* slower;
 //!   the number to read on this case is `bail%`, not the speedup. In absolute
 //!   terms it is under 2 us, well below [`MAX_ABSOLUTE_OVERHEAD_US`].
-//! * `multi_change_utf16_4` (0.6-0.7x) is 74 bytes, and an attempt has a fixed
+//! * `multi_change_utf16_4` (0.7-0.8x) is 74 bytes, and an attempt has a fixed
 //!   cost --- cloning the options, materializing a cursor root over the previous
 //!   green tree, walking it for the window --- that is under 2 us against a
-//!   3.6 us whole parse. It lost at 0.8x before the cutoff too, while
-//!   successfully splicing. No window threshold fixes a fixed cost; roadmap
-//!   Phase 7's token tier is what removes it. A document-size floor would, but
-//!   it would also refuse the small documents with *narrow* windows that do win
-//!   (`single_change_small`, 1.6 KB, 1.3x).
+//!   roughly 4 us whole parse. Sharing the block parser registry removes its
+//!   per-parse allocation but does not change that cost model. A 4 KiB
+//!   always-try floor was measured and rejected: the 74-byte region splice ran
+//!   at 0.47x, while `multi_change_small_4` fell from break-even to 0.45x. The
+//!   fractional region guard therefore remains active on small documents.
 //!
 //! `multi_change_large_8` used to be the third. Before the supplied-span path,
 //! `diff_edit` cost 7.1 us, the config clone 0.1 us, and the declined attempt

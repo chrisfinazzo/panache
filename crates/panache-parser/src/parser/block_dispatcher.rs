@@ -12,6 +12,7 @@
 use crate::options::{Dialect, ParserOptions};
 use rowan::GreenNodeBuilder;
 use std::any::Any;
+use std::sync::OnceLock;
 
 use super::diagnostics::Diagnostics;
 
@@ -278,7 +279,7 @@ pub(crate) enum BlockEffect {
 /// Note: This is purely organizational - the trait doesn't introduce
 /// backtracking or multiple passes. Each parser operates during the
 /// single forward pass through the document.
-pub(crate) trait BlockParser {
+pub(crate) trait BlockParser: Send + Sync {
     fn effect(&self) -> BlockEffect {
         BlockEffect::None
     }
@@ -3251,6 +3252,13 @@ pub(crate) struct BlockParserRegistry {
 }
 
 impl BlockParserRegistry {
+    /// Return the registry shared by every parser in this process.
+    pub fn shared() -> &'static Self {
+        static REGISTRY: OnceLock<BlockParserRegistry> = OnceLock::new();
+
+        REGISTRY.get_or_init(Self::new)
+    }
+
     /// Create a new registry with all block parsers.
     ///
     /// Order matters! Parsers are tried in the order listed here.
@@ -3369,6 +3377,19 @@ impl BlockParserRegistry {
         let parser = &self.parsers[block_match.parser_index];
         log::trace!("Block parsed by: {}", parser.name());
         parser.parse_prepared(ctx, builder, lines, block_match.payload.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::BlockParserRegistry;
+
+    #[test]
+    fn shared_registry_is_a_singleton() {
+        let first = BlockParserRegistry::shared();
+        let second = BlockParserRegistry::shared();
+
+        assert!(std::ptr::eq(first, second));
     }
 }
 

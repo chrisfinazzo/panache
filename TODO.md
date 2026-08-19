@@ -253,11 +253,14 @@ no reason.
   coalesced edit through the reparse side channel instead of walking both
   whole texts before every attempt.
 
-- [ ] **`Parser::new` builds a `BlockParserRegistry` per parse.** That fixed
-  cost is why three small parses lose to one on a 74-byte document, which is
-  in turn why the region tier carries no small-document exemption where
-  fatou's equivalent does. A shared or lazily-built registry would let that
-  exemption exist and would speed up every boundary parse.
+- [x] **Share `BlockParserRegistry` across parses.** `Parser` now borrows one
+  lazily initialized process-wide registry instead of allocating and
+  populating a vector of 27 boxed parser trait objects on every parse. The
+  expected small-region exemption still does not pay: with a 4 KiB
+  always-try floor, `multi_change_utf16_4` measured 8.27 us against a 3.85
+  us full parse, and `multi_change_small_4` measured 97.38 us against 44.28
+  us. The fractional guard therefore remains in force for small documents
+  too.
 
 - [ ] **The write-phase medium row is only break-even.** `large_authoring.qmd`
   measures 1.05x end to end (`benches/lsp_write_phase.rs`) where

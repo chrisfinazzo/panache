@@ -1423,12 +1423,10 @@ type GreenChild = rowan::NodeOrToken<rowan::GreenNode, rowan::GreenToken>;
 /// each carry a neighbour, so roughly three region-sized parses. Three quarters
 /// of a full parse is where that stops being worth doing.
 ///
-/// Fatou pairs this with an always-try floor for small files, on the reasoning
-/// that every parse in play is small there. Measurement says otherwise here and
-/// the floor is deliberately absent: `Parser::new` builds a
-/// `BlockParserRegistry` per parse, so three parses of a 74-byte document cost
-/// 10.2 us against a 4.3 us full parse (`multi_change_utf16_4`). Charging the
-/// fraction on every document is what keeps that case from losing.
+/// Unlike fatou, Panache has no always-try floor. Sharing the block parser
+/// registry removes one fixed cost from each boundary parse, but measurement
+/// still puts the 74-byte `multi_change_utf16_4` region splice below a full
+/// parse. Charging the fraction on every document keeps that case from losing.
 const REGION_MAX_FILE_DIVISOR: usize = 4;
 
 /// Whether a region is too wide to be worth attempting.
