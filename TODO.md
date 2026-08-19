@@ -307,11 +307,9 @@ no reason.
 
 #### Infrastructure
 
-- [ ] **`panache-parser`'s `pub mod range_utils` has no consumer outside the
-  crate**, and the host keeps its own copy of `expand_byte_range_to_blocks`
-  in `src/range_utils.rs`. Narrowing the module is semver-visible on a
-  published crate, so it is a decision rather than a cleanup --- but the
-  duplication is real and one of the two copies should win.
+- [x] **Keep `panache-parser`'s `range_utils` as the canonical implementation.**
+  The host re-exports its public range-formatting helpers, preserving both
+  published API paths without maintaining a second copy.
 
 **Explicit non-goal:** NodePtr re-anchoring across edits (arity's
 `map_range_through_edits`) is only needed if panache starts caching NodePtrs

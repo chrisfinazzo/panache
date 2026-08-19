@@ -3,25 +3,6 @@ use crate::syntax::{AstNode, Heading, SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
-/// Check if a syntax kind represents a block-level element for formatting purposes.
-/// This determines when to add blank lines between elements.
-pub fn is_block_element(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::PARAGRAPH
-            | SyntaxKind::FIGURE
-            | SyntaxKind::HEADING
-            | SyntaxKind::LIST
-            | SyntaxKind::DEFINITION_LIST
-            | SyntaxKind::BLOCK_QUOTE
-            | SyntaxKind::CODE_BLOCK
-            | SyntaxKind::SIMPLE_TABLE
-            | SyntaxKind::MULTILINE_TABLE
-            | SyntaxKind::PIPE_TABLE
-            | SyntaxKind::LINE_BLOCK
-    )
-}
-
 /// A code block with its location in the document.
 #[derive(Debug, Clone)]
 pub struct CodeBlock {
