@@ -2,16 +2,25 @@
 
 Use this file for durable, high-signal guidance.
 
-## Project snapshot
+## Project overview
 
-- Rust 2024 workspace with root `panache` crate (library + CLI).
-- Workspace crates: `crates/panache-parser`, `crates/panache-formatter`,
+- Panache is a Rust 2024 workspace with a root `panache` crate (library + CLI).
+- Workspace crates are `crates/panache-parser`, `crates/panache-formatter`, and
   `crates/panache-wasm`.
 - `editors/zed` is intentionally outside the workspace.
 
-## Validation commands
+## Project-wide guidance
 
-Run these before and after non-trivial changes:
+### Architecture and ownership
+
+- The parser captures a lossless CST; the formatter owns style policy.
+- Keep parser policy separate from formatter and linter policy.
+- Use typed syntax wrappers in downstream code, including the linter and
+  language server, rather than raw kind matching where wrappers exist.
+
+### Validation
+
+Run these commands before and after non-trivial changes:
 
 ```bash
 cargo check --workspace
@@ -28,49 +37,58 @@ cargo test -p panache-parser --test golden_parser_cases <case_name>
 cargo run -- debug format --checks all document.qmd
 ```
 
-## Parser and formatter invariants
+### Tests and fixtures
 
-- Parser is lossless CST capture; formatter owns style policy.
-- Keep parser single-pass (block parsing + inline emission).
-- Preserve all bytes in CST; formatting belongs in formatter only.
-- Use typed syntax wrappers in downstream code (LSP/linter), not raw kind
-  matching where wrappers exist.
-- CommonMark and Pandoc are different dialects; use `Dialect` for structural
-  parser differences and `Extensions` for feature toggles.
-- Pandoc-native output is the behavioral reference for parser ambiguity.
+- Assert one user-visible behavior at a time with minimal brittleness.
+- Use existing fixture layouts rather than ad-hoc test directories.
+- Keep expected-output updates intentional and reviewed.
+- Prefer stable substring and ordering assertions for CLI diagnostics.
 
-## Scoped engineering guidance
+### Generated artifacts
 
-### Parser and syntax
+Do not hand-edit generated files. Regenerate them using existing project
+commands. Important generated outputs include:
 
-Applies to `crates/panache-parser/src/parser/**`,
-`crates/panache-parser/src/syntax/**`, `src/parser.rs`, and `src/syntax.rs`.
+- `docs/reference/cli.qmd`
+- `docs/reference/_formatter-presets-details.qmd`
+- `docs/reference/_linter-presets-details.qmd`
+- `panache.schema.json`
 
-- Preserve structural markers, whitespace, trivia, and all source bytes in the
-  CST.
-- Keep parser policy separate from formatter and linter policy.
+### Commits and releases
+
+- Use Conventional Commits per `CONTRIBUTING.md`.
+- Do not push or open pull requests unless explicitly asked.
+- Do not skip hooks with `--no-verify`.
+- Do not hand-edit `CHANGELOG.md`.
+- Only `v*` CLI releases should publish GitHub release assets in this
+  repository.
+
+## Parser
+
+### Core invariants
+
+- Keep parsing single-pass: block parsing followed by inline emission.
+- Preserve every source byte, including structural markers, whitespace, and
+  trivia, in the CST.
 - Reuse existing dispatchers and parser utilities; do not introduce post-parse
   repair passes.
+- CommonMark and Pandoc are different dialects. Use `Dialect` for structural
+  parser differences and `Extensions` for feature toggles.
+- Treat Pandoc-native output as the behavioral reference for parser ambiguity.
 - Add focused parser tests or fixtures before changing behavior, and review CST
   snapshot diffs intentionally.
 
-### Math parser
-
-Applies to math parsing and syntax code under `crates/panache-parser` and parser
-fixtures whose names contain `math`.
+### Math
 
 - Keep math parsing lossless and tolerant; parsing must not hard-fail.
 - Report diagnostics through side channels rather than encoding errors as CST
   structure.
 - Emit only `MATH_*` token kinds for math-content internals.
 - Pass flavor-specific behavior through parser options, never global state.
-- Keep formatting policy out of the math parser and add focused parser fixtures
+- Keep formatting policy out of the math parser, and add focused parser fixtures
   for new behavior.
 
-### YAML parser
-
-Applies to YAML parser/syntax code, metadata block parsing, YAML parser tests,
-and YAML parser fixtures under `crates/panache-parser`.
+### YAML
 
 - Keep YAML parsing CST-first, lossless, indentation-aware, and
   trivia-preserving.
@@ -79,110 +97,17 @@ and YAML parser fixtures under `crates/panache-parser`.
 - Guard behavior with yaml-test-suite parity, losslessness checks, and focused
   deterministic tests.
 
-### Formatter
-
-Applies to `src/formatter.rs`, `crates/panache-formatter/**`, and formatter
-golden fixtures.
-
-- Enforce idempotency: `format(format(x)) == format(x)`.
-- When idempotency fails, inspect parser CST shape before adding a formatter
-  workaround.
-- Reuse existing wrapping, list, table, and related helpers.
-- Keep formatter core logic in `crates/panache-formatter`; keep host runtime and
-  process integration in top-level `src/`.
-- Add or update the smallest relevant formatter golden and documentation for
-  user-visible formatting changes.
-
-### YAML formatter
-
-Applies to YAML formatter code, its `STYLE.md`, cross-validation tests, and YAML
-corpus fixtures under `crates/panache-formatter`.
-
-- Treat `STYLE.md` as the source of truth for YAML formatting rules.
-- Keep one YAML output path through `format_yaml`, shared by plain metadata and
-  hashpipe formatting.
-- Treat cross-validation mismatches as formatter, parser, or oracle bugs to
-  diagnose, not accepted divergence.
-- Keep `pretty_yaml` as a development-only reference with no runtime dependency.
-- Ensure every YAML corpus case is idempotent.
-
-### Linter
-
-Applies to `src/linter.rs`, `src/linter/**`, `src/diagnostic_renderer.rs`, lint
-tests, and lint documentation.
-
-- Prioritize accurate rule codes, severity, spans, and precise diagnostics.
-- Add auto-fixes only when replacements preserve document intent.
-- Keep CLI diagnostics concise without regressing LSP mappings.
-- Reuse shared linter orchestration instead of duplicating flows.
-- Add focused lint tests and synchronize docs for user-visible changes.
-
-### LSP
-
-Applies to `src/lsp.rs`, `src/lsp/**`, LSP tests, and `docs/guide/lsp.qmd`.
-
-- Preserve open/change/save/close behavior and stable document state.
-- Keep UTF-16/UTF-8 position conversion correct.
-- Prefer typed syntax wrappers and shared conversion/state helpers.
-- Make state transitions explicit; avoid silent failure paths.
-- Add targeted protocol-visible tests and update the LSP guide for user-visible
-  behavior changes.
-
-### Configuration
-
-Applies to `src/config.rs`, `src/config/types/**`, configuration docs,
-`panache.schema.json`, and schema tests.
-
-- Preserve config discovery precedence and explicit `--config` failure behavior.
-- Merge deterministically: flavor defaults first, then user overrides.
-- Keep canonical keys kebab-case; aliases are compatibility shims.
-- Make deprecations explicit and actionable.
-- Add focused tests for parsing, precedence, and merge changes; update docs and
-  regenerate `panache.schema.json` when keys, defaults, or enums change.
-
-### External formatter presets
-
-Applies to `src/config/formatter_presets.rs` and the generated formatter preset
-reference.
-
-- Keep `PRESETS` metadata and `formatter_preset_names()` synchronized.
-- Preset names are free-form config strings, so adding one does not require
-  schema regeneration.
-- For stdin tools needing filename hints, use `{}` argument placeholders and
-  ensure language extensions are mapped.
-- Add focused preset-resolution tests for new or changed presets.
-
-### VS Code extension
-
-Applies to `editors/code/**`.
-
-- Keep settings aligned across implementation, schema, and README.
-- Preserve activation behavior for supported languages and workspaces.
-- Reuse existing process, download, and configuration helpers.
-- Keep `panache lsp` startup explicit and predictable.
-- Validate changes with `npm run compile` in `editors/code/`.
-
-## Architecture boundaries
-
-- `crates/panache-formatter` is dependency-lean formatter core.
-- Top-level `src/formatter.rs` and related host modules own runtime/process
-  integrations (external tools, CLI/LSP wiring).
-- Do not move external process execution into formatter core crate.
-
-## Conformance and fixtures
+### Conformance
 
 - Keep conformance work incremental; avoid broad rewrites in one session.
 - Never add allowlist entries without rerunning the relevant report and
-  confirming the example/case is currently passing.
+  confirming that the example or case passes.
 - Parser behavior changes require focused parser fixtures; conformance
-  allowlists are regression guards, not primary behavior specs.
-- If parser structure changes user-visible formatting, add/update formatter
+  allowlists are regression guards, not primary behavior specifications.
+- If parser structure changes user-visible formatting, add or update formatter
   golden cases.
 
-### CommonMark conformance
-
-Applies to `crates/panache-parser/tests/commonmark.rs`, its support modules,
-CommonMark spec fixtures, and the fixture update script.
+#### CommonMark
 
 - Run conformance only under `Flavor::CommonMark`; keep the HTML renderer
   test-only.
@@ -190,34 +115,30 @@ CommonMark spec fixtures, and the fixture update script.
   normalization as the source of truth.
 - Classify failures as renderer gap, parser-shape gap, flavor leak, dialect
   divergence, or missing feature.
-- Compare pandoc `-f commonmark` with `-f markdown` when distinguishing dialect
+- Compare Pandoc `-f commonmark` with `-f markdown` when distinguishing dialect
   divergence from extension-default leakage.
 - Keep `blocked.txt` reasons specific; never use it to hide regressions.
 - Add parser fixtures before allowlisting parser behavior changes. Add formatter
   goldens only when changed structure affects user-visible formatting.
 - Never edit the allowlist without rerunning `commonmark_full_report` and
-  confirming the example passes in the fresh report.
+  confirming that the example passes in the fresh report.
 - Do not hand-edit generated reports or vendored spec fixtures.
 
-### Pandoc conformance
+#### Pandoc
 
-Applies to `crates/panache-parser/tests/pandoc.rs`, its support modules, Pandoc
-conformance fixtures, `pandoc_ast.rs`, and the corpus update script.
-
-- Run conformance only under `Flavor::Pandoc` and treat
+- Run conformance only under `Flavor::Pandoc`, and treat
   `pandoc -f markdown -t native` as the behavioral reference.
 - Classify failures as projector gap, parser-shape gap, flavor-default gap, or
   missing feature.
 - Add parser fixtures before allowlisting parser behavior changes. Add formatter
   goldens only when changed structure affects user-visible formatting.
 - Never edit the allowlist without rerunning `pandoc_full_report` and confirming
-  the case passes in the fresh report.
+  that the case passes in the fresh report.
 - Do not hand-edit generated reports or `expected.native` corpus outputs.
+- Never fix Pandoc divergence in the projector when the CST is wrong; fix the
+  parser shape first.
 
-### YAML conformance harness
-
-Applies to `crates/panache-parser/tests/yaml.rs`, its support files, and
-yaml-test-suite fixtures.
+#### YAML
 
 - Treat each yaml-test-suite case directory as the source of truth.
 - Use `test.event` for expected event behavior and `error` for expected-failure
@@ -226,46 +147,106 @@ yaml-test-suite fixtures.
 - Keep triage and regression reports reproducible and harness-generated.
 - Prefer structured snapshots over ad-hoc text dumps.
 
-### Integration tests
+### Tests
 
-Applies to workspace integration tests and fixture directories.
+- Parser golden fixtures live in `crates/panache-parser/tests/fixtures/cases/`.
+- Run a focused golden parser case with
+  `cargo test -p panache-parser --test golden_parser_cases <case_name>`.
 
-- Assert one user-visible behavior at a time with minimal brittleness.
-- Use existing fixture layouts rather than ad-hoc test directories.
-- Keep expected-output updates intentional and reviewed.
-- Prefer stable substring and ordering assertions for CLI diagnostics.
+## Formatter
 
-## Generated artifacts
+### Core invariants
 
-Do not hand-edit generated files. Regenerate using existing project commands.
-Important generated outputs include:
+- Enforce idempotency: `format(format(x)) == format(x)`.
+- When idempotency fails, inspect the parser CST shape before adding a formatter
+  workaround.
+- Reuse existing wrapping, list, table, and related helpers.
+- Keep formatter core logic in `crates/panache-formatter`; keep host runtime and
+  process integration, including external tools and CLI/language-server wiring,
+  in top-level `src/`.
+- `crates/panache-formatter` must remain dependency-lean. Do not move external
+  process execution into it.
+- Add or update the smallest relevant formatter golden and documentation for
+  user-visible formatting changes.
 
-- `docs/reference/cli.qmd`
-- `docs/reference/_formatter-presets-details.qmd`
-- `docs/reference/_linter-presets-details.qmd`
-- `panache.schema.json`
+### YAML
 
-## High-impact gotchas
+- Treat `crates/panache-formatter/src/formatter/yaml/STYLE.md` as the source of
+  truth for YAML formatting rules.
+- Keep one YAML output path through `format_yaml`, shared by plain metadata and
+  hashpipe formatting.
+- Treat cross-validation mismatches as formatter, parser, or oracle bugs to
+  diagnose, not accepted divergence.
+- Keep `pretty_yaml` as a development-only reference with no runtime dependency.
+- Ensure every YAML corpus case is idempotent.
 
+### External formatter presets
+
+- Keep `PRESETS` metadata and `formatter_preset_names()` synchronized.
+- Preset names are free-form configuration strings, so adding one does not
+  require schema regeneration.
+- For stdin tools needing filename hints, use `{}` argument placeholders, and
+  ensure language extensions are mapped.
+- Add focused preset-resolution tests for new or changed presets.
+
+### Tests and debugging
+
+- Formatter golden fixtures live in `tests/fixtures/cases/` and must be
+  registered in `tests/golden_cases.rs`.
+- Run a focused golden formatter case with
+  `cargo test --test golden_cases <case_name>`.
 - `cargo run -- format <file>` edits files in place. Use stdin or `--check` for
   inspection.
-- Lint cache can mask linter changes (`~/.cache/panache/`); use
-  `cargo run -- clean --all` or `--no-cache` when debugging.
-- Never “fix” pandoc divergence in the projector if CST is wrong; fix parser
-  shape first.
 
-## Test locations
+## Linter
 
-- Parser golden fixtures: `crates/panache-parser/tests/fixtures/cases/`
-- Formatter golden fixtures: `tests/fixtures/cases/` (must be registered in
-  `tests/golden_cases.rs`)
-- Linter docs parity gate: `tests/linter_rules_docs.rs`
-- Config schema parity gate: `tests/config_schema.rs`
+### Diagnostics and fixes
 
-## Commits and release hygiene
+- Prioritize accurate rule codes, severity, spans, and precise diagnostics.
+- Add auto-fixes only when replacements preserve document intent.
+- Keep CLI diagnostics concise without regressing language-server mappings.
+- Reuse shared linter orchestration instead of duplicating flows.
+- Add focused lint tests, and synchronize documentation for user-visible
+  changes.
 
-- Use Conventional Commits per `CONTRIBUTING.md`.
-- Do not push or open PRs unless explicitly asked.
-- Do not skip hooks (`--no-verify`).
-- Do not hand-edit `CHANGELOG.md`.
-- Only `v*` CLI releases should publish GitHub release assets in this repo.
+### Tests and debugging
+
+- The linter documentation parity gate is `tests/linter_rules_docs.rs`.
+- The lint cache can mask linter changes. Use `cargo run -- clean --all` or
+  `--no-cache` when debugging.
+
+## Language server
+
+### Document state and protocol
+
+- Preserve open, change, save, and close behavior and stable document state.
+- Keep UTF-16/UTF-8 position conversion correct.
+- Prefer typed syntax wrappers and shared conversion and state helpers.
+- Make state transitions explicit; avoid silent failure paths.
+- Add targeted protocol-visible tests, and update the language-server guide for
+  user-visible behavior changes.
+
+### Editor integrations
+
+- Keep settings aligned across implementation, schema, and README.
+- Preserve activation behavior for supported languages and workspaces.
+- Reuse existing process, download, and configuration helpers.
+- Keep `panache lsp` startup explicit and predictable.
+- Validate changes with `npm run compile` in `editors/code/`.
+
+## Configuration
+
+### Discovery and merging
+
+- Preserve configuration discovery precedence and explicit `--config` failure
+  behavior.
+- Merge deterministically: flavor defaults first, then user overrides.
+- Keep canonical keys kebab-case; aliases are compatibility shims.
+- Make deprecations explicit and actionable.
+
+### Schema and tests
+
+- Add focused tests for parsing, precedence, and merge changes.
+- Update documentation and regenerate `panache.schema.json` when keys, defaults,
+  or enums change.
+- The configuration schema parity gate is `tests/config_schema.rs`.
