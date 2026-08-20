@@ -609,37 +609,56 @@ fn absolutize_start_dir(start_dir: &Path) -> PathBuf {
     std::path::absolute(start_dir).unwrap_or_else(|_| start_dir.to_path_buf())
 }
 
-fn xdg_config_path() -> Option<PathBuf> {
-    if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
-        let p = Path::new(&xdg).join("panache").join("config.toml");
-        if p.is_file() {
-            return Some(p);
+fn user_config_path() -> Option<PathBuf> {
+    user_config_path_from(
+        env::var_os("XDG_CONFIG_HOME"),
+        env::var_os("HOME"),
+        dirs::config_dir,
+    )
+}
+
+fn user_config_path_from<F>(
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    platform_config_dir: F,
+) -> Option<PathBuf>
+where
+    F: FnOnce() -> Option<PathBuf>,
+{
+    let config_in = |base: &Path| base.join("panache").join("config.toml");
+
+    if let Some(xdg) = xdg_config_home.filter(|value| !value.is_empty()) {
+        let path = config_in(Path::new(&xdg));
+        if path.is_file() {
+            return Some(path);
         }
     }
-    if let Ok(home) = env::var("HOME") {
-        let p = Path::new(&home)
-            .join(".config")
-            .join("panache")
-            .join("config.toml");
-        if p.is_file() {
-            return Some(p);
+
+    // Preserve the original `$HOME/.config` fallback for existing installations.
+    if let Some(home) = home.filter(|value| !value.is_empty()) {
+        let path = config_in(&Path::new(&home).join(".config"));
+        if path.is_file() {
+            return Some(path);
         }
     }
-    None
+
+    platform_config_dir()
+        .map(|base| config_in(&base))
+        .filter(|path| path.is_file())
 }
 
 /// Which configuration source [`load`] resolved, carrying its path.
 ///
 /// The directory of the carried path is where relative globs declared in that
 /// config anchor (see [`anchor_dir`]) — except for [`ConfigSource::Global`],
-/// the XDG user config, which has no project location and therefore no anchor.
+/// the user config, which has no project location and therefore no anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigSource {
     /// Loaded from an explicit `--config <path>`.
     Explicit(PathBuf),
     /// Discovered by walking up the directory tree from the input.
     Discovered(PathBuf),
-    /// The global `~/.config/panache/config.toml` (XDG user config).
+    /// The user config in the platform's configuration directory.
     Global(PathBuf),
     /// No config file found; built-in defaults are in use.
     None,
@@ -658,7 +677,7 @@ impl ConfigSource {
 
     /// The project directory that relative globs in this config anchor against
     /// (its own directory, with a `.config/` wrapper unwrapped to the project
-    /// root). `None` for the global XDG config and the no-config case, which
+    /// root). `None` for the global user config and the no-config case, which
     /// have no project location.
     pub fn project_anchor(&self) -> Option<PathBuf> {
         match self {
@@ -708,7 +727,7 @@ pub fn load_with_chain(
         // `panache.toml` be ignored by both the CLI and the LSP.
         let (cfg, ext, chain) = read_config_with_chain(&p).map_err(io::Error::from)?;
         (cfg, ConfigSource::Discovered(p), ext, chain)
-    } else if let Some(p) = xdg_config_path()
+    } else if let Some(p) = user_config_path()
         && let Ok((cfg, ext, chain)) = read_config_with_chain(&p)
     {
         (cfg, ConfigSource::Global(p), ext, chain)
@@ -1094,6 +1113,38 @@ impl GlobMatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_config_path_uses_platform_config_directory() {
+        // Injecting the base lets Windows CI exercise the Roaming AppData path
+        // without reading or writing the runner's real user configuration.
+        let platform = tempfile::tempdir().expect("platform config dir");
+        let config = platform.path().join("panache").join("config.toml");
+        std::fs::create_dir_all(config.parent().expect("config parent")).unwrap();
+        std::fs::write(&config, "flavor = \"quarto\"\n").unwrap();
+
+        let found = user_config_path_from(None, None, || Some(platform.path().to_path_buf()));
+
+        assert_eq!(found.as_deref(), Some(config.as_path()));
+    }
+
+    #[test]
+    fn user_config_path_prefers_xdg_config_home() {
+        let xdg = tempfile::tempdir().expect("XDG config dir");
+        let platform = tempfile::tempdir().expect("platform config dir");
+        let xdg_config = xdg.path().join("panache").join("config.toml");
+        let platform_config = platform.path().join("panache").join("config.toml");
+        std::fs::create_dir_all(xdg_config.parent().expect("XDG config parent")).unwrap();
+        std::fs::create_dir_all(platform_config.parent().expect("platform config parent")).unwrap();
+        std::fs::write(&xdg_config, "flavor = \"quarto\"\n").unwrap();
+        std::fs::write(&platform_config, "flavor = \"pandoc\"\n").unwrap();
+
+        let found = user_config_path_from(Some(xdg.path().as_os_str().to_owned()), None, || {
+            Some(platform.path().to_path_buf())
+        });
+
+        assert_eq!(found.as_deref(), Some(xdg_config.as_path()));
+    }
 
     #[test]
     fn detect_flavor_maps_rmarkdown_extension() {
@@ -2146,7 +2197,7 @@ mod tests {
             ),
             Path::new("/elsewhere")
         );
-        // Global XDG config and the no-config case fall back (never `~/.config`).
+        // Global user config and the no-config case fall back (never the config directory).
         assert_eq!(
             anchor_dir(
                 &ConfigSource::Global(PathBuf::from("/home/u/.config/panache/config.toml")),

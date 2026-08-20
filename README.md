@@ -177,9 +177,14 @@ The list of LSP features supported by Panache includes, among others:
 
 Panache looks for a configuration in:
 
-1. `.panache.toml` or `panache.toml` in current directory or parent directories
-2. `$XDG_CONFIG_HOME/panache/config.toml` (usually
-   `~/.config/panache/config.toml`)
+1. An explicit `--config <path>`
+2. `.panache.toml`, `panache.toml`, or `.config/panache.toml` in the current
+   directory or a parent directory
+3. The user configuration directory:
+   - Linux: `$XDG_CONFIG_HOME/panache/config.toml` or
+     `~/.config/panache/config.toml`
+   - macOS: `~/Library/Application Support/panache/config.toml`
+   - Windows: `%APPDATA%\panache\config.toml`
 
 ### Example
 

@@ -15,8 +15,9 @@ Panache searches for a configuration file in the following order:
 1. **Explicit path**: `--config <path>` (errors if invalid)
 2. **Project config**: `.panache.toml`, `panache.toml`, or
    `.config/panache.toml` in current or parent directories
-3. **User config**: `~/$XDG_CONFIG_HOME/panache/config.toml` (typically
-   `~/.config/panache/config.toml`)
+3. **User config**: `panache/config.toml` in the platform's user configuration
+   directory---`$XDG_CONFIG_HOME` or `~/.config` on Linux,
+   `~/Library/Application Support` on macOS, and `%APPDATA%` on Windows
 
 For the project-config step, discovery walks up from the file being processed
 and uses the **nearest** `panache.toml`, `.panache.toml`, or
@@ -357,9 +358,8 @@ Path matching base:
   like a `panache.toml` in the directory above `.config/`. The same rule applies
   to discovered configs and to an explicit `--config path/to/panache.toml`
   (anchored at `path/to/`, not the current working directory).
-- The global `~/.config/panache/config.toml` has no project location, so its
-  globs resolve against the directory being traversed (typically the current
-  working directory).
+- The global user config has no project location, so its globs resolve against
+  the directory being traversed (typically the current working directory).
 - CLI path arguments (for example `panache format docs/`) limit traversal scope
   but do not change how globs are anchored.
 
