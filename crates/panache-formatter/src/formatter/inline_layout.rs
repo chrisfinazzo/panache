@@ -559,8 +559,19 @@ impl<'a> StreamingCoreSink<'a> {
         ws_after: bool,
         boundary_class: SentenceBoundaryClass,
     ) {
+        self.emit_piece_with_boundary_text(piece, None, ws_after, boundary_class);
+    }
+
+    fn emit_piece_with_boundary_text(
+        &mut self,
+        piece: String,
+        boundary_text: Option<String>,
+        ws_after: bool,
+        boundary_class: SentenceBoundaryClass,
+    ) {
         let incoming = SentenceSegment {
             text: piece,
+            boundary_text,
             has_whitespace_after: ws_after,
             boundary_class,
         };
@@ -757,6 +768,7 @@ fn append_image_closing(node: &SyntaxNode, out: &mut String, config: &Config) {
 struct TraversalBuilder<'a> {
     sink: StreamingCoreSink<'a>,
     current_piece: Option<String>,
+    current_piece_boundary_text: Option<String>,
     current_piece_boundary_class: SentenceBoundaryClass,
     pending_space: bool,
     /// `Some(c)` when the prior pending space came from a soft break
@@ -802,6 +814,7 @@ impl<'a> TraversalBuilder<'a> {
                 avoid_tilde_fence_line_start,
             ),
             current_piece: None,
+            current_piece_boundary_text: None,
             current_piece_boundary_class: SentenceBoundaryClass::Normal,
             pending_space: false,
             pending_soft_break_ea_prev: None,
@@ -827,15 +840,36 @@ impl<'a> TraversalBuilder<'a> {
         if self.pending_space {
             self.flush_current(true);
             self.current_piece = Some(text.to_string());
+            self.current_piece_boundary_text = None;
             self.current_piece_boundary_class = boundary_class;
             self.pending_space = false;
         } else if let Some(current) = &mut self.current_piece {
             current.push_str(text);
+            self.current_piece_boundary_text = None;
             self.current_piece_boundary_class = boundary_class;
         } else {
             self.current_piece = Some(text.to_string());
+            self.current_piece_boundary_text = None;
             self.current_piece_boundary_class = boundary_class;
         }
+        if let Some(last) = text.chars().last() {
+            self.last_emitted_char = Some(last);
+        }
+    }
+
+    fn push_trailing_attachment(&mut self, text: &str) {
+        if self.pending_space {
+            self.push_piece(text);
+            return;
+        }
+        let Some(current) = self.current_piece.as_mut() else {
+            self.push_piece(text);
+            return;
+        };
+        if self.current_piece_boundary_text.is_none() {
+            self.current_piece_boundary_text = Some(current.clone());
+        }
+        current.push_str(text);
         if let Some(last) = text.chars().last() {
             self.last_emitted_char = Some(last);
         }
@@ -893,8 +927,12 @@ impl<'a> TraversalBuilder<'a> {
 
     fn flush_current(&mut self, ws_after: bool) {
         if let Some(piece) = self.current_piece.take() {
-            self.sink
-                .emit_piece_with_boundary(piece, ws_after, self.current_piece_boundary_class);
+            self.sink.emit_piece_with_boundary_text(
+                piece,
+                self.current_piece_boundary_text.take(),
+                ws_after,
+                self.current_piece_boundary_class,
+            );
             self.current_piece_boundary_class = SentenceBoundaryClass::Normal;
         }
     }
@@ -1294,7 +1332,7 @@ fn process_node_recursive(
                         sink.set_skip_next_leading_whitespace(false);
                     }
                     let text = format_inline_fn(&n);
-                    sink.push_piece(&text);
+                    sink.push_trailing_attachment(&text);
                 }
                 _ => {
                     let text = format_inline_fn(&n);

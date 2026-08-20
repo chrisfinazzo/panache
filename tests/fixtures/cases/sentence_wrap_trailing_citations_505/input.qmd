@@ -1,0 +1,13 @@
+Text.[@cite] Next sentence.
+
+Question?[@cite] Next sentence.
+
+Multiple.[@first][@second] Next sentence.
+
+Cross-reference.[@fig-plot] Next sentence.
+
+Use e.g.[@cite] examples here.
+
+At 9 a.m.[@cite] It started.
+
+Citation before punctuation [@cite]. Next sentence.

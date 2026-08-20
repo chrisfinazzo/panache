@@ -26,6 +26,7 @@ pub(super) enum SentenceBoundaryClass {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SentenceSegment {
     pub text: String,
+    pub boundary_text: Option<String>,
     pub has_whitespace_after: bool,
     pub boundary_class: SentenceBoundaryClass,
 }
@@ -296,7 +297,7 @@ pub(super) fn is_sentence_boundary_segment(
         return false;
     }
     is_sentence_boundary_text(
-        &segment.text,
+        segment.boundary_text.as_deref().unwrap_or(&segment.text),
         next_segment.map(|next| next.text.as_str()),
         segment.has_whitespace_after,
         is_last,
@@ -349,6 +350,7 @@ pub(super) fn split_sentence_text(text: &str, profile: ResolvedProfile<'_>) -> V
         .enumerate()
         .map(|(idx, word)| SentenceSegment {
             text: (*word).to_string(),
+            boundary_text: None,
             has_whitespace_after: idx + 1 < words.len(),
             boundary_class: SentenceBoundaryClass::Normal,
         })
@@ -733,11 +735,13 @@ mod tests {
         let segments = vec![
             SentenceSegment {
                 text: "`???`".to_string(),
+                boundary_text: None,
                 has_whitespace_after: true,
                 boundary_class: SentenceBoundaryClass::NonBoundary,
             },
             SentenceSegment {
                 text: "also".to_string(),
+                boundary_text: None,
                 has_whitespace_after: true,
                 boundary_class: SentenceBoundaryClass::Normal,
             },

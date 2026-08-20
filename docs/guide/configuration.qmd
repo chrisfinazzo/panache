@@ -557,6 +557,15 @@ cs = ["např.", "tzv."]
 de = ["bzw.", "usw."]
 ```
 
+A citation or cross-reference attached directly to a sentence-ending period
+stays with the sentence. For example, sentence wrapping changes
+`Text.[@citation] Next sentence.` to:
+
+```markdown
+Text.[@citation]
+Next sentence.
+```
+
 ### Math Formatting
 
 Configure how math delimiters are formatted:

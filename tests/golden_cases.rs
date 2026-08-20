@@ -532,6 +532,7 @@ golden_test_cases!(
     sentence_wrap_quote_multisentence,
     sentence_wrap_inline_code_question,
     sentence_wrap_table_caption,
+    sentence_wrap_trailing_citations_505,
     sentence_wrap_lang_cs,
     sentence_wrap_lang_de,
     sentence_wrap_no_break_flat,
