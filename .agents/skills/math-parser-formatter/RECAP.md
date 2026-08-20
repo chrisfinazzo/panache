@@ -68,29 +68,32 @@ still-relevant trap into Persistent traps. Keep it short.
 
 ## Latest session
 
-**`MATH_DELIMITED`-aware line-break scanning (formatter).** *Not yet committed.*
-The break-candidate walk now handles a `MATH_DELIMITED` node explicitly as one
-opaque, completed operand instead of re-deriving `\left`/`\right` depth from
-command text. The ordinary-delimiter depth counter remains for flat `(…)` and
-`[…]` token runs. Removed `left`/`right` from `operators::command_class`; the
-vendored symbol-class fixture now pins both as structurally handled commands
-whose table lookup returns `None`.
+**Composable embedded math environments.** Added a small math-local
+Wadler-style document model (adapted from Badness) with groups, hard/optional
+lines, indentation, and hanging alignment. A `MATH_ENVIRONMENT` inside a balanced
+ordinary delimiter pair now remains an operand: delimiter contents break at
+top-level punctuation, matrix rows hang beyond the `\begin` column, `\end`
+returns to it, and commas stay attached. No parser change was needed.
 
-- Added focused coverage for a nested, null, asymmetric delimited run between
-  two relations and a binary chain following a bracket-delimited operand. Inner
-  operators remain invisible to the scanner; surrounding operators retain
-  their classes.
-- Updated STYLE.md, the fixture rationale, and TODO.md. Focused line-break and
-  symbol-class tests pass. `cargo check --workspace`, `cargo test --workspace`,
-  clippy with `-D warnings`, and `cargo fmt --check` are clean. The workspace
-  test needed temporary `GOCACHE`/`XDG_CACHE_HOME` paths because the sandboxed
-  user cache made the external-staticcheck CLI test fail before invocation.
+- The reported multivariate-normal golden now specifies the structured output;
+  focused unit coverage pins binary spacing, hanging geometry, unsupported-shape
+  preservation, comments, and idempotency. Existing Tier 1 properties and Tier 2
+  MathML invariance pass.
+- Unsupported mixed shapes remain verbatim rather than falling through to the
+  old environment-lifting path. Standalone environments and environment-free
+  display line breaking retain their existing renderers in this bounded phase.
+- Final review found no correctness issues. `cargo check --workspace`,
+  `cargo test --workspace`, clippy with `-D warnings`, and `cargo fmt --check`
+  are clean.
 
 ### Suggested next sub-targets
 1. **Environment-body line-breaking** (interacts with the `&`-column engine).
 2. **Embed `MATH_CONTENT` into `TEX_BLOCK`** (parser) so bare `\begin{env}`
    blocks become formattable (would make `MathContext::EnvironmentBody` reachable).
-3. Optional structural cooking (orthogonal to operators): script attachment,
+3. Expand document lowering to mixed environments outside ordinary delimiters
+   and multiple environments in one segment; then unify free-row breaking with
+   the document model.
+4. Optional structural cooking (orthogonal to operators): script attachment,
    known-command argument grouping.
 
 **Settled:** binary breaking is **one operator per line** (greedy fill tried and
@@ -107,6 +110,9 @@ tokens) so formatter + linter + LSP share one interpretation.
 
 ## Earlier sessions
 
+- **`MATH_DELIMITED`-aware line-break scanning.** Delimited nodes are opaque
+  operands; `left`/`right` left the command-class table, with nested/asymmetric
+  delimiter and following-binary regression coverage.
 - **Phase 6 indent budget; greedy packing rejected.** The flat `math-indent` is
   charged against `line-width`; binary breaks remain one operator per line
   after a greedy line-fill experiment produced semantically arbitrary ragging.

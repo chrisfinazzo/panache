@@ -9,6 +9,7 @@
 
 use rowan::NodeOrToken;
 
+use super::layout::{Doc, Printer};
 use super::operators::{self, AtomClass};
 use super::{MathContext, MathFormatOptions, linebreak};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
@@ -26,6 +27,11 @@ pub(super) fn render(tree: &SyntaxNode, opts: &MathFormatOptions) -> String {
 }
 
 fn render_display(top: &[SyntaxElement], opts: &MathFormatOptions) -> String {
+    if has_mixed_environment_content(top) {
+        return render_mixed_delimited_display(top, opts)
+            .unwrap_or_else(|| top.iter().map(ToString::to_string).collect());
+    }
+
     let mut lines: Vec<String> = Vec::new();
     let mut pending: Vec<SyntaxElement> = Vec::new();
     let flat_indent = " ".repeat(opts.math_indent);
@@ -43,6 +49,229 @@ fn render_display(top: &[SyntaxElement], opts: &MathFormatOptions) -> String {
     }
     flush_free_rows(&pending, &flat_indent, opts.line_width, &mut lines);
     lines.join("\n")
+}
+
+fn has_mixed_environment_content(elems: &[SyntaxElement]) -> bool {
+    let has_environment = elems.iter().any(contains_environment);
+    let has_free_content = elems.iter().any(|element| {
+        element.kind() != SyntaxKind::MATH_ENVIRONMENT && !is_layout_whitespace(element)
+    });
+    has_environment && has_free_content
+}
+
+fn contains_environment(element: &SyntaxElement) -> bool {
+    element.kind() == SyntaxKind::MATH_ENVIRONMENT
+        || element.as_node().is_some_and(|node| {
+            node.descendants()
+                .any(|descendant| descendant.kind() == SyntaxKind::MATH_ENVIRONMENT)
+        })
+}
+
+fn render_mixed_delimited_display(
+    elems: &[SyntaxElement],
+    opts: &MathFormatOptions,
+) -> Option<String> {
+    if elems.iter().any(contains_comment) {
+        return None;
+    }
+    let environments: Vec<usize> = elems
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            (element.kind() == SyntaxKind::MATH_ENVIRONMENT).then_some(index)
+        })
+        .collect();
+    if environments.is_empty() {
+        return None;
+    }
+
+    let (open, close) = enclosing_delimiters(elems, &environments)?;
+    let prefix = render_inline(&elems[..=open]).trim().to_string();
+    let suffix = render_inline_seeded(&elems[close..], Some(AtomClass::Close))
+        .trim()
+        .to_string();
+    let body = delimited_body_doc(&elems[open + 1..close], opts)?;
+    let doc = Doc::group(Doc::concat([
+        Doc::text(prefix),
+        Doc::indent(Doc::concat([Doc::SoftLine, body])),
+        Doc::SoftLine,
+        Doc::text(suffix),
+    ]));
+
+    Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
+}
+
+fn contains_comment(element: &SyntaxElement) -> bool {
+    element.kind() == SyntaxKind::MATH_COMMENT
+        || element.as_node().is_some_and(|node| {
+            node.descendants_with_tokens()
+                .filter_map(|descendant| descendant.into_token())
+                .any(|token| token.kind() == SyntaxKind::MATH_COMMENT)
+        })
+}
+
+fn enclosing_delimiters(elems: &[SyntaxElement], environments: &[usize]) -> Option<(usize, usize)> {
+    for open in 0..elems.len() {
+        if elems[open].kind() != SyntaxKind::MATH_OPEN {
+            continue;
+        }
+        let mut delimiters = vec![element_text(&elems[open])?];
+        for (close, element) in elems.iter().enumerate().skip(open + 1) {
+            match element.kind() {
+                SyntaxKind::MATH_OPEN => delimiters.push(element_text(element)?),
+                SyntaxKind::MATH_CLOSE => {
+                    let opening = delimiters.pop()?;
+                    if !delimiters_match(opening, element_text(element)?) {
+                        break;
+                    }
+                    if delimiters.is_empty() {
+                        if environments
+                            .iter()
+                            .all(|environment| open < *environment && *environment < close)
+                        {
+                            return Some((open, close));
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+fn element_text(element: &SyntaxElement) -> Option<&str> {
+    element.as_token().map(|token| token.text())
+}
+
+fn delimiters_match(open: &str, close: &str) -> bool {
+    matches!((open, close), ("(", ")") | ("[", "]"))
+}
+
+fn delimited_body_doc(body: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Doc> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+
+    for (index, element) in body.iter().enumerate() {
+        match element.kind() {
+            SyntaxKind::MATH_OPEN => depth += 1,
+            SyntaxKind::MATH_CLOSE => depth = depth.saturating_sub(1),
+            SyntaxKind::MATH_PUNCT if depth == 0 => {
+                segments.push(Doc::concat([
+                    mixed_segment_doc(&body[start..index], opts)?,
+                    Doc::text(element.to_string()),
+                ]));
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    segments.push(mixed_segment_doc(&body[start..], opts)?);
+    Some(Doc::join(Doc::Line, segments))
+}
+
+fn mixed_segment_doc(segment: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Doc> {
+    if segment.iter().any(contains_unsafe_mixed_trivia) {
+        return None;
+    }
+    if segment.iter().any(|element| {
+        element.kind() != SyntaxKind::MATH_ENVIRONMENT && contains_environment(element)
+    }) {
+        return None;
+    }
+    let environment_indices: Vec<usize> = segment
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            (element.kind() == SyntaxKind::MATH_ENVIRONMENT).then_some(index)
+        })
+        .collect();
+    match environment_indices.as_slice() {
+        [] => Some(Doc::text(render_inline(segment).trim().to_string())),
+        [environment_index] => {
+            let before = &segment[..*environment_index];
+            let after = &segment[*environment_index + 1..];
+            let prefix = render_before_operand(before);
+            let prefix_width = prefix.chars().count();
+            let environment = segment[*environment_index].as_node()?;
+            let environment_doc = Doc::join(
+                Doc::HardLine,
+                render_environment_lines(environment, 0, opts)
+                    .into_iter()
+                    .map(Doc::text),
+            );
+            let mut suffix = render_inline_seeded(after, Some(AtomClass::Close))
+                .trim()
+                .to_string();
+            if !suffix.is_empty() && needs_space_after_environment(after) {
+                suffix.insert(0, ' ');
+            }
+            Some(Doc::concat([
+                Doc::text(prefix),
+                Doc::align(prefix_width, environment_doc),
+                Doc::text(suffix),
+            ]))
+        }
+        _ => None,
+    }
+}
+
+fn contains_unsafe_mixed_trivia(element: &SyntaxElement) -> bool {
+    if element.kind() == SyntaxKind::MATH_ENVIRONMENT {
+        return false;
+    }
+    if matches!(
+        element.kind(),
+        SyntaxKind::MATH_COMMENT | SyntaxKind::MATH_LINE_BREAK
+    ) {
+        return true;
+    }
+    element.as_node().is_some_and(|node| {
+        node.descendants_with_tokens()
+            .filter_map(|descendant| descendant.into_token())
+            .any(|token| {
+                matches!(
+                    token.kind(),
+                    SyntaxKind::MATH_COMMENT | SyntaxKind::MATH_LINE_BREAK
+                )
+            })
+    })
+}
+
+fn render_before_operand(before: &[SyntaxElement]) -> String {
+    let mut tokens = flatten_tokens(before);
+    tokens.push((SyntaxKind::MATH_TEXT, "X".to_string()));
+    let rendered = collapse_spaces(&space_operators(&tokens, None));
+    rendered
+        .strip_suffix('X')
+        .expect("synthetic trailing operand must survive spacing")
+        .trim_start()
+        .to_string()
+}
+
+fn needs_space_after_environment(after: &[SyntaxElement]) -> bool {
+    let had_space = after.first().is_some_and(is_layout_whitespace);
+    let Some(element) = after.iter().find(|element| !is_layout_whitespace(element)) else {
+        return false;
+    };
+    let Some(token) = element.as_token() else {
+        return had_space;
+    };
+    if token.kind() == SyntaxKind::MATH_OPERATOR {
+        return operators::is_spaced(operators::coerce(
+            operators::classify_operator(token.text()),
+            Some(AtomClass::Close),
+        ));
+    }
+    if token.kind() == SyntaxKind::MATH_COMMAND {
+        let name = token.text().strip_prefix('\\').unwrap_or(token.text());
+        return operators::command_class(name)
+            .map(|class| operators::is_spaced(operators::coerce(class, Some(AtomClass::Close))))
+            .unwrap_or(had_space);
+    }
+    had_space
 }
 
 /// Free (non-environment) display content: one *logical* row per equation,

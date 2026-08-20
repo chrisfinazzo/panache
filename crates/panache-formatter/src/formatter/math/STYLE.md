@@ -40,11 +40,28 @@ Returned unchanged, never reflowed:
    0). Free content is **never** column-aligned --- a bare `&` outside an
    environment is not a separator.
 
-3. **Environment layout.** `\begin{name}` and `\end{name}` each go on their own
-   line at the environment's indent. The body is indented **one level (2 spaces)
-   deeper**, accumulating for nested environments. `math_indent` does **not**
-   apply inside environments (hardcoded 2-space, opinionated --- may become
-   configurable later under the experimental clause).
+3. **Environment layout.** A standalone `\begin{name}` and `\end{name}` each go
+   on their own line at the environment's indent. The body is indented **one
+   level (2 spaces) deeper**, accumulating for nested environments.
+   `math_indent` does **not** apply inside standalone environments (hardcoded
+   2-space, opinionated --- may become configurable later under the experimental
+   clause).
+
+   An environment embedded as an operand inside a balanced ordinary delimiter
+   pair (`(...)` or `[...]`) remains in the surrounding expression. If it makes
+   the delimiter body multiline, the body breaks after the opening delimiter, at
+   top-level commas/semicolons, and before the closing delimiter. The
+   environment starts after its preceding expression; its body hangs one level
+   beyond the `\begin` column, and `\end` returns to that column. Following
+   punctuation stays attached to `\end`, never detached onto its own line. This
+   is formatter-side delimiter interpretation; ordinary delimiters remain flat
+   tokens in the lossless CST because they do not create TeX scope.
+
+   Mixed shapes this layout does not yet model safely --- an environment outside
+   a balanced delimiter pair, multiple environments in one delimiter segment, or
+   a segment containing a comment or explicit `\\` --- stay verbatim. The
+   math-local Wadler-style document model (`layout.rs`) preserves multiline
+   fragments compositionally; it never uses string sentinels.
 
 4. **`\\` normalization.** A row's trailing hard break is emitted as `\\` (one
    space before). A trailing `\\` on the final row is **preserved if present,
@@ -249,3 +266,8 @@ engine guarantees it by construction:
   (Rule 7), and the continuation indent is recomputed from that row's structure
   (never measured from the source), so the identical break points and alignment
   column are reproduced.
+- **Embedded environments are a fixed point.** Their hanging column is the
+  canonical flat width of the formatted segment prefix, never the source
+  indentation. The delimiter group and environment hard lines therefore choose
+  the same broken layout on every pass, while punctuation remains in the same
+  document concatenation as the environment close.

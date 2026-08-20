@@ -1,0 +1,6 @@
+$$
+  \symbf{x} \sim \normal(
+    \symbf{\mu} = \begin{bmatrix}1 \\ 1\end{bmatrix},
+    \symbf{\Sigma} = \begin{bmatrix}1 & 0.8 \\ 0.8 & 1\end{bmatrix}
+  )
+$$

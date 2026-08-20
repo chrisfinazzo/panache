@@ -26,6 +26,7 @@
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::syntax::{SyntaxNode, math_diagnostics};
 
+mod layout;
 mod linebreak;
 pub mod operators;
 mod render;
@@ -202,6 +203,122 @@ mod tests {
         let input = "\\begin{aligned}\nx &= 1\\\\\ny &= 22\n\\end{aligned}";
         let expected = "\\begin{aligned}\n  x & = 1  \\\\\n  y & = 22\n\\end{aligned}";
         assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn display_hangs_embedded_environment_under_its_start() {
+        let input = "f(x=\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}, y)";
+        let expected =
+            "f(\n  x = \\begin{bmatrix}\n        1 \\\\\n        2\n      \\end{bmatrix},\n  y\n)";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn display_spaces_binary_operator_after_embedded_environment() {
+        let input = "f(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}+z)";
+        let expected = "f(\n  \\begin{bmatrix}\n    1 \\\\\n    2\n  \\end{bmatrix} + z\n)";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn unsupported_mixed_environment_shape_stays_verbatim() {
+        let input = "x = \\begin{bmatrix}1 \\\\ 2\\end{bmatrix}";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn comment_before_embedded_environment_stays_verbatim() {
+        let input = "f(% reason\n\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn mismatched_delimiters_around_environment_stay_verbatim() {
+        let input = "f[\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn trailing_punctuation_does_not_create_a_blank_segment() {
+        let input = "f(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix},)";
+        let expected = "f(\n  \\begin{bmatrix}\n    1 \\\\\n    2\n  \\end{bmatrix},\n)";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn nested_comment_before_environment_stays_verbatim() {
+        let input = "f({% reason\nx}+\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn nested_environment_shape_stays_verbatim() {
+        let input = "f({  \\begin{bmatrix}1 \\\\ 2\\end{bmatrix}  })";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn unary_operator_before_environment_stays_tight() {
+        let input = "f(-\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        let output = fmt(input, MathContext::Display);
+        assert!(output.contains("-\\begin{bmatrix}"), "got: {output}");
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn command_operator_before_environment_is_spaced() {
+        let input = "f(x\\cdot\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        let output = fmt(input, MathContext::Display);
+        assert!(
+            output.contains("x \\cdot \\begin{bmatrix}"),
+            "got: {output}"
+        );
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn comment_before_delimited_environment_stays_verbatim() {
+        let input = "% reason\nf(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn comment_inside_embedded_environment_stays_verbatim() {
+        let input = "f(\\begin{bmatrix}{% reason\nx} \\\\ 2\\end{bmatrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn authored_space_after_environment_before_group_is_preserved() {
+        let input = "f(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix} {x})";
+        let output = fmt(input, MathContext::Display);
+        assert!(output.contains("\\end{bmatrix} {x}"), "got: {output}");
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn authored_space_after_environment_before_command_is_preserved() {
+        let input = "f(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix} \\alpha)";
+        let output = fmt(input, MathContext::Display);
+        assert!(output.contains("\\end{bmatrix} \\alpha"), "got: {output}");
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn indirect_and_direct_environments_in_one_segment_stay_verbatim() {
+        let input = "f({\\begin{matrix}a\\end{matrix}}+\\begin{matrix}b\\end{matrix})";
+        assert_eq!(fmt(input, MathContext::Display), input);
         assert_idempotent(input, MathContext::Display);
     }
 

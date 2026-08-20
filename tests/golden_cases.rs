@@ -412,6 +412,7 @@ golden_test_cases!(
     math_align_experimental,
     math_binary_relation_lhs_experimental,
     math_blockquote_experimental,
+    math_embedded_environment_experimental,
     math_linebreak_binary_chain_experimental,
     math_linebreak_experimental,
     math_linebreak_indent_budget_experimental,
