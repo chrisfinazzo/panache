@@ -549,6 +549,7 @@ golden_test_cases!(
     unicode,
     issue_171_gfm_inline_links,
     issue_231_gfm_tilde_idempotency,
+    issue_501_gfm_gitlab_quick_action,
     issue_172_hashpipe_inline_list_idempotency,
     issue_179_hashpipe_one_space_list_idempotency,
     issue_hashpipe_nested_list_indent,

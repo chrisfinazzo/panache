@@ -619,14 +619,12 @@ impl Formatter {
         }
     }
 
-    /// A paragraph whose first emitted line is a `:` definition marker
+    /// A paragraph whose first emitted line is a `:` or `~` definition marker
     /// re-parses as a `DEFINITION` as soon as the block above it is a single
     /// line: the parser promotes that line to the `TERM`. Reflow manufactures
     /// exactly that situation out of a multi-line paragraph, so escape the
     /// marker to keep `format(format(x)) == format(x)`. `\: def` is
     /// `Para [":", Space, "def"]` for pandoc and panache alike.
-    ///
-    /// `~` needs no guard: `escape_special_chars` already escapes it in TEXT.
     ///
     /// Reads the emitted text rather than the source, because the reparse sees
     /// the emitted text — a paragraph that is still multi-line after wrapping
@@ -638,6 +636,9 @@ impl Formatter {
     /// 0-3 space allowance, so the guard must too, or a marker at a content
     /// column of 4 reads as indented code and is never guarded.
     pub(super) fn guard_definition_marker_start(&mut self, start: usize, content_indent: usize) {
+        if !self.config.parser_extensions.definition_lists {
+            return;
+        }
         let Some(first) = self.output[start..].lines().next() else {
             return;
         };
@@ -647,14 +648,14 @@ impl Formatter {
             .count()
             .min(content_indent);
         let prefix_len = container_indent + Self::block_prefix_len(&first[container_indent..]);
-        let Some((':', ..)) = try_parse_definition_marker(&first[prefix_len..]) else {
+        let Some((marker, ..)) = try_parse_definition_marker(&first[prefix_len..]) else {
             return;
         };
         if !Self::preceding_block_is_one_line(&self.output[..start]) {
             return;
         }
         let marker = first[prefix_len..]
-            .find(':')
+            .find(marker)
             .expect("marker parsed above")
             .saturating_add(prefix_len);
         self.output.insert(start + marker, '\\');

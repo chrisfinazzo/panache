@@ -57,7 +57,7 @@ fn subscript_and_superscript_together() {
 fn subscript_with_unescaped_internal_whitespace_is_not_subscript() {
     let input = "Something~some text~ here.\n";
     let output = format(input, None, None);
-    assert!(output.contains("\\~some text\\~"));
+    assert!(output.contains("~some text~"));
 }
 
 #[test]

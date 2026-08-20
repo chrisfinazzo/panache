@@ -5,6 +5,7 @@ use crate::formatter::sentence_wrap::{
 };
 use crate::formatter::smart::normalize_smart_punctuation;
 use crate::syntax::{SyntaxKind, SyntaxNode};
+use panache_parser::parser::inlines::subscript::try_parse_subscript;
 use rowan::NodeOrToken;
 use std::borrow::Cow;
 use std::fmt::Write;
@@ -29,6 +30,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 ///   round-trip into a pipe table, line block, or grid-table row. Flavors with
 ///   none of these (e.g. CommonMark) leave it bare, matching pandoc's
 ///   commonmark writer.
+/// * `escape_tildes` - Whether literal `~` characters should be escaped because
+///   a formatting transformation would otherwise create inline syntax.
+#[allow(clippy::too_many_arguments)]
 fn escape_special_chars(
     text: &str,
     skip_emphasis_delim: bool,
@@ -37,6 +41,7 @@ fn escape_special_chars(
     escape_underscores: bool,
     escape_square_brackets: bool,
     escape_pipes: bool,
+    escape_tildes: bool,
 ) -> String {
     let mut result = String::with_capacity(text.len() * 2);
     let is_single_underscore = text == "_";
@@ -87,6 +92,9 @@ fn escape_special_chars(
                 result.push(ch);
             }
             '|' if !escape_pipes => {
+                result.push(ch);
+            }
+            '~' if !escape_tildes => {
                 result.push(ch);
             }
             '|' | '~' | '`' => {
@@ -226,10 +234,13 @@ pub(super) struct NodeWrapOptions<'a> {
     pub atomic_links_root: bool,
     pub avoid_unsafe_line_start: bool,
     pub avoid_blockquote_line_start: bool,
+    pub avoid_definition_marker_line_start: bool,
     /// Avoid starting a wrapped line with an ATX heading (`#`) or setext/thematic
     /// (`---`/`===`) marker. Set by every mode: a `=`/`-` run pushed to its own
     /// line promotes the paragraph into a setext heading in every flavor.
     pub avoid_heading_line_start: bool,
+    /// Avoid manufacturing a tilde code fence that interrupts a paragraph.
+    pub avoid_tilde_fence_line_start: bool,
     /// Force a line break at every existing soft break (`NEWLINE`) in addition
     /// to the breaks `mode` produces. Set by the `Semantic` wrap mode, which
     /// layers sembr break-preservation on top of the sentence-break path.
@@ -244,7 +255,9 @@ impl<'a> NodeWrapOptions<'a> {
             atomic_links_root: false,
             avoid_unsafe_line_start: false,
             avoid_blockquote_line_start: false,
+            avoid_definition_marker_line_start: false,
             avoid_heading_line_start: true,
+            avoid_tilde_fence_line_start: false,
             preserve_newlines: false,
         }
     }
@@ -256,7 +269,9 @@ impl<'a> NodeWrapOptions<'a> {
             atomic_links_root: true,
             avoid_unsafe_line_start: true,
             avoid_blockquote_line_start: true,
+            avoid_definition_marker_line_start: false,
             avoid_heading_line_start: true,
+            avoid_tilde_fence_line_start: false,
             preserve_newlines: false,
         }
     }
@@ -276,7 +291,7 @@ impl WrapStrategy {
             config.parser_extensions.lists_without_preceding_blankline
                 || config.dialect() == Dialect::CommonMark;
         let avoid_blockquote_start = !config.parser_extensions.blank_before_blockquote;
-        match self {
+        let mut options = match self {
             Self::ParagraphReflow => NodeWrapOptions {
                 avoid_unsafe_line_start: avoid_unsafe_in_paragraph_reflow,
                 avoid_blockquote_line_start: avoid_blockquote_start,
@@ -291,7 +306,11 @@ impl WrapStrategy {
             },
             Self::ListSentence => NodeWrapOptions::sentence(),
             Self::ListSemantic => NodeWrapOptions::semantic(),
-        }
+        };
+        options.avoid_tilde_fence_line_start =
+            config.dialect() == Dialect::CommonMark && config.parser_extensions.fenced_code_blocks;
+        options.avoid_definition_marker_line_start = config.parser_extensions.definition_lists;
+        options
     }
 }
 
@@ -337,7 +356,11 @@ fn is_decimal_ordered_list_marker_piece(piece: &str) -> bool {
 }
 
 fn is_definition_marker_piece(piece: &str) -> bool {
-    piece == ":"
+    matches!(piece, ":" | "~")
+}
+
+fn is_tilde_fence_piece(piece: &str) -> bool {
+    piece.bytes().take_while(|byte| *byte == b'~').count() >= 3
 }
 
 fn is_bullet_list_marker_piece(piece: &str) -> bool {
@@ -433,7 +456,9 @@ struct StreamingCoreSink<'a> {
     profile: ResolvedProfile<'a>,
     avoid_unsafe_line_start: bool,
     avoid_blockquote_line_start: bool,
+    avoid_definition_marker_line_start: bool,
     avoid_heading_line_start: bool,
+    avoid_tilde_fence_line_start: bool,
 }
 
 impl<'a> StreamingCoreSink<'a> {
@@ -445,7 +470,9 @@ impl<'a> StreamingCoreSink<'a> {
         profile: ResolvedProfile<'a>,
         avoid_unsafe_line_start: bool,
         avoid_blockquote_line_start: bool,
+        avoid_definition_marker_line_start: bool,
         avoid_heading_line_start: bool,
+        avoid_tilde_fence_line_start: bool,
     ) -> Self {
         Self {
             default_line_width: line_widths.last().copied().unwrap_or(0),
@@ -461,16 +488,19 @@ impl<'a> StreamingCoreSink<'a> {
             profile,
             avoid_unsafe_line_start,
             avoid_blockquote_line_start,
+            avoid_definition_marker_line_start,
             avoid_heading_line_start,
+            avoid_tilde_fence_line_start,
         }
     }
 
     fn piece_would_start_unsafe_line(&self, text: &str) -> bool {
-        is_definition_marker_piece(text)
+        (self.avoid_definition_marker_line_start && is_definition_marker_piece(text))
             || (self.avoid_blockquote_line_start && is_unsafe_block_line_start_piece(text))
             || (self.avoid_unsafe_line_start && is_unsafe_list_line_start_piece(text))
             || (self.avoid_heading_line_start
                 && (is_atx_heading_marker_piece(text) || is_setext_or_thematic_marker_piece(text)))
+            || (self.avoid_tilde_fence_line_start && is_tilde_fence_piece(text))
     }
 
     fn consume(
@@ -588,6 +618,8 @@ pub(super) fn wrap_text_first_fit(text: &str, line_width: usize) -> Vec<String> 
         false,
         false,
         ResolvedProfile::builtin_only(SentenceLanguage::English),
+        false,
+        false,
         false,
         false,
         false,
@@ -740,6 +772,7 @@ struct TraversalBuilder<'a> {
     last_emitted_char: Option<char>,
     skip_next_leading_whitespace: bool,
     preserve_newlines: bool,
+    escape_literal_tildes: bool,
 }
 
 impl<'a> TraversalBuilder<'a> {
@@ -750,8 +783,11 @@ impl<'a> TraversalBuilder<'a> {
         profile: ResolvedProfile<'a>,
         avoid_unsafe_line_start: bool,
         avoid_blockquote_line_start: bool,
+        avoid_definition_marker_line_start: bool,
         avoid_heading_line_start: bool,
+        avoid_tilde_fence_line_start: bool,
         preserve_newlines: bool,
+        escape_literal_tildes: bool,
     ) -> Self {
         Self {
             sink: StreamingCoreSink::new(
@@ -761,7 +797,9 @@ impl<'a> TraversalBuilder<'a> {
                 profile,
                 avoid_unsafe_line_start,
                 avoid_blockquote_line_start,
+                avoid_definition_marker_line_start,
                 avoid_heading_line_start,
+                avoid_tilde_fence_line_start,
             ),
             current_piece: None,
             current_piece_boundary_class: SentenceBoundaryClass::Normal,
@@ -770,6 +808,7 @@ impl<'a> TraversalBuilder<'a> {
             last_emitted_char: None,
             skip_next_leading_whitespace: false,
             preserve_newlines,
+            escape_literal_tildes,
         }
     }
 
@@ -822,6 +861,10 @@ impl<'a> TraversalBuilder<'a> {
 
     fn preserve_newlines(&self) -> bool {
         self.preserve_newlines
+    }
+
+    fn escape_literal_tildes(&self) -> bool {
+        self.escape_literal_tildes
     }
 
     fn push_soft_break(&mut self) {
@@ -988,6 +1031,7 @@ fn process_node_recursive(
                             config.parser_extensions.pipe_tables
                                 || config.parser_extensions.line_blocks
                                 || config.parser_extensions.grid_tables,
+                            sink.escape_literal_tildes(),
                         );
                         sink.push_piece(&processed_word);
                         saw_word = true;
@@ -1352,6 +1396,55 @@ fn should_preserve_paragraph_layout(config: &Config, node: &SyntaxNode) -> bool 
     is_fence_like_triplet_paragraph(node) || paragraph_has_swept_fence_shape(config, node)
 }
 
+/// Formatting normally preserves delimiter-separating whitespace. The
+/// `east_asian_line_breaks` extension is the exception: it removes a soft
+/// break between two wide characters. Detect when that removal would join a
+/// literal Pandoc subscript across the break so its `TEXT` tildes can remain
+/// escaped without penalizing unrelated literal tildes.
+fn east_asian_break_creates_subscript(config: &Config, node: &SyntaxNode) -> bool {
+    if !config.formatter_extensions.east_asian_line_breaks || !config.parser_extensions.subscript {
+        return false;
+    }
+
+    let text = node.text().to_string();
+    let node_start = u32::from(node.text_range().start()) as usize;
+
+    node.descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+        .filter(|token| token.kind() == SyntaxKind::NEWLINE)
+        .any(|newline| {
+            let break_start = u32::from(newline.text_range().start()) as usize - node_start;
+            let break_end = break_start + newline.text().len();
+            let Some(previous) = text[..break_start].chars().next_back() else {
+                return false;
+            };
+            let Some(next) = text[break_end..].chars().next() else {
+                return false;
+            };
+            if UnicodeWidthChar::width(previous) != Some(2)
+                || UnicodeWidthChar::width(next) != Some(2)
+            {
+                return false;
+            }
+
+            let word_start = text[..break_start]
+                .rfind(|ch: char| ch.is_ascii_whitespace())
+                .map_or(0, |index| index + 1);
+            let word_end = text[break_end..]
+                .find(|ch: char| ch.is_ascii_whitespace())
+                .map_or(text.len(), |index| break_end + index);
+            let mut joined = String::with_capacity(word_end - word_start - newline.text().len());
+            joined.push_str(&text[word_start..break_start]);
+            joined.push_str(&text[break_end..word_end]);
+            let join_at = break_start - word_start;
+
+            joined.match_indices('~').any(|(start, _)| {
+                try_parse_subscript(&joined[start..])
+                    .is_some_and(|(len, _)| start < join_at && start + len > join_at)
+            })
+        })
+}
+
 pub(super) fn wrapped_lines_for_node(
     config: &Config,
     node: &SyntaxNode,
@@ -1368,14 +1461,19 @@ pub(super) fn wrapped_lines_for_node(
     };
     let mut extra_abbreviations = Vec::new();
     let profile = resolve_profile(node, config, &mut extra_abbreviations);
+    let escape_literal_tildes =
+        !options.preserve_newlines && east_asian_break_creates_subscript(config, node);
     let mut builder = TraversalBuilder::new(
         line_widths,
         sentence_mode,
         profile,
         options.avoid_unsafe_line_start,
         options.avoid_blockquote_line_start,
+        options.avoid_definition_marker_line_start,
         options.avoid_heading_line_start,
+        options.avoid_tilde_fence_line_start,
         options.preserve_newlines,
+        escape_literal_tildes,
     );
     process_node_recursive(
         config,
@@ -1487,7 +1585,7 @@ mod tests {
         is_decimal_ordered_list_marker_piece, is_definition_marker_piece,
         is_example_list_marker_piece, is_fancy_alpha_marker_piece,
         is_fancy_paren_alpha_or_roman_marker_piece, is_fancy_paren_decimal_marker_piece,
-        is_fancy_roman_marker_piece, is_setext_or_thematic_marker_piece,
+        is_fancy_roman_marker_piece, is_setext_or_thematic_marker_piece, is_tilde_fence_piece,
         is_unsafe_list_line_start_piece, wrap_text_first_fit,
     };
 
@@ -1514,6 +1612,7 @@ mod tests {
         assert!(is_bullet_list_marker_piece("-"));
         assert!(is_bullet_list_marker_piece("*"));
         assert!(is_definition_marker_piece(":"));
+        assert!(is_definition_marker_piece("~"));
         assert!(is_unsafe_list_line_start_piece("2018."));
         assert!(is_unsafe_list_line_start_piece("2)"));
         assert!(is_unsafe_list_line_start_piece("a."));
@@ -1529,6 +1628,9 @@ mod tests {
         assert!(!is_bullet_list_marker_piece("+foo"));
         assert!(!is_decimal_ordered_list_marker_piece("v2.0"));
         assert!(!is_decimal_ordered_list_marker_piece("2024.05"));
+        assert!(is_tilde_fence_piece("~~~"));
+        assert!(is_tilde_fence_piece("~~~~info"));
+        assert!(!is_tilde_fence_piece("~~"));
     }
 
     #[test]

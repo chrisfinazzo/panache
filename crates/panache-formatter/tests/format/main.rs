@@ -40,6 +40,7 @@ mod subscript;
 mod superscript;
 mod tables;
 mod tex;
+mod tilde_escaping;
 mod yaml_double_to_folded;
 mod yaml_folded_wrap;
 mod yaml_frontmatter;
