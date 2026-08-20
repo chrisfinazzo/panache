@@ -2,12 +2,346 @@ use crate::config::WrapMode;
 use crate::formatter::indent_utils::{calculate_list_item_indent, is_alignable_marker};
 use crate::formatter::inline_layout::{self, WrapStrategy};
 use crate::formatter::tables;
-use crate::syntax::{AstNode, FencedDiv, SyntaxKind, SyntaxNode};
+use crate::syntax::{AstNode, DefinitionItem, FencedDiv, SyntaxKind, SyntaxNode};
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
+use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use rowan::NodeOrToken;
 
 use super::Formatter;
-use super::preserve;
+use super::preserve::{self, preserve_lines};
+use super::utils::is_block_element;
+
+impl Formatter {
+    pub(super) fn format_definition_list(&mut self, node: &SyntaxNode, indent: usize) {
+        if self.is_grid_table_caption_definition_list(node) {
+            self.output.push_str(&node.text().to_string());
+            if !self.output.ends_with('\n') {
+                self.output.push('\n');
+            }
+            return;
+        }
+        if indent == 0 && !self.output.is_empty() && !self.output.ends_with("\n\n") {
+            self.output.push('\n');
+        }
+        let mut saw_item = false;
+        for child in node.children() {
+            if child.kind() == SyntaxKind::BLANK_LINE {
+                continue;
+            }
+            if child.kind() == SyntaxKind::DEFINITION_ITEM {
+                if saw_item && !self.output.ends_with("\n\n") {
+                    self.output.push('\n');
+                }
+                saw_item = true;
+            }
+            self.format_node_sync(&child, indent);
+        }
+        if !self.output.ends_with('\n') {
+            self.output.push('\n');
+        }
+    }
+
+    pub(super) fn format_definition_item(&mut self, node: &SyntaxNode, indent: usize) {
+        let is_compact_by_structure = DefinitionItem::cast(node.clone())
+            .map(|item| item.is_compact())
+            .unwrap_or(true);
+        let mut has_blank_between_term_and_first_definition = false;
+        let mut seen_term = false;
+        let mut seen_definition = false;
+
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::TERM => {
+                    seen_term = true;
+                }
+                SyntaxKind::BLANK_LINE => {
+                    if seen_term && !seen_definition {
+                        has_blank_between_term_and_first_definition = true;
+                    }
+                }
+                SyntaxKind::DEFINITION => {
+                    seen_definition = true;
+                }
+                _ => {}
+            }
+        }
+
+        let is_compact = is_compact_by_structure && !has_blank_between_term_and_first_definition;
+        let mut saw_term = false;
+
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::BLANK_LINE => {}
+                SyntaxKind::TERM => {
+                    self.format_node_sync(&child, indent);
+                    saw_term = true;
+                }
+                SyntaxKind::DEFINITION => {
+                    if saw_term {
+                        if is_compact {
+                            if !self.output.ends_with('\n') {
+                                self.output.push('\n');
+                            }
+                        } else if !self.output.ends_with("\n\n") {
+                            self.output.push('\n');
+                        }
+                    } else if !self.output.is_empty() && !self.output.ends_with('\n') {
+                        self.output.push('\n');
+                    }
+                    self.format_node_sync(&child, indent);
+                }
+                _ => self.format_node_sync(&child, indent),
+            }
+        }
+    }
+
+    pub(super) fn format_term(&mut self, node: &SyntaxNode, indent: usize) {
+        if indent > 0 && (self.output.is_empty() || self.output.ends_with('\n')) {
+            self.output.push_str(&" ".repeat(indent));
+        }
+        for child in node.children_with_tokens() {
+            match child {
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::TEXT => {
+                    self.output.push_str(tok.text());
+                }
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::NEWLINE => {
+                    self.output.push('\n');
+                }
+                NodeOrToken::Node(n) => {
+                    self.format_node_sync(&n, indent);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn format_definition(&mut self, node: &SyntaxNode, indent: usize) {
+        let def_indent = indent + 4;
+        let saved_wrap = Self::reflow_would_promote_a_definition_term(node)
+            .then(|| self.config.wrap.replace(WrapMode::Preserve));
+        let wrap_mode = self.config.wrap.clone().unwrap_or(WrapMode::Reflow);
+
+        if indent > 0 {
+            self.output.push_str(&" ".repeat(indent));
+        }
+        self.output.push_str(":   ");
+
+        let children: Vec<_> = node.children_with_tokens().collect();
+        let mut first_para_idx = None;
+
+        let mut text_idx = None;
+        for (i, child) in children.iter().enumerate() {
+            if let NodeOrToken::Token(tok) = child
+                && tok.kind() == SyntaxKind::TEXT
+            {
+                text_idx = Some(i);
+            }
+        }
+
+        if let Some(tidx) = text_idx {
+            for (i, child) in children.iter().enumerate().skip(tidx + 1) {
+                if let NodeOrToken::Node(n) = child {
+                    match n.kind() {
+                        SyntaxKind::PARAGRAPH => {
+                            first_para_idx = Some(i);
+                            break;
+                        }
+                        SyntaxKind::BLANK_LINE => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        for (i, child) in children.iter().enumerate() {
+            match child {
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::TEXT => {
+                    self.output.push_str(tok.text());
+                }
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::NEWLINE => {
+                    let bare_marker_pull_up = self.output.ends_with(":   ")
+                        && children.get(i + 1).is_some_and(|next| match next {
+                            NodeOrToken::Node(n) if n.kind() == SyntaxKind::PLAIN => {
+                                let first_line = n
+                                    .text()
+                                    .to_string()
+                                    .lines()
+                                    .next()
+                                    .unwrap_or_default()
+                                    .trim_start_matches([' ', '\t'])
+                                    .to_string();
+                                try_parse_atx_heading(&first_line).is_none()
+                            }
+                            NodeOrToken::Node(n) => is_block_element(n.kind()),
+                            _ => false,
+                        });
+                    if first_para_idx.is_some_and(|idx| i + 1 == idx) {
+                        self.output.push(' ');
+                    } else if !bare_marker_pull_up {
+                        if self.output.ends_with(":   ") {
+                            self.output.truncate(self.output.len() - 3);
+                        }
+                        self.output.push('\n');
+                    }
+                }
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DEFINITION_MARKER => {}
+                NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+                NodeOrToken::Node(n) => match n.kind() {
+                    SyntaxKind::CODE_BLOCK => {
+                        if self.output.ends_with(":   ") {
+                            self.format_container_code_block(
+                                n,
+                                "",
+                                def_indent,
+                                true,
+                                Some(Self::container_content_offset(n)),
+                                false,
+                            );
+                        } else {
+                            if !self.output.ends_with("\n\n") {
+                                self.output.push('\n');
+                            }
+                            self.format_indented_code_block(n, def_indent);
+                        }
+                    }
+                    SyntaxKind::HEADING => {
+                        self.output.push_str(&self.format_heading(n));
+                        self.output.push('\n');
+
+                        let has_following_blocks =
+                            children.iter().skip(i + 1).any(|sib| match sib {
+                                NodeOrToken::Node(sn) => sn.kind() != SyntaxKind::BLANK_LINE,
+                                _ => false,
+                            });
+                        let next_is_blank_line = children.get(i + 1).is_some_and(|sib| {
+                            matches!(
+                                sib,
+                                NodeOrToken::Node(sn) if sn.kind() == SyntaxKind::BLANK_LINE
+                            )
+                        });
+                        if has_following_blocks && !next_is_blank_line {
+                            self.output.push('\n');
+                        }
+                    }
+                    SyntaxKind::PLAIN => {
+                        if let Some((heading_line, remainder)) =
+                            self.leading_atx_heading_with_remainder(n)
+                        {
+                            self.output.push_str(&heading_line);
+                            self.output.push('\n');
+                            self.output.push('\n');
+                            for line in self.wrap_text_for_indent(&remainder, def_indent) {
+                                self.output.push_str(&" ".repeat(def_indent));
+                                self.output.push_str(line.trim_start());
+                                self.output.push('\n');
+                            }
+                        } else {
+                            self.format_node_sync(n, def_indent);
+                        }
+                    }
+                    SyntaxKind::PARAGRAPH => {
+                        if first_para_idx == Some(i) {
+                            let marker_len = ":   ".len();
+                            let first_line_space =
+                                self.config.line_width.saturating_sub(indent + marker_len);
+                            let available_width = self.config.line_width.saturating_sub(def_indent);
+                            let widths = [first_line_space, available_width];
+
+                            let lines = match wrap_mode {
+                                WrapMode::Preserve => preserve_lines(
+                                    n,
+                                    self.config.formatter_extensions.escaped_line_breaks,
+                                ),
+                                WrapMode::Reflow => {
+                                    self.wrapped_lines_for_paragraph_with_widths(n, &widths)
+                                }
+                                WrapMode::Sentence => self.sentence_lines_for_paragraph(n),
+                                WrapMode::Semantic => self.semantic_lines_for_paragraph(n),
+                            };
+
+                            if !lines.is_empty() {
+                                self.output.push_str(&lines[0]);
+                                self.output.push('\n');
+                                for line in lines.iter().skip(1) {
+                                    self.output.push_str(&" ".repeat(def_indent));
+                                    self.output.push_str(line.trim_start());
+                                    self.output.push('\n');
+                                }
+                            }
+                        } else {
+                            if !self.output.ends_with("\n\n") {
+                                self.output.push('\n');
+                            }
+                            self.format_list_continuation_paragraph(n, def_indent);
+                        }
+                    }
+                    SyntaxKind::BLANK_LINE => {
+                        let is_before_first_para = first_para_idx.is_some_and(|idx| i < idx);
+
+                        if !is_before_first_para {
+                            self.output.push('\n');
+                        }
+                    }
+                    SyntaxKind::LIST => {
+                        let start = self.output.len();
+                        self.format_node_sync(n, def_indent);
+
+                        if self.output[..start].ends_with(":   ")
+                            && self.output[start..].starts_with(&" ".repeat(def_indent))
+                        {
+                            self.output.drain(start..start + def_indent);
+                        }
+                    }
+                    SyntaxKind::BLOCK_QUOTE => {
+                        if self.output.ends_with(":   ") {
+                            let mut pieces: Vec<String> = Vec::new();
+                            let block_text = n.text().to_string();
+                            for line in block_text.lines() {
+                                let trimmed = line.trim_start();
+                                let content = if let Some(rest) = trimmed.strip_prefix('>') {
+                                    rest.trim_start()
+                                } else {
+                                    trimmed
+                                };
+                                if !content.is_empty() {
+                                    pieces.push(content.to_string());
+                                }
+                            }
+
+                            self.output.push_str("> ");
+                            self.output.push_str(&pieces.join(" "));
+                            self.output.push('\n');
+
+                            if let Some(next_non_blank) = node
+                                .children()
+                                .skip(i + 1)
+                                .find(|sibling| sibling.kind() != SyntaxKind::BLANK_LINE)
+                                && is_block_element(next_non_blank.kind())
+                                && !self.output.ends_with("\n\n")
+                            {
+                                self.output.push('\n');
+                            }
+                        } else {
+                            self.format_node_sync(n, def_indent);
+                        }
+                    }
+                    _ => {
+                        self.format_node_sync(n, def_indent);
+                    }
+                },
+                _ => {}
+            }
+        }
+        if !self.output.ends_with('\n') {
+            self.output.push('\n');
+        }
+        if let Some(saved) = saved_wrap {
+            self.config.wrap = saved;
+        }
+    }
+}
 
 impl Formatter {
     fn is_marker_only_blockquote_continuation(node: &SyntaxNode) -> bool {

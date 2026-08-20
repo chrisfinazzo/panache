@@ -1,4 +1,5 @@
 use crate::config::{Config, MathDelimiterStyle};
+use crate::formatter::Formatter;
 use crate::formatter::core::{normalize_attribute_text, normalize_span_attributes};
 use crate::formatter::math::{self, MathContext, MathFormatOptions};
 use crate::formatter::shortcodes::format_shortcode;
@@ -6,6 +7,28 @@ use crate::formatter::smart::normalize_smart_punctuation;
 use crate::syntax::{DisplayMath, InlineMath, SyntaxKind, SyntaxNode, code_span_payload};
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
+
+impl Formatter {
+    pub(super) fn format_delimited_inline(
+        &mut self,
+        node: &SyntaxNode,
+        indent: usize,
+        delimiter: &str,
+        marker: SyntaxKind,
+    ) {
+        self.output.push_str(delimiter);
+        for child in node.children_with_tokens() {
+            match child {
+                NodeOrToken::Node(child) => self.format_node_sync(&child, indent),
+                NodeOrToken::Token(token) if token.kind() != marker => {
+                    self.output.push_str(token.text());
+                }
+                NodeOrToken::Token(_) => {}
+            }
+        }
+        self.output.push_str(delimiter);
+    }
+}
 
 /// Expand a code span's tabs and join its lines, the way a reader sees it.
 ///

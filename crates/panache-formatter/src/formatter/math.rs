@@ -36,6 +36,10 @@ pub mod operators;
 mod render;
 
 impl Formatter {
+    pub(super) fn format_inline_math_marker(&mut self, node: &SyntaxNode) {
+        self.output.push_str(node.text().to_string().trim());
+    }
+
     pub(super) fn format_inline_math(&mut self, node: &SyntaxNode) {
         let is_display_math = node.children_with_tokens().any(|child| {
             matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::DISPLAY_MATH_MARKER)

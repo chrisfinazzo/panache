@@ -2,8 +2,11 @@ use crate::config::Config;
 use crate::syntax::{SyntaxNode, YamlFrontmatterRegion};
 
 mod blockquotes;
+mod blocks;
 pub mod code_blocks;
+mod containers;
 mod core;
+mod document;
 mod fenced_divs;
 mod hashpipe;
 mod headings;

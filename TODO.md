@@ -4,7 +4,7 @@ This document tracks implementation status for Panache's features.
 
 ## Architecture and refactoring
 
-- [ ] Split `crates/panache-formatter/src/formatter/core.rs`'s
+- [x] Split `crates/panache-formatter/src/formatter/core.rs`'s
   `Formatter::format_node_sync` dispatch into cohesive formatter modules
   (document/blocks, containers, lists, tables, math, and raw content). Keep
   shared `Formatter` state in the core module and preserve idempotency

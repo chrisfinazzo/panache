@@ -4,7 +4,22 @@ use panache_parser::parser::blocks::code_blocks::{CodeBlockType, InfoString};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
+use super::Formatter;
 use super::hashpipe;
+
+impl Formatter {
+    pub(super) fn format_block_code(&mut self, node: &SyntaxNode) {
+        log::trace!("Formatting code block");
+        if let Some(previous) = node.prev_sibling()
+            && previous.kind() == SyntaxKind::PARAGRAPH
+            && !self.output.ends_with("\n\n")
+            && !self.output.ends_with("\n \n")
+        {
+            self.output.push('\n');
+        }
+        self.format_code_block(node);
+    }
+}
 
 pub type FormattedCodeMap = HashMap<(String, String), String>;
 
