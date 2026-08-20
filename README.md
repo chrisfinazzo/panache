@@ -41,21 +41,20 @@ Panache is available from several sources:
 ### Install Script
 
 The installer scripts pick the right release artifact for your platform and
-install to a user-local directory by default. They are fetched from the latest
-release and then download the matching Panache CLI release asset. If you prefer,
-download and inspect the script before running it.
+install to a user-local directory by default. They download the matching Panache
+CLI release asset. If you prefer, download and inspect the script before running
+it.
 
 For macOS and Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf \
-    https://github.com/jolars/panache/releases/latest/download/panache-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -sSf https://panache.bz/install | sh
 ```
 
 For Windows PowerShell:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/jolars/panache/releases/latest/download/panache-installer.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://panache.bz/install.ps1 | iex"
 ```
 
 Set `PANACHE_INSTALL_DIR` to change the destination and `PANACHE_TAG` to pin a

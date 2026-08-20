@@ -65,6 +65,14 @@ jobs:
         with:
           path: docs
 
+      - name: Publish installers
+        run: |
+          install -m 0644 scripts/panache-installer.sh docs/_site/install
+          install -m 0644 scripts/panache-installer.ps1 docs/_site/install.ps1
+          cmp scripts/panache-installer.sh docs/_site/install
+          cmp scripts/panache-installer.ps1 docs/_site/install.ps1
+          sh -n docs/_site/install
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
