@@ -210,8 +210,8 @@ julia = "fatou" # Enable Julia linting
 python = "ruff"
 ```
 
-See [examples/panache.toml](./examples/panache.toml) for a complete
-configuration reference.
+See [the configuration reference](https://panache.bz/guide/configuration) for a
+complete list of configuration options and their defaults.
 
 ## Integrations
 
