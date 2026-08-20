@@ -1,9 +1,8 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
-DOCUMENT@0..117
+DOCUMENT@0..232
   PARAGRAPH@0..65
     LINK@0..64
       LINK_START@0..1
@@ -45,3 +44,47 @@ DOCUMENT@0..117
       LINK_DEST@114..115 "]"
     TEXT@115..116 "."
     NEWLINE@116..117 "\n"
+  BLANK_LINE@117..118
+    BLANK_LINE@117..118 "\n"
+  PARAGRAPH@118..160
+    LINK@118..159
+      LINK_START@118..119
+        LINK_START@118..119 "["
+      LINK_TEXT@119..134
+        TEXT@119..134 "jola@math.ku.dk"
+      LINK_TEXT_END@134..135 "]"
+      LINK_DEST_START@135..136 "("
+      LINK_DEST@136..158
+        TEXT@136..158 "mailto:jola@math.ku.dk"
+      LINK_DEST_END@158..159 ")"
+    NEWLINE@159..160 "\n"
+  BLANK_LINE@160..161
+    BLANK_LINE@160..161 "\n"
+  PARAGRAPH@161..195
+    LINK@161..194
+      LINK_START@161..162
+        LINK_START@161..162 "["
+      LINK_TEXT@162..172
+        TEXT@162..166 "see "
+        CITATION@166..172
+          CITATION_MARKER@166..167 "@"
+          CITATION_KEY@167..172 "doe99"
+      LINK_TEXT_END@172..173 "]"
+      LINK_DEST_START@173..174 "("
+      LINK_DEST@174..193
+        TEXT@174..193 "https://example.com"
+      LINK_DEST_END@193..194 ")"
+    NEWLINE@194..195 "\n"
+  BLANK_LINE@195..196
+    BLANK_LINE@195..196 "\n"
+  PARAGRAPH@196..232
+    UNRESOLVED_REFERENCE@196..231
+      LINK_START@196..197
+        LINK_START@196..197 "["
+      LINK_TEXT@197..230
+        TEXT@197..224 "email jola@math.ku.dk ..."
+        CITATION@224..230
+          CITATION_MARKER@224..225 "@"
+          CITATION_KEY@225..230 "doe99"
+      TEXT@230..231 "]"
+    NEWLINE@231..232 "\n"

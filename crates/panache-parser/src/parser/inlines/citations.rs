@@ -40,6 +40,12 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
             }
             b']' => {
                 if bracket_depth == 0 {
+                    if pos + 1 < bytes.len()
+                        && bytes[pos + 1] == b'('
+                        && inline_destination_end(bytes, pos + 1).is_some()
+                    {
+                        return None;
+                    }
                     break;
                 }
                 bracket_depth -= 1;
@@ -52,8 +58,9 @@ pub(crate) fn try_parse_bracketed_citation(text: &str) -> Option<(usize, &str)> 
                 }
             }
             b'@' => {
+                try_parse_bare_citation(text, pos)?;
                 has_citation = true;
-                break;
+                pos += 1;
             }
             _ => {
                 pos += 1;
@@ -800,6 +807,27 @@ mod tests {
     fn test_parse_bracketed_citation_not_citation() {
         assert_eq!(try_parse_bracketed_citation("[text](url)"), None);
         assert_eq!(try_parse_bracketed_citation("[just text]"), None);
+    }
+
+    #[test]
+    fn test_bracketed_email_is_not_citation() {
+        assert_eq!(try_parse_bracketed_citation("[jola@math.ku.dk]"), None);
+    }
+
+    #[test]
+    fn test_invalid_marker_prevents_bracketed_citation() {
+        assert_eq!(
+            try_parse_bracketed_citation("[email jola@math.ku.dk; see @doe99]"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_inline_link_owns_brackets_containing_citation() {
+        assert_eq!(
+            try_parse_bracketed_citation("[see @doe99](https://example.com)"),
+            None
+        );
     }
 
     #[test]
