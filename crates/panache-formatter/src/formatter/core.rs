@@ -1,6 +1,6 @@
 use crate::config::{Config, HorizontalRuleStyle, WrapMode};
-use crate::directives::{DirectiveTracker, extract_directive_from_node};
-use crate::syntax::{DefinitionItem, DisplayMath, FencedDiv, SyntaxKind, SyntaxNode};
+use crate::directives::DirectiveTracker;
+use crate::syntax::{DefinitionItem, FencedDiv, SyntaxKind, SyntaxNode};
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use panache_parser::parser::blocks::horizontal_rules::try_parse_horizontal_rule;
@@ -32,7 +32,7 @@ pub struct Formatter {
     /// Track ignore directives for formatting
     pub(super) directive_tracker: DirectiveTracker,
     /// Depth of ignore region (for preserving content exactly)
-    ignore_region_start: Option<usize>,
+    pub(super) ignore_region_start: Option<usize>,
     /// Structured rendering context for nested blockquote containers.
     blockquote_context: Option<BlockquoteContext>,
 }
@@ -137,7 +137,7 @@ impl Formatter {
         paragraphs::contains_latex_command(node)
     }
 
-    fn is_grid_table_continuation_paragraph(&self, node: &SyntaxNode) -> bool {
+    pub(super) fn is_grid_table_continuation_paragraph(&self, node: &SyntaxNode) -> bool {
         if node.kind() != SyntaxKind::PARAGRAPH {
             return false;
         }
@@ -1183,81 +1183,11 @@ impl Formatter {
             }
 
             SyntaxKind::HTML_BLOCK | SyntaxKind::HTML_BLOCK_RAW | SyntaxKind::HTML_BLOCK_DIV => {
-                if let Some(directive) = extract_directive_from_node(node) {
-                    self.directive_tracker.process_directive(&directive);
-
-                    if matches!(directive, crate::directives::Directive::Start(_))
-                        && self.directive_tracker.is_formatting_ignored()
-                        && self.ignore_region_start.is_none()
-                    {
-                        self.ignore_region_start = Some(self.output.len());
-                    }
-                }
-
-                let mut text = String::new();
-                let mut after_marker = false;
-                for el in node.descendants_with_tokens() {
-                    if let NodeOrToken::Token(t) = el {
-                        if t.kind() == SyntaxKind::LINE_PREFIX {
-                            if t.text().contains('>') {
-                                after_marker = true;
-                            } else if after_marker {
-                                after_marker = false;
-                            } else {
-                                text.push_str(t.text());
-                            }
-                            continue;
-                        }
-                        after_marker = false;
-                        text.push_str(t.text());
-                    }
-                }
-                self.output.push_str(&text);
-                if !text.ends_with('\n') {
-                    self.output.push('\n');
-                }
+                self.format_html_block(node)
             }
-
-            SyntaxKind::COMMENT => {
-                let text = node.text().to_string();
-
-                if let Some(directive) = extract_directive_from_node(node) {
-                    self.directive_tracker.process_directive(&directive);
-
-                    if matches!(directive, crate::directives::Directive::Start(_))
-                        && self.directive_tracker.is_formatting_ignored()
-                        && self.ignore_region_start.is_none()
-                    {
-                        self.ignore_region_start = Some(self.output.len());
-                    }
-                }
-
-                self.output.push_str(&text);
-                if !text.ends_with('\n') {
-                    self.output.push('\n');
-                }
-            }
-
-            SyntaxKind::LATEX_COMMAND => {
-                let text = node.text().to_string();
-                self.output.push_str(&text);
-            }
-
-            SyntaxKind::TEX_BLOCK => {
-                log::trace!("Formatting TeX block");
-                for child in node.children_with_tokens() {
-                    match child {
-                        rowan::NodeOrToken::Token(t) => {
-                            self.output.push_str(t.text());
-                        }
-                        rowan::NodeOrToken::Node(_) => {}
-                    }
-                }
-
-                if !self.output.ends_with('\n') {
-                    self.output.push('\n');
-                }
-            }
+            SyntaxKind::COMMENT => self.format_comment(node),
+            SyntaxKind::LATEX_COMMAND => self.format_latex_command(node),
+            SyntaxKind::TEX_BLOCK => self.format_tex_block(node),
 
             SyntaxKind::BLOCK_QUOTE => {
                 log::trace!("Formatting blockquote");
@@ -2285,117 +2215,12 @@ impl Formatter {
                 }
             }
 
-            SyntaxKind::SIMPLE_TABLE => {
-                log::trace!("Formatting simple table");
-                let formatted = tables::format_simple_table(node, &self.config, indent);
-                self.output.push_str(&formatted);
+            SyntaxKind::SIMPLE_TABLE
+            | SyntaxKind::MULTILINE_TABLE
+            | SyntaxKind::PIPE_TABLE
+            | SyntaxKind::GRID_TABLE => self.format_table(node, indent),
 
-                if let Some(next) = node.next_sibling()
-                    && is_block_element(next.kind())
-                    && !self.output.ends_with("\n\n")
-                {
-                    self.output.push('\n');
-                }
-            }
-
-            SyntaxKind::MULTILINE_TABLE => {
-                let formatted = tables::format_multiline_table(node, &self.config, indent);
-                self.output.push_str(&formatted);
-            }
-
-            SyntaxKind::PIPE_TABLE => {
-                let formatted = tables::format_pipe_table(node, &self.config, indent);
-                self.output.push_str(&formatted);
-            }
-
-            SyntaxKind::GRID_TABLE => {
-                if let Some(next) = node.next_sibling()
-                    && self.is_grid_table_continuation_paragraph(&next)
-                {
-                    self.output.push_str(&node.text().to_string());
-                    if !self.output.ends_with('\n') {
-                        self.output.push('\n');
-                    }
-                    return;
-                }
-                let formatted = tables::format_grid_table(node, &self.config, indent);
-                self.output.push_str(&formatted);
-            }
-
-            SyntaxKind::INLINE_MATH => {
-                let is_display_math = node.children_with_tokens().any(|t| {
-                    matches!(t, NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::DISPLAY_MATH_MARKER)
-                });
-
-                let content = node
-                    .children_with_tokens()
-                    .find_map(|c| match c {
-                        NodeOrToken::Token(t) if t.kind() == SyntaxKind::TEXT => {
-                            Some(t.text().to_string())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-
-                let original_marker = node
-                    .children_with_tokens()
-                    .find_map(|t| match t {
-                        NodeOrToken::Token(tok)
-                            if tok.kind() == SyntaxKind::INLINE_MATH_MARKER
-                                || tok.kind() == SyntaxKind::DISPLAY_MATH_MARKER =>
-                        {
-                            Some(tok.text().to_string())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| "$".to_string());
-
-                use crate::config::MathDelimiterStyle;
-                let (open, close) = match self.config.math_delimiter_style {
-                    MathDelimiterStyle::Preserve => {
-                        if is_display_math {
-                            match original_marker.as_str() {
-                                "\\[" => (r"\[", r"\]"),
-                                "\\\\[" => (r"\\[", r"\\]"),
-                                _ => ("$$", "$$"), // Default to $$
-                            }
-                        } else {
-                            match original_marker.as_str() {
-                                "$`" => ("$`", "`$"),
-                                r"\(" => (r"\(", r"\)"),
-                                r"\\(" => (r"\\(", r"\\)"),
-                                _ => ("$", "$"), // Default to $
-                            }
-                        }
-                    }
-                    MathDelimiterStyle::Dollars => {
-                        if is_display_math {
-                            ("$$", "$$")
-                        } else {
-                            ("$", "$")
-                        }
-                    }
-                    MathDelimiterStyle::Backslash => {
-                        if is_display_math {
-                            (r"\[", r"\]")
-                        } else {
-                            (r"\(", r"\)")
-                        }
-                    }
-                };
-
-                if is_display_math {
-                    self.output.push_str(open);
-                    self.output.push(' ');
-                    self.output.push_str(&content);
-                    self.output.push(' ');
-                    self.output.push_str(close);
-                } else {
-                    self.output.push_str(open);
-                    self.output.push_str(&content);
-                    self.output.push_str(close);
-                }
-            }
+            SyntaxKind::INLINE_MATH => self.format_inline_math(node),
 
             SyntaxKind::LIST_ITEM => {
                 self.format_list_item(node, indent);
@@ -2615,88 +2440,7 @@ impl Formatter {
                 self.output.push_str(node.text().to_string().trim());
             }
 
-            SyntaxKind::DISPLAY_MATH => {
-                let Some(display_math) = DisplayMath::cast(node.clone()) else {
-                    self.output.push_str(&node.text().to_string());
-                    return;
-                };
-
-                let math_content = Some(display_math.content());
-
-                let opening_value = display_math
-                    .opening_marker()
-                    .unwrap_or_else(|| "$$".to_string());
-                let closing_value = display_math
-                    .closing_marker()
-                    .unwrap_or_else(|| "$$".to_string());
-                let opening = opening_value.as_str();
-                let closing_from_tree = closing_value.as_str();
-                let is_environment = display_math.is_environment_form();
-
-                use crate::config::MathDelimiterStyle;
-                let (open, close) = if is_environment {
-                    (opening, closing_from_tree)
-                } else {
-                    match self.config.math_delimiter_style {
-                        MathDelimiterStyle::Preserve => (opening, closing_from_tree),
-                        MathDelimiterStyle::Dollars => ("$$", "$$"),
-                        MathDelimiterStyle::Backslash => (r"\[", r"\]"),
-                    }
-                };
-
-                use crate::formatter::math::{self, MathContext, MathFormatOptions};
-
-                if is_environment {
-                    self.output.push_str(open);
-                    if let Some(content) = math_content {
-                        let opts = MathFormatOptions::from_config(
-                            &self.config,
-                            MathContext::EnvironmentBody,
-                        );
-                        match math::format_math(&content, &opts) {
-                            Some(body) => {
-                                self.output.push('\n');
-                                self.output.push_str(&body);
-                                self.output.push('\n');
-                            }
-                            None => {
-                                self.output.push_str(&content);
-                                if !content.ends_with('\n') {
-                                    self.output.push('\n');
-                                }
-                            }
-                        }
-                    }
-                    self.output.push_str(close);
-                    self.output.push('\n');
-                    return;
-                }
-
-                self.output.push('\n');
-                self.output.push_str(open);
-                self.output.push('\n');
-
-                if let Some(content) = math_content {
-                    let opts = MathFormatOptions::from_config(&self.config, MathContext::Display);
-                    match math::format_math(&content, &opts) {
-                        Some(body) => {
-                            self.output.push_str(&body);
-                            self.output.push('\n');
-                        }
-                        None => {
-                            let math_indent = self.config.math_indent;
-                            for line in content.trim().lines() {
-                                self.output.push_str(&" ".repeat(math_indent));
-                                self.output.push_str(line.trim_end());
-                                self.output.push('\n');
-                            }
-                        }
-                    }
-                }
-
-                self.output.push_str(close);
-                self.output.push('\n');
-            }
+            SyntaxKind::DISPLAY_MATH => self.format_display_math(node),
 
             SyntaxKind::CODE_BLOCK => {
                 log::trace!("Formatting code block");

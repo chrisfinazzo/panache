@@ -23,13 +23,149 @@
 //! default) callers emit math verbatim and never reach this module; on, they
 //! route content through [`format_math`].
 
+use crate::config::MathDelimiterStyle;
+use crate::formatter::Formatter;
+use crate::syntax::{DisplayMath, SyntaxKind, SyntaxNode, math_diagnostics};
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
-use panache_parser::syntax::{SyntaxNode, math_diagnostics};
+use rowan::NodeOrToken;
+use rowan::ast::AstNode;
 
 mod layout;
 mod linebreak;
 pub mod operators;
 mod render;
+
+impl Formatter {
+    pub(super) fn format_inline_math(&mut self, node: &SyntaxNode) {
+        let is_display_math = node.children_with_tokens().any(|child| {
+            matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::DISPLAY_MATH_MARKER)
+        });
+        let content = node
+            .children_with_tokens()
+            .find_map(|child| match child {
+                NodeOrToken::Token(token) if token.kind() == SyntaxKind::TEXT => {
+                    Some(token.text().to_string())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let marker = node
+            .children_with_tokens()
+            .find_map(|child| match child {
+                NodeOrToken::Token(token)
+                    if matches!(
+                        token.kind(),
+                        SyntaxKind::INLINE_MATH_MARKER | SyntaxKind::DISPLAY_MATH_MARKER
+                    ) =>
+                {
+                    Some(token.text().to_string())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "$".to_string());
+        let (open, close) =
+            inline_delimiters(self.config.math_delimiter_style, is_display_math, &marker);
+
+        self.output.push_str(open);
+        if is_display_math {
+            self.output.push(' ');
+        }
+        self.output.push_str(&content);
+        if is_display_math {
+            self.output.push(' ');
+        }
+        self.output.push_str(close);
+    }
+
+    pub(super) fn format_display_math(&mut self, node: &SyntaxNode) {
+        let Some(display_math) = DisplayMath::cast(node.clone()) else {
+            self.output.push_str(&node.text().to_string());
+            return;
+        };
+        let content = display_math.content();
+        let opening = display_math
+            .opening_marker()
+            .unwrap_or_else(|| "$$".to_string());
+        let closing = display_math
+            .closing_marker()
+            .unwrap_or_else(|| "$$".to_string());
+        let is_environment = display_math.is_environment_form();
+        let (open, close) = if is_environment {
+            (opening.as_str(), closing.as_str())
+        } else {
+            match self.config.math_delimiter_style {
+                MathDelimiterStyle::Preserve => (opening.as_str(), closing.as_str()),
+                MathDelimiterStyle::Dollars => ("$$", "$$"),
+                MathDelimiterStyle::Backslash => (r"\[", r"\]"),
+            }
+        };
+
+        if is_environment {
+            self.output.push_str(open);
+            let opts = MathFormatOptions::from_config(&self.config, MathContext::EnvironmentBody);
+            match format_math(&content, &opts) {
+                Some(body) => {
+                    self.output.push('\n');
+                    self.output.push_str(&body);
+                    self.output.push('\n');
+                }
+                None => {
+                    self.output.push_str(&content);
+                    if !content.ends_with('\n') {
+                        self.output.push('\n');
+                    }
+                }
+            }
+            self.output.push_str(close);
+            self.output.push('\n');
+            return;
+        }
+
+        self.output.push('\n');
+        self.output.push_str(open);
+        self.output.push('\n');
+        let opts = MathFormatOptions::from_config(&self.config, MathContext::Display);
+        match format_math(&content, &opts) {
+            Some(body) => {
+                self.output.push_str(&body);
+                self.output.push('\n');
+            }
+            None => {
+                for line in content.trim().lines() {
+                    self.output.push_str(&" ".repeat(self.config.math_indent));
+                    self.output.push_str(line.trim_end());
+                    self.output.push('\n');
+                }
+            }
+        }
+        self.output.push_str(close);
+        self.output.push('\n');
+    }
+}
+
+fn inline_delimiters(
+    style: MathDelimiterStyle,
+    is_display_math: bool,
+    marker: &str,
+) -> (&'static str, &'static str) {
+    match style {
+        MathDelimiterStyle::Preserve if is_display_math => match marker {
+            "\\[" => (r"\[", r"\]"),
+            "\\\\[" => (r"\\[", r"\\]"),
+            _ => ("$$", "$$"),
+        },
+        MathDelimiterStyle::Preserve => match marker {
+            "$`" => ("$`", "`$"),
+            r"\(" => (r"\(", r"\)"),
+            r"\\(" => (r"\\(", r"\\)"),
+            _ => ("$", "$"),
+        },
+        MathDelimiterStyle::Dollars if is_display_math => ("$$", "$$"),
+        MathDelimiterStyle::Dollars => ("$", "$"),
+        MathDelimiterStyle::Backslash if is_display_math => (r"\[", r"\]"),
+        MathDelimiterStyle::Backslash => (r"\(", r"\)"),
+    }
+}
 
 /// Where a math span sits, which decides how aggressively it is laid out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -15,6 +15,7 @@ pub mod math;
 mod metadata;
 mod paragraphs;
 mod preserve;
+mod raw;
 mod sentence_wrap;
 mod shortcodes;
 mod smart;

@@ -1,4 +1,5 @@
 use crate::config::{Config, WrapMode};
+use crate::formatter::Formatter;
 use crate::formatter::inline::format_inline_node;
 use crate::formatter::inline_layout::wrap_text_first_fit;
 use crate::formatter::sentence_wrap::{ResolvedProfile, resolve_profile, split_sentence_text};
@@ -7,6 +8,47 @@ use panache_parser::analyze_grid;
 use rowan::NodeOrToken;
 use std::collections::BTreeSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+impl Formatter {
+    pub(super) fn format_table(&mut self, node: &SyntaxNode, indent: usize) {
+        match node.kind() {
+            SyntaxKind::SIMPLE_TABLE => {
+                log::trace!("Formatting simple table");
+                self.output
+                    .push_str(&format_simple_table(node, &self.config, indent));
+
+                if let Some(next) = node.next_sibling()
+                    && super::utils::is_block_element(next.kind())
+                    && !self.output.ends_with("\n\n")
+                {
+                    self.output.push('\n');
+                }
+            }
+            SyntaxKind::MULTILINE_TABLE => {
+                self.output
+                    .push_str(&format_multiline_table(node, &self.config, indent))
+            }
+            SyntaxKind::PIPE_TABLE => {
+                self.output
+                    .push_str(&format_pipe_table(node, &self.config, indent))
+            }
+            SyntaxKind::GRID_TABLE => {
+                if let Some(next) = node.next_sibling()
+                    && self.is_grid_table_continuation_paragraph(&next)
+                {
+                    self.output.push_str(&node.text().to_string());
+                    if !self.output.ends_with('\n') {
+                        self.output.push('\n');
+                    }
+                    return;
+                }
+                self.output
+                    .push_str(&format_grid_table(node, &self.config, indent));
+            }
+            _ => unreachable!("format_table received a non-table node"),
+        }
+    }
+}
 
 /// Indent (in columns) assumed for table types that self-indent at the top
 /// level (pipe, simple, multiline) when budgeting caption wrap width. The
