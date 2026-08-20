@@ -113,39 +113,21 @@ commands. Important generated outputs include:
   test-only.
 - Treat `spec.txt` and byte-equal HTML after shared `<li>` whitespace
   normalization as the source of truth.
-- Classify failures as renderer gap, parser-shape gap, flavor leak, dialect
-  divergence, or missing feature.
-- Compare Pandoc `-f commonmark` with `-f markdown` when distinguishing dialect
-  divergence from extension-default leakage.
-- Keep `blocked.txt` reasons specific; never use it to hide regressions.
-- Add parser fixtures before allowlisting parser behavior changes. Add formatter
-  goldens only when changed structure affects user-visible formatting.
-- Never edit the allowlist without rerunning `commonmark_full_report` and
-  confirming that the example passes in the fresh report.
 - Do not hand-edit generated reports or vendored spec fixtures.
 
 #### Pandoc
 
 - Run conformance only under `Flavor::Pandoc`, and treat
   `pandoc -f markdown -t native` as the behavioral reference.
-- Classify failures as projector gap, parser-shape gap, flavor-default gap, or
-  missing feature.
-- Add parser fixtures before allowlisting parser behavior changes. Add formatter
-  goldens only when changed structure affects user-visible formatting.
-- Never edit the allowlist without rerunning `pandoc_full_report` and confirming
-  that the case passes in the fresh report.
 - Do not hand-edit generated reports or `expected.native` corpus outputs.
 - Never fix Pandoc divergence in the projector when the CST is wrong; fix the
   parser shape first.
 
 #### YAML
 
-- Treat each yaml-test-suite case directory as the source of truth.
-- Use `test.event` for expected event behavior and `error` for expected-failure
-  behavior.
-- Do not allowlist a case without checking both event and error contracts.
+- Treat each yaml-test-suite case directory as the source of truth; check both
+  `test.event` and `error` contracts before allowlisting it.
 - Keep triage and regression reports reproducible and harness-generated.
-- Prefer structured snapshots over ad-hoc text dumps.
 
 ### Tests
 
@@ -180,15 +162,6 @@ commands. Important generated outputs include:
 - Keep `pretty_yaml` as a development-only reference with no runtime dependency.
 - Ensure every YAML corpus case is idempotent.
 
-### External formatter presets
-
-- Keep `PRESETS` metadata and `formatter_preset_names()` synchronized.
-- Preset names are free-form configuration strings, so adding one does not
-  require schema regeneration.
-- For stdin tools needing filename hints, use `{}` argument placeholders, and
-  ensure language extensions are mapped.
-- Add focused preset-resolution tests for new or changed presets.
-
 ### Tests and debugging
 
 - Formatter golden fixtures live in `tests/fixtures/cases/` and must be
@@ -204,6 +177,8 @@ commands. Important generated outputs include:
 
 - Prioritize accurate rule codes, severity, spans, and precise diagnostics.
 - Add auto-fixes only when replacements preserve document intent.
+- Rules produce structured diagnostics; shared CLI and language-server paths own
+  presentation and position mapping.
 - Keep CLI diagnostics concise without regressing language-server mappings.
 - Reuse shared linter orchestration instead of duplicating flows.
 - Add focused lint tests, and synchronize documentation for user-visible
@@ -221,6 +196,10 @@ commands. Important generated outputs include:
 
 - Preserve open, change, save, and close behavior and stable document state.
 - Keep UTF-16/UTF-8 position conversion correct.
+- The main thread is the sole writer of `GlobalState` and the Salsa database;
+  workers operate on read-only snapshots.
+- Treat Salsa cancellation as the concurrency boundary; keep Salsa mutation on
+  the main thread.
 - Prefer typed syntax wrappers and shared conversion and state helpers.
 - Make state transitions explicit; avoid silent failure paths.
 - Add targeted protocol-visible tests, and update the language-server guide for
@@ -247,6 +226,7 @@ commands. Important generated outputs include:
 ### Schema and tests
 
 - Add focused tests for parsing, precedence, and merge changes.
-- Update documentation and regenerate `panache.schema.json` when keys, defaults,
-  or enums change.
+- Update documentation when keys, defaults, or enums change.
+- Regenerate `panache.schema.json` with
+  `UPDATE_EXPECTED=1 cargo test config_schema`, and review the diff.
 - The configuration schema parity gate is `tests/config_schema.rs`.
