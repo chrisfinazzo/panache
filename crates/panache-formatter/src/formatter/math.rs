@@ -282,6 +282,15 @@ mod tests {
             "\\alpha \\cdot \\beta"
         );
         assert_eq!(fmt("\\sum x", MathContext::Inline), "\\sum x");
+        assert_eq!(
+            fmt("\\operatorname*{minimize} a", MathContext::Inline),
+            "\\operatorname*{minimize} a"
+        );
+        assert_eq!(
+            fmt("\\operatorname * {minimize} a", MathContext::Inline),
+            "\\operatorname*{minimize} a"
+        );
+        assert_eq!(fmt("\\alpha*x", MathContext::Inline), "\\alpha * x");
         assert_eq!(fmt("\\alpha x", MathContext::Inline), "\\alpha x");
         assert_eq!(
             fmt("\\left( x \\right)", MathContext::Inline),
@@ -292,6 +301,9 @@ mod tests {
             "a\\leq b",
             "\\alpha\\cdot\\beta",
             "\\sum x",
+            "\\operatorname*{minimize} a",
+            "\\operatorname * {minimize} a",
+            "\\alpha*x",
             "\\alpha x",
             "\\left( x \\right)",
         ] {

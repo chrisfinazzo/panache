@@ -119,6 +119,12 @@ pub fn command_class(name: &str) -> Option<AtomClass> {
     Some(class)
 }
 
+/// Whether `*` immediately following this command is a syntactic modifier,
+/// rather than a binary operator.
+pub fn takes_star_modifier(name: &str) -> bool {
+    matches!(name, "operatorname")
+}
+
 /// Whether a command (name **without** the leading backslash) switches its
 /// mandatory `{…}` argument into *text mode*, where whitespace is significant
 /// and must be preserved verbatim. The curated set is the single-argument

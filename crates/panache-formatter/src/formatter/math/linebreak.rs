@@ -286,6 +286,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
     let mut out: Vec<Break> = Vec::new();
     let mut depth: i32 = 0;
     let mut prev: Option<AtomClass> = None;
+    let mut star_modifier_pending = false;
     let mut i = 0;
     while i < elems.len() {
         let el = &elems[i];
@@ -293,15 +294,18 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
             SyntaxKind::MATH_OPEN => {
                 depth += 1;
                 prev = Some(AtomClass::Open);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_CLOSE => {
                 depth -= 1;
                 prev = Some(AtomClass::Close);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_PUNCT => {
                 prev = Some(AtomClass::Punct);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_TEXT
@@ -334,18 +338,22 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                     });
                 }
                 prev = Some(AtomClass::Rel);
+                star_modifier_pending = false;
                 i = end;
             }
             SyntaxKind::MATH_TEXT => {
                 prev = Some(AtomClass::Ord);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_SCRIPT | SyntaxKind::MATH_ALIGN => {
                 prev = Some(AtomClass::Open);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_GROUP | SyntaxKind::MATH_ENVIRONMENT | SyntaxKind::MATH_DELIMITED => {
                 prev = Some(AtomClass::Close);
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE | SyntaxKind::MATH_COMMENT => {
@@ -353,6 +361,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
             }
             SyntaxKind::MATH_LINE_BREAK => {
                 prev = None;
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_COMMAND => {
@@ -374,6 +383,7 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                 } else {
                     prev = Some(AtomClass::Ord);
                 }
+                star_modifier_pending = operators::takes_star_modifier(name);
                 i += 1;
             }
             SyntaxKind::MATH_OPERATOR => {
@@ -386,8 +396,16 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                     i += 1;
                 }
                 let mut char_off = 0usize;
-                for atom in operators::split_operator_atoms(&run) {
-                    let class = operators::coerce(operators::classify_operator(atom), prev);
+                for (n, atom) in operators::split_operator_atoms(&run)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let is_modifier = n == 0 && atom == "*" && star_modifier_pending;
+                    let class = if is_modifier {
+                        AtomClass::Ord
+                    } else {
+                        operators::coerce(operators::classify_operator(atom), prev)
+                    };
                     if depth == 0 && operators::is_spaced(class) {
                         out.push(Break {
                             index: run_start + char_off,
@@ -398,9 +416,11 @@ fn spaced_operator_breaks(elems: &[SyntaxElement]) -> Vec<Break> {
                     prev = Some(class);
                     char_off += atom.chars().count();
                 }
+                star_modifier_pending = false;
             }
             _ => {
                 prev = Some(AtomClass::Ord);
+                star_modifier_pending = false;
                 i += 1;
             }
         }
@@ -431,6 +451,11 @@ mod tests {
             .filter(|b| b.class == AtomClass::Rel)
             .map(|b| b.index)
             .collect()
+    }
+
+    #[test]
+    fn starred_command_modifier_is_not_a_break_candidate() {
+        assert!(spaced_operator_breaks(&elems("\\operatorname*{minimize} a")).is_empty());
     }
 
     #[test]

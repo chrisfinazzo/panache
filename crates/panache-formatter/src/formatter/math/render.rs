@@ -471,6 +471,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
     let mut pending_space = false;
     let mut group_stack: Vec<bool> = Vec::new();
     let mut prev_sig_is_text_cmd = false;
+    let mut star_modifier_pending = false;
     let mut colon_head = false;
 
     let mut i = 0;
@@ -489,6 +490,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
             {
                 colon_head = true;
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_OPERATOR => {
@@ -506,8 +508,15 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                     } else {
                         atom.to_string()
                     };
-                    let class = operators::coerce(operators::classify_operator(&atom), prev_class);
-                    let demand = if operators::is_spaced(class) {
+                    let is_modifier = n == 0 && atom == "*" && star_modifier_pending;
+                    let class = if is_modifier {
+                        AtomClass::Ord
+                    } else {
+                        operators::coerce(operators::classify_operator(&atom), prev_class)
+                    };
+                    let demand = if is_modifier {
+                        Demand::TightOp
+                    } else if operators::is_spaced(class) {
                         Demand::SpacedOp
                     } else {
                         Demand::TightOp
@@ -519,6 +528,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 }
                 colon_head = false;
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
             }
             SyntaxKind::MATH_COMMAND => {
                 let name = text.strip_prefix('\\').unwrap_or(text);
@@ -541,6 +551,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 pending_space = false;
                 prev_demand = demand;
                 prev_sig_is_text_cmd = operators::is_text_mode_command(name);
+                star_modifier_pending = operators::takes_star_modifier(name);
                 i += 1;
             }
             SyntaxKind::MATH_COMMENT => {
@@ -548,6 +559,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 pending_space = false;
                 prev_demand = Demand::Plain;
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_SCRIPT => {
@@ -556,6 +568,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 prev_demand = Demand::TightOp;
                 prev_class = Some(AtomClass::Open);
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_GROUP_OPEN => {
@@ -571,6 +584,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 };
                 prev_class = Some(AtomClass::Open);
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
             SyntaxKind::MATH_GROUP_CLOSE => {
@@ -585,6 +599,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 prev_demand = Demand::Plain;
                 prev_class = Some(AtomClass::Close);
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
             _ => {
@@ -593,6 +608,7 @@ fn space_operators(toks: &[(SyntaxKind, String)], seed: Option<AtomClass>) -> St
                 prev_demand = Demand::Plain;
                 prev_class = atom_prev_class(*kind, text);
                 prev_sig_is_text_cmd = false;
+                star_modifier_pending = false;
                 i += 1;
             }
         }
