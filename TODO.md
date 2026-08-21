@@ -44,6 +44,25 @@ This document tracks implementation status for Panache's features.
 
 ## Language Server
 
+### Memory
+
+- [ ] Stop interning labels in the definition-index build. `InternedLabel`
+  (`src/salsa.rs:82`) is a `#[salsa::interned]` struct, and salsa never
+  collects an interned value created above `Durability::LOW`, so every
+  distinct label string interned is retained for the life of the process.
+  The definition-index build
+  (`insert_reference`/`insert_footnote`/`insert_crossref`/
+  `insert_example_label`, `src/salsa.rs:1859-1889`) re-runs per keystroke
+  and interns every label the document currently contains — including each
+  intermediate spelling as a user types one out, each of which becomes an
+  immortal string. No memos key on the labels (the index resolves them back
+  to owned strings in `into_owned`), so this is megabytes over a long
+  session rather than gigabytes, but the interning also buys nothing there:
+  building the index on owned strings directly removes the leak outright.
+  `InternedPath` is fine (bounded by distinct files). Background: the same
+  salsa pattern caused jolars/arity#116; see arity commit `8cf322f` for the
+  general shape.
+
 ### Code Actions
 
 - [ ] Convert between table styles (simple, pipe, grid)
