@@ -99,6 +99,11 @@ tasks:
       - task: bench:incremental-gate
       - task: bench:write-phase-gate
 
+  bench:lsp-memory:
+    desc: Compare Panache and Marksman language-server memory on Linux
+    cmds:
+      - bash benches/compare_lsp_memory.sh
+
   refresh-benchmarks:
     desc: Re-run benchmarks and rebuild the performance page (invalidates freeze cache)
     cmds:

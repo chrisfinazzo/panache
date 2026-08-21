@@ -19,6 +19,7 @@
     pkgs.llvmPackages.bintools
     pkgs.rumdl
     pkgs.mado
+    pkgs.marksman
     pkgs.prettier
     pkgs.hyperfine
     pkgs.quartoMinimal

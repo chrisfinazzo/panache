@@ -4,8 +4,9 @@ description: >
   This page presents performance benchmarks for Panache, comparing its
   formatting and linting speed against popular alternatives like Prettier,
   Pandoc, rumdl, mdformat, mado, markdownlint, and markdownlint-cli2 on real
-  Quarto and Markdown documents. The benchmarks highlight Panache's efficiency
-  and suitability for on-save formatting and fast repository-wide checks.
+  Quarto and Markdown documents, and its language-server memory use against
+  Marksman. The benchmarks highlight Panache's efficiency and suitability for
+  editor and repository-wide work.
 engine: knitr
 ---
 
@@ -50,35 +51,41 @@ bash benches/compare_all.sh --json --out docs/guide/performance_data.json
 //| label: load-data
 //| echo: false
 
-data = FileAttachment("performance_data.json").json()
+data = FileAttachment("performance_data.json").json();
 ```
 
 ```{ojs}
 //| label: prepare-records
 //| echo: false
 
-documentMeta = new Map(data.documents.map(d => [d.id, d]))
+documentMeta = new Map(data.documents.map((d) => [d.id, d]));
 
 panacheByDoc = d3.rollup(
-  data.results.filter(r => r.formatter === "panache"),
-  v => v[0].mean_ms,
-  r => r.document
-)
+    data.results.filter((r) => r.formatter === "panache"),
+    (v) => v[0].mean_ms,
+    (r) => r.document,
+);
 
-records = data.results.map(r => ({
-  formatter: r.formatter,
-  document: r.document,
-  documentName: documentMeta.get(r.document)?.name ?? r.document,
-  mean_ms: r.mean_ms,
-  runs: r.runs,
-  ratio: r.mean_ms / panacheByDoc.get(r.document)
-}))
+records = data.results.map((r) => ({
+    formatter: r.formatter,
+    document: r.document,
+    documentName: documentMeta.get(r.document)?.name ?? r.document,
+    mean_ms: r.mean_ms,
+    runs: r.runs,
+    ratio: r.mean_ms / panacheByDoc.get(r.document),
+}));
 
 formatters = Array.from(
-  d3.rollup(records, v => d3.mean(v, d => d.ratio), d => d.formatter)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
+    d3.rollup(
+        records,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.formatter,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
 
-documentIds = data.documents.map(d => d.id)
+documentIds = data.documents.map((d) => d.id);
 ```
 
 ```{ojs}
@@ -86,19 +93,19 @@ documentIds = data.documents.map(d => d.id)
 //| echo: false
 
 formatterRanges = d3.rollup(
-  records.filter(r => r.formatter !== "panache"),
-  v => {
-    const lo = Math.round(d3.min(v, d => d.ratio));
-    const hi = Math.round(d3.max(v, d => d.ratio));
-    return `${lo}\u2013${hi}x`;
-  },
-  d => d.formatter
-)
+    records.filter((r) => r.formatter !== "panache"),
+    (v) => {
+        const lo = Math.round(d3.min(v, (d) => d.ratio));
+        const hi = Math.round(d3.max(v, (d) => d.ratio));
+        return `${lo}\u2013${hi}x`;
+    },
+    (d) => d.formatter,
+);
 
-prettierRange = formatterRanges.get("prettier") ?? "n/a"
-pandocRange = formatterRanges.get("pandoc") ?? "n/a"
-rumdlRange = formatterRanges.get("rumdl") ?? "n/a"
-mdformatRange = formatterRanges.get("mdformat") ?? "n/a"
+prettierRange = formatterRanges.get("prettier") ?? "n/a";
+pandocRange = formatterRanges.get("pandoc") ?? "n/a";
+rumdlRange = formatterRanges.get("rumdl") ?? "n/a";
+mdformatRange = formatterRanges.get("mdformat") ?? "n/a";
 ```
 
 ```{ojs}
@@ -113,7 +120,7 @@ html`<div class="callout-note">
     <li>Minimum runs: ${data.meta.min_runs}</li>
     <li>panache ${data.meta.tools.panache.version}, prettier ${data.meta.tools.prettier?.version ?? "n/a"}, pandoc ${data.meta.tools.pandoc?.version ?? "n/a"}, rumdl ${data.meta.tools.rumdl?.version ?? "n/a"}, mdformat ${data.meta.tools.mdformat?.version ?? "n/a"}, mado ${data.meta.tools.mado?.version ?? "n/a"}, markdownlint ${data.meta.tools.markdownlint?.version ?? "n/a"}, markdownlint-cli2 ${data.meta.tools["markdownlint-cli2"]?.version ?? "n/a"}</li>
   </ul>
-</div>`
+</div>`;
 ```
 
 ## Formatting
@@ -135,38 +142,45 @@ left-to-right from fastest to slowest on average.
 //|   time relative to panache (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 360,
-  x: {label: null, domain: formatters},
-  y: {label: "Mean time relative to panache (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: documentIds,
-    tickFormat: id => documentMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(records, {
-      x: "formatter",
-      y: "ratio",
-      fill: "document",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        document: "documentName",
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 360,
+    x: { label: null, domain: formatters },
+    y: {
+        label: "Mean time relative to panache (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: documentIds,
+        tickFormat: (id) => documentMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(records, {
+            x: "formatter",
+            y: "ratio",
+            fill: "document",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                document: "documentName",
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
 
 ```{ojs}
@@ -174,30 +188,30 @@ Plot.plot({
 //| echo: false
 
 prepareRepoSuiteRows = (data, toolLabels) => {
-  const repoMeta = new Map(data.repos.map(r => [r.id, r]))
-  const baselineByRepo = new Map(
-    data.results
-      .filter(r => r.tool === "panache" && !r.failed && r.mean_ms != null)
-      .map(r => [r.repo, r.mean_ms])
-  )
+    const repoMeta = new Map(data.repos.map((r) => [r.id, r]));
+    const baselineByRepo = new Map(
+        data.results
+            .filter((r) => r.tool === "panache" && !r.failed && r.mean_ms != null)
+            .map((r) => [r.repo, r.mean_ms]),
+    );
 
-  return data.results
-    .filter(r => !r.failed && r.mean_ms != null && baselineByRepo.has(r.repo))
-    .map(r => {
-      const repo = repoMeta.get(r.repo)
-      const repoLabel = repo?.name ?? r.repo
-      const toolLabel = toolLabels[r.tool] ?? r.tool
-      return {
-        ...r,
-        repoLabel,
-        toolLabel,
-        fileCount: repo?.file_count ?? null,
-        totalBytes: repo?.total_bytes ?? null,
-        barLabel: `${repoLabel} — ${toolLabel}`,
-        ratio: r.mean_ms / baselineByRepo.get(r.repo)
-      }
-    })
-}
+    return data.results
+        .filter((r) => !r.failed && r.mean_ms != null && baselineByRepo.has(r.repo))
+        .map((r) => {
+            const repo = repoMeta.get(r.repo);
+            const repoLabel = repo?.name ?? r.repo;
+            const toolLabel = toolLabels[r.tool] ?? r.tool;
+            return {
+                ...r,
+                repoLabel,
+                toolLabel,
+                fileCount: repo?.file_count ?? null,
+                totalBytes: repo?.total_bytes ?? null,
+                barLabel: `${repoLabel} — ${toolLabel}`,
+                ratio: r.mean_ms / baselineByRepo.get(r.repo),
+            };
+        });
+};
 ```
 
 ### Repository-Wide
@@ -216,7 +230,9 @@ bash benches/compare_repo_suite.sh --mode format --track markdown --out docs/gui
 //| label: load-repo-markdown-format
 //| echo: false
 
-repoMarkdownFormat = FileAttachment("performance_repo_markdown_format_data.json").json()
+repoMarkdownFormat = FileAttachment(
+    "performance_repo_markdown_format_data.json",
+).json();
 ```
 
 ```{ojs}
@@ -224,16 +240,24 @@ repoMarkdownFormat = FileAttachment("performance_repo_markdown_format_data.json"
 //| echo: false
 
 repoMarkdownFormatResults = prepareRepoSuiteRows(repoMarkdownFormat, {
-  panache: "panache",
-  prettier: "prettier",
-  rumdl: "rumdl",
-  mdformat: "mdformat"
-})
+    panache: "panache",
+    prettier: "prettier",
+    rumdl: "rumdl",
+    mdformat: "mdformat",
+});
 repoMarkdownFormatTools = Array.from(
-  d3.rollup(repoMarkdownFormatResults, v => d3.mean(v, d => d.ratio), d => d.toolLabel)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
-repoMarkdownFormatRepos = repoMarkdownFormat.repos.map(r => r.id)
-repoMarkdownFormatRepoMeta = new Map(repoMarkdownFormat.repos.map(r => [r.id, r]))
+    d3.rollup(
+        repoMarkdownFormatResults,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.toolLabel,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
+repoMarkdownFormatRepos = repoMarkdownFormat.repos.map((r) => r.id);
+repoMarkdownFormatRepoMeta = new Map(
+    repoMarkdownFormat.repos.map((r) => [r.id, r]),
+);
 ```
 
 In @fig-repo-markdown-format, we compare formatting time across panache,
@@ -249,40 +273,48 @@ repositories.
 //|   (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 320,
-  x: {label: null, domain: repoMarkdownFormatTools},
-  y: {label: "Mean time relative to panache within each repo (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: repoMarkdownFormatRepos,
-    tickFormat: id => repoMarkdownFormatRepoMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(repoMarkdownFormatResults, {
-      x: "toolLabel",
-      y: "ratio",
-      fill: "repo",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        repo: "repoLabel",
-        tool: "toolLabel",
-        files: d => d.fileCount,
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 320,
+    x: { label: null, domain: repoMarkdownFormatTools },
+    y: {
+        label:
+            "Mean time relative to panache within each repo (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: repoMarkdownFormatRepos,
+        tickFormat: (id) => repoMarkdownFormatRepoMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(repoMarkdownFormatResults, {
+            x: "toolLabel",
+            y: "ratio",
+            fill: "repo",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                repo: "repoLabel",
+                tool: "toolLabel",
+                files: (d) => d.fileCount,
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
 
 ```{bash}
@@ -299,7 +331,9 @@ bash benches/compare_repo_suite.sh --mode format --track quarto --out docs/guide
 //| label: load-repo-quarto-format
 //| echo: false
 
-repoQuartoFormat = FileAttachment("performance_repo_quarto_format_data.json").json()
+repoQuartoFormat = FileAttachment(
+    "performance_repo_quarto_format_data.json",
+).json();
 ```
 
 ```{ojs}
@@ -307,14 +341,22 @@ repoQuartoFormat = FileAttachment("performance_repo_quarto_format_data.json").js
 //| echo: false
 
 repoQuartoFormatResults = prepareRepoSuiteRows(repoQuartoFormat, {
-  panache: "panache",
-  rumdl: "rumdl"
-})
+    panache: "panache",
+    rumdl: "rumdl",
+});
 repoQuartoFormatTools = Array.from(
-  d3.rollup(repoQuartoFormatResults, v => d3.mean(v, d => d.ratio), d => d.toolLabel)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
-repoQuartoFormatRepos = repoQuartoFormat.repos.map(r => r.id)
-repoQuartoFormatRepoMeta = new Map(repoQuartoFormat.repos.map(r => [r.id, r]))
+    d3.rollup(
+        repoQuartoFormatResults,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.toolLabel,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
+repoQuartoFormatRepos = repoQuartoFormat.repos.map((r) => r.id);
+repoQuartoFormatRepoMeta = new Map(
+    repoQuartoFormat.repos.map((r) => [r.id, r]),
+);
 ```
 
 In @fig-repo-quarto-format, we compare formatting time across panache and rumdl
@@ -328,40 +370,48 @@ on tracked `.qmd` files from several Quarto repositories.
 //|   that repo (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 320,
-  x: {label: null, domain: repoQuartoFormatTools},
-  y: {label: "Mean time relative to panache within each repo (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: repoQuartoFormatRepos,
-    tickFormat: id => repoQuartoFormatRepoMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(repoQuartoFormatResults, {
-      x: "toolLabel",
-      y: "ratio",
-      fill: "repo",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        repo: "repoLabel",
-        tool: "toolLabel",
-        files: d => d.fileCount,
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 320,
+    x: { label: null, domain: repoQuartoFormatTools },
+    y: {
+        label:
+            "Mean time relative to panache within each repo (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: repoQuartoFormatRepos,
+        tickFormat: (id) => repoQuartoFormatRepoMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(repoQuartoFormatResults, {
+            x: "toolLabel",
+            y: "ratio",
+            fill: "repo",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                repo: "repoLabel",
+                tool: "toolLabel",
+                files: (d) => d.fileCount,
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
 
 Each dot is one repo/tool pair. Panache sits at 1× by construction (dashed
@@ -386,31 +436,37 @@ bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_dat
 //| label: load-lint-single-data
 //| echo: false
 
-lintSingleData = FileAttachment("performance_lint_single_data.json").json()
+lintSingleData = FileAttachment("performance_lint_single_data.json").json();
 ```
 
 ```{ojs}
 //| label: prepare-lint-single-records
 //| echo: false
 
-lintDocumentMeta = new Map(lintSingleData.documents.map(d => [d.id, d]))
+lintDocumentMeta = new Map(lintSingleData.documents.map((d) => [d.id, d]));
 lintPanacheByDoc = d3.rollup(
-  lintSingleData.results.filter(r => r.tool === "panache"),
-  v => v[0].mean_ms,
-  r => r.document
-)
-lintSingleRecords = lintSingleData.results.map(r => ({
-  tool: r.tool,
-  document: r.document,
-  documentName: lintDocumentMeta.get(r.document)?.name ?? r.document,
-  mean_ms: r.mean_ms,
-  runs: r.runs,
-  ratio: r.mean_ms / lintPanacheByDoc.get(r.document)
-}))
+    lintSingleData.results.filter((r) => r.tool === "panache"),
+    (v) => v[0].mean_ms,
+    (r) => r.document,
+);
+lintSingleRecords = lintSingleData.results.map((r) => ({
+    tool: r.tool,
+    document: r.document,
+    documentName: lintDocumentMeta.get(r.document)?.name ?? r.document,
+    mean_ms: r.mean_ms,
+    runs: r.runs,
+    ratio: r.mean_ms / lintPanacheByDoc.get(r.document),
+}));
 lintTools = Array.from(
-  d3.rollup(lintSingleRecords, v => d3.mean(v, d => d.ratio), d => d.tool)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
-lintDocumentIds = lintSingleData.documents.map(d => d.id)
+    d3.rollup(
+        lintSingleRecords,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.tool,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
+lintDocumentIds = lintSingleData.documents.map((d) => d.id);
 ```
 
 In @fig-lint-single-results, we compare linting time per document across panache
@@ -426,38 +482,45 @@ faster). Panache sits at 1× by construction.
 //|   the y-axis shows time relative to panache lint (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 300,
-  x: {label: null, domain: lintTools},
-  y: {label: "Mean time relative to panache lint (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: lintDocumentIds,
-    tickFormat: id => lintDocumentMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(lintSingleRecords, {
-      x: "tool",
-      y: "ratio",
-      fill: "document",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        document: "documentName",
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache lint": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 300,
+    x: { label: null, domain: lintTools },
+    y: {
+        label: "Mean time relative to panache lint (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: lintDocumentIds,
+        tickFormat: (id) => lintDocumentMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(lintSingleRecords, {
+            x: "tool",
+            y: "ratio",
+            fill: "document",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                document: "documentName",
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache lint": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
 
 ### Repository-Wide
@@ -482,7 +545,9 @@ bash benches/compare_repo_suite.sh --mode lint --track markdown --out docs/guide
 //| label: load-repo-markdown-lint
 //| echo: false
 
-repoMarkdownLint = FileAttachment("performance_repo_markdown_lint_data.json").json()
+repoMarkdownLint = FileAttachment(
+    "performance_repo_markdown_lint_data.json",
+).json();
 ```
 
 ```{ojs}
@@ -490,17 +555,25 @@ repoMarkdownLint = FileAttachment("performance_repo_markdown_lint_data.json").js
 //| echo: false
 
 repoMarkdownLintResults = prepareRepoSuiteRows(repoMarkdownLint, {
-  panache: "panache lint",
-  rumdl: "rumdl check",
-  mado: "mado check",
-  markdownlint: "markdownlint",
-  "markdownlint-cli2": "markdownlint-cli2"
-})
+    panache: "panache lint",
+    rumdl: "rumdl check",
+    mado: "mado check",
+    markdownlint: "markdownlint",
+    "markdownlint-cli2": "markdownlint-cli2",
+});
 repoMarkdownLintTools = Array.from(
-  d3.rollup(repoMarkdownLintResults, v => d3.mean(v, d => d.ratio), d => d.toolLabel)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
-repoMarkdownLintRepos = repoMarkdownLint.repos.map(r => r.id)
-repoMarkdownLintRepoMeta = new Map(repoMarkdownLint.repos.map(r => [r.id, r]))
+    d3.rollup(
+        repoMarkdownLintResults,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.toolLabel,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
+repoMarkdownLintRepos = repoMarkdownLint.repos.map((r) => r.id);
+repoMarkdownLintRepoMeta = new Map(
+    repoMarkdownLint.repos.map((r) => [r.id, r]),
+);
 ```
 
 ```{ojs}
@@ -512,40 +585,48 @@ repoMarkdownLintRepoMeta = new Map(repoMarkdownLint.repos.map(r => [r.id, r]))
 //|   relative to panache lint within that repo (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 300,
-  x: {label: null, domain: repoMarkdownLintTools},
-  y: {label: "Mean time relative to panache lint within each repo (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: repoMarkdownLintRepos,
-    tickFormat: id => repoMarkdownLintRepoMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(repoMarkdownLintResults, {
-      x: "toolLabel",
-      y: "ratio",
-      fill: "repo",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        repo: "repoLabel",
-        tool: "toolLabel",
-        files: d => d.fileCount,
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache lint": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 300,
+    x: { label: null, domain: repoMarkdownLintTools },
+    y: {
+        label:
+            "Mean time relative to panache lint within each repo (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: repoMarkdownLintRepos,
+        tickFormat: (id) => repoMarkdownLintRepoMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(repoMarkdownLintResults, {
+            x: "toolLabel",
+            y: "ratio",
+            fill: "repo",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                repo: "repoLabel",
+                tool: "toolLabel",
+                files: (d) => d.fileCount,
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache lint": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
 
 In @fig-repo-quarto-lint, we compare linting time across panache and rumdl on
@@ -565,7 +646,9 @@ bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/p
 //| label: load-repo-quarto-lint
 //| echo: false
 
-repoQuartoLint = FileAttachment("performance_repo_quarto_lint_data.json").json()
+repoQuartoLint = FileAttachment(
+    "performance_repo_quarto_lint_data.json",
+).json();
 ```
 
 ```{ojs}
@@ -573,14 +656,20 @@ repoQuartoLint = FileAttachment("performance_repo_quarto_lint_data.json").json()
 //| echo: false
 
 repoQuartoLintResults = prepareRepoSuiteRows(repoQuartoLint, {
-  panache: "panache lint",
-  rumdl: "rumdl check"
-})
+    panache: "panache lint",
+    rumdl: "rumdl check",
+});
 repoQuartoLintTools = Array.from(
-  d3.rollup(repoQuartoLintResults, v => d3.mean(v, d => d.ratio), d => d.toolLabel)
-).sort(([, a], [, b]) => a - b).map(([k]) => k)
-repoQuartoLintRepos = repoQuartoLint.repos.map(r => r.id)
-repoQuartoLintRepoMeta = new Map(repoQuartoLint.repos.map(r => [r.id, r]))
+    d3.rollup(
+        repoQuartoLintResults,
+        (v) => d3.mean(v, (d) => d.ratio),
+        (d) => d.toolLabel,
+    ),
+)
+    .sort(([, a], [, b]) => a - b)
+    .map(([k]) => k);
+repoQuartoLintRepos = repoQuartoLint.repos.map((r) => r.id);
+repoQuartoLintRepoMeta = new Map(repoQuartoLint.repos.map((r) => [r.id, r]));
 ```
 
 ```{ojs}
@@ -591,47 +680,203 @@ repoQuartoLintRepoMeta = new Map(repoQuartoLint.repos.map(r => [r.id, r]))
 //|   that repo (×, lower is faster)."
 
 Plot.plot({
-  marginLeft: 60,
-  marginRight: 20,
-  marginBottom: 40,
-  marginTop: 20,
-  height: 320,
-  x: {label: null, domain: repoQuartoLintTools},
-  y: {label: "Mean time relative to panache lint within each repo (×, lower is faster)", grid: true},
-  color: {
-    legend: true,
-    domain: repoQuartoLintRepos,
-    tickFormat: id => repoQuartoLintRepoMeta.get(id)?.name ?? id,
-    scheme: "tableau10"
-  },
-  marks: [
-    Plot.ruleY([1], {stroke: "#2a9d8f", strokeWidth: 2, strokeDasharray: "4 3"}),
-    Plot.dot(repoQuartoLintResults, {
-      x: "toolLabel",
-      y: "ratio",
-      fill: "repo",
-      r: 6,
-      fillOpacity: 0.85,
-      stroke: "white",
-      strokeWidth: 1,
-      channels: {
-        repo: "repoLabel",
-        tool: "toolLabel",
-        files: d => d.fileCount,
-        "time (ms)": d => d.mean_ms.toFixed(1),
-        "× panache lint": d => d.ratio.toFixed(2)
-      },
-      tip: true
-    })
-  ]
-})
+    marginLeft: 60,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 20,
+    height: 320,
+    x: { label: null, domain: repoQuartoLintTools },
+    y: {
+        label:
+            "Mean time relative to panache lint within each repo (×, lower is faster)",
+        grid: true,
+    },
+    color: {
+        legend: true,
+        domain: repoQuartoLintRepos,
+        tickFormat: (id) => repoQuartoLintRepoMeta.get(id)?.name ?? id,
+        scheme: "tableau10",
+    },
+    marks: [
+        Plot.ruleY([1], {
+            stroke: "#2a9d8f",
+            strokeWidth: 2,
+            strokeDasharray: "4 3",
+        }),
+        Plot.dot(repoQuartoLintResults, {
+            x: "toolLabel",
+            y: "ratio",
+            fill: "repo",
+            r: 6,
+            fillOpacity: 0.85,
+            stroke: "white",
+            strokeWidth: 1,
+            channels: {
+                repo: "repoLabel",
+                tool: "toolLabel",
+                files: (d) => d.fileCount,
+                "time (ms)": (d) => d.mean_ms.toFixed(1),
+                "× panache lint": (d) => d.ratio.toFixed(2),
+            },
+            tip: true,
+        }),
+    ],
+});
 ```
+
+## Language-Server Memory
+
+This Linux-only benchmark compares the complete process-tree memory used by
+Panache and [Marksman](https://github.com/artempyanykh/marksman). It opens the
+five largest tracked Markdown files in a pinned revision of the Rust Book,
+requests diagnostics and navigation features, and then performs 1,000
+fixed-width reference-label renames. Each rename is followed by a definition
+request, which forces the server to observe the updated label index.
+
+The runner samples RSS and proportional set size (PSS) from `/proc` every 150
+milliseconds. It records a milestone after the process tree remains below 5% of
+one CPU core for five seconds, and reports medians from three fresh server
+processes run in alternating order.
+
+```{ojs}
+//| label: load-lsp-memory
+//| echo: false
+
+lspMemory = FileAttachment("performance_lsp_memory_data.json").json();
+```
+
+```{ojs}
+//| label: prepare-lsp-memory
+//| echo: false
+
+lspMemoryMilestones = [
+    { key: "baseline", label: "Baseline" },
+    { key: "settled", label: "Files open" },
+    { key: "edited", label: "After edits" },
+    { key: "peak", label: "Peak" },
+];
+
+lspMemoryRows = lspMemory.servers.flatMap((server) =>
+    lspMemoryMilestones.map((milestone) => ({
+        server: server.label,
+        milestone: milestone.label,
+        rss: server.aggregate.milestones[milestone.key].rss_mb,
+        pss: server.aggregate.milestones[milestone.key].pss_mb,
+    })),
+);
+
+lspMemoryTable = lspMemory.servers.map((server) => ({
+    server: server.label,
+    settledRss: server.aggregate.milestones.settled.rss_mb,
+    editedRss: server.aggregate.milestones.edited.rss_mb,
+    editedPss: server.aggregate.milestones.edited.pss_mb,
+    peakRss: server.aggregate.milestones.peak.rss_mb,
+    ratio: server.aggregate.relative_to_panache.edited_rss,
+}));
+```
+
+```{ojs}
+//| label: render-lsp-memory-environment
+//| echo: false
+
+html`<div class="callout-note">
+  <div class="callout-header" style="font-weight: 600">Test Environment</div>
+  <ul style="margin: 0">
+    <li>Generated: ${new Date(lspMemory.meta.generated_at).toUTCString()}</li>
+    <li>Host: ${lspMemory.meta.host.cpu} (${lspMemory.meta.host.os}/${lspMemory.meta.host.arch}, ${lspMemory.meta.host.memory_gb} GiB RAM)</li>
+    <li>Corpus: ${lspMemory.corpus.name} at ${lspMemory.corpus.revision.slice(0, 12)}; ${lspMemory.session.file_count} open files (${(lspMemory.session.opened_bytes / 1024).toFixed(1)} KiB)</li>
+    <li>Workload: ${lspMemory.meta.edit_count.toLocaleString()} edits; ${lspMemory.meta.runs} fresh processes per server</li>
+    <li>${lspMemory.servers.map((server) => `${server.label}: ${server.version.replace(/^panache /, "")}`).join(", ")}</li>
+  </ul>
+</div>`;
+```
+
+```{ojs}
+//| label: fig-lsp-memory
+//| echo: false
+//| fig-cap: "Median whole-process-tree RSS during the language-server workload.
+//|   Each milestone is measured after quiescence, except peak, which is the
+//|   largest 150 ms sample from the complete session."
+
+Plot.plot({
+    marginLeft: 55,
+    marginRight: 20,
+    marginBottom: 40,
+    marginTop: 25,
+    height: 320,
+    x: { label: null },
+    y: { label: "Median process-tree RSS (MB)", grid: true },
+    fx: { label: null, domain: lspMemoryMilestones.map((d) => d.label) },
+    color: { legend: true, domain: ["Panache", "Marksman"], scheme: "tableau10" },
+    marks: [
+        Plot.barY(lspMemoryRows, {
+            fx: "milestone",
+            x: "server",
+            y: "rss",
+            fill: "server",
+            tip: true,
+        }),
+        Plot.text(lspMemoryRows, {
+            fx: "milestone",
+            x: "server",
+            y: "rss",
+            text: (d) => d.rss.toFixed(1),
+            dy: -7,
+        }),
+        Plot.ruleY([0]),
+    ],
+});
+```
+
+```{ojs}
+//| label: table-lsp-memory
+//| echo: false
+
+Inputs.table(lspMemoryTable, {
+    columns: [
+        "server",
+        "settledRss",
+        "editedRss",
+        "editedPss",
+        "peakRss",
+        "ratio",
+    ],
+    header: {
+        server: "Server",
+        settledRss: "Files-open RSS (MB)",
+        editedRss: "Post-edit RSS (MB)",
+        editedPss: "Post-edit PSS (MB)",
+        peakRss: "Peak RSS (MB)",
+        ratio: "Post-edit RSS vs Panache",
+    },
+    format: {
+        settledRss: (value) => value.toFixed(1),
+        editedRss: (value) => value.toFixed(1),
+        editedPss: (value) => value.toFixed(1),
+        peakRss: (value) => value.toFixed(1),
+        ratio: (value) => `${value.toFixed(1)}×`,
+    },
+});
+```
+
+Marksman used 8.2 times as much RSS as Panache after the files were open and 7.5
+times as much after edit churn. Panache's median RSS rose from 16.8 MB to 21.5
+MB during the 1,000 edits; the three runs finished within 0.2 MB of one another.
+This workload therefore did not reproduce unbounded growth in Panache.
+
+The comparison measures default architecture, not identical internal work.
+Marksman indexes the Markdown workspace eagerly, while Panache analyzes open
+documents and discovers project relationships lazily. Both servers receive the
+same open, edit, and navigation sequence, while diagnostics use each server's
+advertised pull or push mode. Their memory totals reflect those different
+strategies.
 
 ## Reproducing
 
-All benchmarks are reproducible and require
-[`hyperfine`](https://github.com/sharkdp/hyperfine) to run. The scripts in
-`benches/` are designed to be run from the repository root:
+All benchmarks are reproducible. The formatting and linting comparisons require
+[`hyperfine`](https://github.com/sharkdp/hyperfine); the language-server memory
+comparison requires Linux with `/proc` and Marksman. The scripts in `benches/`
+are designed to be run from the repository root:
 
 ```bash
 # Download test documents (idempotent)
@@ -654,6 +899,9 @@ bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/p
 
 # Run per-document lint benchmark
 bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_data.json
+
+# Run the Linux language-server memory benchmark
+task bench:lsp-memory
 
 # Or run the human-readable text variant
 bash benches/compare_all.sh

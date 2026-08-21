@@ -26,6 +26,9 @@ task bench:write-phase-gate
 # Run the LSP settle benchmark (what publishing one document costs per settle)
 cargo bench --bench lsp_settle
 
+# Compare Panache and Marksman language-server memory on Linux
+task bench:lsp-memory
+
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
 
@@ -138,6 +141,20 @@ valgrind --tool=cachegrind cargo bench --bench formatting
   - Drives the data-driven `docs/guide/performance.qmd` page; `freeze: true` on
     that doc means the benchmark only re-runs when you delete
     `docs/_freeze/guide/performance/` and re-render.
+- **`benches/compare_lsp_memory.sh`**: Linux language-server memory comparison
+  - Checks out a pinned revision of the Rust Book into a gitignored directory.
+  - Opens the five largest tracked Markdown files under `src/`, exercises
+    diagnostics and navigation, and performs 1,000 reference-label edits.
+  - Runs three fresh processes per server in alternating order and records the
+    median whole-process-tree RSS and PSS at baseline, settled, edited, and peak
+    milestones.
+  - Launches Panache with an isolated GFM config and gives both servers isolated
+    user config and cache directories.
+  - Writes raw runs and aggregate comparisons to
+    `docs/guide/performance_lsp_memory_data.json` by default. Override the run
+    with the `PANACHE_LSP_MEMORY_RUNS`, `PANACHE_LSP_MEMORY_OPEN_FILES`,
+    `PANACHE_LSP_MEMORY_EDITS`, `PANACHE_LSP_MEMORY_QUIET_SECONDS`, and
+    `PANACHE_LSP_MEMORY_SETTLE_TIMEOUT` environment variables.
 - **`benches/generate_docs.sh`**: Captures results for documentation
   - Generates `benches/benchmark_results.json` (machine-readable)
   - Renders `docs/benchmarks.qmd` from JSON

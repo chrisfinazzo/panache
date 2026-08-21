@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "generated_at": "2026-08-21T21:23:58.024059+00:00",
+    "host": {
+      "os": "Linux",
+      "arch": "x86_64",
+      "cpu": "AMD Ryzen 9 7900 12-Core Processor",
+      "memory_gb": 61
+    },
+    "runs": 3,
+    "quiet_seconds": 5.0,
+    "settle_timeout_seconds": 120.0,
+    "edit_count": 1000
+  },
+  "corpus": {
+    "name": "The Rust Programming Language",
+    "repo": "https://github.com/rust-lang/book.git",
+    "revision": "917544888a55e4da7109bdba8c88c893c0da70f4"
+  },
+  "session": {
+    "project": "rust-book",
+    "files": [
+      "src/ch02-00-guessing-game-tutorial.md",
+      "src/ch21-02-multithreaded.md",
+      "src/ch10-03-lifetime-syntax.md",
+      "src/ch20-01-unsafe-rust.md",
+      "src/ch18-03-oo-design-patterns.md"
+    ],
+    "file_count": 5,
+    "disk_bytes": 161453,
+    "opened_bytes": 161556,
+    "edited_file": "src/ch02-00-guessing-game-tutorial.md"
+  },
+  "servers": [
+    {
+      "key": "panache",
+      "label": "Panache",
+      "doing": "open-document analysis with lazily discovered project relationships",
+      "version": "panache 3.6.1",
+      "command": "panache --config <isolated-gfm-config> lsp",
+      "runs": [
+        {
+          "run": 1,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 10.1,
+              "pss_mb": 8.3,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 16.8,
+              "pss_mb": 15.0,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 21.4,
+              "pss_mb": 19.6,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 21.4,
+              "pss_mb": 19.6,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.02,
+          "baseline_seconds": 4.52,
+          "settled_seconds": 5.53,
+          "edit_seconds": 6.93,
+          "total_seconds": 12.47,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 10,
+          "definition_requests": 1000,
+          "samples": 83
+        },
+        {
+          "run": 2,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 10.1,
+              "pss_mb": 8.2,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 16.8,
+              "pss_mb": 14.9,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 21.5,
+              "pss_mb": 19.7,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 21.5,
+              "pss_mb": 19.7,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.0,
+          "baseline_seconds": 4.5,
+          "settled_seconds": 5.52,
+          "edit_seconds": 6.93,
+          "total_seconds": 12.45,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 10,
+          "definition_requests": 1000,
+          "samples": 83
+        },
+        {
+          "run": 3,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 10.1,
+              "pss_mb": 8.2,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 16.7,
+              "pss_mb": 14.9,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 21.6,
+              "pss_mb": 19.8,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 21.6,
+              "pss_mb": 19.8,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.0,
+          "baseline_seconds": 4.5,
+          "settled_seconds": 5.52,
+          "edit_seconds": 6.98,
+          "total_seconds": 12.49,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 10,
+          "definition_requests": 1000,
+          "samples": 83
+        }
+      ],
+      "aggregate": {
+        "milestones": {
+          "baseline": {
+            "rss_mb": 10.1,
+            "pss_mb": 8.2,
+            "processes": 1
+          },
+          "settled": {
+            "rss_mb": 16.8,
+            "pss_mb": 14.9,
+            "processes": 1
+          },
+          "edited": {
+            "rss_mb": 21.5,
+            "pss_mb": 19.7,
+            "processes": 1
+          },
+          "peak": {
+            "rss_mb": 21.5,
+            "pss_mb": 19.7,
+            "processes": 1
+          }
+        },
+        "timings": {
+          "init_seconds": 0.0,
+          "baseline_seconds": 4.5,
+          "settled_seconds": 5.52,
+          "edit_seconds": 6.93,
+          "total_seconds": 12.47
+        },
+        "samples": 83,
+        "relative_to_panache": {
+          "baseline_rss": 1.0,
+          "settled_rss": 1.0,
+          "edited_rss": 1.0,
+          "peak_rss": 1.0
+        }
+      }
+    },
+    {
+      "key": "marksman",
+      "label": "Marksman",
+      "doing": "workspace-wide Markdown indexing and cross-reference analysis",
+      "version": "2026-02-08",
+      "command": "marksman server",
+      "runs": [
+        {
+          "run": 1,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 129.0,
+              "pss_mb": 124.3,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 137.7,
+              "pss_mb": 132.9,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 165.8,
+              "pss_mb": 160.9,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 171.1,
+              "pss_mb": 166.2,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.78,
+          "baseline_seconds": 6.28,
+          "settled_seconds": 12.84,
+          "edit_seconds": 43.33,
+          "total_seconds": 56.17,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 5,
+          "diagnostic_requests": 0,
+          "definition_requests": 1000,
+          "samples": 367
+        },
+        {
+          "run": 2,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 128.7,
+              "pss_mb": 124.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 144.3,
+              "pss_mb": 139.5,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 160.3,
+              "pss_mb": 156.3,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 169.6,
+              "pss_mb": 164.7,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.83,
+          "baseline_seconds": 6.33,
+          "settled_seconds": 12.97,
+          "edit_seconds": 38.57,
+          "total_seconds": 51.54,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 5,
+          "diagnostic_requests": 0,
+          "definition_requests": 1000,
+          "samples": 337
+        },
+        {
+          "run": 3,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 128.4,
+              "pss_mb": 124.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 137.3,
+              "pss_mb": 132.7,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 160.7,
+              "pss_mb": 156.1,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 170.1,
+              "pss_mb": 165.6,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.75,
+          "baseline_seconds": 6.25,
+          "settled_seconds": 12.82,
+          "edit_seconds": 36.5,
+          "total_seconds": 49.32,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 5,
+          "diagnostic_requests": 0,
+          "definition_requests": 1000,
+          "samples": 323
+        }
+      ],
+      "aggregate": {
+        "milestones": {
+          "baseline": {
+            "rss_mb": 128.7,
+            "pss_mb": 124.0,
+            "processes": 1
+          },
+          "settled": {
+            "rss_mb": 137.7,
+            "pss_mb": 132.9,
+            "processes": 1
+          },
+          "edited": {
+            "rss_mb": 160.7,
+            "pss_mb": 156.3,
+            "processes": 1
+          },
+          "peak": {
+            "rss_mb": 170.1,
+            "pss_mb": 165.6,
+            "processes": 1
+          }
+        },
+        "timings": {
+          "init_seconds": 0.78,
+          "baseline_seconds": 6.28,
+          "settled_seconds": 12.84,
+          "edit_seconds": 38.57,
+          "total_seconds": 51.54
+        },
+        "samples": 337,
+        "relative_to_panache": {
+          "baseline_rss": 12.7,
+          "settled_rss": 8.2,
+          "edited_rss": 7.5,
+          "peak_rss": 7.9
+        }
+      }
+    }
+  ]
+}
