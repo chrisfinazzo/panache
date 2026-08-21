@@ -79,30 +79,12 @@ pub struct InternedPath<'db> {
     pub path: PathBuf,
 }
 
-#[salsa::interned]
-pub struct InternedLabel<'db> {
-    #[returns(ref)]
-    pub label: String,
-}
-
 pub fn intern_path<'db>(db: &'db dyn Db, path: &Path) -> InternedPath<'db> {
     InternedPath::new(db, path.to_path_buf())
 }
 
-pub fn intern_label<'db>(db: &'db dyn Db, label: &str) -> InternedLabel<'db> {
-    InternedLabel::new(db, label.to_owned())
-}
-
-pub fn intern_normalized_label<'db>(db: &'db dyn Db, label: &str) -> InternedLabel<'db> {
-    InternedLabel::new(db, normalize_label(label))
-}
-
 pub fn resolve_path(db: &dyn Db, path: InternedPath<'_>) -> PathBuf {
     path.path(db).clone()
-}
-
-pub fn resolve_label(db: &dyn Db, label: InternedLabel<'_>) -> String {
-    label.label(db).clone()
 }
 
 /// Document-scoped reference-definition label set for `(file, config)`.
@@ -1757,21 +1739,13 @@ pub struct DefinitionIndex {
     example_labels: HashMap<String, DefinitionLocation>,
 }
 
-#[derive(Default)]
-struct InternedDefinitionIndex<'db> {
-    references: HashMap<InternedLabel<'db>, DefinitionLocation>,
-    footnotes: HashMap<InternedLabel<'db>, DefinitionLocation>,
-    crossrefs: HashMap<InternedLabel<'db>, DefinitionLocation>,
-    example_labels: HashMap<InternedLabel<'db>, DefinitionLocation>,
-}
-
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> DefinitionIndex {
     // The definitions' source path is the document's own path, resolved from its
     // `FileText` identity (empty for an in-memory buffer).
     let path = db.path_of(file).unwrap_or_default();
     let tree = parsed_tree_root(db, file, config);
-    let mut index = InternedDefinitionIndex::default();
+    let mut index = DefinitionIndex::default();
 
     for def in tree.descendants().filter_map(ReferenceDefinition::cast) {
         db.unwind_if_revision_cancelled();
@@ -1783,7 +1757,7 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
             path: path.clone(),
             range: def.syntax().text_range(),
         };
-        insert_reference(db, &mut index, &label, location);
+        insert_reference(&mut index, &label, location);
     }
 
     for def in tree.descendants().filter_map(FootnoteDefinition::cast) {
@@ -1796,7 +1770,7 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
             path: path.clone(),
             range: def.syntax().text_range(),
         };
-        insert_footnote(db, &mut index, &id, location);
+        insert_footnote(&mut index, &id, location);
     }
 
     for item in tree.descendants().filter_map(ListItem::cast) {
@@ -1808,7 +1782,7 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
             path: path.clone(),
             range,
         };
-        insert_example_label(db, &mut index, &label, location);
+        insert_example_label(&mut index, &label, location);
     }
 
     for attribute in tree.descendants().filter_map(AttributeNode::cast) {
@@ -1818,7 +1792,7 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
                 path: path.clone(),
                 range: attribute.syntax().text_range(),
             };
-            insert_crossref(db, &mut index, &id, location);
+            insert_crossref(&mut index, &id, location);
         }
     }
 
@@ -1833,7 +1807,7 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
                 path: path.clone(),
                 range: label.declaration_range(),
             };
-            insert_crossref(db, &mut index, value, location);
+            insert_crossref(&mut index, value, location);
         }
     }
 
@@ -1847,74 +1821,27 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
         );
     }
 
-    index.into_owned(db)
+    index
 }
 
-fn insert_reference<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
-    label: &str,
-    location: DefinitionLocation,
-) {
-    let key = intern_normalized_label(db, label);
+fn insert_reference(index: &mut DefinitionIndex, label: &str, location: DefinitionLocation) {
+    let key = normalize_label(label);
     index.references.entry(key).or_insert(location);
 }
 
-fn insert_footnote<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
-    id: &str,
-    location: DefinitionLocation,
-) {
-    let key = intern_normalized_label(db, id);
+fn insert_footnote(index: &mut DefinitionIndex, id: &str, location: DefinitionLocation) {
+    let key = normalize_label(id);
     index.footnotes.entry(key).or_insert(location);
 }
 
-fn insert_crossref<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
-    id: &str,
-    location: DefinitionLocation,
-) {
-    let key = intern_label(db, &normalize_anchor_label(id));
+fn insert_crossref(index: &mut DefinitionIndex, id: &str, location: DefinitionLocation) {
+    let key = normalize_anchor_label(id);
     index.crossrefs.entry(key).or_insert(location);
 }
 
-fn insert_example_label<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
-    label: &str,
-    location: DefinitionLocation,
-) {
-    let key = intern_normalized_label(db, label);
+fn insert_example_label(index: &mut DefinitionIndex, label: &str, location: DefinitionLocation) {
+    let key = normalize_label(label);
     index.example_labels.entry(key).or_insert(location);
-}
-
-impl InternedDefinitionIndex<'_> {
-    fn into_owned(self, db: &dyn Db) -> DefinitionIndex {
-        DefinitionIndex {
-            references: self
-                .references
-                .into_iter()
-                .map(|(label, location)| (resolve_label(db, label), location))
-                .collect(),
-            footnotes: self
-                .footnotes
-                .into_iter()
-                .map(|(label, location)| (resolve_label(db, label), location))
-                .collect(),
-            crossrefs: self
-                .crossrefs
-                .into_iter()
-                .map(|(label, location)| (resolve_label(db, label), location))
-                .collect(),
-            example_labels: self
-                .example_labels
-                .into_iter()
-                .map(|(label, location)| (resolve_label(db, label), location))
-                .collect(),
-        }
-    }
 }
 
 impl DefinitionIndex {
@@ -1992,9 +1919,9 @@ impl DefinitionLocation {
     }
 }
 
-fn collect_bookdown_definitions<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
+fn collect_bookdown_definitions(
+    db: &dyn Db,
+    index: &mut DefinitionIndex,
     tree: &SyntaxNode,
     path: &Path,
     collect_equation_definitions: bool,
@@ -2030,7 +1957,7 @@ fn collect_bookdown_definitions<'db>(
                         path: path.to_path_buf(),
                         range: token.text_range(),
                     };
-                    insert_crossref(db, index, label, location);
+                    insert_crossref(index, label, location);
                 }
             }
             _ => {}
@@ -2041,9 +1968,9 @@ fn collect_bookdown_definitions<'db>(
 /// Scan a single text span for bookdown `(\#...)` declarations and text
 /// references, inserting any found into `index`. `base_start` is the document
 /// byte offset of `text[0]` so emitted ranges are document-absolute.
-fn scan_bookdown_definitions_in_text<'db>(
-    db: &'db dyn Db,
-    index: &mut InternedDefinitionIndex<'db>,
+fn scan_bookdown_definitions_in_text(
+    db: &dyn Db,
+    index: &mut DefinitionIndex,
     path: &Path,
     collect_equation_definitions: bool,
     text: &str,
@@ -2074,7 +2001,7 @@ fn scan_bookdown_definitions_in_text<'db>(
                 path: path.to_path_buf(),
                 range,
             };
-            insert_crossref(db, index, label, location);
+            insert_crossref(index, label, location);
             offset += len;
             continue;
         }
@@ -2091,7 +2018,7 @@ fn scan_bookdown_definitions_in_text<'db>(
                 path: path.to_path_buf(),
                 range,
             };
-            insert_crossref(db, index, label, location);
+            insert_crossref(index, label, location);
             offset += len;
             continue;
         }
@@ -2104,7 +2031,7 @@ fn scan_bookdown_definitions_in_text<'db>(
                 path: path.to_path_buf(),
                 range,
             };
-            insert_crossref(db, index, label, location);
+            insert_crossref(index, label, location);
             offset += len;
             continue;
         }
@@ -3267,14 +3194,6 @@ mod tests {
     }
 
     #[test]
-    fn intern_normalized_label_collapses_and_lowercases() {
-        let db = SalsaDb::default();
-        let a = intern_normalized_label(&db, "Foo  Bar");
-        let b = intern_normalized_label(&db, "foo bar");
-        assert!(a == b);
-    }
-
-    #[test]
     fn intern_path_roundtrips_to_owned_path() {
         let db = SalsaDb::default();
         let path = PathBuf::from("/tmp/example.qmd");
@@ -4426,6 +4345,25 @@ mod tests {
             .iter()
             .filter(|key| key.starts_with(&needle))
             .count()
+    }
+
+    #[test]
+    fn definition_index_does_not_intern_labels() {
+        let db = SalsaDb::default();
+        let file = FileText::from_str(&db, "[Transient Label]: /target\n");
+        let config = FileConfig::new(&db, Config::default());
+
+        let index = definition_index(&db, file, config);
+        assert!(index.find_reference("transient label").is_some());
+
+        let memory = (&db as &dyn salsa::Database).memory_usage();
+        assert!(
+            memory
+                .structs
+                .iter()
+                .all(|ingredient| ingredient.debug_name() != "InternedLabel"),
+            "definition indexing must not create a database-wide label interner"
+        );
     }
 
     #[test]
