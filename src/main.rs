@@ -628,8 +628,8 @@ fn load_config_for_cli(
         panache::config::load(config_path, start_dir, input_path, flavor_override)?
     } else {
         let mut cfg = panache::Config::default();
-        // Delegate to the canonical extension→flavor map so `--isolated` stays
-        // in lockstep with the config-file path (notably mdsvex's `.svx` and the
+        // Delegate to the canonical flavor defaults so `--isolated` stays in
+        // lockstep with the config-file path (notably mdsvex's `.svx` and the
         // compound `.svelte.md`); a reduced match here previously omitted them.
         let isolated_flavor = flavor_override
             .or_else(|| input_path.and_then(|p| panache::config::detect_flavor_from_path(p, &cfg)));
@@ -637,6 +637,7 @@ fn load_config_for_cli(
         if let Some(flavor) = isolated_flavor {
             cfg.flavor = flavor;
             cfg.extensions = panache::config::Extensions::for_flavor(flavor);
+            cfg.formatter_extensions = panache::config::FormatterExtensions::for_flavor(flavor);
         }
         (cfg, panache::config::ConfigSource::None)
     };

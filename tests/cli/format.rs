@@ -485,6 +485,16 @@ fn test_format_isolated_ignores_discovered_config_for_stdin() {
 }
 
 #[test]
+fn test_format_isolated_flavor_applies_formatter_extensions() {
+    cargo_bin_cmd!("panache")
+        .args(["--flavor", "gfm", "--isolated", "--quiet", "format"])
+        .write_stdin("alpha—beta; gamma–delta; wait… really?\n")
+        .assert()
+        .success()
+        .stdout("alpha—beta; gamma–delta; wait… really?\n");
+}
+
+#[test]
 fn test_format_check_cache_reuse_and_config_invalidation() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("test.qmd");
