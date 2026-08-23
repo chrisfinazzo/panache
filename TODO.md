@@ -10,7 +10,7 @@ This document tracks implementation status for Panache's features.
   shared `Formatter` state in the core module and preserve idempotency
   golden coverage throughout.
 
-- [ ] Split `crates/panache-parser/src/parser/core.rs` at its line-framing and
+- [x] Split `crates/panache-parser/src/parser/core.rs` at its line-framing and
   inner-content orchestration boundary. Extract cohesive list-item,
   blockquote, definition-list, and HTML-interruption protocols, but retain
   the parser's single-pass block-then-inline architecture in the
