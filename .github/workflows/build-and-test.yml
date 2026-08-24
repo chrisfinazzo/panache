@@ -74,6 +74,46 @@ jobs:
         working-directory: editors/code
         run: npm run compile
 
+  zed:
+    name: Zed Extension
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install
+
+      - name: Install wasm target
+        run: rustup target add wasm32-wasip2
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editors/zed
+          prefix-key: "v1-zed"
+
+      # `editors/zed` is its own workspace, so none of the workspace-wide jobs
+      # above reach it: until this job existed, the extension was only ever
+      # compiled by Zed's registry, long after the change that broke it landed.
+      - name: Check formatting
+        working-directory: editors/zed
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: editors/zed
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        working-directory: editors/zed
+        run: cargo test --locked
+
+      # `--locked` is also what catches a `Cargo.lock` left behind by a version
+      # bump, since nothing else regenerates it.
+      - name: Build extension
+        working-directory: editors/zed
+        run: cargo build --release --target wasm32-wasip2 --locked
+
   cargo-deny:
     name: Cargo Deny
     runs-on: ubuntu-latest
@@ -86,7 +126,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [cargo-deny, test, extension]
+    needs: [cargo-deny, test, extension, zed]
     runs-on: ubuntu-latest
     permissions:
       contents: write
