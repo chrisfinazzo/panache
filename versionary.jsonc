@@ -52,6 +52,14 @@
           "type": "toml",
           "path": "extension.toml",
           "field-path": "$.version"
+        },
+        // `Cargo.lock` records the crate's own version, and nothing else keeps
+        // it in step with `Cargo.toml`. The `--locked` build in CI is the
+        // backstop if this rule ever stops matching.
+        {
+          "type": "regex",
+          "path": "Cargo.lock",
+          "pattern": "name = \"zed_panache\"\\nversion = \"([^\"]+)\""
         }
       ]
     }
