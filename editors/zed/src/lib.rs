@@ -13,7 +13,10 @@ struct PanacheExtension {
 
 #[derive(Debug, PartialEq)]
 struct GithubReleaseDetails {
-    asset_name: String,
+    /// Candidate asset names in preference order. Linux lists the glibc build
+    /// first and the static musl build as a fallback, mirroring the resolution
+    /// order in `editors/code/src/installer.ts`.
+    asset_names: Vec<String>,
     downloaded_file_type: zed::DownloadedFileType,
     downloaded_directory: String,
     downloaded_binary_path: String,
@@ -83,16 +86,16 @@ impl PanacheExtension {
             .strip_prefix('v')
             .unwrap_or(&release.version)
             .to_string();
-        let release_details = GithubReleaseDetails::new(platform, arch, version);
+        let release_details = GithubReleaseDetails::new(platform, arch, version)?;
 
-        let asset = release
-            .assets
+        let asset = release_details
+            .asset_names
             .iter()
-            .find(|asset| asset.name == release_details.asset_name)
+            .find_map(|name| release.assets.iter().find(|asset| &asset.name == name))
             .ok_or_else(|| {
                 format!(
-                    "Panache release {} has no asset matching {:?}",
-                    release.version, release_details.asset_name
+                    "Panache release {} has no asset matching any of {:?}",
+                    release.version, release_details.asset_names
                 )
             })?;
 
@@ -135,28 +138,25 @@ impl GithubReleaseDetails {
         platform: zed_extension_api::Os,
         arch: zed_extension_api::Architecture,
         version: String,
-    ) -> Self {
-        let target_triple = format!(
-            "{arch}-{os}",
-            arch = match arch {
-                zed::Architecture::Aarch64 => "aarch64",
-                zed::Architecture::X86 => "x86",
-                zed::Architecture::X8664 => "x86_64",
-            },
-            os = match platform {
-                zed::Os::Mac => "apple-darwin",
-                zed::Os::Linux => "unknown-linux-gnu",
-                zed::Os::Windows => "pc-windows-msvc",
+    ) -> Result<Self> {
+        let arch = match arch {
+            zed::Architecture::Aarch64 => "aarch64",
+            zed::Architecture::X8664 => "x86_64",
+            // Panache publishes no 32-bit assets, so failing here beats asking
+            // the host to download an `x86-*` archive that does not exist.
+            zed::Architecture::X86 => {
+                return Err("Panache does not publish binaries for 32-bit x86".into())
             }
-        );
+        };
 
-        let asset_name = format!(
-            "panache-{target_triple}.{suffix}",
-            suffix = match platform {
-                zed::Os::Mac | zed::Os::Linux => "tar.gz",
-                zed::Os::Windows => "zip",
-            }
-        );
+        let asset_names = match platform {
+            zed::Os::Mac => vec![format!("panache-{arch}-apple-darwin.tar.gz")],
+            zed::Os::Linux => vec![
+                format!("panache-{arch}-unknown-linux-gnu.tar.gz"),
+                format!("panache-{arch}-unknown-linux-musl.tar.gz"),
+            ],
+            zed::Os::Windows => vec![format!("panache-{arch}-pc-windows-msvc.zip")],
+        };
 
         let downloaded_file_type = match platform {
             zed::Os::Mac | zed::Os::Linux => zed::DownloadedFileType::GzipTar,
@@ -170,12 +170,12 @@ impl GithubReleaseDetails {
             zed::Os::Windows => format!("{downloaded_directory}/panache.exe"),
         };
 
-        Self {
-            asset_name,
+        Ok(Self {
+            asset_names,
             downloaded_file_type,
             downloaded_directory,
             downloaded_binary_path,
-        }
+        })
     }
 }
 
@@ -229,49 +229,54 @@ zed::register_extension!(PanacheExtension);
 #[cfg(test)]
 mod test {
     use crate::GithubReleaseDetails;
+    use zed_extension_api::{Architecture, DownloadedFileType, Os};
 
     #[test]
-    fn test_github_release_details() {
+    fn resolves_macos_release() {
         assert_eq!(
-            GithubReleaseDetails::new(
-                zed_extension_api::Os::Mac,
-                zed_extension_api::Architecture::Aarch64,
-                String::from("0.1.0"),
-            ),
-            GithubReleaseDetails {
-                asset_name: String::from("panache-aarch64-apple-darwin.tar.gz"),
-                downloaded_file_type: zed_extension_api::DownloadedFileType::GzipTar,
+            GithubReleaseDetails::new(Os::Mac, Architecture::Aarch64, String::from("0.1.0")),
+            Ok(GithubReleaseDetails {
+                asset_names: vec![String::from("panache-aarch64-apple-darwin.tar.gz")],
+                downloaded_file_type: DownloadedFileType::GzipTar,
                 downloaded_directory: String::from("panache-0.1.0"),
-                downloaded_binary_path: String::from("panache-0.1.0/panache")
-            }
+                downloaded_binary_path: String::from("panache-0.1.0/panache"),
+            })
         );
+    }
 
+    #[test]
+    fn resolves_linux_release_with_musl_fallback() {
         assert_eq!(
-            GithubReleaseDetails::new(
-                zed_extension_api::Os::Linux,
-                zed_extension_api::Architecture::X8664,
-                String::from("0.2.0"),
-            ),
-            GithubReleaseDetails {
-                asset_name: String::from("panache-x86_64-unknown-linux-gnu.tar.gz"),
-                downloaded_file_type: zed_extension_api::DownloadedFileType::GzipTar,
+            GithubReleaseDetails::new(Os::Linux, Architecture::X8664, String::from("0.2.0")),
+            Ok(GithubReleaseDetails {
+                asset_names: vec![
+                    String::from("panache-x86_64-unknown-linux-gnu.tar.gz"),
+                    String::from("panache-x86_64-unknown-linux-musl.tar.gz"),
+                ],
+                downloaded_file_type: DownloadedFileType::GzipTar,
                 downloaded_directory: String::from("panache-0.2.0"),
-                downloaded_binary_path: String::from("panache-0.2.0/panache")
-            }
+                downloaded_binary_path: String::from("panache-0.2.0/panache"),
+            })
         );
+    }
 
+    #[test]
+    fn resolves_windows_release() {
         assert_eq!(
-            GithubReleaseDetails::new(
-                zed_extension_api::Os::Windows,
-                zed_extension_api::Architecture::X8664,
-                String::from("0.1.0"),
-            ),
-            GithubReleaseDetails {
-                asset_name: String::from("panache-x86_64-pc-windows-msvc.zip"),
-                downloaded_file_type: zed_extension_api::DownloadedFileType::Zip,
+            GithubReleaseDetails::new(Os::Windows, Architecture::X8664, String::from("0.1.0")),
+            Ok(GithubReleaseDetails {
+                asset_names: vec![String::from("panache-x86_64-pc-windows-msvc.zip")],
+                downloaded_file_type: DownloadedFileType::Zip,
                 downloaded_directory: String::from("panache-0.1.0"),
-                downloaded_binary_path: String::from("panache-0.1.0/panache.exe")
-            }
+                downloaded_binary_path: String::from("panache-0.1.0/panache.exe"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_32_bit_x86() {
+        assert!(
+            GithubReleaseDetails::new(Os::Linux, Architecture::X86, String::from("0.1.0")).is_err()
         );
     }
 }
