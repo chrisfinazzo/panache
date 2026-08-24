@@ -1,0 +1,6 @@
+$$
+  K(x) = \begin{cases}
+           a, & x \in A          \\
+           0, & \text{otherwise}
+         \end{cases}
+$$

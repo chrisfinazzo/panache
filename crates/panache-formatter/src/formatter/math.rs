@@ -364,9 +364,24 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_mixed_environment_shape_stays_verbatim() {
+    fn display_hangs_top_level_environment_under_its_start() {
         let input = "x = \\begin{bmatrix}1 \\\\ 2\\end{bmatrix}";
-        assert_eq!(fmt(input, MathContext::Display), input);
+        let expected = r"x = \begin{bmatrix}
+      1 \\
+      2
+    \end{bmatrix}";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn top_level_environment_trims_boundary_newlines() {
+        let input = "\n  x = \\begin{bmatrix}1 \\\\ 2\\end{bmatrix}\n";
+        let expected = r"x = \begin{bmatrix}
+      1 \\
+      2
+    \end{bmatrix}";
+        assert_eq!(fmt(input, MathContext::Display), expected);
         assert_idempotent(input, MathContext::Display);
     }
 

@@ -57,11 +57,18 @@ Returned unchanged, never reflowed:
    is formatter-side delimiter interpretation; ordinary delimiters remain flat
    tokens in the lossless CST because they do not create TeX scope.
 
-   Mixed shapes this layout does not yet model safely --- an environment outside
-   a balanced delimiter pair, multiple environments in one delimiter segment, or
-   a segment containing a comment or explicit `\\` --- stay verbatim. The
-   math-local Wadler-style document model (`layout.rs`) preserves multiline
-   fragments compositionally; it never uses string sentinels.
+   A single top-level environment with surrounding free content uses the same
+   hanging layout. Its `\begin` stays after the preceding expression, and its
+   body and `\end` align relative to the environment's starting column.
+
+   Mixed shapes this layout does not yet model safely --- multiple environments
+   in one segment, unbalanced ordinary delimiters, or a segment containing a
+   comment or explicit `\\` --- stay verbatim. The surrounding display-math
+   formatter owns delimiter-adjacent line breaks, so the verbatim fallback
+   removes only leading and trailing newline characters. It preserves
+   indentation and all internal whitespace. The math-local Wadler-style document
+   model (`layout.rs`) preserves multiline fragments compositionally; it never
+   uses string sentinels.
 
 4. **`\\` normalization.** A row's trailing hard break is emitted as `\\` (one
    space before). A trailing `\\` on the final row is **preserved if present,

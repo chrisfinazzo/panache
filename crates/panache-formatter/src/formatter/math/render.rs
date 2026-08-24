@@ -29,7 +29,11 @@ pub(super) fn render(tree: &SyntaxNode, opts: &MathFormatOptions) -> String {
 fn render_display(top: &[SyntaxElement], opts: &MathFormatOptions) -> String {
     if has_mixed_environment_content(top) {
         return render_mixed_delimited_display(top, opts)
-            .unwrap_or_else(|| top.iter().map(ToString::to_string).collect());
+            .or_else(|| render_top_level_mixed_environment(top, opts))
+            .unwrap_or_else(|| {
+                let content: String = top.iter().map(ToString::to_string).collect();
+                content.trim_matches(['\r', '\n']).to_string()
+            });
     }
 
     let mut lines: Vec<String> = Vec::new();
@@ -147,6 +151,44 @@ fn element_text(element: &SyntaxElement) -> Option<&str> {
 
 fn delimiters_match(open: &str, close: &str) -> bool {
     matches!((open, close), ("(", ")") | ("[", "]"))
+}
+
+fn render_top_level_mixed_environment(
+    elems: &[SyntaxElement],
+    opts: &MathFormatOptions,
+) -> Option<String> {
+    if elems.iter().any(contains_comment) || !ordinary_delimiters_balanced(elems) {
+        return None;
+    }
+    let doc = mixed_segment_doc(elems, opts)?;
+    Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
+}
+
+fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {
+    let mut openings = Vec::new();
+    for element in elems {
+        match element.kind() {
+            SyntaxKind::MATH_OPEN => {
+                let Some(text) = element_text(element) else {
+                    return false;
+                };
+                openings.push(text);
+            }
+            SyntaxKind::MATH_CLOSE => {
+                let Some(opening) = openings.pop() else {
+                    return false;
+                };
+                let Some(closing) = element_text(element) else {
+                    return false;
+                };
+                if !delimiters_match(opening, closing) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    openings.is_empty()
 }
 
 fn delimited_body_doc(body: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Doc> {
