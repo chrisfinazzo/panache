@@ -21,6 +21,9 @@ still-relevant trap into Persistent traps. Keep it short.
   `MATH_SPACE` is load-bearing (collides with blockquote-prefix `WHITESPACE`
   otherwise); `MATH_NEWLINE` is kept for symmetry.
 - **Parser is unconditional; the experimental gate is formatter-side only.**
+- **Panache owns its complete math stack.** `../badness` may inform design and
+  regression cases, but Panache must not depend on its crates, retain or project
+  a Badness CST, share a math crate with it, or delegate formatting to it.
 - **No pandoc oracle for math formatting** — pandoc passes math through. Lean on
   golden tests + idempotency/losslessness, plus a dev-only latexindent/KaTeX
   oracle (Phase 4).
@@ -68,48 +71,33 @@ still-relevant trap into Persistent traps. Keep it short.
 
 ## Latest session
 
-**Composable embedded math environments.** Added a small math-local
-Wadler-style document model (adapted from Badness) with groups, hard/optional
-lines, indentation, and hanging alignment. A `MATH_ENVIRONMENT` inside a balanced
-ordinary delimiter pair now remains an operand: delimiter contents break at
-top-level punctuation, matrix rows hang beyond the `\begin` column, `\end`
-returns to it, and commas stay attached. No parser change was needed.
+**Native Panache math-stack roadmap.** Reassessed the parser and formatter
+against `../badness`. Panache will adopt the stronger command-argument, script,
+signature-domain, semantic-atom, and compositional-layout ideas, but will own
+their implementation completely: no Badness dependency, shared crate,
+transient/foreign CST, projection layer, or formatter delegation.
 
-- The reported multivariate-normal golden now specifies the structured output;
-  focused unit coverage pins binary spacing, hanging geometry, unsupported-shape
-  preservation, comments, and idempotency. Existing Tier 1 properties and Tier 2
-  MathML invariance pass.
-- Unsupported mixed shapes remain verbatim rather than falling through to the
-  old environment-lifting path. Standalone environments and environment-free
-  display line breaking retain their existing renderers in this bounded phase.
-- Final review found no correctness issues. `cargo check --workspace`,
-  `cargo test --workspace`, clippy with `-D warnings`, and `cargo fmt --check`
-  are clean.
+- `TODO.md` now records the staged parser/CST, formatter, integration, and
+  validation plan. The authoritative structure remains the native, lossless
+  `MATH_CONTENT` subtree so the linter, Salsa, and LSP retain direct host ranges.
+- Markdown keeps ownership of delimiter recognition, container prefixes, raw
+  math-environment classification, Bookdown labels, and delimiter style. The
+  Panache math parser owns the admitted TeX-math content.
+- No implementation changed in this session.
 
 ### Suggested next sub-targets
-1. **Environment-body line-breaking** (interacts with the `&`-column engine).
-2. **Embed `MATH_CONTENT` into `TEX_BLOCK`** (parser) so bare `\begin{env}`
-   blocks become formattable (would make `MathContext::EnvironmentBody` reachable).
-3. Expand document lowering to mixed environments outside ordinary delimiters
-   and multiple environments in one segment; then unify free-row breaking with
-   the document model.
-4. Optional structural cooking (orthogonal to operators): script attachment,
-   known-command argument grouping.
-
-**Settled:** binary breaking is **one operator per line** (greedy fill tried and
-rejected this session). Over-width rows left untouched are those with no depth-0
-relation *or* binary op (a lone wide `\frac`).
-
-**Placement note (deferred, YAGNI):** `operators.rs` lives in the formatter
-crate (`pub`), but the `cooking.rs` analog it mirrors lives in the *parser*
-crate. Only the formatter consumes it today, so leave it; **move it to the parser
-crate if/when a second consumer appears** (linter wanting atom info, LSP semantic
-tokens) so formatter + linter + LSP share one interpretation.
+1. Pin the target native CST with command-argument and script-attachment golden
+   fixtures, including unknown-macro whitespace preservation.
+2. Design the Panache-owned signature/domain model and typed syntax wrappers.
+3. Implement one bounded structural slice before revisiting formatter layout.
 
 --------------------------------------------------------------------------------
 
 ## Earlier sessions
 
+- **Composable embedded math environments.** Added the math-local Wadler-style
+  document model, structured mixed-environment layout, and focused idempotency
+  and MathML coverage; unsupported shapes remain verbatim.
 - **`MATH_DELIMITED`-aware line-break scanning.** Delimited nodes are opaque
   operands; `left`/`right` left the command-class table, with nested/asymmetric
   delimiter and following-binary regression coverage.
