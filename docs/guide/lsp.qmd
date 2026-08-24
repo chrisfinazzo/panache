@@ -324,6 +324,50 @@ The Open VSX extension is identical to the VS Code extension and uses the same
 configuration settings, so see the [VS Code] section above for configuration
 instructions.
 
+### Zed
+
+Install the [Panache extension](https://zed.dev/extensions?query=panache) from
+the extensions view (`zed: extensions` in the command palette). Markdown is
+built into Zed, and Quarto comes from the [Quarto
+extension](https://github.com/prefrontal-systems/zed-quarto-plugin), which you
+need installed first. Zed has no R Markdown language extension, so Panache's R
+Markdown support is unavailable there for now.
+
+Zed uses the `panache` on your `PATH` when there is one, and otherwise downloads
+the release binary matching your platform. Keeping Panache on the `PATH` is the
+better option on distributions that cannot run the generic release build, NixOS
+above all.
+
+To format on save, add to `settings.json`:
+
+```json
+{
+  "languages": {
+    "Markdown": {
+      "formatter": "language_server",
+      "format_on_save": "on"
+    }
+  }
+}
+```
+
+Formatting and linting options come from `panache.toml` (see
+[Configuration](configuration.qmd)). Zed's `lsp` settings block cannot supply
+them: the server reads its configuration from disk and accepts no formatting
+settings over LSP.
+
+To point Zed at a particular binary, set `binary.path`:
+
+```json
+{
+  "lsp": {
+    "panache-language-server": {
+      "binary": { "path": "/opt/panache/bin/panache", "arguments": ["lsp"] }
+    }
+  }
+}
+```
+
 ### Helix
 
 Add to `~/.config/helix/languages.toml`:
