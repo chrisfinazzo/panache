@@ -75,11 +75,14 @@ Returned unchanged, never reflowed:
    In display math, a single top-level environment with surrounding free content
    uses the same hanging layout. Its `\begin` stays after the preceding
    expression, and its body and `\end` align relative to the environment's
-   starting column. Inline math follows Badness's distinct layout: the
-   environment's continuation lines return to the math body's base column when
-   the body prints flat. If a nested `%` comment pins the inline breaks, the
-   environment instead hangs from its actual `\begin` source column, including
-   the host `$` opener's column.
+   starting column. When a nested `%` comment pins the display breaks and the
+   preceding expression ends in a binary operator, the expression breaks before
+   that operator; the environment stays on the operator's continuation line and
+   hangs from its resulting `\begin` column. Inline math follows Badness's
+   distinct layout: the environment's continuation lines return to the math
+   body's base column when the body prints flat. If a nested `%` comment pins
+   the inline breaks, the environment instead hangs from its actual `\begin`
+   source column, including the host `$` opener's column.
 
    A single environment inside a closed `\left`/`\right` body composes the same
    environment layout with the structured delimiter's hanging column, whether it

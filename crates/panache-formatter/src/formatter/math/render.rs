@@ -18,7 +18,10 @@ use crate::syntax::{
     SyntaxNode, SyntaxToken,
 };
 use panache_parser::parser::math::MathParseOptions;
-use panache_parser::semantic::math::{ArgKind, ArgumentDomain, SignatureScope, match_arg_slot};
+use panache_parser::semantic::math::{
+    ArgKind, ArgumentDomain, MathBreakPriority, SignatureScope, match_arg_slot,
+    semantic_math_atoms_in,
+};
 
 const INDENT: &str = "  ";
 
@@ -162,6 +165,7 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
     if has_mixed_environment_content(top) {
         let semantic = expand_word_elements(top);
         return render_mixed_delimited_display(&semantic, opts)
+            .or_else(|| render_top_level_commented_environment(&semantic, opts))
             .or_else(|| render_top_level_mixed_environment(&semantic, opts))
             .unwrap_or_else(|| {
                 let content: String = top.iter().map(ToString::to_string).collect();
@@ -404,18 +408,94 @@ fn render_top_level_mixed_environment(
     Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
 }
 
+fn render_top_level_commented_environment(
+    elems: &[SyntaxElement],
+    opts: &MathFormatOptions,
+) -> Option<String> {
+    let doc = top_level_commented_environment_doc(elems, opts)?;
+    Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
+}
+
+fn top_level_commented_environment_doc(
+    elems: &[SyntaxElement],
+    opts: &MathFormatOptions,
+) -> Option<Ir> {
+    if !elems.iter().any(contains_comment) || !ordinary_delimiters_balanced(elems) {
+        return None;
+    }
+    if elems.iter().any(contains_unsafe_mixed_trivia)
+        || elems
+            .iter()
+            .any(|element| environment_block(element).is_none() && contains_environment(element))
+    {
+        return None;
+    }
+
+    let environment_indices = elems
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| environment_block(element).is_some().then_some(index))
+        .collect::<Vec<_>>();
+    let [environment_index] = environment_indices.as_slice() else {
+        return None;
+    };
+    let before = &elems[..*environment_index];
+    let after = &elems[*environment_index + 1..];
+    if after.iter().any(|element| !is_layout_whitespace(element)) {
+        return None;
+    }
+
+    let operator_index = before
+        .iter()
+        .rposition(|element| !is_layout_whitespace(element))?;
+    if semantic_math_atoms_in(before.iter().cloned())
+        .last()
+        .is_none_or(|atom| atom.break_priority != MathBreakPriority::Binary)
+        || !before[..operator_index]
+            .iter()
+            .any(|element| !is_layout_whitespace(element))
+    {
+        return None;
+    }
+
+    let (environment, scripts) = environment_block(&elems[*environment_index])?;
+    if !scripts.is_empty() {
+        return None;
+    }
+    let environment_doc = environment_document(&environment, opts)?;
+
+    // A forced break inside the environment breaks Badness's surrounding
+    // display group at the preceding binary operator too. A zero-width typed
+    // display layout reproduces those operator breaks without flattening the
+    // prefix or reinterpreting its semantic atom roles.
+    let prefix = lower::try_lower_display_elements(before.to_vec(), &opts.signature_scope, 0)?;
+    let prefix_last_width = Printer::new(opts.line_width, INDENT.len())
+        .print(&prefix, 0)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .chars()
+        .count();
+    Some(Ir::concat([
+        prefix,
+        Ir::text(" "),
+        Ir::align(prefix_last_width + 1, environment_doc),
+    ]))
+}
+
 pub(super) fn can_render_mixed_environment_comments(
     tree: &SyntaxNode,
     opts: &MathFormatOptions,
 ) -> bool {
-    if opts.context != MathContext::Inline {
-        return false;
-    }
     let elements = expand_word_elements(&tree.children_with_tokens().collect::<Vec<_>>());
     if !elements.iter().any(contains_environment) {
         return false;
     }
-    mixed_segment_doc(&elements, opts, Some(1)).is_some()
+    match opts.context {
+        MathContext::Inline => mixed_segment_doc(&elements, opts, Some(1)).is_some(),
+        MathContext::Display => top_level_commented_environment_doc(&elements, opts).is_some(),
+        MathContext::EnvironmentBody => false,
+    }
 }
 
 fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {

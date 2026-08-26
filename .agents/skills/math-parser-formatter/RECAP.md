@@ -60,30 +60,33 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Comment-bearing embedded environments in inline expressions.** Mixed inline
-expressions such as `x+\begin{matrix}...%...\end{matrix},y` now use the typed
-environment compositor instead of declining the whole math body.
+**Comment-bearing environments after free display expressions.** A display
+shape such as `x+\begin{matrix}...%...\end{matrix}` now uses a typed mixed
+document instead of declining the entire math body.
 
-- The nested-comment safety gate accepts the shape only when the same typed
-  mixed-segment document used by rendering succeeds. Unsupported scripts,
-  malformed environments, authored breaks in free content, and multiple
-  environments in one segment still take the compatibility path.
-- Comment-pinned inline environments hang from their actual `\begin` source
-  column. The explicit hanging offset includes the controlled host `$` opener;
-  ordinary comment-free inline math still prints flat.
-- Mandatory oracle cases cover a free expression and an ordinary-delimiter
-  wrapper, with byte parity and second-pass idempotency checks.
-- `STYLE.md` records the rule. The complete formatter oracle passes. Regenerating
-  the shared-corpus report produced no diff.
+- The mandatory oracle regression pins Badness's distinct layout byte for byte:
+  the free expression breaks before `+`, the environment begins on that
+  continuation line, and its body hangs from the resulting `\begin` column.
+- The prefix is lowered through the shared semantic display path. A forced
+  zero-width layout reproduces the operator break caused by the environment's
+  hard lines without adding formatter-local operator interpretation.
+- The safety gate remains deliberately narrow: exactly one well-formed,
+  unscripted environment must end the expression after a binary operator.
+  Comments or authored breaks in the free content, trailing expression content,
+  nested non-block environments, and multiple environments retain the
+  compatibility path.
+- `STYLE.md` records the display rule. The complete formatter oracle and all
+  workspace validation gates pass. The shared corpus and its parity
+  classifications did not change, so the committed report needed no update.
 
 ### Suggested next sub-targets
 
-1. Add display support for a free expression followed by a comment-bearing
-   environment only after pinning Badness's distinct wrapping policy: the
-   observed `x+\begin{matrix}...` shape breaks before `+`, then hangs the
-   environment from the continuation line.
-2. Move environments toward first-class typed atom documents so the separate
-   structured-delimiter and mixed-environment paths can eventually converge.
+1. Move environments toward first-class typed atom documents so the separate
+   structured-delimiter and mixed-environment paths can converge and the
+   display-specific compositor can shrink.
+2. Pin Badness's layout for other comment-bearing display surroundings—such as
+   a relation before the environment or trailing free content—before widening
+   the new safety gate.
 3. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness

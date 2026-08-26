@@ -37,6 +37,15 @@ pub(super) fn try_lower_display_content(
     line_width: usize,
 ) -> Option<Ir> {
     let elements = content.elements().collect::<Vec<_>>();
+    try_lower_display_elements(elements, scope, line_width)
+}
+
+/// Lower a formatter-derived free-display segment without inventing a CST wrapper.
+pub(super) fn try_lower_display_elements(
+    elements: Vec<SyntaxElement>,
+    scope: &SignatureScope,
+    line_width: usize,
+) -> Option<Ir> {
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
     if elements
         .iter()
