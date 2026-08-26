@@ -872,6 +872,24 @@ fn environment_grid_multiple_multiline_cells_match_badness() {
 }
 
 #[test]
+fn environment_grid_multiline_cells_across_rows_match_badness() {
+    for body in [
+        "{a % first row left cell\n+b}&=c\\\\\nd&={e % second row right cell\n+f}",
+        "a&{b % first row middle cell\n+c}&=d\\\\\n{e % second row left cell\n+f}&g&=h",
+        "a&=x^{b % first row exponent\n+c}\\\\\n\\frac{d % second row numerator\n+e}{f}&=g",
+        "\\left( a % first row delimiter\n+b \\right)&=c\\\\\nd&=y+{e % second row group\n+f}",
+    ] {
+        assert_formatter_parity(body, OracleContext::Environment);
+        let once = panache_body(body, OracleContext::Environment).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Environment).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "environment rows with multiline cells are not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn nested_environment_comment_migration_slice_matches_badness() {
     for body in [
         "\\begin{gathered}\n{a % inner\n+b}\n\\end{gathered}",
@@ -965,6 +983,35 @@ fn mixed_delimited_environment_migration_slice_matches_badness() {
             "mixed delimited environment is not idempotent in {context:?}"
         );
     }
+}
+
+#[test]
+fn multiple_delimited_environments_match_badness() {
+    let authored_rows = "\\left(\\begin{matrix}\na&b\\\\\nc&d\n\\end{matrix},\\begin{matrix}\ne&f\\\\\ng&h\n\\end{matrix}\\right)";
+    for context in OracleContext::ALL {
+        assert_formatter_parity(authored_rows, context);
+        let once = panache_body(authored_rows, context).expect("first Panache pass");
+        let twice = panache_body(&once, context).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "multiple delimited environments are not idempotent in {context:?}"
+        );
+    }
+
+    let comment = "\\left(\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix},\\begin{matrix}\nf&g\\\\\nh&i\n\\end{matrix}\\right)";
+    assert!(panache_body(comment, OracleContext::Inline).is_err());
+    for context in [OracleContext::Display, OracleContext::Environment] {
+        assert_formatter_parity(comment, context);
+        let once = panache_body(comment, context).expect("first Panache pass");
+        let twice = panache_body(&once, context).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "commented delimited environments are not idempotent in {context:?}"
+        );
+    }
+
+    let unpunctuated_comment = "\\left(\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}\\begin{matrix}\nd&e\n\\end{matrix}\\right)";
+    assert!(panache_body(unpunctuated_comment, OracleContext::Display).is_err());
 }
 
 #[test]

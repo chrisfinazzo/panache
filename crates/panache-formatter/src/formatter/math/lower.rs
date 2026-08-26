@@ -83,8 +83,8 @@ pub(super) fn try_lower_display_content(
 ///
 /// This stays separate from ordinary atom lowering until environments become
 /// first-class typed atom documents. The narrow shape lets the existing
-/// environment-grid document compose without admitting multiple environments
-/// or malformed delimiter bodies.
+/// environment-grid document compose without admitting unpunctuated multiple
+/// environments or malformed delimiter bodies.
 pub(super) fn try_lower_delimited_environment(
     content: &MathContent,
     opts: &MathFormatOptions,

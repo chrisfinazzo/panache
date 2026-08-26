@@ -281,6 +281,14 @@ fn has_nested_comment(tree: &SyntaxNode) -> bool {
 }
 
 fn can_lower_nested_comments(tree: &SyntaxNode, opts: &MathFormatOptions) -> bool {
+    if opts.context != MathContext::Inline
+        && MathContent::cast(tree.clone())
+            .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
+            .is_some()
+    {
+        return true;
+    }
+
     if opts.context == MathContext::EnvironmentBody {
         return render::can_render_environment_comments(tree, &opts.signature_scope);
     }

@@ -86,8 +86,16 @@ Returned unchanged, never reflowed:
    stays on the `\end` line before the closing `\right`; the structured
    delimiter does not add the ordinary-delimiter breaks described above.
 
+   Multiple environments compose only when top-level punctuation puts each one
+   in a separate segment. The punctuation stays attached to the preceding
+   `\end`, and the next environment begins immediately afterward; its body and
+   closing delimiter align from that actual starting column. Authored rows keep
+   the normal environment policy. Comment-bearing cells use the typed grid
+   policy in display and environment contexts; inline comment-bearing multiple
+   environments remain on the compatibility path.
+
    Mixed shapes this layout does not yet model safely --- multiple environments
-   in one segment, unbalanced ordinary delimiters, or a segment containing a
+   in one segment, unbalanced ordinary delimiters, or free segments containing a
    comment or explicit `\\` --- stay verbatim. The surrounding display-math
    formatter owns delimiter-adjacent line breaks, so the verbatim fallback
    removes only leading and trailing newline characters. It preserves

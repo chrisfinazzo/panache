@@ -50,31 +50,42 @@ rewrite those sections instead of accumulating history.
   every multiline cell's continuation to the environment body indent. Preserve
   the atom-relative offset separately for ordinary aligned grids; do not bake it
   into the cell document.
+- **Multiple environments inside `\left`/`\right` require punctuation
+  boundaries.** Each top-level punctuation-delimited segment may own one
+  well-formed environment. The next environment glues to the punctuation on the
+  preceding `\end` line, then hangs from that actual source column. Adjacent
+  environments in one segment remain on the compatibility path.
 
 --------------------------------------------------------------------------------
 
 ## Latest session
 
-**Multiple multiline cells in one environment row.** Tight-grid composition now
-matches Badness when two or more cells contain comment-broken typed constructs.
+**Punctuated multiple environments inside structured delimiters.** A
+`\left`/`\right` body may now lower multiple well-formed environments when
+top-level punctuation separates them.
 
-- Mandatory oracle cases cover groups, fractions, scripts, paired delimiters,
-  and constructs preceded by free expression content; each case also pins
-  second-pass idempotency.
-- `BodyCell` retains the typed document and its atom-relative offset separately.
-  Ordinary aligned grids apply that offset, while tight grids reset every
-  multiline continuation to the environment body indent.
-- `STYLE.md` records the tight-grid continuation rule. The complete formatter
-  oracle passes. The corpus and its parity classifications did not change, so
-  the committed report did not require regeneration.
+- Each segment retains its normal environment-grid and authored-row policy.
+  The next environment starts immediately after the punctuation, and its
+  internal rows align beneath that start column.
+- Comment-bearing cells follow the same typed grid policy in display and
+  environment contexts. Inline comment-bearing multiple environments and
+  unpunctuated multiple environments remain on the compatibility path.
+- Environment row documents now expose physical lines instead of embedding
+  newline bytes in a nominal line, allowing safe composition into typed IR.
+- A multi-row grid probe with multiline cells in different columns already had
+  byte parity and is now retained as regression coverage.
+- `STYLE.md` records the punctuation and compatibility boundaries. The complete
+  formatter oracle passes. The corpus and its parity classifications did not
+  change, so the committed report did not require regeneration.
 
 ### Suggested next sub-targets
 
-1. Add a multi-row grid case combining multiline cells in different columns if
-   the pinned oracle exposes another row-composition distinction.
-2. Admit a second structured-delimiter environment shape only when an oracle
-   case can pin its comment or authored-break policy without weakening the
-   compatibility boundary.
-3. Revisit non-colon scripted composite relations only after the pinned Badness
+1. Replace another narrow embedded-environment compatibility path only when a
+   mandatory oracle case pins its comment, authored-break, or script policy.
+2. Move environments toward first-class typed atom documents so the separate
+   structured-delimiter and mixed-environment paths can eventually converge.
+3. Revisit inline comments across punctuated multiple environments only with a
+   pinned Badness-compatible indentation rule; keep the current fallback.
+4. Revisit non-colon scripted composite relations only after the pinned Badness
    formatter defect is corrected; keep their compatibility path in the
    meantime.

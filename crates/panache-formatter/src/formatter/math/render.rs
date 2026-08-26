@@ -431,6 +431,14 @@ fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {
 }
 
 fn delimited_body_doc(body: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Ir> {
+    delimited_body_doc_configured(body, opts, true)
+}
+
+fn delimited_body_doc_configured(
+    body: &[SyntaxElement],
+    opts: &MathFormatOptions,
+    break_at_punctuation: bool,
+) -> Option<Ir> {
     let mut segments = Vec::new();
     let mut start = 0usize;
     let mut depth = 0usize;
@@ -450,7 +458,25 @@ fn delimited_body_doc(body: &[SyntaxElement], opts: &MathFormatOptions) -> Optio
         }
     }
     segments.push(mixed_segment_doc(&body[start..], opts, true)?);
-    Some(Ir::join(Ir::Line, segments))
+    if break_at_punctuation {
+        Some(Ir::join(Ir::Line, segments))
+    } else {
+        let printer = Printer::new(opts.line_width, INDENT.len());
+        let mut offset = 0usize;
+        let mut aligned = Vec::with_capacity(segments.len());
+        for segment in segments {
+            let final_line_width = printer
+                .print(&segment, 0)
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .chars()
+                .count();
+            aligned.push(Ir::align(offset, segment));
+            offset += final_line_width;
+        }
+        Some(Ir::concat(aligned))
+    }
 }
 
 fn mixed_segment_doc(
@@ -523,11 +549,12 @@ fn mixed_segment_doc(
     }
 }
 
-/// Compose one environment and surrounding free content inside `\left…\right`.
+/// Compose environments and surrounding free content inside `\left…\right`.
 ///
 /// Comments or authored breaks in the surrounding expression, malformed or
-/// multiple environments, and unbalanced ordinary delimiters remain on the
-/// compatibility path. The environment body retains its normal row policy.
+/// unpunctuated multiple environments, and unbalanced ordinary delimiters
+/// remain on the compatibility path. Each environment body retains its normal
+/// row policy.
 pub(super) fn mixed_delimited_environment_document(
     body: &MathContent,
     opts: &MathFormatOptions,
@@ -544,11 +571,19 @@ pub(super) fn mixed_delimited_environment_document(
     let has_free_content = elements
         .iter()
         .any(|element| environment_block(element).is_none() && !is_layout_whitespace(element));
-    if environment_count != 1 || !has_free_content {
+    if environment_count == 0 || !has_free_content {
         return None;
     }
 
-    mixed_segment_doc(&elements, opts, true)
+    if environment_count == 1 {
+        mixed_segment_doc(&elements, opts, true)
+    } else {
+        // A top-level punctuation mark is the only boundary at which Badness
+        // composes multiple environment documents. Each segment accepts at
+        // most one, and unlike ordinary delimited lists, Badness glues the next
+        // environment directly to the punctuation.
+        delimited_body_doc_configured(&elements, opts, false)
+    }
 }
 
 fn is_well_formed_environment(environment: &SyntaxNode) -> bool {
@@ -900,13 +935,23 @@ fn render_body_lines(
             BodyItem::Row { cells, break_text } => {
                 if tight_grid {
                     let document = join_tight_cell_documents(&cells, break_text.as_deref());
-                    out.push(printer.print(&document, indent.len()));
+                    out.extend(
+                        printer
+                            .print(&document, indent.len())
+                            .split('\n')
+                            .map(str::to_string),
+                    );
                 } else if cells
                     .iter()
                     .any(|cell| matches!(cell, BodyCell::Document { .. }))
                 {
                     let document = join_cell_documents(&cells, &widths, break_text.as_deref());
-                    out.push(printer.print(&document, indent.len()));
+                    out.extend(
+                        printer
+                            .print(&document, indent.len())
+                            .split('\n')
+                            .map(str::to_string),
+                    );
                 } else {
                     let cells = cells
                         .iter()
