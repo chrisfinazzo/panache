@@ -45,26 +45,29 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Rust 1.89 oracle upgrade.** Updated the development-only oracles to
-`badness-parser` 0.6.0 and `badness-formatter` 0.7.0 so the workspace can lower
-its MSRV without retaining the older Badness parser transitively.
+**Typed authored relation-chain alignment.** Fitting free-display chains split
+by authored `\\` markers now stay in the typed lowering path instead of being
+diverted to the legacy renderer for their continuation geometry.
 
-- Parser structural and semantic parity remain complete for every accepted
-  corpus case.
-- Badness 0.7 preserves binary-operator context across a comment in a recovered
-  environment prefix. Panache now does the same for multiline grid cells and
-  nested environments by removing the first-cell-only context reset and extra
-  alignment column.
-- The formatter differential report reflects Badness 0.7's broader choice to
-  render environments vertically in inline contexts; those cases remain on
-  Panache's conservative compatibility path.
-- The committed parser and formatter reports were regenerated against the new
-  pinned oracle versions.
+- The lowering derives the first top-level relation, its source column, its RHS
+  column, and assignment status from the shared semantic atom stream and typed
+  command/script structure. Equality chains align at the relation; ordinary
+  relations following `\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq` align
+  at the assignment RHS, while repeated assignments align at the operator.
+- The alignment is top-level only and composes through `Ir::Align`; nested
+  authored rows retain their own bracket hanging indent, and top-level `&`
+  shapes remain outside the implicit-chain rule.
+- Rows that still require width-driven binary splitting remain on the legacy
+  display path. This preserves the existing over-width layout until display
+  wrapping itself is lowered into the document IR.
+- Formatter output and oracle classifications are unchanged. The complete
+  formatter crate suite, including Badness parity, corpus properties, and
+  MathML cross-validation, passes.
 
 ### Suggested next sub-targets
 
-1. Add typed relation-chain continuation alignment, then retire the display
-   authored-break compatibility path for supported chains.
+1. Lower width-driven free-display relation/binary wrapping into the shared IR,
+   then remove the final over-width authored-break compatibility check.
 2. Expand structured-delimiter environment lowering to mixed bodies only when a
    representative oracle case can pin the spacing and break policy.
 3. Expand grid-comment parity to rows combining multiple multiline cells if a

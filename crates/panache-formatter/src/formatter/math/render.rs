@@ -148,26 +148,27 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
     let has_authored_break = tree
         .descendants_with_tokens()
         .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK);
-    let authored_break_uses_legacy_alignment = has_authored_break && {
-        let rows = split_logical_rows(top);
-        let parse_opts = MathParseOptions {
-            bookdown_equation_labels: opts.bookdown_equation_labels,
-        };
-        relation_chain_alignment(&rows, parse_opts, &opts.signature_scope)
-            .into_iter()
-            .any(|indent| indent > 0)
-    };
     if !top.iter().any(contains_environment)
         && (has_comment || has_authored_break)
-        && !authored_break_uses_legacy_alignment
         && let Some(document) = MathContent::cast(tree.clone())
-            .and_then(|content| lower::try_lower_content(&content, &opts.signature_scope))
+            .and_then(|content| lower::try_lower_display_content(&content, &opts.signature_scope))
     {
-        return trimmed_body(
+        let output = trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             opts.math_indent,
         );
+        // Width-driven row splitting still belongs to the legacy display path.
+        // Typed authored-row lowering owns chains whose rows already fit; the
+        // display-wrapping slice will retire this final compatibility check.
+        if !has_authored_break
+            || has_comment
+            || output
+                .lines()
+                .all(|line| line.chars().count() <= opts.line_width)
+        {
+            return output;
+        }
     }
 
     if has_mixed_environment_content(top) {
