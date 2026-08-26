@@ -1078,6 +1078,15 @@ fn width_driven_display_migration_slice_matches_badness() {
 }
 
 #[test]
+fn definition_relation_typed_contexts_match_badness() {
+    for body in ["x:=y", "a::=b", "x:=-y", r"\mu:=\nu"] {
+        for context in [OracleContext::Inline, OracleContext::Environment] {
+            assert_formatter_parity(body, context);
+        }
+    }
+}
+
+#[test]
 fn result_classification_distinguishes_all_baseline_outcomes() {
     assert!(matches!(
         classify_result(Ok("same".to_owned()), Some("same".to_owned())),

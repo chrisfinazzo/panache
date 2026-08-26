@@ -38,6 +38,13 @@ pub(super) fn try_lower_display_content(
 ) -> Option<Ir> {
     let elements = content.elements().collect::<Vec<_>>();
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
+    // The legacy display breaker treats `:=` as an assignment, while Badness
+    // aligns its automatic relation chains at the definition colon. Keep that
+    // user-visible seam intact until definition relations and their scripted
+    // forms can migrate together.
+    if has_definition_relation(&elements, &semantic_atoms) {
+        return None;
+    }
     if elements
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK)
@@ -745,8 +752,7 @@ fn lower_pieces_with_atoms(
     preserve_comment_context: bool,
     environment_rows: bool,
 ) -> Option<Vec<Piece>> {
-    if has_definition_relation(elements)
-        || has_scripted_composite_relation(elements)
+    if has_scripted_composite_relation(elements)
         || !elements
             .iter()
             .all(|element| is_supported_element(element, scope))
@@ -754,10 +760,11 @@ fn lower_pieces_with_atoms(
         return None;
     }
 
+    let semantic_atoms = coalesce_definition_relations(elements, semantic_atoms);
     let mut pieces = Vec::new();
     let mut previous_end = None;
 
-    for &atom in semantic_atoms {
+    for atom in semantic_atoms {
         let atom_document = atom_document(
             atom,
             elements,
@@ -783,6 +790,89 @@ fn lower_pieces_with_atoms(
     }
 
     Some(pieces)
+}
+
+/// Badness's semantic stream keeps each definition colon as punctuation, but
+/// its formatter prints the contiguous colon run and following `=` relation as
+/// one operator. Combine only atoms from the same lexical word so authored
+/// whitespace and CST-separated scripted relations retain their own paths.
+fn coalesce_definition_relations(
+    elements: &[SyntaxElement],
+    semantic_atoms: &[SemanticMathAtom],
+) -> Vec<SemanticMathAtom> {
+    let mut coalesced = Vec::with_capacity(semantic_atoms.len());
+    let mut index = 0;
+    while let Some(&first) = semantic_atoms.get(index) {
+        let Some(word) = elements.iter().find_map(|element| {
+            element.as_token().filter(|token| {
+                token.kind() == SyntaxKind::MATH_WORD
+                    && token.text_range().start() <= first.range.start()
+                    && token.text_range().end() >= first.range.end()
+            })
+        }) else {
+            coalesced.push(first);
+            index += 1;
+            continue;
+        };
+        if first.class != MathClass::Punct || token_slice(first.range, word).as_deref() != Some(":")
+        {
+            coalesced.push(first);
+            index += 1;
+            continue;
+        }
+
+        let mut relation_index = index + 1;
+        while semantic_atoms.get(relation_index).is_some_and(|atom| {
+            atom.class == MathClass::Punct
+                && semantic_atoms[relation_index - 1].range.end() == atom.range.start()
+                && token_slice(atom.range, word).as_deref() == Some(":")
+        }) {
+            relation_index += 1;
+        }
+        let Some(&relation) = semantic_atoms.get(relation_index) else {
+            coalesced.push(first);
+            index += 1;
+            continue;
+        };
+        if relation.class != MathClass::Rel
+            || semantic_atoms[relation_index - 1].range.end() != relation.range.start()
+            || token_slice(relation.range, word).is_none_or(|text| !text.starts_with('='))
+        {
+            coalesced.push(first);
+            index += 1;
+            continue;
+        }
+
+        coalesced.push(SemanticMathAtom {
+            range: TextRange::new(first.range.start(), relation.range.end()),
+            class: MathClass::Rel,
+            delimiter: None,
+            break_priority: MathBreakPriority::Relation,
+            coerced_unary: false,
+        });
+        index = relation_index + 1;
+    }
+    coalesced
+}
+
+fn has_definition_relation(
+    elements: &[SyntaxElement],
+    semantic_atoms: &[SemanticMathAtom],
+) -> bool {
+    coalesce_definition_relations(elements, semantic_atoms)
+        .into_iter()
+        .any(|atom| {
+            atom.class == MathClass::Rel
+                && elements.iter().any(|element| {
+                    element.as_token().is_some_and(|token| {
+                        token.kind() == SyntaxKind::MATH_WORD
+                            && token.text_range().start() <= atom.range.start()
+                            && token.text_range().end() >= atom.range.end()
+                            && token_slice(atom.range, token)
+                                .is_some_and(|text| text.starts_with(':') && text.ends_with('='))
+                    })
+                })
+        })
 }
 
 fn document_from_pieces(pieces: &[Piece], spacing: Spacing) -> Ir {
@@ -982,28 +1072,28 @@ fn relation_layout(
         })
         .collect::<Vec<_>>();
 
-    let starts_with_relation = semantic_atoms
+    let starts_with_relation = pieces
         .first()
-        .is_some_and(|atom| atom.break_priority == MathBreakPriority::Relation);
+        .is_some_and(|piece| piece.role == Role::Relation);
     let mut column = 0;
     let mut delimiter_depth = 0usize;
-    for (index, (piece, atom)) in pieces.iter().zip(semantic_atoms).enumerate() {
+    for (index, piece) in pieces.iter().enumerate() {
         if index > 0 && (base_gaps[index] || spaced_slashes[index - 1] || spaced_slashes[index]) {
             column += 1;
         }
         let width = piece.document.flat_width()?;
-        if delimiter_depth == 0 && atom.break_priority == MathBreakPriority::Relation {
+        if delimiter_depth == 0 && piece.role == Role::Relation {
             return Some((
                 Some(RelationLayout {
                     column,
                     rhs_start: column + width + 1,
-                    assignment: relation_is_assignment(*atom, elements),
+                    assignment: piece.assignment,
                 }),
                 starts_with_relation,
             ));
         }
         column += width;
-        match atom.delimiter {
+        match piece.delimiter {
             Some(DelimiterRole::Open) => delimiter_depth += 1,
             Some(DelimiterRole::Close) => delimiter_depth = delimiter_depth.saturating_sub(1),
             Some(DelimiterRole::Fence) | None => {}
@@ -1074,39 +1164,6 @@ fn has_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
             '=' | '<' | '>' => matches!(base, '=' | '<' | '>'),
             _ => false,
         }
-    })
-}
-
-fn has_definition_relation(elements: &[SyntaxElement]) -> bool {
-    // Keep authored definition-relation spelling on the compatibility path,
-    // including the CST boundary created when a command precedes it.
-    if elements.iter().any(|element| match element {
-        SyntaxElement::Token(token) => {
-            token.kind() == SyntaxKind::MATH_WORD && token.text().contains(":=")
-        }
-        SyntaxElement::Node(node) => node.descendants_with_tokens().any(|descendant| {
-            descendant.into_token().is_some_and(|token| {
-                token.kind() == SyntaxKind::MATH_WORD && token.text().contains(":=")
-            })
-        }),
-    }) {
-        return true;
-    }
-    elements.iter().enumerate().any(|(index, element)| {
-        if !matches!(element, SyntaxElement::Node(node) if MathCommand::cast(node.clone()).is_some()) {
-            return false;
-        }
-        elements[index + 1..]
-            .iter()
-            .find(|candidate| {
-                !matches!(
-                    candidate.kind(),
-                    SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE
-                )
-            })
-            .is_some_and(|candidate| {
-                matches!(candidate, SyntaxElement::Token(token) if token.kind() == SyntaxKind::MATH_WORD && token.text().starts_with(":="))
-            })
     })
 }
 
@@ -1683,6 +1740,21 @@ mod tests {
     }
 
     #[test]
+    fn lowers_definition_relations_through_the_semantic_stream() {
+        let cases = [
+            ("x:=y", "x := y"),
+            ("a::=b", "a ::= b"),
+            (r"\mu:=\nu", r"\mu := \nu"),
+            (r"x\coloneqq y", r"x \coloneqq y"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(lower(input).as_deref(), Some(expected), "{input:?}");
+        }
+        assert_eq!(lower_display("x:=y"), None);
+    }
+
+    #[test]
     fn lowers_ordinary_groups_recursively() {
         let cases = [
             ("{ a+b }", "{a + b}"),
@@ -2111,7 +2183,7 @@ mod tests {
 
     #[test]
     fn rejects_redefined_and_incomplete_bare_commands() {
-        for input in [r"\frac", r"\sqrt", r"\text", r"\mu:=\nu"] {
+        for input in [r"\frac", r"\sqrt", r"\text"] {
             assert_eq!(lower(input), None, "{input:?}");
         }
 
@@ -2138,8 +2210,6 @@ mod tests {
     #[test]
     fn rejects_every_unsupported_shape_category() {
         let cases = [
-            "x:=y",
-            "a::=b",
             "a+b\n% own line",
             r"a\\[1ex",
             "a&b",

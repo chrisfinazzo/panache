@@ -45,34 +45,34 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Typed width-driven free-display wrapping.** Supported free-display rows now
-stay in the typed lowering path whether they fit, wrap automatically, or occur
-after an authored `\\` marker. The final over-width authored-row compatibility
-check in `render_display` is gone.
+**Typed definition relations in inline and environment contexts.** Plain
+definition relations no longer force the whole supported body onto the legacy
+renderer outside free displays.
 
-- The typed document layout ranks top-level relations above binaries, keeps
-  fixed and `\left`/`\right` delimiter interiors opaque, aligns equality chains
-  at the first relation, and anchors ordinary relations after assignments at
-  the assignment RHS. Over-width relation segments then split at each binary
-  operator with the established nested indentation.
-- Width accounting subtracts the host `math-indent` once and subtracts an
-  authored continuation's semantic alignment before laying out that row. The
-  resulting relative geometry composes through `Ir::Align` and remains
-  idempotent.
-- A mandatory narrow-display oracle case pins relation-first and binary-second
-  byte parity with Badness. The regenerated corpus report keeps the same
-  classification counts, but four display outputs now use typed/Badness
-  spelling for scripts and paired delimiters instead of legacy flattening.
-- The complete formatter crate suite passes, including Badness parity, corpus
-  properties, and MathML cross-validation. All four project-required workspace
-  validation commands also pass.
+- Typed lowering coalesces the semantic stream's contiguous punctuation-colon
+  atoms and following `=` relation into one formatter piece. It does so only
+  inside the same lexical `MATH_WORD`, preserving authored whitespace and
+  leaving CST-separated scripted composites on their compatibility path.
+- `x:=y`, `a::=b`, `x:=-y`, and `\mu:=\nu` now have direct lowering coverage
+  and mandatory byte parity with Badness in inline and environment contexts.
+  Relation-layout inspection now reads the lowered piece metadata, since one
+  definition-relation piece can correspond to several semantic atoms.
+- Free displays containing definition relations intentionally remain on the
+  legacy path. Panache's documented legacy breaker treats `:=` as an assignment
+  and anchors a later ordinary relation under its RHS; Badness aligns the later
+  relation under the definition colon. Migrating only the unscripted display
+  shape would make `:=` and `:=_i` inconsistent.
+- The focused typed-lowering suite and complete Badness formatter oracle pass.
+  The corpus and its parity classifications did not change.
 
 ### Suggested next sub-targets
 
-1. Expand structured-delimiter environment lowering to mixed bodies only when a
+1. Resolve the free-display definition-relation policy as one slice: pin
+   Badness's automatic and authored-row behavior, migrate unscripted and
+   scripted `:=` consistently, and update `STYLE.md` if the oracle requires a
+   visible alignment change. Keep the known non-colon scripted-relation defect
+   on its compatibility path.
+2. Expand structured-delimiter environment lowering to mixed bodies only when a
    representative oracle case can pin the spacing and break policy.
-2. Expand grid-comment parity to rows combining multiple multiline cells if a
+3. Expand grid-comment parity to rows combining multiple multiline cells if a
    motivating corpus case appears.
-3. Retire more of the legacy free-display breaker only as its remaining
-   unsupported definition-relation and scripted-composite seams gain safe typed
-   handling; keep the known Badness-defect cases on compatibility paths.
