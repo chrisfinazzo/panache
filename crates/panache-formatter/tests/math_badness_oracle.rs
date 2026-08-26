@@ -1087,6 +1087,32 @@ fn definition_relation_typed_contexts_match_badness() {
 }
 
 #[test]
+fn free_display_definition_relations_match_badness() {
+    let cases = [
+        ("A := bbbbbbbbbb = cccccccccc", 20),
+        ("A :=_i bbbbbbbbbb =_j cccccccccc", 20),
+        ("A := bbbbbbbbbb := cccccccccc", 20),
+        ("A :=_i bbbbbbbbbb :=_j cccccccccc", 20),
+        (concat!(r"A := a \\", "\n", r":= b \\", "\n", "= c"), 80),
+        (concat!(r"A :=_i a \\", "\n", r":=_j b \\", "\n", "= c"), 80),
+    ];
+
+    for (body, width) in cases {
+        let badness = badness_body_with_width(body, OracleContext::Display, width)
+            .expect("Badness display-math oracle");
+        let panache =
+            panache_body_with_preamble_and_width(body, None, OracleContext::Display, width)
+                .expect("Panache display-math formatter");
+        assert_eq!(panache, badness, "definition-relation display: {body:?}");
+
+        let twice =
+            panache_body_with_preamble_and_width(&panache, None, OracleContext::Display, width)
+                .expect("second Panache pass");
+        assert_eq!(twice, panache, "definition-relation display: {body:?}");
+    }
+}
+
+#[test]
 fn result_classification_distinguishes_all_baseline_outcomes() {
     assert!(matches!(
         classify_result(Ok("same".to_owned()), Some("same".to_owned())),

@@ -38,13 +38,6 @@ pub(super) fn try_lower_display_content(
 ) -> Option<Ir> {
     let elements = content.elements().collect::<Vec<_>>();
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
-    // The legacy display breaker treats `:=` as an assignment, while Badness
-    // aligns its automatic relation chains at the definition colon. Keep that
-    // user-visible seam intact until definition relations and their scripted
-    // forms can migrate together.
-    if has_definition_relation(&elements, &semantic_atoms) {
-        return None;
-    }
     if elements
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK)
@@ -248,6 +241,7 @@ struct RelationLayout {
     column: usize,
     rhs_start: usize,
     assignment: bool,
+    definition: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -473,6 +467,7 @@ fn lower_authored_breaks(
                     for continuation in index + 1..=end {
                         let continuation_relation = rows[continuation].first_relation?;
                         relation_indents[continuation] = match head_relation {
+                            Some(head) if head.definition => 0,
                             Some(head) if !head.assignment => head.column,
                             Some(head) if continuation_relation.assignment => head.column,
                             Some(head) => head.rhs_start,
@@ -752,7 +747,7 @@ fn lower_pieces_with_atoms(
     preserve_comment_context: bool,
     environment_rows: bool,
 ) -> Option<Vec<Piece>> {
-    if has_scripted_composite_relation(elements)
+    if has_unsupported_scripted_composite_relation(elements)
         || !elements
             .iter()
             .all(|element| is_supported_element(element, scope))
@@ -765,19 +760,31 @@ fn lower_pieces_with_atoms(
     let mut previous_end = None;
 
     for atom in semantic_atoms {
-        let atom_document = atom_document(
+        let atom_document = definition_relation_document(
             atom,
             elements,
             scope,
             spacing,
             preserve_comment_context,
             environment_rows,
-        )?;
+        )
+        .or_else(|| {
+            atom_document(
+                atom,
+                elements,
+                scope,
+                spacing,
+                preserve_comment_context,
+                environment_rows,
+            )
+        })?;
         pieces.push(Piece {
             role: Role::from(atom.break_priority),
             delimiter: atom.delimiter,
             assignment: atom.break_priority == MathBreakPriority::Relation
                 && relation_is_assignment(atom, elements),
+            definition: atom.break_priority == MathBreakPriority::Relation
+                && is_definition_relation(atom, elements),
             unary: atom.coerced_unary,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
             slash: atom_document.slash,
@@ -794,8 +801,9 @@ fn lower_pieces_with_atoms(
 
 /// Badness's semantic stream keeps each definition colon as punctuation, but
 /// its formatter prints the contiguous colon run and following `=` relation as
-/// one operator. Combine only atoms from the same lexical word so authored
-/// whitespace and CST-separated scripted relations retain their own paths.
+/// one operator. Authored whitespace still separates the scalars; a scripted
+/// equals may cross the CST boundary because its script belongs to the whole
+/// definition relation.
 fn coalesce_definition_relations(
     elements: &[SyntaxElement],
     semantic_atoms: &[SemanticMathAtom],
@@ -836,7 +844,7 @@ fn coalesce_definition_relations(
         };
         if relation.class != MathClass::Rel
             || semantic_atoms[relation_index - 1].range.end() != relation.range.start()
-            || token_slice(relation.range, word).is_none_or(|text| !text.starts_with('='))
+            || !atom_starts_with_equals(relation, elements)
         {
             coalesced.push(first);
             index += 1;
@@ -855,24 +863,26 @@ fn coalesce_definition_relations(
     coalesced
 }
 
-fn has_definition_relation(
-    elements: &[SyntaxElement],
-    semantic_atoms: &[SemanticMathAtom],
-) -> bool {
-    coalesce_definition_relations(elements, semantic_atoms)
-        .into_iter()
-        .any(|atom| {
-            atom.class == MathClass::Rel
-                && elements.iter().any(|element| {
-                    element.as_token().is_some_and(|token| {
-                        token.kind() == SyntaxKind::MATH_WORD
-                            && token.text_range().start() <= atom.range.start()
-                            && token.text_range().end() >= atom.range.end()
-                            && token_slice(atom.range, token)
-                                .is_some_and(|text| text.starts_with(':') && text.ends_with('='))
-                    })
-                })
-        })
+fn atom_starts_with_equals(atom: SemanticMathAtom, elements: &[SyntaxElement]) -> bool {
+    elements.iter().any(|element| {
+        if element.text_range().start() > atom.range.start()
+            || element.text_range().end() < atom.range.end()
+        {
+            return false;
+        }
+        match element {
+            SyntaxElement::Token(token) if token.kind() == SyntaxKind::MATH_WORD => {
+                token_slice(atom.range, token).is_some_and(|text| text.starts_with('='))
+            }
+            SyntaxElement::Node(node) => MathScripted::cast(node.clone())
+                .and_then(|scripted| scripted.base())
+                .and_then(SyntaxElement::into_token)
+                .is_some_and(|base| {
+                    base.kind() == SyntaxKind::MATH_WORD && base.text().starts_with('=')
+                }),
+            _ => false,
+        }
+    })
 }
 
 fn document_from_pieces(pieces: &[Piece], spacing: Spacing) -> Ir {
@@ -1088,6 +1098,7 @@ fn relation_layout(
                     column,
                     rhs_start: column + width + 1,
                     assignment: piece.assignment,
+                    definition: piece.definition,
                 }),
                 starts_with_relation,
             ));
@@ -1109,14 +1120,29 @@ fn relation_is_assignment(atom: SemanticMathAtom, elements: &[SyntaxElement]) ->
             element.text_range().start() <= atom.range.start()
                 && element.text_range().end() >= atom.range.end()
         })
-        .is_some_and(|element| assignment_element(element, atom.range))
+        .is_some_and(assignment_element)
 }
 
-fn assignment_element(element: &SyntaxElement, range: TextRange) -> bool {
-    match element {
-        SyntaxElement::Token(token) if token.kind() == SyntaxKind::MATH_WORD => {
-            token_slice(range, token).is_some_and(|text| text.starts_with(":"))
+fn is_definition_relation(atom: SemanticMathAtom, elements: &[SyntaxElement]) -> bool {
+    elements.iter().any(|element| match element {
+        SyntaxElement::Token(token)
+            if token.kind() == SyntaxKind::MATH_WORD
+                && token.text_range().start() <= atom.range.start()
+                && token.text_range().end() >= atom.range.end() =>
+        {
+            token_slice(atom.range, token)
+                .is_some_and(|text| text.starts_with(':') && text.ends_with('='))
         }
+        _ => false,
+    }) || definition_relation_parts(atom, elements).is_some()
+}
+
+fn assignment_element(element: &SyntaxElement) -> bool {
+    match element {
+        // Badness aligns definition relations with the equality/comparison
+        // chain they introduce. Only assignment-arrow commands use the
+        // right-hand-side continuation anchor in typed layout.
+        SyntaxElement::Token(_) => false,
         SyntaxElement::Node(node) => {
             if let Some(command) = MathCommand::cast(node.clone()) {
                 return command.name_token().is_some_and(|name| {
@@ -1128,16 +1154,16 @@ fn assignment_element(element: &SyntaxElement, range: TextRange) -> bool {
             }
             MathScripted::cast(node.clone())
                 .and_then(|scripted| scripted.base())
-                .is_some_and(|base| assignment_element(&base, base.text_range()))
+                .is_some_and(|base| assignment_element(&base))
         }
-        _ => false,
     }
 }
 
-fn has_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
+fn has_unsupported_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
     // The legacy renderer fuses an adjacent relation head with the scalar that
-    // owns the script (`a:` + `:=_i`, or `x<` + `=_i`). Keep those seams on the
-    // fallback until typed lowering can preserve the established spelling.
+    // owns the script (`x<` + `=_i`). Definition relations are supported by
+    // typed lowering; keep the other seams on the fallback because the pinned
+    // Badness formatter still splits them.
     elements.windows(2).any(|pair| {
         let [SyntaxElement::Token(head), SyntaxElement::Node(node)] = pair else {
             return false;
@@ -1160,7 +1186,7 @@ fn has_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
         };
 
         match head {
-            ':' => base == ':' || base == '=',
+            ':' => base == ':',
             '=' | '<' | '>' => matches!(base, '=' | '<' | '>'),
             _ => false,
         }
@@ -1283,6 +1309,58 @@ fn atom_document(
             && matches!(raw_class, MathClass::Bin | MathClass::Rel),
         starts_control_word_letter: element_starts_control_word_letter(element),
         ends_control_word: element_ends_control_word(element),
+    })
+}
+
+fn definition_relation_document(
+    atom: SemanticMathAtom,
+    elements: &[SyntaxElement],
+    scope: &SignatureScope,
+    spacing: Spacing,
+    preserve_comment_context: bool,
+    environment_rows: bool,
+) -> Option<AtomDocument> {
+    let (prefix, scripted) = definition_relation_parts(atom, elements)?;
+    let scripted = lower_scripted(
+        &scripted,
+        scope,
+        spacing,
+        preserve_comment_context,
+        environment_rows,
+    )?;
+    Some(AtomDocument {
+        document: Ir::concat([Ir::verbatim(prefix), scripted]),
+        slash: false,
+        control_word_operator: false,
+        starts_control_word_letter: false,
+        ends_control_word: false,
+    })
+}
+
+fn definition_relation_parts(
+    atom: SemanticMathAtom,
+    elements: &[SyntaxElement],
+) -> Option<(String, MathScripted)> {
+    elements.windows(2).find_map(|pair| {
+        let [SyntaxElement::Token(head), SyntaxElement::Node(node)] = pair else {
+            return None;
+        };
+        if head.kind() != SyntaxKind::MATH_WORD
+            || head.text_range().start() > atom.range.start()
+            || head.text_range().end() != node.text_range().start()
+            || node.text_range().end() != atom.range.end()
+        {
+            return None;
+        }
+        let scripted = MathScripted::cast(node.clone())?;
+        let base = scripted.base()?.into_token()?;
+        if base.kind() != SyntaxKind::MATH_WORD || !base.text().starts_with('=') {
+            return None;
+        }
+        let prefix_range = TextRange::new(atom.range.start(), head.text_range().end());
+        let prefix = token_slice(prefix_range, head)?;
+        (!prefix.is_empty() && prefix.chars().all(|character| character == ':'))
+            .then_some((prefix, scripted))
     })
 }
 
@@ -1540,6 +1618,7 @@ struct Piece {
     role: Role,
     delimiter: Option<DelimiterRole>,
     assignment: bool,
+    definition: bool,
     /// A `+`/`-` that TeX coerced to a unary sign. It binds to the operand
     /// beside it, so it strips the authored space on either side.
     unary: bool,
@@ -1744,6 +1823,8 @@ mod tests {
         let cases = [
             ("x:=y", "x := y"),
             ("a::=b", "a ::= b"),
+            ("a:=_ib", "a :=_i b"),
+            ("a::=_ib", "a ::=_i b"),
             (r"\mu:=\nu", r"\mu := \nu"),
             (r"x\coloneqq y", r"x \coloneqq y"),
         ];
@@ -1751,7 +1832,13 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(lower(input).as_deref(), Some(expected), "{input:?}");
         }
-        assert_eq!(lower_display("x:=y"), None);
+        assert_eq!(lower_display("x:=y").as_deref(), Some("x := y"));
+        assert_eq!(
+            lower_display_width("A := bbbbbbbbbb = cccccccccc", 20).as_deref(),
+            Some("A := bbbbbbbbbb\n  = cccccccccc"),
+        );
+        let authored = concat!(r"A :=_i a \\", "\n", r":=_j b \\", "\n", "= c");
+        assert_eq!(lower_display(authored).as_deref(), Some(authored));
     }
 
     #[test]
@@ -2160,8 +2247,6 @@ mod tests {
             "x^",
             "x^% argument comment\n2",
             r"\text{ a+b }^2",
-            r"a:=_ib",
-            r"a::=_ib",
             r"x<=_iy",
             r"x>=_iy",
             r"a==_kb",

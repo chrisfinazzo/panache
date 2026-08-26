@@ -200,24 +200,24 @@ Returned unchanged, never reflowed:
    only the relation split shows: `A = aaaa + bbbb` / `= cccc + dddd`.)
 
    **Assignment exception.** When the leading relation is an *assignment* arrow
-   (`\gets`, `\leftarrow`, `\mapsto`, `\coloneqq`, or the composite `:=`), the
-   arrow defines its LHS rather than equating it, so it is **not** part of an
-   equality chain it introduces. An equality or comparison continuation anchors
-   under the assignment's *right-hand side* (`linebreak::rhs_start_column`)
-   instead of under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag
-   it left. A repeated assignment, however, aligns its operator under the first
-   assignment operator. The continuation's relation kind selects the anchor via
-   `linebreak::continuation_anchor_for` and `relation_is_assignment`. `\to` and
-   `\rightarrow` are intentionally *not* assignments (they are usually limits or
-   mappings).
+   (`\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq`), the arrow defines its LHS
+   rather than equating it, so it is **not** part of an equality chain it
+   introduces. An equality or comparison continuation anchors under the
+   assignment's *right-hand side* (`linebreak::rhs_start_column`) instead of
+   under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag it left. A
+   repeated assignment, however, aligns its operator under the first assignment
+   operator. The continuation's relation kind selects the anchor via
+   `linebreak::continuation_anchor_for` and `relation_is_assignment`. `:=`,
+   `\to`, and `\rightarrow` are intentionally *not* assignments for automatic
+   layout; they participate in the relation chain.
 
    ```
    \beta_0 \gets \beta_0 + \frac{4}{n} …
                  = \beta_0 - \frac{1}{L_0} …
                  = 1/4
 
-   A :=_i bbbbbbbbbb
-     :=_j cccccccccc
+   A := bbbbbbbbbb
+     = cccccccccc
    ```
 
    This is **fully deterministic**: the layout is a pure function of the
@@ -253,7 +253,10 @@ Returned unchanged, never reflowed:
      (`relation_chain_alignment`). This fires regardless of width (the `\\` are
      forced breaks). A group containing a top-level `&` is left to the existing
      free-row path (a bare `&` is not a column separator), and `\\` rows that
-     are not a relation chain stay flush at the bare `math-indent`.
+     are not a relation chain stay flush at the bare `math-indent`. Badness
+     treats a definition-led authored chain differently from automatic wrapping:
+     rows beginning with `:=`, `:=_i`, or a later ordinary relation remain flush
+     at `math-indent`.
    - **Scope:** every over-width free row with a top-level relation **or**
      binary operator is broken. A **relation chain** (≥ 2 relations) splits at
      its relations, then nests binary terms inside each over-width segment (as

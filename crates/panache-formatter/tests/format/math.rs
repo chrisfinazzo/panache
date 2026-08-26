@@ -318,10 +318,10 @@ fn hardbreak_assignment_chain_anchors_under_rhs() {
 }
 
 #[test]
-fn hardbreak_repeated_assignments_align_the_operators() {
+fn hardbreak_definition_relations_follow_badness_rows() {
     let cfg = math_config(true);
     let input = "$$\nA :=_i a \\\\\n:=_j b \\\\\n= c\n$$\n";
-    let expected = "$$\n  A :=_i a \\\\\n    :=_j b \\\\\n         = c\n$$\n";
+    let expected = "$$\n  A :=_i a \\\\\n  :=_j b \\\\\n  = c\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
     let twice = format(&output, Some(cfg), None);
