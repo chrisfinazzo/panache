@@ -954,6 +954,22 @@ fn embedded_environment_migration_slice_matches_badness() {
 }
 
 #[test]
+fn comment_bearing_embedded_environment_matches_badness() {
+    for body in [
+        "x+\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix},y",
+        "(x,\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix},y)",
+    ] {
+        assert_formatter_parity(body, OracleContext::Inline);
+        let once = panache_body(body, OracleContext::Inline).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Inline).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "comment-bearing embedded inline environment is not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn delimited_environment_migration_slice_matches_badness() {
     let id = "environments/nested/delimited_matrix.tex";
     let body = fs::read_to_string(corpus_root().join(id))

@@ -108,7 +108,8 @@ fn render_inline_content(
     }
     if elements.iter().any(contains_environment) {
         let semantic = expand_word_elements(elements);
-        if let Some(document) = mixed_segment_doc(&semantic, opts, false) {
+        let hanging_offset = keeps_breaks.then_some(1);
+        if let Some(document) = mixed_segment_doc(&semantic, opts, hanging_offset) {
             return print(&document);
         }
     }
@@ -399,8 +400,22 @@ fn render_top_level_mixed_environment(
     if elems.iter().any(contains_comment) || !ordinary_delimiters_balanced(elems) {
         return None;
     }
-    let doc = mixed_segment_doc(elems, opts, true)?;
+    let doc = mixed_segment_doc(elems, opts, Some(0))?;
     Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
+}
+
+pub(super) fn can_render_mixed_environment_comments(
+    tree: &SyntaxNode,
+    opts: &MathFormatOptions,
+) -> bool {
+    if opts.context != MathContext::Inline {
+        return false;
+    }
+    let elements = expand_word_elements(&tree.children_with_tokens().collect::<Vec<_>>());
+    if !elements.iter().any(contains_environment) {
+        return false;
+    }
+    mixed_segment_doc(&elements, opts, Some(1)).is_some()
 }
 
 fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {
@@ -449,7 +464,7 @@ fn delimited_body_doc_configured(
             Some(AtomClass::Close) => depth = depth.saturating_sub(1),
             Some(AtomClass::Punct) if depth == 0 => {
                 segments.push(Ir::concat([
-                    mixed_segment_doc(&body[start..index], opts, true)?,
+                    mixed_segment_doc(&body[start..index], opts, Some(0))?,
                     Ir::text(element.to_string()),
                 ]));
                 start = index + 1;
@@ -457,7 +472,7 @@ fn delimited_body_doc_configured(
             _ => {}
         }
     }
-    segments.push(mixed_segment_doc(&body[start..], opts, true)?);
+    segments.push(mixed_segment_doc(&body[start..], opts, Some(0))?);
     if break_at_punctuation {
         Some(Ir::join(Ir::Line, segments))
     } else {
@@ -482,7 +497,7 @@ fn delimited_body_doc_configured(
 fn mixed_segment_doc(
     segment: &[SyntaxElement],
     opts: &MathFormatOptions,
-    hang_environment: bool,
+    hanging_offset: Option<usize>,
 ) -> Option<Ir> {
     if segment.iter().any(contains_unsafe_mixed_trivia) {
         return None;
@@ -534,8 +549,8 @@ fn mixed_segment_doc(
                     render_inline(&scripts, &opts.signature_scope).trim()
                 );
             }
-            let environment_doc = if hang_environment {
-                Ir::align(prefix_width, environment_doc)
+            let environment_doc = if let Some(hanging_offset) = hanging_offset {
+                Ir::align(prefix_width + hanging_offset, environment_doc)
             } else {
                 environment_doc
             };
@@ -576,7 +591,7 @@ pub(super) fn mixed_delimited_environment_document(
     }
 
     if environment_count == 1 {
-        mixed_segment_doc(&elements, opts, true)
+        mixed_segment_doc(&elements, opts, Some(0))
     } else {
         // A top-level punctuation mark is the only boundary at which Badness
         // composes multiple environment documents. Each segment accepts at

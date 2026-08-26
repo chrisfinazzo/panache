@@ -60,26 +60,28 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Inline comments across punctuated multiple environments.** The existing
-typed `\left`/`\right` document now accepts comment-bearing environment cells
-in inline math as well as display and environment contexts.
+**Comment-bearing embedded environments in inline expressions.** Mixed inline
+expressions such as `x+\begin{matrix}...%...\end{matrix},y` now use the typed
+environment compositor instead of declining the whole math body.
 
-- The nested-comment safety gate accepts the shape only when structured-
-  delimiter lowering succeeds; malformed, unpunctuated, and otherwise
-  unsupported comment shapes still take the compatibility path.
-- Comment-pinned inline continuations account for the controlled host `$`
-  opener's column, matching Badness byte-for-byte without changing display or
-  environment indentation.
-- The existing oracle case is mandatory in all three contexts and checks a
-  second formatting pass for idempotency.
-- `STYLE.md` records the inline indentation rule. The complete formatter oracle
-  passes. The shared corpus and its report classifications did not change, so
-  the committed report did not require regeneration.
+- The nested-comment safety gate accepts the shape only when the same typed
+  mixed-segment document used by rendering succeeds. Unsupported scripts,
+  malformed environments, authored breaks in free content, and multiple
+  environments in one segment still take the compatibility path.
+- Comment-pinned inline environments hang from their actual `\begin` source
+  column. The explicit hanging offset includes the controlled host `$` opener;
+  ordinary comment-free inline math still prints flat.
+- Mandatory oracle cases cover a free expression and an ordinary-delimiter
+  wrapper, with byte parity and second-pass idempotency checks.
+- `STYLE.md` records the rule. The complete formatter oracle passes. Regenerating
+  the shared-corpus report produced no diff.
 
 ### Suggested next sub-targets
 
-1. Replace another narrow embedded-environment compatibility path only when a
-   mandatory oracle case pins its comment, authored-break, or script policy.
+1. Add display support for a free expression followed by a comment-bearing
+   environment only after pinning Badness's distinct wrapping policy: the
+   observed `x+\begin{matrix}...` shape breaks before `+`, then hangs the
+   environment from the continuation line.
 2. Move environments toward first-class typed atom documents so the separate
    structured-delimiter and mixed-environment paths can eventually converge.
 3. Revisit unpunctuated multiple environments only with a pinned structural

@@ -288,6 +288,10 @@ fn can_lower_nested_comments(tree: &SyntaxNode, opts: &MathFormatOptions) -> boo
         return true;
     }
 
+    if render::can_render_mixed_environment_comments(tree, opts) {
+        return true;
+    }
+
     if opts.context == MathContext::EnvironmentBody {
         return render::can_render_environment_comments(tree, &opts.signature_scope);
     }
