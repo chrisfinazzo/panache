@@ -31,7 +31,17 @@ Returned unchanged, never reflowed:
 1. **Inline whitespace collapse.** In inline context (`$...$`, `\(...\)`), the
    content is rendered on one line with every whitespace run collapsed to a
    single space and the ends trimmed. Spaces are never *removed* (a
-   command-terminating space survives: `\alpha   x` → `\alpha x`).
+   command-terminating space survives: `\alpha   x` → `\alpha x`). A leading
+   top-level `%` comment remains on its own line, and a same-line trailing `%`
+   comment retains the newline that terminates it. Safe mid-expression comments
+   retain the preceding atom's semantic context across their hard newline, so a
+   following sign remains binary or unary as authored. The same rule applies in
+   signature-proven math arguments, ordinary groups, braced script arguments,
+   and `\left`/`\right` bodies. Every bracket level enclosing a comment-broken
+   body adds one column of hanging indentation, which also positions the closing
+   delimiter after a trailing comment; a `\left`/`\right` pair contributes its
+   opening width plus one column instead, and its padded body puts the closing
+   `\right` one further column out.
 
 2. **Display free rows.** Non-environment display content (`$$...$$`) is laid
    out one row per line. Rows split on a top-level `\\` (hard break, kept) or a
@@ -47,6 +57,11 @@ Returned unchanged, never reflowed:
    2-space, opinionated --- may become configurable later under the experimental
    clause).
 
+   A free comment-bearing body without `&`, an authored `\\`, or a nested
+   environment follows the typed comment rules from Rule 1 at the environment's
+   one-level indent. Its operator context survives comment newlines, and nested
+   brackets contribute their normal hanging indentation.
+
    An environment embedded as an operand inside a balanced ordinary delimiter
    pair (`(...)` or `[...]`) remains in the surrounding expression. If it makes
    the delimiter body multiline, the body breaks after the opening delimiter, at
@@ -57,9 +72,16 @@ Returned unchanged, never reflowed:
    is formatter-side delimiter interpretation; ordinary delimiters remain flat
    tokens in the lossless CST because they do not create TeX scope.
 
-   A single top-level environment with surrounding free content uses the same
-   hanging layout. Its `\begin` stays after the preceding expression, and its
-   body and `\end` align relative to the environment's starting column.
+   In display math, a single top-level environment with surrounding free content
+   uses the same hanging layout. Its `\begin` stays after the preceding
+   expression, and its body and `\end` align relative to the environment's
+   starting column. Inline math follows Badness's distinct layout: the
+   environment's continuation lines return to the math body's base column.
+
+   A lone environment inside a closed `\left`/`\right` body composes the same
+   environment layout with the structured delimiter's hanging column. The
+   `\begin` remains beside the opening delimiter; body rows indent one level
+   beyond it, and `\end` returns beneath it before the closing `\right`.
 
    Mixed shapes this layout does not yet model safely --- multiple environments
    in one segment, unbalanced ordinary delimiters, or a segment containing a
@@ -67,12 +89,14 @@ Returned unchanged, never reflowed:
    formatter owns delimiter-adjacent line breaks, so the verbatim fallback
    removes only leading and trailing newline characters. It preserves
    indentation and all internal whitespace. The math-local Wadler-style document
-   model (`layout.rs`) preserves multiline fragments compositionally; it never
-   uses string sentinels.
+   model (`ir.rs`) preserves multiline fragments compositionally; it never uses
+   string sentinels.
 
-4. **`\\` normalization.** A row's trailing hard break is emitted as `\\` (one
-   space before). A trailing `\\` on the final row is **preserved if present,
-   never synthesized**.
+4. **`\\` normalization.** Display and environment row layout emits a trailing
+   hard break as `\\` with one preceding space. Typed inline lowering follows
+   Badness and preserves whether the author placed whitespace before the break.
+   A trailing `\\` on the final row is **preserved if present, never
+   synthesized**.
 
 5. **`&`-column alignment.** Within an environment body, rows split into cells
    on **top-level** `&` (a `&` inside a group `{...}` or a nested environment is
@@ -86,12 +110,31 @@ Returned unchanged, never reflowed:
    **source character counts**, so alignment is cosmetic source-tidiness, not
    rendered-glyph alignment (`\alpha` counts as 6).
 
+   A grid cell containing one comment-bearing group, signature-proven argument,
+   braced script, or `\left`/`\right` body uses the typed comment layout from
+   Rule 1. A final cell's continuation indent composes the environment indent,
+   the aligned cell's starting column, and the enclosing construct's hanging
+   indent.
+
+   For Badness parity, a multiline non-final cell switches the entire
+   environment to tight separators: `&` has no surrounding grid space, columns
+   are not padded, and a trailing `\\` is not preceded by a synthesized space.
+   Cell contents still receive ordinary operator formatting. The pinned oracle
+   has one construct-sensitive inconsistency: after a comment in an ordinary
+   first-column group---including a single-cell row---the next operator receives
+   line-local context, and the continuation gains one column, while commands,
+   scripts, paired delimiters, and later columns preserve semantic context
+   across the comment. Panache reproduces this behavior until the oracle is
+   corrected.
+
    Ragged rows are fine: a column's width is the max over only the rows that
    have a non-last cell there; a short row contributes to and is padded for only
    the columns it has.
 
    A row whose sole content is a single nested environment (no `&`, no `\\`) is
-   block-laid-out at the body indent rather than inlined.
+   block-laid-out at the body indent rather than inlined. Comment-bearing cells
+   inside such an environment recurse through the same typed layout and safety
+   checks at every nesting depth.
 
 6. **Operator spacing.** The char operators `+ - * = < >` (the parser's neutral
    `MATH_OPERATOR` tokens) are spaced by *interpretation*, not by CST shape ---
@@ -158,18 +201,23 @@ Returned unchanged, never reflowed:
 
    **Assignment exception.** When the leading relation is an *assignment* arrow
    (`\gets`, `\leftarrow`, `\mapsto`, `\coloneqq`, or the composite `:=`), the
-   arrow defines its LHS rather than equating it, so it is **not** part of the
-   equality chain it introduces. The equality continuations then anchor under
-   the assignment's *right-hand side* (`linebreak::rhs_start_column`) instead of
-   under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag them left.
-   The selector is `linebreak::continuation_anchor` /
-   `first_relation_is_assignment`. `\to` and `\rightarrow` are intentionally
-   *not* assignments (they are usually limits or mappings).
+   arrow defines its LHS rather than equating it, so it is **not** part of an
+   equality chain it introduces. An equality or comparison continuation anchors
+   under the assignment's *right-hand side* (`linebreak::rhs_start_column`)
+   instead of under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag
+   it left. A repeated assignment, however, aligns its operator under the first
+   assignment operator. The continuation's relation kind selects the anchor via
+   `linebreak::continuation_anchor_for` and `relation_is_assignment`. `\to` and
+   `\rightarrow` are intentionally *not* assignments (they are usually limits or
+   mappings).
 
    ```
    \beta_0 \gets \beta_0 + \frac{4}{n} …
                  = \beta_0 - \frac{1}{L_0} …
                  = 1/4
+
+   A :=_i bbbbbbbbbb
+     :=_j cccccccccc
    ```
 
    This is **fully deterministic**: the layout is a pure function of the
@@ -197,14 +245,15 @@ Returned unchanged, never reflowed:
    - **`\\` relation chains align like an implicit `aligned`.** A genuine hard
      `\\` *does* split logical rows. When ≥ 2 such `\\`-joined rows form a
      relation chain --- the head ends in `\\` and every following row
-     `begins_with_top_level_relation` (a continuation like `= b`) --- the
-     continuations hang at the head's `continuation_anchor` (under the first
-     relation, or the assignment's RHS), exactly as the within-row relation
-     breaks do, so a `\\`-broken chain in bare `$$` reads like an `aligned` even
-     without one (`relation_chain_alignment`). This fires regardless of width
-     (the `\\` are forced breaks). A group containing a top-level `&` is left to
-     the existing free-row path (a bare `&` is not a column separator), and `\\`
-     rows that are not a relation chain stay flush at the bare `math-indent`.
+     `begins_with_top_level_relation` (a continuation like `= b`) --- each
+     continuation hangs at the corresponding anchor in the head row: an equality
+     or comparison under an assignment's RHS, but a repeated assignment under
+     its operator. This is exactly the within-row policy, so a `\\`-broken chain
+     in bare `$$` reads like an `aligned` even without one
+     (`relation_chain_alignment`). This fires regardless of width (the `\\` are
+     forced breaks). A group containing a top-level `&` is left to the existing
+     free-row path (a bare `&` is not a column separator), and `\\` rows that
+     are not a relation chain stay flush at the bare `math-indent`.
    - **Scope:** every over-width free row with a top-level relation **or**
      binary operator is broken. A **relation chain** (≥ 2 relations) splits at
      its relations, then nests binary terms inside each over-width segment (as
@@ -227,19 +276,13 @@ Returned unchanged, never reflowed:
      `{a} _ b` → `{a}_b`. The marker still presents an opening class, so a
      directly following `+`/`-` coerces to unary (`x^{-1}` keeps its minus
      tight).
-   - **Math-mode brace groups** have their *leading and trailing* interior
-     whitespace trimmed (`{ 00 }` → `{00}`, `{-1 }` → `{-1}`), since math mode
-     ignores it. The space *before* `{` and *after* `}` (between atoms) is left
-     alone (`{x} y` stays `{x} y`), and inter-atom spaces inside the group keep
-     the Rule 1/6 collapse, not removal. **Text-mode groups are exempt:** the
-     argument of a text-switching command (`\text`, `\mbox`, the `\text*` family ---
-     see `operators::is_text_mode_command`) keeps its interior spaces verbatim
-     (`\text{ a }` survives), and the exemption nests, so a group inside a text
-     argument (`\text{a {b} c}`) is also preserved. Whether a group is text mode
-     is tracked with a brace-mode stack in `render::space_operators`. Math-mode
-     font commands (`\mathrm`, `\mathbf`) are **not** text mode --- spaces are
-     already insignificant inside them --- so their interiors are trimmed like
-     any other math group.
+   - **Signature-proven math arguments** recurse through the normal math spacing
+     path, so their leading and trailing interior whitespace is trimmed
+     (`\frac{ 1 }{ 2 }` → `\frac{1}{2}`). Text-domain, unknown, unmatched, and
+     redefined-command arguments are emitted as one opaque byte string. This
+     preserves `\text{ a }`, custom text macros, and any argument whose
+     whitespace semantics Panache cannot prove. Configured signatures replace
+     built-ins; raw-TeX definitions shadow both.
 
 ## Idempotency
 

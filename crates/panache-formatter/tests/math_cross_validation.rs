@@ -31,39 +31,21 @@
 //! skipped fraction exceeds [`MAX_SKIP_FRACTION`]**, so silent oracle-coverage
 //! erosion stays visible.
 
-use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_math};
 use pulldown_latex::config::RenderConfig;
 use pulldown_latex::{Parser, Storage, push_mathml};
 
+#[path = "common/math_corpus.rs"]
+mod math_corpus;
+use math_corpus::{discover_cases, read_preamble, signature_scope};
+
 const MAX_SKIP_FRACTION: f64 = 0.40;
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/math_corpus")
-}
-
-fn discover_cases(root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    walk(root, &mut out);
-    out.sort();
-    out
-}
-
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk(&path, out);
-        } else if path.extension() == Some(OsStr::new("tex")) {
-            out.push(path);
-        }
-    }
 }
 
 fn context_for(id: &str) -> MathContext {
@@ -74,13 +56,17 @@ fn context_for(id: &str) -> MathContext {
     }
 }
 
-fn format_opts(context: MathContext) -> MathFormatOptions {
+fn format_opts(
+    context: MathContext,
+    signature_scope: panache_parser::semantic::math::SignatureScope,
+) -> MathFormatOptions {
     MathFormatOptions {
         enabled: true,
         math_indent: 2,
         line_width: 80,
         bookdown_equation_labels: false,
         context,
+        signature_scope,
     }
 }
 
@@ -148,6 +134,13 @@ fn corpus_cross_validates_against_pulldown_latex() {
                 continue;
             }
         };
+        let preamble = match read_preamble(case) {
+            Ok(preamble) => preamble,
+            Err(e) => {
+                failures.push(format!("[{id}] preamble read error: {e}"));
+                continue;
+            }
+        };
         let context = context_for(&id);
 
         let Some(before) = render_mathml(&input) else {
@@ -155,7 +148,11 @@ fn corpus_cross_validates_against_pulldown_latex() {
             continue;
         };
 
-        let formatted = format_math(&input, &format_opts(context)).unwrap_or_else(|| input.clone());
+        let formatted = format_math(
+            &input,
+            &format_opts(context, signature_scope(preamble.as_deref())),
+        )
+        .unwrap_or_else(|| input.clone());
         let Some(after) = render_mathml(&formatted) else {
             failures.push(format!(
                 "[{id}] format produced oracle-unparseable output:\n  input:\n{}\n  formatted:\n{}",

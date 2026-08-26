@@ -1,139 +1,104 @@
 ---
 name: math-parser-formatter
-description: Incrementally build Panache's math parser and formatter — a lossless
-  structural TeX CST for inline/display math, then content-aware reformatting
-  behind an experimental gate — one bounded phase at a time.
+description: Advance Panache's math parser and formatter one bounded phase at a
+  time. Use when implementing or debugging the TeX math CST, semantic model,
+  Badness parity, math formatting, or the next math-roadmap task.
 ---
 
-Use this skill when asked to advance Panache's math parsing/formatting, fix a
-math-CST or math-formatting issue, or pick the next phase of this effort.
-
-This is a **long-horizon, multi-session effort**. Each session moves one phase
-or sub-task forward; do not attempt sweeping rewrites in one go. Current state
-and design decisions live in this skill and `RECAP.md`.
+This is a multi-session effort. Project source paths below are relative to the
+repository root. Skill resources linked from this file are relative to this
+`SKILL.md` file.
 
 ## Scope boundaries
 
 - Parser: `crates/panache-parser/src/parser/math.rs` (the TeX content parser),
   embedded via `crates/panache-parser/src/parser/inlines/math.rs`, with AST
   accessors in `crates/panache-parser/src/syntax/{math,inlines}.rs`.
-- Formatter (future phases): a new `crates/panache-formatter/src/formatter/math/`
-  mirroring `formatter/yaml/`, gated behind an experimental option.
-- Goal: parse math *content* into a lossless structural CST (Phase 1 done;
-  operator atoms now tokenized) and reformat it **semantics-safely**. *In scope*:
-  align `&` columns, indent environment bodies, normalize `\\`, collapse spaces
-  (done); **operator-precedence-aware spacing** (`a+b` → `a + b`, class-based);
-  and **semantic line-breaking + indenting of long display math** (wrap at the
-  lowest-precedence operators, indent continuations). *Out of scope*: macro
-  rewriting, `\frac`/`\dfrac` canonicalization, and anything that needs macro
-  expansion.
+- Formatter: `crates/panache-formatter/src/formatter/math/`, gated behind an
+  experimental option.
+- Goal: make Panache's math-content CST structurally isomorphic to Badness's and
+  reproduce Badness's math formatting style, while retaining a wholly native
+  production parser, semantic model, CST, and formatter. The sole intentional
+  style extension is alignment of trailing `\\` markers in alignment-capable
+  environments. *Out of scope*: macro rewriting, `\frac`/`\dfrac`
+  canonicalization, and anything that needs macro expansion.
 - **There is no pandoc oracle for math *formatting*** — pandoc passes math
-  content through untouched. Use an external dev-only oracle (latexindent /
-  KaTeX parser) for cross-validation, à la `pretty_yaml` for YAML.
+  content through untouched. Use exact, pinned `badness-parser` and
+  `badness-formatter` development dependencies as the structural and output
+  oracles. Retain independent MathML and TeX/PDF checks for meaning preservation.
 
 ## Locked-in design decisions (do not relitigate)
 
 - **Parser is unconditional + lossless**; the experimental gate lives on the
   **formatter** side (default off = emit math verbatim, today's behavior). The
   gate is a formatter-config option, NOT a Pandoc `Extensions` flag.
-- **texlab, not KaTeX**, is the parser model (lossless, error-tolerant vs.
-  lossy, throwing).
-- **Diagnostics ride a side-channel** (`MathParseReport`), to be surfaced via
-  linter + LSP — not the CST.
-- **Bookdown equation labels** (`(\#eq:label)`) are parsed into a
-  `MATH_EQUATION_LABEL` token, gated on `bookdown_equation_references`.
+- **Badness is the parser model.** Match its lossless, error-tolerant CST and
+  recovery through the pinned development-only oracle; do not substitute a
+  lossy or throwing math parser.
+- **Diagnostics ride a side-channel.** Derive `MathDiagnostic` values through
+  `math_diagnostics()` for the formatter, linter, and LSP; do not encode errors
+  as CST structure.
+- **Host-only constructs stay outside TeX math where possible.** Markdown
+  delimiters, Bookdown equation labels (`(\#eq:label)`), Pandoc attributes, and
+  container prefixes belong to the host layer. Equation labels are host tokens
+  between ordered `MATH_CONTENT` segments, never children of those segments.
 - **`MATH_SPACE`/`MATH_NEWLINE` stay distinct** from host `WHITESPACE`/`NEWLINE`
   so `math_content_text()` can strip container prefixes the block machinery
   interleaves into `MATH_CONTENT` (blockquote `>` etc.).
-- **Operators are tokenized but never classified in the CST.** `+ - * = < >`
-  emit a neutral `MATH_OPERATOR` token (one per char); bin/rel/precedence is
-  *interpretation* (contextual unary minus, `\mathbin`, macro-dependent) — the
-  analog of YAML scalar cooking. It lives in a **shared formatter/LSP module**
-  keyed on operator text + command name (class + break-priority), never
-  `MATH_BIN_OP`/`MATH_REL_OP` kinds. That module is the gateway to both
-  precedence-aware spacing and semantic line-breaking.
+- **The math CST follows Badness's lexical grain.** Ordinary characters live in
+  a Badness-equivalent `MATH_WORD` run; `MATH_OPERATOR`, `MATH_OPEN`,
+  `MATH_CLOSE`, and `MATH_PUNCT` are migration residue from the old formatter.
+  A Panache-owned semantic atom iterator slices Unicode scalars and derives
+  operator class, delimiter role, unary coercion, and break priority exactly as
+  Badness does.
+- **Badness is test-only.** Production code must not depend on Badness, retain a
+  Badness CST, delegate formatting, or project between runtime trees. Test-only
+  projectors may mechanically rename kinds, remove wrapper offsets, and discard
+  documented host trivia; they must never parse, infer attachment, or repair a
+  tree.
+- **Known pinned Badness formatter defect:** it still splits a non-colon
+  relation head from its CST-separated scripted tail (`<=_i` → `< =_i`, with
+  the same problem for `>=_i` and `==_i`). Panache preserves these composite
+  relations. Keep those cases on the compatibility path and outside mandatory
+  byte parity until the pinned oracle is corrected. Definition relations,
+  including `:=_i`, now have byte parity.
+- **Raise issues with Badness to the user:** if you see a Badness parser 
+  or formatter defect, record it and elevate it to the user so that
+  it can be fixed in the Badness repository.
 
 Follow the math-parser, parser, and formatter invariants in the repository's
 root `AGENTS.md`.
 
-## Phased plan (status)
-
-- **Phase 0 — scaffolding.** SyntaxKinds, this skill + rule, corpus. *Skill/rule
-  DONE; representative TeX corpus still TODO.*
-- **Phase 1 — TeX tokenizer + structural CST (parser).** *DONE*. Lossless
-  `MATH_CONTENT` CST, diagnostics side-channel, bookdown labels,
-  accessors/projector/indexers.
-- **Phase 1b — operator atoms (parser).** *DONE* (`feat(parser): tokenize math
-  operators into MATH_OPERATOR`). Neutral `MATH_OPERATOR` token, no class.
-- **Phase 2 — formatter experimental gate + inline math.** *DONE*. Gate is
-  `[experimental] format-math` (default false), mirrored onto
-  `Config::experimental_format_math`, schema regenerated. Off → verbatim; on →
-  inline spacing normalization.
-- **Phase 3 — display math + environments.** *DONE*. `&`-column alignment,
-  environment-body indentation, `\\` normalization; honors
-  `has_unescaped_single_dollar_in_content()`.
-- **Phase 4 — dev-oracle cross-validation + idempotency corpus.** *DONE*.
-  Tier-1 corpus props + Tier-2 `pulldown-latex` MathML invariance oracle.
-- **Phase 5 — operator interpretation module + precedence-aware spacing.**
-  *DONE*. `formatter/math/operators.rs` (`cooking.rs` analog, `pub` for LSP):
-  classify char operators + curated command table → class; TeX Bin→Ord coercion;
-  gap-based re-spacer (`a+b`→`a + b`, unary `-x`/`f(-x)` tight, `x=-y`→`x = -y`).
-  Char operators only; **command-operator spacing + Tier 3 → Phase 5b**;
-  break-priority column → Phase 6.
-- **Phase 5b — command-operator spacing + Tier 3.** *DONE*. Re-spaced
-  `\leq`/`\cdot` (command-terminating space handled, never `TightOp`); landed the
-  dev-only vendored symbol→atom-class fixture (`tests/fixtures/math_symbol_classes/`)
-  cross-checked against `pulldown-latex` Events. `\lim`/`\asymp` divergences
-  recorded, not corrected.
-- **Phase 6 — semantic line-breaking + indenting.** Wrap long display math at
-  lowest-precedence operators, indent continuations (uses Phase 5 priorities).
-  - *Commit 1 DONE*: parser tokenizes delimiters/punctuation (`( [` →
-    `MATH_OPEN`, `) ]` → `MATH_CLOSE`, `, ;` → `MATH_PUNCT`; `| . /` stay text);
-    formatter's `text_tail_class` replaced by kind-keyed `operators::delimiter_class`.
-    No behavior change.
-  - *Commit 2 DONE* (`9d7c2e5b`): `operators::break_priority` (Rel > Bin > 0) +
-    new `formatter/math/linebreak.rs`. Over-width display **free rows** break at
-    depth-0 relations (≥2), continuations align under the first relation; depth
-    tracked via open/close counter (`(`/`[`/`\left` vs `)`/`]`/`\right`), brace
-    groups opaque. `line_width` threaded onto `MathFormatOptions`. Idempotency:
-    `render.rs::split_logical_rows` joins soft newlines into one logical row
-    (only `\\` splits) — except a `%`-comment-terminating newline (significant,
-    or the next line is absorbed into the comment).
-  - *Commit 3 DONE*: nested **binary** breaking inside an over-width relation
-    segment — each `+ term` nests one indent step deeper (under the relation
-    RHS). `linebreak.rs` now uses `spaced_operator_breaks` (depth-0, coerced, so
-    unary signs excluded) + `break_binary_segment`; `render_inline_seeded(_,
-    Some(Close))` keeps a leading-`+` continuation binary (not unary) in
-    isolation. **Scope:** binary breaking only WITHIN a relation chain (≥2 rels);
-    standalone binary chains / single-relation / no-relation rows stay one line.
-    Remaining: binary breaking outside a relation chain, environment-body
-    breaking, min-breaks-to-fit.
-- **Phase 7 — docs + stabilization** (`docs/guide/formatting.qmd`,
-  `configuration.qmd`); consider flipping the gate per flavor (separate
-  decision).
-- **Surface math diagnostics via linter/LSP** — *DONE* (promoted Warning→Error).
-- **Optional structural cooking (parser, orthogonal to operators):** script
-  attachment, known-command argument grouping — legit future CST work if a
-  formatting phase needs the structure.
-
 ## Session workflow
 
-1. Read `RECAP.md` (status, traps, next sub-targets) and the rules above.
-2. Pick one bounded phase/sub-task.
+1. Read the repository roadmap at `TODO.md` in the root. Follow its checkboxes
+   for the authoritative sequence, then read the skill-local
+   [RECAP.md](RECAP.md) for the latest completed slice and suggested next
+   sub-targets. Resolve that link relative to this `SKILL.md`, not the
+   repository root.
+2. Pick one bounded sub-task. If the roadmap, recap, and repository disagree,
+   verify the implementation and correct the stale document before proceeding.
 3. TDD: add the failing test first (parser golden / formatter golden / unit).
-4. Validate before landing:
-   - `cargo test --workspace`
-   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-   - `cargo fmt -- --check`
+4. Validate during development and before landing:
+   - During development, run the focused suite relevant to the changed layer:
+     - Parser CST: `cargo test -p panache-parser --test math_badness_parity`
+     - Semantic model:
+       `cargo test -p panache-parser --test math_semantic_parity`
+     - Formatter output:
+       `cargo test -p panache-formatter --test math_badness_oracle`
+   - If the formatter corpus or its parity classification changes, regenerate
+     and review the committed report with:
+
+     ```bash
+     cargo test -p panache-formatter --test math_badness_oracle \
+       math_badness_full_report -- --ignored --nocapture
+     ```
+
+   - Before landing, run the workspace validation required by root `AGENTS.md`.
+     Its `cargo test --workspace` gate subsumes the focused suites; do not rerun
+     a focused suite afterward when both exercised the same tree state.
    - For parser CST snapshot changes: review each diff (byte ranges must still
      reconstruct the input losslessly).
    - Flag-off regression: existing formatter goldens stay byte-identical.
-5. Rewrite `RECAP.md`'s Latest-session entry; add a one-line Earlier-sessions
-   note.
-
-## Traps
-
-- A background process (suspected pre-commit `git stash`) reverted tracked edits
-  once mid-session; untracked files survived. If source edits vanish, re-apply.
-- Don't read raw math content via `MATH_CONTENT.text()` — use
-  `syntax::math::math_content_text()` (strips host container prefixes).
+5. Rewrite `RECAP.md` with the latest result and suggested next sub-targets.
+   Update roadmap checkboxes when the completed work changes them.

@@ -14,10 +14,10 @@
 //! [`panache_parser::syntax::math::math_content_text`]) sidesteps that entirely.
 //!
 //! Operator spacing is *interpretation*, not a CST shape: the parser emits
-//! neutral `MATH_OPERATOR` tokens and the class/precedence logic lives in
-//! [`operators`] (the math analog of YAML scalar cooking), keyed on operator
-//! text + command name. Still out of scope: `\frac` canonicalization, auto-`&`
-//! insertion, and macro rewriting.
+//! neutral `MATH_WORD` runs. Migrated slices consume the parser's semantic atom
+//! stream; the legacy fallback still uses [`operators`] until its remaining
+//! shapes reach Badness parity. Still out of scope: `\frac` canonicalization,
+//! auto-`&` insertion, and macro rewriting.
 //!
 //! The gate is [`crate::config::Config::experimental_format_math`]. Off (the
 //! default) callers emit math verbatim and never reach this module; on, they
@@ -25,14 +25,20 @@
 
 use crate::config::MathDelimiterStyle;
 use crate::formatter::Formatter;
-use crate::syntax::{DisplayMath, SyntaxKind, SyntaxNode, math_diagnostics};
+use crate::syntax::{
+    DisplayMath, InlineMath, MathContent, MathSubscript, MathSuperscript, SyntaxKind, SyntaxNode,
+    math_diagnostics,
+};
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
+use panache_parser::semantic::math::SignatureScope;
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
 
-mod layout;
+mod ir;
 mod linebreak;
+mod lower;
 pub mod operators;
+mod printer;
 mod render;
 
 impl Formatter {
@@ -44,14 +50,8 @@ impl Formatter {
         let is_display_math = node.children_with_tokens().any(|child| {
             matches!(child, NodeOrToken::Token(token) if token.kind() == SyntaxKind::DISPLAY_MATH_MARKER)
         });
-        let content = node
-            .children_with_tokens()
-            .find_map(|child| match child {
-                NodeOrToken::Token(token) if token.kind() == SyntaxKind::TEXT => {
-                    Some(token.text().to_string())
-                }
-                _ => None,
-            })
+        let content = InlineMath::cast(node.clone())
+            .map(|math| math.content())
             .unwrap_or_default();
         let marker = node
             .children_with_tokens()
@@ -110,8 +110,7 @@ impl Formatter {
             match format_math(&content, &opts) {
                 Some(body) => {
                     self.output.push('\n');
-                    self.output.push_str(&body);
-                    self.output.push('\n');
+                    push_body_with_trailing_newline(&mut self.output, &body);
                 }
                 None => {
                     self.output.push_str(&content);
@@ -131,8 +130,7 @@ impl Formatter {
         let opts = MathFormatOptions::from_config(&self.config, MathContext::Display);
         match format_math(&content, &opts) {
             Some(body) => {
-                self.output.push_str(&body);
-                self.output.push('\n');
+                push_body_with_trailing_newline(&mut self.output, &body);
             }
             None => {
                 for line in content.trim().lines() {
@@ -144,6 +142,15 @@ impl Formatter {
         }
         self.output.push_str(close);
         self.output.push('\n');
+    }
+}
+
+/// Renderers may retain an authored final newline for TeX parity, while the
+/// host still needs exactly one separator before its closing delimiter.
+pub(super) fn push_body_with_trailing_newline(output: &mut String, body: &str) {
+    output.push_str(body);
+    if !body.ends_with('\n') {
+        output.push('\n');
     }
 }
 
@@ -185,7 +192,7 @@ pub enum MathContext {
 
 /// Inputs for [`format_math`], derived from the host [`Config`](crate::Config)
 /// at each call site.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct MathFormatOptions {
     /// Master gate. False ⇒ [`format_math`] returns its input verbatim, so a
     /// mis-wired call site can never change bytes.
@@ -203,6 +210,8 @@ pub struct MathFormatOptions {
     pub bookdown_equation_labels: bool,
     /// Inline vs display vs bare-environment layout.
     pub context: MathContext,
+    /// Configured signatures with raw document definitions layered above them.
+    pub signature_scope: SignatureScope,
 }
 
 impl MathFormatOptions {
@@ -214,6 +223,7 @@ impl MathFormatOptions {
             line_width: config.line_width,
             bookdown_equation_labels: config.parser_extensions.bookdown_equation_references,
             context,
+            signature_scope: config.math_signature_scope.clone(),
         }
     }
 }
@@ -243,7 +253,59 @@ pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
     if !math_diagnostics(&tree).is_empty() {
         return None;
     }
+    if has_dangling_script(&tree) {
+        return None;
+    }
+    if has_nested_comment(&tree) && !can_lower_nested_comments(&tree, opts) {
+        return None;
+    }
     Some(render::render(&tree, opts))
+}
+
+/// Whether a comment occurs inside a construct that historically rendered on
+/// one line. Such comments require either typed hard-line lowering or verbatim
+/// fallback; collapsing their terminating newline would absorb the remainder
+/// of the construct into the comment.
+fn has_nested_comment(tree: &SyntaxNode) -> bool {
+    tree.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::MATH_COMMENT)
+        .any(|token| {
+            token.parent_ancestors().any(|node| {
+                !matches!(
+                    node.kind(),
+                    SyntaxKind::MATH_CONTENT | SyntaxKind::MATH_ENVIRONMENT
+                )
+            })
+        })
+}
+
+fn can_lower_nested_comments(tree: &SyntaxNode, opts: &MathFormatOptions) -> bool {
+    if opts.context == MathContext::EnvironmentBody {
+        return render::can_render_environment_comments(tree, &opts.signature_scope);
+    }
+
+    let context_is_supported = opts.context != MathContext::Display
+        || !tree
+            .descendants_with_tokens()
+            .any(|element| element.kind() == SyntaxKind::MATH_ENVIRONMENT);
+    context_is_supported
+        && MathContent::cast(tree.clone())
+            .and_then(|content| lower::try_lower_content(&content, &opts.signature_scope))
+            .is_some()
+}
+
+/// A script marker with no argument (`x^` at the end of the content, or with
+/// the argument cut off by a comment, blank line, or structural boundary)
+/// cannot be reflowed safely: collapsing the boundary trivia would let the
+/// next atom re-attach as the argument on the following pass, changing both
+/// the parse and the bytes. Such content is malformed TeX anyway, so it takes
+/// the verbatim path like other malformed math.
+fn has_dangling_script(tree: &SyntaxNode) -> bool {
+    tree.descendants().any(|node| {
+        MathSubscript::cast(node.clone()).is_some_and(|script| script.argument().is_none())
+            || MathSuperscript::cast(node).is_some_and(|script| script.argument().is_none())
+    })
 }
 
 fn has_unescaped_single_dollar(content: &str) -> bool {
@@ -282,6 +344,7 @@ mod tests {
             line_width: 80,
             bookdown_equation_labels: false,
             context,
+            signature_scope: SignatureScope::default(),
         }
     }
 
@@ -323,6 +386,32 @@ mod tests {
     fn inline_preserves_command_terminating_space() {
         assert_eq!(fmt("\\alpha   x", MathContext::Inline), "\\alpha x");
         assert_idempotent("\\alpha x", MathContext::Inline);
+    }
+
+    #[test]
+    fn inline_keeps_optional_arguments_tight() {
+        assert_eq!(fmt(r"\sqrt[3]{x}", MathContext::Inline), r"\sqrt[3]{x}");
+        assert_eq!(
+            fmt(r"\inferrule*[right]{A}{B}", MathContext::Inline),
+            r"\inferrule*[right]{A}{B}"
+        );
+    }
+
+    #[test]
+    fn inline_formats_edge_comments_in_math_command_arguments() {
+        for (input, expected) in [
+            (
+                "\\frac{% numerator\n a+b}{c}",
+                "\\frac{% numerator\n a + b}{c}",
+            ),
+            (
+                "\\frac{a+b % numerator\n}{c}",
+                "\\frac{a + b % numerator\n }{c}",
+            ),
+        ] {
+            assert_eq!(fmt(input, MathContext::Inline), expected);
+            assert_idempotent(input, MathContext::Inline);
+        }
     }
 
     #[test]
@@ -409,9 +498,11 @@ mod tests {
 
     #[test]
     fn nested_comment_before_environment_stays_verbatim() {
+        // A group-nested comment forces the `None` fallback (the caller emits
+        // the content verbatim): reflowing would absorb the group remainder
+        // into the comment.
         let input = "f({% reason\nx}+\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -449,9 +540,10 @@ mod tests {
 
     #[test]
     fn comment_inside_embedded_environment_stays_verbatim() {
+        // The comment sits inside a group within the environment row, so the
+        // `None` fallback applies (the caller emits the content verbatim).
         let input = "f(\\begin{bmatrix}{% reason\nx} \\\\ 2\\end{bmatrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -505,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_keeps_the_definition_colon_glued_to_its_equals() {
+    fn inline_definition_colon_spacing_respects_the_migration_slice() {
         assert_eq!(fmt("x:=y", MathContext::Inline), "x := y");
         assert_eq!(fmt("x := y", MathContext::Inline), "x := y");
         assert_eq!(fmt("\\mu:=\\nu", MathContext::Inline), "\\mu := \\nu");
@@ -524,6 +616,117 @@ mod tests {
         ] {
             assert_idempotent(case, MathContext::Inline);
         }
+    }
+
+    #[test]
+    fn inline_scripts_preserve_their_base_atom_class() {
+        assert_eq!(fmt("a=_ib", MathContext::Inline), "a =_i b");
+        assert_eq!(fmt(r"a\gets_ib", MathContext::Inline), r"a \gets_i b");
+        assert_eq!(fmt("a:=_ib", MathContext::Inline), "a :=_i b");
+        for case in ["a=_ib", r"a\gets_ib", "a:=_ib"] {
+            assert_idempotent(case, MathContext::Inline);
+        }
+    }
+
+    #[test]
+    fn colon_runs_in_definition_relations_stay_fused() {
+        assert_eq!(fmt("a::=_ib", MathContext::Inline), "a ::=_i b");
+        assert_eq!(fmt("a::=b", MathContext::Inline), "a ::= b");
+        for case in ["a::=_ib", "a::=b"] {
+            assert_idempotent(case, MathContext::Inline);
+        }
+    }
+
+    #[test]
+    fn scripted_composite_relations_stay_fused() {
+        assert_eq!(fmt("x<=_iy", MathContext::Inline), "x <=_i y");
+        assert_eq!(fmt("x>=_iy", MathContext::Inline), "x >=_i y");
+        assert_eq!(fmt("a==_kb", MathContext::Inline), "a ==_k b");
+        for case in ["x<=_iy", "x>=_iy", "a==_kb"] {
+            assert_idempotent(case, MathContext::Inline);
+        }
+    }
+
+    #[test]
+    fn text_mode_script_argument_keeps_its_group_spaces() {
+        assert_eq!(
+            fmt(r"x_\text{ max }", MathContext::Inline),
+            r"x_\text{ max }"
+        );
+        assert_eq!(
+            fmt(r"x^\mbox{ a b }", MathContext::Inline),
+            r"x^\mbox{ a b }"
+        );
+        assert_eq!(fmt(r"\text{ a }^2", MathContext::Inline), r"\text{ a }^2");
+        for case in [r"x_\text{ max }", r"x^\mbox{ a b }", r"\text{ a }^2"] {
+            assert_idempotent(case, MathContext::Inline);
+        }
+    }
+
+    #[test]
+    fn dangling_script_marker_bails_to_verbatim() {
+        assert_eq!(format_math("x^", &opts(MathContext::Inline)), None);
+        assert_eq!(format_math("x^\n\n2", &opts(MathContext::Display)), None);
+        assert_eq!(
+            format_math(
+                "\\begin{align}\nx^\n\n2\n\\end{align}",
+                &opts(MathContext::Display)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn overwidth_row_break_keeps_equation_labels_intact() {
+        let o = MathFormatOptions {
+            line_width: 30,
+            bookdown_equation_labels: true,
+            ..opts(MathContext::Display)
+        };
+        let input = "yyyy = aaaaaaaaaa + bbbbbbbbbb + cccccccccc (\\#eq:my-label)";
+        let once = fmt_with(input, &o);
+        assert!(once.contains("(\\#eq:my-label)"), "got: {once}");
+        assert_eq!(fmt_with(&once, &o), once);
+    }
+
+    #[test]
+    fn scripted_environment_keeps_environment_layout() {
+        let input = "\\begin{pmatrix}a \\\\ b\\end{pmatrix}^T";
+        let expected = "\\begin{pmatrix}\n  a \\\\\n  b\n\\end{pmatrix}^T";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn scripted_closing_delimiter_keeps_delimited_layout() {
+        let input = "(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})^2";
+        let expected = "(\n  \\begin{bmatrix}\n    1 \\\\\n    2\n  \\end{bmatrix}\n)^2";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    #[test]
+    fn scripted_relation_after_environment_is_spaced() {
+        let input = "\\begin{pmatrix}a \\\\ b\\end{pmatrix}=_ic";
+        let once = fmt(input, MathContext::Display);
+        assert!(once.contains("\\end{pmatrix} =_i c"), "got: {once}");
+        assert_idempotent(input, MathContext::Display);
+    }
+
+    /// A `*` separated from its command by a script is an operator atom, not a
+    /// modifier, so it stays where it was written rather than migrating back
+    /// onto the command. It prints tight because `\operatorname` is a large
+    /// operator, and TeX coerces a binary atom after one into a unary sign.
+    #[test]
+    fn star_modifier_does_not_cross_a_script() {
+        assert_eq!(
+            fmt(r"\operatorname*_i{x}", MathContext::Inline),
+            r"\operatorname*_i{x}"
+        );
+        assert_eq!(
+            fmt(r"\operatorname_i*{x}", MathContext::Inline),
+            r"\operatorname_i*{x}"
+        );
     }
 
     #[test]
@@ -592,6 +795,13 @@ mod tests {
             &fmt(input, MathContext::EnvironmentBody),
             MathContext::EnvironmentBody,
         );
+    }
+
+    #[test]
+    fn line_break_modifiers_stay_attached() {
+        let input = "a \\\\*[2ex]\nb";
+        assert_eq!(fmt(input, MathContext::Display), input);
+        assert_idempotent(input, MathContext::Display);
     }
 
     #[test]

@@ -1,0 +1,24 @@
+A body ending in a comment or a row break keeps the closing delimiter on the
+next line, with no blank line between.
+
+$$
+  x = y % trailing
+$$
+
+$$
+  b\\
+$$
+
+\begin{align}
+  x = y % trailing
+\end{align}
+
+A structured delimiter body with an authored final newline must not add a blank
+line before the display-math closer.
+
+$$
+  \left( \begin{matrix}
+           a & b \\
+           c & d
+         \end{matrix} \right)
+$$

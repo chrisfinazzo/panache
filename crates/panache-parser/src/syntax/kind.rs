@@ -87,23 +87,31 @@ pub enum SyntaxKind {
     DISPLAY_MATH,
     MATH_CONTENT, // wrapper node for parsed TeX math content (subtree root)
 
-    MATH_GROUP,       // { ... } brace group (node)
-    MATH_ENVIRONMENT, // \begin{env} ... \end{env} (node)
-    MATH_DELIMITED,   // \left<d> ... \right<d> paired delimiters (node)
-    MATH_GROUP_OPEN,  // {
-    MATH_GROUP_CLOSE, // }
-    MATH_COMMAND,     // \foo control word or \% control symbol
-    MATH_LINE_BREAK,  // \\
-    MATH_ALIGN,       // & alignment tab
-    MATH_SCRIPT,      // ^ or _
-    MATH_COMMENT,     // % to end of line (TeX comment)
-    MATH_OPERATOR,
-    MATH_OPEN,    // ( or [
-    MATH_CLOSE,   // ) or ]
-    MATH_PUNCT,   // , or ;
-    MATH_TEXT,    // run of ordinary atoms
-    MATH_SPACE,   // run of spaces/tabs
-    MATH_NEWLINE, // newline within math content
+    MATH_GROUP,          // { ... } brace group (node)
+    MATH_OPTIONAL,       // [ ... ] optional argument (node)
+    MATH_ENVIRONMENT,    // \begin{env} ... \end{env} (node)
+    MATH_BEGIN,          // \begin plus its environment name (node)
+    MATH_END,            // \end plus its environment name (node)
+    MATH_NAME_GROUP,     // {name} following \begin or \end (node)
+    MATH_DELIMITED,      // \left<d> ... \right<d> paired delimiters (node)
+    MATH_SCRIPTED,       // base atom with one or more sub/superscripts (node)
+    MATH_SUBSCRIPT,      // _ plus its optional one-atom argument (node)
+    MATH_SUPERSCRIPT,    // ^ plus its optional one-atom argument (node)
+    MATH_GROUP_OPEN,     // {
+    MATH_GROUP_CLOSE,    // }
+    MATH_BRACKET_OPEN,   // [
+    MATH_BRACKET_CLOSE,  // ]
+    MATH_COMMAND,        // control word plus attached groups/optionals (node)
+    MATH_CONTROL_WORD,   // \foo control word
+    MATH_CONTROL_SYMBOL, // \% single-character control sequence
+    MATH_LINE_BREAK,     // \\ row terminator (node wrapping its control symbol)
+    MATH_ALIGN,          // & alignment tab
+    MATH_CARET,          // ^ superscript marker
+    MATH_UNDERSCORE,     // _ subscript marker
+    MATH_COMMENT,        // % to end of line (TeX comment)
+    MATH_WORD,           // Badness-equivalent run of ordinary math characters
+    MATH_SPACE,          // run of spaces/tabs
+    MATH_NEWLINE,        // newline within math content
     MATH_EQUATION_LABEL,
 
     INLINE_FOOTNOTE_START, // ^[

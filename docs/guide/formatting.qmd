@@ -1092,12 +1092,27 @@ as one symbol (`x:=y` → `x := y`), never split into `x : = y`; a colon that is
 not followed directly by `=` keeps the spacing you wrote (`x:y`, `f: A`). Macro
 contents are not rewritten (no `\frac` canonicalization, no auto-`&` insertion).
 Alignment uses **source character widths** (it tidies the source, it does not
-align rendered glyphs), and malformed math is left untouched.
+align rendered glyphs), and malformed math is left untouched. A leading
+top-level `%` comment stays on its own line, and a same-line trailing comment
+retains its terminating newline.
+
+Inline math is kept on a single line: an environment or a `\\` row break inside
+`$…$` is flattened, because a newline there would end the surrounding paragraph
+or split a table row. The one exception is a `%` comment, which runs to end of
+line and so keeps the break that follows it. Display math owns its own lines and
+keeps the structural layout above.
 
 Whitespace that TeX ignores is normalized away: sub/superscript markers (`_`,
 `^`) are tightened (`H _{ 00}^{-1 }` → `H_{00}^{-1}`), and the leading/trailing
 interior whitespace of a math-mode brace group is trimmed (`{ 00 }` → `{00}`).
 Text-mode arguments are exempt, so `\text{ a }` keeps its spaces.
+
+Built-in signatures identify the math and text arguments of commands such as
+`\frac`, `\sqrt`, and `\text`. Project-specific commands can declare the same
+positional information with
+[`format.math-signatures`](configuration.qmd#math-command-signatures). Only an
+argument proven to contain math is reformatted; text, unknown, unmatched, and
+redefined command arguments retain their authored bytes.
 
 A display equation (`$$…$$`) wider than `line-width` is broken at its top-level
 relations, with each continuation aligned under the first relation (the classic

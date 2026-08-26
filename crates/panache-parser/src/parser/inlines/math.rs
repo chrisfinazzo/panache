@@ -13,16 +13,106 @@
 
 use super::sink::InlineSink;
 use crate::parser::blocks::raw_blocks::{extract_environment_name, is_inline_math_environment};
+use crate::parser::inlines::bookdown::try_parse_bookdown_equation_definition;
 use crate::parser::math::{MathParseOptions, parse_math_content};
 use crate::parser::utils::tree_copy::copy_green_node;
 use crate::syntax::SyntaxKind;
 
-/// Emit the math content as a structural, lossless `MATH_CONTENT` subtree
-/// (brace groups, environments, control sequences, alignment, …) rather than an
-/// opaque `TEXT` token, so the formatter and linter can act on its structure.
-/// See [`crate::parser::math`]. Lossless: the subtree's text equals `content`.
+/// Emit structural TeX segments and host-owned Bookdown labels in source order.
+///
+/// Equation labels are Markdown-flavor syntax, not TeX. They therefore sit
+/// beside `MATH_CONTENT` rather than inside it. Splitting at those labels keeps
+/// every token's range aligned with the host document while the remaining
+/// segments stay ordinary, independently parseable TeX subtrees.
 fn emit_math_content(builder: &mut impl InlineSink, content: &str, opts: MathParseOptions) {
-    copy_green_node(builder, &parse_math_content(content, opts));
+    if !opts.bookdown_equation_labels {
+        copy_green_node(builder, &parse_math_content(content, opts));
+        return;
+    }
+
+    let tex_opts = MathParseOptions {
+        bookdown_equation_labels: false,
+    };
+    let bytes = content.as_bytes();
+    let mut segment_start = 0;
+    let mut pos = 0;
+    // Only a label at the top level may split the content: splitting inside a
+    // group or an environment would leave each half unbalanced, and a label
+    // written inside a `%` comment is prose, not a definition.
+    let mut brace_depth = 0usize;
+    let mut environment_depth = 0usize;
+    while pos < content.len() {
+        match bytes[pos] {
+            b'%' => {
+                pos = content[pos..]
+                    .find('\n')
+                    .map_or(content.len(), |offset| pos + offset + 1);
+                continue;
+            }
+            b'\\' => {
+                pos += match control_word_at(content, pos) {
+                    Some(name) => {
+                        match name {
+                            "begin" => environment_depth += 1,
+                            "end" => environment_depth = environment_depth.saturating_sub(1),
+                            _ => {}
+                        }
+                        1 + name.len()
+                    }
+                    // A control symbol escapes whatever character it carries,
+                    // so `\{`, `\}`, and `\%` are literal text.
+                    None => 1 + content[pos + 1..].chars().next().map_or(0, char::len_utf8),
+                };
+                continue;
+            }
+            b'{' => {
+                brace_depth += 1;
+                pos += 1;
+                continue;
+            }
+            b'}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                pos += 1;
+                continue;
+            }
+            b'(' if brace_depth == 0 && environment_depth == 0 => {
+                if let Some((len, _)) = try_parse_bookdown_equation_definition(&content[pos..]) {
+                    copy_green_node(
+                        builder,
+                        &parse_math_content(&content[segment_start..pos], tex_opts),
+                    );
+                    builder.token(
+                        SyntaxKind::MATH_EQUATION_LABEL.into(),
+                        &content[pos..pos + len],
+                    );
+                    pos += len;
+                    segment_start = pos;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        pos += content[pos..]
+            .chars()
+            .next()
+            .expect("position is before the end of content")
+            .len_utf8();
+    }
+    copy_green_node(
+        builder,
+        &parse_math_content(&content[segment_start..], tex_opts),
+    );
+}
+
+/// The control-word name at `pos`, using the math parser's `[A-Za-z@]`
+/// alphabet. `None` for a control symbol such as `\\` or `\{`.
+fn control_word_at(text: &str, pos: usize) -> Option<&str> {
+    let after = text[pos..].strip_prefix('\\')?;
+    let len = after
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphabetic() || *byte == b'@')
+        .count();
+    (len > 0).then(|| &after[..len])
 }
 
 /// Derive math-content parse options from the parser config. Keeps the
@@ -444,6 +534,36 @@ pub fn emit_double_backslash_display_math(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::SyntaxNode;
+
+    const BOOKDOWN_MATH: MathParseOptions = MathParseOptions {
+        bookdown_equation_labels: true,
+    };
+
+    fn emitted_inline_math(content: &str) -> SyntaxNode {
+        let mut builder = rowan::GreenNodeBuilder::new();
+        emit_inline_math(&mut builder, content, BOOKDOWN_MATH);
+        SyntaxNode::new_root(builder.finish())
+    }
+
+    #[test]
+    fn bookdown_equation_labels_are_host_children_of_math() {
+        let math = emitted_inline_math(r"x (\#eq:inline) + y");
+        let label = math
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| token.kind() == SyntaxKind::MATH_EQUATION_LABEL)
+            .expect("equation label");
+
+        assert_eq!(label.text(), r"(\#eq:inline)");
+        assert_eq!(usize::from(label.text_range().start()), 3);
+        assert!(
+            label
+                .parent_ancestors()
+                .all(|ancestor| ancestor.kind() != SyntaxKind::MATH_CONTENT)
+        );
+        assert_eq!(math.text().to_string(), r"$x (\#eq:inline) + y$");
+    }
 
     #[test]
     fn test_parse_simple_inline_math() {

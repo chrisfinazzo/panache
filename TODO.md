@@ -199,98 +199,125 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 
 ## Math parser and formatter redesign
 
-Panache should adopt the stronger structural and semantic ideas proven in
-`../badness`, but it must own its math implementation completely. There must be
-no Badness dependency, shared crate, foreign or transient Badness CST,
-projection layer, or formatter delegation. Badness is a design and regression
-reference only. The authoritative syntax tree remains Panache's native, lossless
-`MATH_CONTENT` subtree, which the linter, Salsa indexes, formatter, and language
-server can traverse with host-document ranges.
+Markdown and LaTeX math bodies use the same TeX-math grammar. Within a math
+body, Panache's CST should therefore be structurally isomorphic to Badness's:
+the same token boundaries, node hierarchy, attachment rules, recovery behavior,
+and semantic views, with only a mechanical `MATH_*` kind prefix where Panache's
+global kind namespace or host-byte filtering requires it. Badness's `MATH` node
+corresponds to Panache's native, lossless `MATH_CONTENT` subtree.
 
-Markdown and LaTeX math bodies use the same TeX-math grammar. Panache's host
-parser remains responsible for Pandoc/CommonMark delimiter rules, raw math
-environment recognition, container-prefix handling, Bookdown equation labels,
-and delimiter-style policy. The math parser handles only the content admitted by
-that host layer.
+Panache still owns its complete production implementation. There must be no
+runtime Badness dependency, shared crate, formatter delegation, foreign CST in
+Salsa, or projection step in the parser, formatter, linter, or language server.
+Pinned Badness crates are permitted as development-only differential oracles;
+their trees and formatted output exist only inside tests.
 
-### Parser and CST
+Panache's host parser remains responsible for Pandoc/CommonMark delimiter rules,
+deciding which raw environments contain math, container-prefix handling,
+Bookdown equation labels, Pandoc attributes, source-range mapping, and
+delimiter-style policy. Keep these host constructs outside the TeX-math subtree
+where possible. Unavoidable interleaved host trivia, such as blockquote and list
+prefixes, is the only structural exception and must be ignored mechanically by
+the test projector.
 
-- [ ] Specify the target CST with focused parser golden fixtures before changing
-  the grammar. Cover command calls and arguments, nested groups, TeX's
-  one-token script attachment, `\left`/`\right`, environments, comments,
-  malformed input, Unicode atoms, and Bookdown equation labels.
-- [ ] Replace bare `MATH_COMMAND` tokens followed by unrelated groups with
-  native Panache command-call nodes that own their syntactically attached
-  arguments. Preserve every source byte and recover without hard failure.
-- [ ] Add native scripted structure for bases, subscripts, and superscripts,
-  including unbraced one-token arguments and Unicode-scalar boundaries.
-- [ ] Strengthen environment and `\left`/`\right` pairing without introducing a
-  post-parse repair pass. Keep Pandoc's decision about which raw
-  environments count as math in the Markdown host layer.
-- [ ] Add a Panache-owned command and environment signature database. Argument
-  attachment belongs in the CST; whether an argument's domain is math, text,
-  or unknown belongs in a Panache semantic layer shared by its consumers.
-- [ ] Model document-provided command declarations conservatively, including
-  definitions in relevant raw TeX and explicit configuration. A visible
-  redefinition must shadow built-in argument knowledge; unavailable macro
-  context must reduce formatting rather than license a speculative rewrite.
-- [ ] Keep unknown and redefined command arguments opaque. In particular, never
-  assume that whitespace inside an arbitrary macro argument is insignificant
-  merely because the call occurs in math mode.
-- [ ] Preserve `MATH_SPACE` and `MATH_NEWLINE` as distinct math tokens so
-  `math_content_text()` can continue to exclude blockquote and list
-  prefixes. Retain native host ranges for diagnostics and LSP features.
-- [ ] Keep operator class, delimiter role where macro-dependent, unary coercion,
-  and break priority out of the CST. Move the existing interpretation code
-  into a Panache-owned parser/semantic module when the linter or LSP becomes
-  its second consumer.
+### Completed foundation
 
-### Formatter
+- [x] Pin `badness-parser` and `badness-formatter` as development-only oracles;
+  add mechanical CST projectors, a parser differential report, and
+  controlled formatter wrappers. The shared parser corpus currently passes
+  82/82 cases.
+- [x] Match Badness's lexical and structural CST for the shared corpus,
+  including commands and arguments, scripts, environments, `\left`/`\right`,
+  and malformed-input recovery.
+- [x] Add Panache-owned built-in signatures, argument domains, raw-TeX
+  redefinition overlays, atom metadata, Unicode-scalar iteration, structural
+  atoms, and scripted-base inheritance.
+- [x] Keep `MATH_SPACE` and `MATH_NEWLINE` distinct from host trivia, strip
+  injected container prefixes in `math_content_text()`, and retain direct
+  host-document ranges.
+- [x] Surface `math-syntax` diagnostics through native CST walks shared by the
+  formatter, linter, and language server.
 
-- [ ] Replace the mixture of flattened token streams, string assembly, and the
-  small embedded-environment document model with one Panache-owned
-  compositional layout IR and printer for all math shapes.
-- [ ] Lower typed Panache math nodes into that layout IR. Recurse only into
-  signature-proven math arguments; preserve text-domain and unknown
-  arguments according to their semantic contracts.
-- [ ] Unify inline spacing, display line breaking, environment grids, nested
-  environments, comments, scripts, and delimiters through the same lowering
-  path. Retain conservative verbatim fallback for unsupported or malformed
-  shapes.
-- [ ] Preserve Panache's existing desirable policies, including composite `:=`,
-  assignment-RHS alignment, implicit relation-chain alignment across
-  authored `\\`, `math-indent`, delimiter-style configuration, and the
-  formatter's experimental gate.
-- [ ] Review output-policy differences against Badness fixtures rather than
-  adopting them mechanically. Decide script spacing, `\left`/`\right`
-  spacing, authored-break behavior, and display wrap modes explicitly in
-  Panache's math style specification.
+### Ordered implementation plan
 
-### Integration and validation
+Work through these items in order. For every migrated slice, add the oracle case
+first, promote it to a mandatory parity assertion when it passes, and keep the
+formatter-off output byte-identical.
 
-- [ ] Keep `math-syntax` diagnostics as native CST walks with direct
-  host-document ranges. Introduce new diagnostic codes deliberately rather
-  than exposing every newly detectable parser error at once.
-- [ ] Add typed wrappers needed by the linter and language server for commands,
-  arguments, scripts, delimiters, environments, rows, and cells before
-  migrating downstream consumers.
-- [ ] Expand the Panache corpus with the relevant Badness regression shapes,
-  especially macro-argument whitespace and built-in redefinition cases. The
-  fixtures become Panache tests and must not require Badness at test time.
-- [ ] Require parser losslessness, formatter idempotency, non-trivia and comment
-  preservation, trivia-perturbation convergence, MathML equivalence where
-  the oracle applies, and representative TeX/PDF checks for macro-dependent
-  cases.
-- [ ] Add Markdown-host regressions for blockquotes, lists, raw math
-  environments, Bookdown labels, delimiter extensions, and source-range
-  mapping.
-- [ ] Migrate one bounded CST or formatter slice at a time behind the existing
-  gate. Remove the old parser and renderer paths only after their
-  replacements satisfy the corpus, workspace checks, performance checks, and
-  WASM-size review.
-- [ ] Keep math formatting experimental until the native parser, semantic model,
-  formatter, linter, and LSP have all migrated and the resulting style is
-  documented.
+1. **Finish the shared semantic model.**
+
+   - [x] Generate a Panache-owned Unicode math atom table from the source pinned
+     by the Badness oracle. Add a reproducible generation command and
+     exhaustive lookup-parity tests; unknown scalars must remain
+     conservative.
+   - [x] Add a source-ordered semantic atom stream with Badness-equivalent
+     contextual Bin-to-Ord coercion and break priorities. Cover unary signs,
+     relations, delimiters, punctuation, commands, groups, and scripted-base
+     inheritance with differential tests.
+   - [x] Add explicit configured command signatures. Define the configuration
+     shape for positional brace/bracket arguments and math/text/unknown
+     domains, merge it into `SignatureScope`, regenerate the schema, and
+     document the setting. Raw-TeX redefinitions must shadow both configured
+     and built-in signatures.
+   - [x] Lock the conservative argument contract with regressions: formatter
+     consumers may recurse only into signature-proven math arguments and
+     must preserve text-domain, unknown, redefined, over-attached, and
+     malformed arguments byte-for-byte.
+
+2. **Finish the host/CST boundary before lowering it.**
+
+   - [x] Move Bookdown equation labels out of `MATH_CONTENT` while retaining
+     their original source ranges and cross-reference behavior. Add parser
+     and formatter regressions for inline/display math, blockquotes, lists,
+     raw math environments, delimiter extensions, and unavoidable host
+     trivia.
+   - [x] Complete typed access to every CST shape the formatter and downstream
+     consumers need—content, commands, attached brace/bracket arguments,
+     scripts, delimiters, line breaks, and environments. Keep rows and cells
+     as formatter-layout concepts derived from `&` and `\\`, not new CST
+     nodes.
+
+3. **Establish the formatter migration baseline.**
+
+   - [x] Run the formatter oracle over every applicable shared-corpus case in
+     inline, display, and environment contexts. Commit a reproducible report
+     that classifies parity, controlled-wrapper rejection, and divergence;
+     use it to select the first bounded migration slice.
+   - [x] Expand the shared corpus where the report lacks representative shapes,
+     especially macro-argument whitespace, built-in redefinitions,
+     text-domain arguments, malformed recovery, nested
+     delimiters/environments, comments, and authored line breaks. Derive
+     expectations through the pinned oracles.
+
+4. **Replace the legacy formatter in bounded parity slices.**
+
+   - [x] Complete the Panache-owned Badness-style document IR and printer, then
+     lower words, trivia, groups, and signature-proven arguments into it.
+     Leave unsupported shapes on the existing conservative fallback.
+   - [ ] Lower commands, scripts, and paired delimiters through the shared
+     semantic atom stream. Remove the corresponding flattened-token logic,
+     string assembly, script sentinels, and formatter-local operator
+     semantics only after each slice reaches mandatory byte parity.
+   - [ ] Lower comments, authored breaks, display wrapping, nested environments,
+     and environment grids. Replace the separate embedded-environment path
+     once the shared cases pass in every controlled context.
+   - [ ] Reconnect the new formatter to Markdown delimiter spelling and the
+     existing experimental gate. Enabling the gate must produce the same TeX
+     style in every host delimiter form; disabling it must remain
+     byte-exact.
+
+5. **Remove the migration paths and enforce the final gates.**
+
+   - [ ] Delete the old parser/renderer compatibility paths and obsolete math
+     token handling after the complete differential corpus passes. Run
+     parser losslessness, formatter idempotency, trivia-perturbation
+     convergence, comment preservation, Badness parity, applicable MathML
+     equivalence, and representative TeX/PDF checks.
+   - [ ] Run the workspace checks, compare parser/formatter performance, and
+     review WASM size before accepting the replacement.
+   - [ ] Document the resulting math style and supported semantic/configuration
+     model. Turn `format-math` into a stable gate and deprecate the
+     experimental setting.
 
 ## Parser
 
