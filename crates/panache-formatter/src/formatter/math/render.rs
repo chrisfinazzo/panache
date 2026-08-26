@@ -19,8 +19,8 @@ use crate::syntax::{
 };
 use panache_parser::parser::math::MathParseOptions;
 use panache_parser::semantic::math::{
-    ArgKind, ArgumentDomain, MathBreakPriority, SignatureScope, match_arg_slot,
-    semantic_math_atoms_in,
+    ArgKind, ArgumentDomain, MathBreakPriority, MathClass, SignatureScope, match_arg_slot,
+    math_atoms, semantic_math_atoms_in,
 };
 
 const INDENT: &str = "  ";
@@ -165,7 +165,7 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
     if has_mixed_environment_content(top) {
         let semantic = expand_word_elements(top);
         return render_mixed_delimited_display(&semantic, opts)
-            .or_else(|| render_top_level_commented_environment(&semantic, opts))
+            .or_else(|| render_top_level_commented_environment(top, opts))
             .or_else(|| render_top_level_mixed_environment(&semantic, opts))
             .unwrap_or_else(|| {
                 let content: String = top.iter().map(ToString::to_string).collect();
@@ -420,7 +420,9 @@ fn top_level_commented_environment_doc(
     elems: &[SyntaxElement],
     opts: &MathFormatOptions,
 ) -> Option<Ir> {
-    if !elems.iter().any(contains_comment) || !ordinary_delimiters_balanced(elems) {
+    if !elems.iter().any(contains_comment)
+        || !ordinary_delimiters_balanced(&expand_word_elements(elems))
+    {
         return None;
     }
     if elems.iter().any(contains_unsafe_mixed_trivia)
@@ -441,22 +443,22 @@ fn top_level_commented_environment_doc(
     };
     let before = &elems[..*environment_index];
     let after = &elems[*environment_index + 1..];
-    if after.iter().any(|element| !is_layout_whitespace(element)) {
+    // Badness breaks a top-level operator after this forced multiline atom.
+    // That composition waits for environments to join typed display lowering.
+    if after
+        .iter()
+        .flat_map(math_atoms)
+        .any(|atom| matches!(atom.class, MathClass::Bin | MathClass::Rel))
+    {
         return None;
     }
 
-    let operator_index = before
-        .iter()
-        .rposition(|element| !is_layout_whitespace(element))?;
-    let break_priority = semantic_math_atoms_in(before.iter().cloned())
-        .last()?
-        .break_priority;
+    let before_atoms = semantic_math_atoms_in(before.iter().cloned()).collect::<Vec<_>>();
+    let break_priority = before_atoms.last()?.break_priority;
     if !matches!(
         break_priority,
         MathBreakPriority::Binary | MathBreakPriority::Relation
-    ) || !before[..operator_index]
-        .iter()
-        .any(|element| !is_layout_whitespace(element))
+    ) || before_atoms.len() < 2
     {
         return None;
     }
@@ -466,6 +468,12 @@ fn top_level_commented_environment_doc(
         return None;
     }
     let environment_doc = environment_document(&environment, opts)?;
+    let mut suffix = render_inline_seeded(after, Some(AtomClass::Close), &opts.signature_scope)
+        .trim()
+        .to_string();
+    if !suffix.is_empty() && needs_space_after_environment(after) {
+        suffix.insert(0, ' ');
+    }
 
     // A forced break inside the environment breaks Badness's surrounding
     // display group at a preceding binary operator, while a relation head
@@ -489,6 +497,7 @@ fn top_level_commented_environment_doc(
         prefix,
         Ir::text(" "),
         Ir::align(prefix_last_width + 1, environment_doc),
+        Ir::text(suffix),
     ]))
 }
 
@@ -496,12 +505,14 @@ pub(super) fn can_render_mixed_environment_comments(
     tree: &SyntaxNode,
     opts: &MathFormatOptions,
 ) -> bool {
-    let elements = expand_word_elements(&tree.children_with_tokens().collect::<Vec<_>>());
+    let elements = tree.children_with_tokens().collect::<Vec<_>>();
     if !elements.iter().any(contains_environment) {
         return false;
     }
     match opts.context {
-        MathContext::Inline => mixed_segment_doc(&elements, opts, Some(1)).is_some(),
+        MathContext::Inline => {
+            mixed_segment_doc(&expand_word_elements(&elements), opts, Some(1)).is_some()
+        }
         MathContext::Display => top_level_commented_environment_doc(&elements, opts).is_some(),
         MathContext::EnvironmentBody => false,
     }

@@ -1023,6 +1023,43 @@ fn comment_bearing_embedded_display_environment_after_relation_matches_badness()
 }
 
 #[test]
+fn comment_bearing_embedded_display_environment_with_trailing_content_matches_badness() {
+    let environment = "\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
+    let punctuation = format!("x+{environment},y");
+    let badness = badness_body(&punctuation, OracleContext::Display).expect("Badness formatter");
+
+    assert_eq!(
+        badness,
+        "  x\n  + \\begin{matrix}\n      a & = {b % inner\n             + c} \\\\\n      d & = e\n    \\end{matrix},y"
+    );
+
+    assert_formatter_parity(&punctuation, OracleContext::Display);
+    let once = panache_body(&punctuation, OracleContext::Display).expect("first Panache pass");
+    let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+    assert_eq!(
+        once, twice,
+        "display environment with trailing content is not idempotent: {punctuation:?}"
+    );
+    let delimiter_framed = format!("\n{punctuation}\n");
+    assert_eq!(
+        panache_body(&delimiter_framed, OracleContext::Display).as_deref(),
+        Ok(badness.as_str()),
+        "delimiter-owned edge newlines must not force the compatibility path"
+    );
+
+    for body in [
+        format!("x+{environment}+y"),
+        format!("x={environment}=y"),
+        format!("x\\gets{environment}\\leq y"),
+    ] {
+        assert!(
+            panache_body(&body, OracleContext::Display).is_err(),
+            "operator-bearing suffix must stay on the compatibility path: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn delimited_environment_migration_slice_matches_badness() {
     let id = "environments/nested/delimited_matrix.tex";
     let body = fs::read_to_string(corpus_root().join(id))

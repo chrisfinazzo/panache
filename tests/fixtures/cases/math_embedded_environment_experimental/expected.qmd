@@ -10,3 +10,12 @@ $$
                      \end{bmatrix}
   )
 $$
+
+$$
+  x
+  + \begin{matrix}
+      a & = {b % inner
+             + c} \\
+      d & = e
+    \end{matrix},y
+$$

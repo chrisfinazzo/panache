@@ -26,10 +26,10 @@ rewrite those sections instead of accumulating history.
   arguments split at Unicode-scalar boundaries; comments and blank lines stop
   attachment. Formatter interpretation must inherit the base atom's class
   across the script—especially for scripted relation and assignment breaks.
-- **Contextual coercion follows Badness's role model, not full Appendix G.** A
-  `Bin` becomes `Ord` at list start, after an effective binary or relation, or
-  after an atom with `DelimiterRole::Open`. `Punct`, `Op`, and an `Open` class
-  without a genuine delimiter role remain operands for this purpose.
+- **Contextual coercion retains Panache's established full TeXbook rule.** A
+  `Bin` becomes `Ord` at list start and after `Bin`, `Rel`, `Open`, `Punct`, or
+  `Op`. Badness leaves a binary atom binary after punctuation; the intentional
+  differential is pinned by `panache_coerces_after_punctuation_where_badness_does_not`.
 - **Authored `\\` breaks layout rows but not the semantic atom stream.** Lower
   each row separately while deriving every row's atoms from one source-ordered
   stream; otherwise, a sign after `\\` is incorrectly coerced as though it
@@ -55,40 +55,43 @@ rewrite those sections instead of accumulating history.
   well-formed environment. The next environment glues to the punctuation on the
   preceding `\end` line, then hangs from that actual source column. Adjacent
   environments in one segment remain on the compatibility path.
+- **Synthetic word expansion is for classification only.** Its temporary Rowan
+  tree starts at byte zero, so range-based typed lowering must consume the
+  original CST elements. Use expanded elements only for atom-by-atom delimiter
+  and segment scans.
 
 --------------------------------------------------------------------------------
 
 ## Latest session
 
-**Relations before comment-bearing display environments.** A display shape such
-as `x=\begin{matrix}...%...\end{matrix}` now uses the typed mixed document
-instead of declining the entire math body.
+**Trailing free content after comment-bearing display environments.** A display
+shape such as `x+\begin{matrix}...%...\end{matrix},y` now uses the typed mixed
+document instead of declining the entire math body.
 
-- The mandatory oracle regression pins Badness's relation layout byte for byte:
-  `x = \begin{matrix}` stays in one flat head, and the environment body hangs
-  from that later `\begin` column. This differs from the existing binary case,
-  which breaks before the operator.
-- Admission and prefix layout use the shared semantic `MathBreakPriority`.
-  Binary prefixes retain their forced zero-width layout; relation prefixes use
-  the normal available display width. No formatter-local operator
-  classification was added.
-- Mandatory parity and idempotency cases cover `=`, the command relation
-  `\leq`, the definition relation `:=`, and the assignment relation `\gets`.
-- The narrow safety gate is otherwise unchanged: exactly one well-formed,
-  unscripted environment must end the expression. Comments or authored breaks
-  in the free content, trailing expression content, nested non-block
-  environments, and multiple environments retain the compatibility path.
-- `STYLE.md` records the distinct relation rule. The complete formatter oracle
+- The mandatory oracle regression pins Badness's punctuation layout byte for
+  byte: `,y` stays tight on the `\end{matrix}` line. It also verifies
+  idempotency and the delimiter-owned leading/trailing newline shape passed by
+  the Markdown host.
+- Typed prefix lowering now consumes original CST elements. The temporary
+  zero-based `MATH_WORD` expansion remains confined to ordinary-delimiter
+  balance checks, fixing the host-only decline caused by shifted source ranges.
+- The safety gate admits only trailing top-level atoms without binary or
+  relation classes. Badness starts operator-bearing suffixes on a new display
+  line; those shapes remain on the compatibility path until environments become
+  first-class typed display atoms.
+- The experimental embedded-environment golden fixture covers the host-visible
+  result, and `STYLE.md` records the narrowed rule. The focused formatter oracle
   and all workspace validation gates pass. The shared corpus and its parity
-  classifications did not change, so the committed report needed no update.
+  classifications did not change, so the committed report needs no update.
 
 ### Suggested next sub-targets
 
-1. Move environments toward first-class typed atom documents so the separate
-   structured-delimiter and mixed-environment paths can converge and the
-   display-specific compositor can shrink.
-2. Pin Badness's layout for trailing free content after a comment-bearing
-   display environment before widening the new safety gate.
+1. Make environments first-class typed display atoms, beginning with the pinned
+   trailing binary and relation suffixes that the current safety gate rejects.
+   This should let the separate mixed-environment compositor shrink rather than
+   teaching it another operator-layout variant.
+2. Continue converging the separate structured-delimiter and mixed-environment
+   paths once the typed environment atom composes in free displays.
 3. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness
