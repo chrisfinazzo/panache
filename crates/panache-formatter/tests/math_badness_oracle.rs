@@ -935,6 +935,21 @@ fn delimited_environment_migration_slice_matches_badness() {
 }
 
 #[test]
+fn mixed_delimited_environment_migration_slice_matches_badness() {
+    let body = "\\left(x+\\begin{matrix}\na&b\\\\\nc&d\n\\end{matrix},y\\right)";
+
+    for context in OracleContext::ALL {
+        assert_formatter_parity(body, context);
+        let once = panache_body(body, context).expect("first Panache pass");
+        let twice = panache_body(&once, context).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "mixed delimited environment is not idempotent in {context:?}"
+        );
+    }
+}
+
+#[test]
 fn malformed_embedded_environment_stays_on_compatibility_path() {
     let body = r"\begin {aligned}x\end {aligned}";
     assert_eq!(

@@ -523,6 +523,34 @@ fn mixed_segment_doc(
     }
 }
 
+/// Compose one environment and surrounding free content inside `\left…\right`.
+///
+/// Comments or authored breaks in the surrounding expression, malformed or
+/// multiple environments, and unbalanced ordinary delimiters remain on the
+/// compatibility path. The environment body retains its normal row policy.
+pub(super) fn mixed_delimited_environment_document(
+    body: &MathContent,
+    opts: &MathFormatOptions,
+) -> Option<Ir> {
+    let elements = expand_word_elements(&body.elements().collect::<Vec<_>>());
+    if !ordinary_delimiters_balanced(&elements) {
+        return None;
+    }
+
+    let environment_count = elements
+        .iter()
+        .filter(|element| environment_block(element).is_some())
+        .count();
+    let has_free_content = elements
+        .iter()
+        .any(|element| environment_block(element).is_none() && !is_layout_whitespace(element));
+    if environment_count != 1 || !has_free_content {
+        return None;
+    }
+
+    mixed_segment_doc(&elements, opts, true)
+}
+
 fn is_well_formed_environment(environment: &SyntaxNode) -> bool {
     let Some(environment) = MathEnvironment::cast(environment.clone()) else {
         return false;

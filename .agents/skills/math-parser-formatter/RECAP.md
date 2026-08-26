@@ -50,29 +50,31 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Free-display definition relations.** Supported definition relations no longer
-force a free display onto the legacy renderer.
+**Mixed structured-delimiter environments.** A well-formed `\left…\right` body
+may now contain one environment with free expression content on either side.
 
-- Typed lowering now coalesces a CST-separated definition head with a scripted
-  equals, so `:=_i` and `::=_i` remain one relation piece without weakening the
-  compatibility guard for `<=_i`, `>=_i`, and `==_i`.
-- Automatic relation wrapping and authored-row layout are pinned byte-for-byte
-  against Badness for unscripted and scripted definitions. Automatic wrapping
-  aligns later relations under the definition colon; authored definition-led
-  rows stay flush.
-- Assignment-arrow commands still anchor ordinary continuations under their
-  RHS. `STYLE.md` and the formatter regression now distinguish that behavior
-  from definition relations.
-- The complete formatter oracle and all workspace validation gates pass. The
-  corpus and its parity classifications did not change, so the committed report
-  did not require regeneration.
+- A mandatory oracle case pins inline, display, and environment contexts plus
+  second-pass idempotency. Badness keeps the structured-delimiter body as one
+  segment: only the environment creates hard lines, and those lines hang under
+  its `\begin` column.
+- The narrow document composition rejects comments or authored breaks in the
+  surrounding expression, multiple or malformed environments, nested
+  environment-bearing operands, and unbalanced ordinary delimiters, leaving
+  them on the compatibility path. The environment body retains its normal row
+  and comment policy.
+- `STYLE.md` now distinguishes this policy from the punctuation breaks used by
+  mixed ordinary-delimiter bodies.
+- The complete formatter oracle passes. The corpus and its parity
+  classifications did not change, so the committed report did not require
+  regeneration.
 
 ### Suggested next sub-targets
 
-1. Expand structured-delimiter environment lowering to mixed bodies only when a
-   representative oracle case can pin the spacing and break policy.
-2. Expand grid-comment parity to rows combining multiple multiline cells if a
+1. Expand grid-comment parity to rows combining multiple multiline cells if a
    motivating corpus case appears.
+2. Admit a second structured-delimiter environment shape only when an oracle
+   case can pin its comment or authored-break policy without weakening the
+   compatibility boundary.
 3. Revisit non-colon scripted composite relations only after the pinned Badness
    formatter defect is corrected; keep their compatibility path in the
    meantime.

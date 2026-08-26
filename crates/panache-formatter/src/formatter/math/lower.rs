@@ -79,12 +79,12 @@ pub(super) fn try_lower_display_content(
     }
 }
 
-/// Lower a closed paired delimiter whose body is one well-formed environment.
+/// Lower a closed paired delimiter whose body contains one well-formed environment.
 ///
 /// This stays separate from ordinary atom lowering until environments become
 /// first-class typed atom documents. The narrow shape lets the existing
-/// environment-grid document compose without admitting mixed or malformed
-/// delimiter bodies.
+/// environment-grid document compose without admitting multiple environments
+/// or malformed delimiter bodies.
 pub(super) fn try_lower_delimited_environment(
     content: &MathContent,
     opts: &MathFormatOptions,
@@ -102,22 +102,23 @@ pub(super) fn try_lower_delimited_environment(
     let body = delimited.body()?;
     let right = delimited.right_token()?;
     let close = delimited.closing_delimiter()?;
-    let mut body_elements = body.elements().filter(|element| !is_layout_trivia(element));
-    let environment = body_elements
-        .next()?
-        .into_node()
-        .and_then(MathEnvironment::cast)?;
-    if body_elements.next().is_some() {
-        return None;
-    }
-
-    let environment = render::environment_document(environment.syntax(), opts)?;
+    let body_elements = body
+        .elements()
+        .filter(|element| !is_layout_trivia(element))
+        .collect::<Vec<_>>();
+    let body_document = match body_elements.as_slice() {
+        [element] => {
+            let environment = element.as_node().cloned().and_then(MathEnvironment::cast)?;
+            render::environment_document(environment.syntax(), opts)?
+        }
+        _ => render::mixed_delimited_environment_document(&body, opts)?,
+    };
     let opening_width = left.text().chars().count() + open.text().chars().count();
     Some(Ir::concat([
         Ir::verbatim(left.text()),
         Ir::verbatim(open.text()),
         Ir::text(" "),
-        Ir::align(opening_width + 1, environment),
+        Ir::align(opening_width + 1, body_document),
         Ir::text(" "),
         Ir::verbatim(right.text()),
         Ir::verbatim(close.text()),

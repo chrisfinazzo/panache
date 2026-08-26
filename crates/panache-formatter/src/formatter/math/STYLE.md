@@ -78,10 +78,13 @@ Returned unchanged, never reflowed:
    starting column. Inline math follows Badness's distinct layout: the
    environment's continuation lines return to the math body's base column.
 
-   A lone environment inside a closed `\left`/`\right` body composes the same
-   environment layout with the structured delimiter's hanging column. The
-   `\begin` remains beside the opening delimiter; body rows indent one level
-   beyond it, and `\end` returns beneath it before the closing `\right`.
+   A single environment inside a closed `\left`/`\right` body composes the same
+   environment layout with the structured delimiter's hanging column, whether it
+   is alone or surrounded by free expression content. The `\begin` remains
+   beside the opening delimiter or preceding expression; body rows indent one
+   level beyond it, and `\end` returns beneath it. Following expression content
+   stays on the `\end` line before the closing `\right`; the structured
+   delimiter does not add the ordinary-delimiter breaks described above.
 
    Mixed shapes this layout does not yet model safely --- multiple environments
    in one segment, unbalanced ordinary delimiters, or a segment containing a
