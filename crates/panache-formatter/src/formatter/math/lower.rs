@@ -114,11 +114,14 @@ pub(super) fn try_lower_delimited_environment(
         _ => render::mixed_delimited_environment_document(&body, opts)?,
     };
     let opening_width = left.text().chars().count() + open.text().chars().count();
+    // Badness lays comment-pinned inline continuations out after the host `$`
+    // opener, which the delimiter-free math entry point does not retain.
+    let host_inline_offset = usize::from(opts.context == super::MathContext::Inline);
     Some(Ir::concat([
         Ir::verbatim(left.text()),
         Ir::verbatim(open.text()),
         Ir::text(" "),
-        Ir::align(opening_width + 1, body_document),
+        Ir::align(opening_width + 1 + host_inline_offset, body_document),
         Ir::text(" "),
         Ir::verbatim(right.text()),
         Ir::verbatim(close.text()),

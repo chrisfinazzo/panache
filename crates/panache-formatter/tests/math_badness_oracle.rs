@@ -999,8 +999,7 @@ fn multiple_delimited_environments_match_badness() {
     }
 
     let comment = "\\left(\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix},\\begin{matrix}\nf&g\\\\\nh&i\n\\end{matrix}\\right)";
-    assert!(panache_body(comment, OracleContext::Inline).is_err());
-    for context in [OracleContext::Display, OracleContext::Environment] {
+    for context in OracleContext::ALL {
         assert_formatter_parity(comment, context);
         let once = panache_body(comment, context).expect("first Panache pass");
         let twice = panache_body(&once, context).expect("second Panache pass");

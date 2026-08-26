@@ -91,8 +91,8 @@ Returned unchanged, never reflowed:
    `\end`, and the next environment begins immediately afterward; its body and
    closing delimiter align from that actual starting column. Authored rows keep
    the normal environment policy. Comment-bearing cells use the typed grid
-   policy in display and environment contexts; inline comment-bearing multiple
-   environments remain on the compatibility path.
+   policy in every context. Inline comment-pinned continuations include the host
+   `$` opener's column when deriving their hanging indentation.
 
    Mixed shapes this layout does not yet model safely --- multiple environments
    in one segment, unbalanced ordinary delimiters, or free segments containing a

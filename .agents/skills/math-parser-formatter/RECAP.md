@@ -60,23 +60,21 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Punctuated multiple environments inside structured delimiters.** A
-`\left`/`\right` body may now lower multiple well-formed environments when
-top-level punctuation separates them.
+**Inline comments across punctuated multiple environments.** The existing
+typed `\left`/`\right` document now accepts comment-bearing environment cells
+in inline math as well as display and environment contexts.
 
-- Each segment retains its normal environment-grid and authored-row policy.
-  The next environment starts immediately after the punctuation, and its
-  internal rows align beneath that start column.
-- Comment-bearing cells follow the same typed grid policy in display and
-  environment contexts. Inline comment-bearing multiple environments and
-  unpunctuated multiple environments remain on the compatibility path.
-- Environment row documents now expose physical lines instead of embedding
-  newline bytes in a nominal line, allowing safe composition into typed IR.
-- A multi-row grid probe with multiline cells in different columns already had
-  byte parity and is now retained as regression coverage.
-- `STYLE.md` records the punctuation and compatibility boundaries. The complete
-  formatter oracle passes. The corpus and its parity classifications did not
-  change, so the committed report did not require regeneration.
+- The nested-comment safety gate accepts the shape only when structured-
+  delimiter lowering succeeds; malformed, unpunctuated, and otherwise
+  unsupported comment shapes still take the compatibility path.
+- Comment-pinned inline continuations account for the controlled host `$`
+  opener's column, matching Badness byte-for-byte without changing display or
+  environment indentation.
+- The existing oracle case is mandatory in all three contexts and checks a
+  second formatting pass for idempotency.
+- `STYLE.md` records the inline indentation rule. The complete formatter oracle
+  passes. The shared corpus and its report classifications did not change, so
+  the committed report did not require regeneration.
 
 ### Suggested next sub-targets
 
@@ -84,8 +82,8 @@ top-level punctuation separates them.
    mandatory oracle case pins its comment, authored-break, or script policy.
 2. Move environments toward first-class typed atom documents so the separate
    structured-delimiter and mixed-environment paths can eventually converge.
-3. Revisit inline comments across punctuated multiple environments only with a
-   pinned Badness-compatible indentation rule; keep the current fallback.
+3. Revisit unpunctuated multiple environments only with a pinned structural
+   composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness
    formatter defect is corrected; keep their compatibility path in the
    meantime.
