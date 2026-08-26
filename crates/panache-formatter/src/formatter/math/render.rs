@@ -448,12 +448,15 @@ fn top_level_commented_environment_doc(
     let operator_index = before
         .iter()
         .rposition(|element| !is_layout_whitespace(element))?;
-    if semantic_math_atoms_in(before.iter().cloned())
-        .last()
-        .is_none_or(|atom| atom.break_priority != MathBreakPriority::Binary)
-        || !before[..operator_index]
-            .iter()
-            .any(|element| !is_layout_whitespace(element))
+    let break_priority = semantic_math_atoms_in(before.iter().cloned())
+        .last()?
+        .break_priority;
+    if !matches!(
+        break_priority,
+        MathBreakPriority::Binary | MathBreakPriority::Relation
+    ) || !before[..operator_index]
+        .iter()
+        .any(|element| !is_layout_whitespace(element))
     {
         return None;
     }
@@ -465,10 +468,16 @@ fn top_level_commented_environment_doc(
     let environment_doc = environment_document(&environment, opts)?;
 
     // A forced break inside the environment breaks Badness's surrounding
-    // display group at the preceding binary operator too. A zero-width typed
-    // display layout reproduces those operator breaks without flattening the
-    // prefix or reinterpreting its semantic atom roles.
-    let prefix = lower::try_lower_display_elements(before.to_vec(), &opts.signature_scope, 0)?;
+    // display group at a preceding binary operator, while a relation head
+    // stays flat when it fits. The typed display layout reproduces both
+    // decisions without flattening the prefix or reinterpreting atom roles.
+    let prefix_width = match break_priority {
+        MathBreakPriority::Binary => 0,
+        MathBreakPriority::Relation => opts.line_width.saturating_sub(opts.math_indent),
+        MathBreakPriority::None => return None,
+    };
+    let prefix =
+        lower::try_lower_display_elements(before.to_vec(), &opts.signature_scope, prefix_width)?;
     let prefix_last_width = Printer::new(opts.line_width, INDENT.len())
         .print(&prefix, 0)
         .lines()

@@ -992,6 +992,37 @@ fn comment_bearing_embedded_display_environment_matches_badness() {
 }
 
 #[test]
+fn comment_bearing_embedded_display_environment_after_relation_matches_badness() {
+    let body = "x=\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
+    let badness = badness_body(body, OracleContext::Display).expect("Badness formatter");
+
+    assert_eq!(
+        badness,
+        "  x = \\begin{matrix}\n        a & = {b % inner\n               + c} \\\\\n        d & = e\n      \\end{matrix}"
+    );
+
+    assert_formatter_parity(body, OracleContext::Display);
+    let once = panache_body(body, OracleContext::Display).expect("first Panache pass");
+    let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+    assert_eq!(
+        once, twice,
+        "relation-led embedded display environment is not idempotent: {body:?}"
+    );
+
+    let environment = "\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
+    for head in ["x\\leq", "x:=", "x\\gets"] {
+        let body = format!("{head}{environment}");
+        assert_formatter_parity(&body, OracleContext::Display);
+        let once = panache_body(&body, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "relation-led embedded display environment is not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn delimited_environment_migration_slice_matches_badness() {
     let id = "environments/nested/delimited_matrix.tex";
     let body = fs::read_to_string(corpus_root().join(id))

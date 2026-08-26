@@ -60,23 +60,26 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Comment-bearing environments after free display expressions.** A display
-shape such as `x+\begin{matrix}...%...\end{matrix}` now uses a typed mixed
-document instead of declining the entire math body.
+**Relations before comment-bearing display environments.** A display shape such
+as `x=\begin{matrix}...%...\end{matrix}` now uses the typed mixed document
+instead of declining the entire math body.
 
-- The mandatory oracle regression pins Badness's distinct layout byte for byte:
-  the free expression breaks before `+`, the environment begins on that
-  continuation line, and its body hangs from the resulting `\begin` column.
-- The prefix is lowered through the shared semantic display path. A forced
-  zero-width layout reproduces the operator break caused by the environment's
-  hard lines without adding formatter-local operator interpretation.
-- The safety gate remains deliberately narrow: exactly one well-formed,
-  unscripted environment must end the expression after a binary operator.
-  Comments or authored breaks in the free content, trailing expression content,
-  nested non-block environments, and multiple environments retain the
-  compatibility path.
-- `STYLE.md` records the display rule. The complete formatter oracle and all
-  workspace validation gates pass. The shared corpus and its parity
+- The mandatory oracle regression pins Badness's relation layout byte for byte:
+  `x = \begin{matrix}` stays in one flat head, and the environment body hangs
+  from that later `\begin` column. This differs from the existing binary case,
+  which breaks before the operator.
+- Admission and prefix layout use the shared semantic `MathBreakPriority`.
+  Binary prefixes retain their forced zero-width layout; relation prefixes use
+  the normal available display width. No formatter-local operator
+  classification was added.
+- Mandatory parity and idempotency cases cover `=`, the command relation
+  `\leq`, the definition relation `:=`, and the assignment relation `\gets`.
+- The narrow safety gate is otherwise unchanged: exactly one well-formed,
+  unscripted environment must end the expression. Comments or authored breaks
+  in the free content, trailing expression content, nested non-block
+  environments, and multiple environments retain the compatibility path.
+- `STYLE.md` records the distinct relation rule. The complete formatter oracle
+  and all workspace validation gates pass. The shared corpus and its parity
   classifications did not change, so the committed report needed no update.
 
 ### Suggested next sub-targets
@@ -84,9 +87,8 @@ document instead of declining the entire math body.
 1. Move environments toward first-class typed atom documents so the separate
    structured-delimiter and mixed-environment paths can converge and the
    display-specific compositor can shrink.
-2. Pin Badness's layout for other comment-bearing display surroundings—such as
-   a relation before the environment or trailing free content—before widening
-   the new safety gate.
+2. Pin Badness's layout for trailing free content after a comment-bearing
+   display environment before widening the new safety gate.
 3. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness
