@@ -15,14 +15,14 @@ env:
 
 jobs:
   msrv:
-    name: Rust 1.95 MSRV
+    name: Rust 1.89 MSRV
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.95
-        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Install Rust 1.89
+        run: rustup toolchain install 1.89.0 --profile minimal
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -31,7 +31,7 @@ jobs:
           prefix-key: "v1-rust-msrv"
 
       - name: Check workspace
-        run: cargo +1.95.0 check --workspace --all-targets --all-features
+        run: cargo +1.89.0 check --workspace --all-targets --all-features
 
   test:
     if: github.event_name != 'schedule'

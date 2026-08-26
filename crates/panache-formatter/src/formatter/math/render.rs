@@ -823,10 +823,9 @@ fn render_body_lines(
             let split = split_cells(&row.elems);
             let cells = split
                 .iter()
-                .enumerate()
-                .map(|(column, cell)| {
+                .map(|cell| {
                     if cell.iter().any(contains_nested_comment) {
-                        lower_grid_cell(cell, &opts.signature_scope, column == 0)
+                        lower_grid_cell(cell, &opts.signature_scope)
                             .map(BodyCell::Document)
                             .unwrap_or_else(|| {
                                 BodyCell::Flat(
@@ -907,8 +906,7 @@ fn render_body_lines(
 }
 
 /// Badness suppresses grid padding and separator spaces for the whole
-/// environment when a non-final cell is multiline. An ordinary first-cell
-/// group also hangs one column beyond the usual bracket indent.
+/// environment when a non-final cell is multiline.
 fn join_tight_cell_documents(cells: &[BodyCell], break_text: Option<&str>) -> Ir {
     let mut documents = Vec::new();
     for (column, cell) in cells.iter().enumerate() {
@@ -1013,18 +1011,13 @@ fn can_render_environment_body_comments(
         }
 
         let cells = split_cells(&row.elems);
-        cells.iter().enumerate().all(|(column, cell)| {
-            !cell.iter().any(contains_nested_comment)
-                || lower_grid_cell(cell, scope, column == 0).is_some()
+        cells.iter().all(|cell| {
+            !cell.iter().any(contains_nested_comment) || lower_grid_cell(cell, scope).is_some()
         })
     })
 }
 
-fn lower_grid_cell(
-    elements: &[SyntaxElement],
-    scope: &SignatureScope,
-    first_cell: bool,
-) -> Option<Ir> {
+fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option<Ir> {
     let comment_elements = elements
         .iter()
         .filter(|element| contains_nested_comment(element))
@@ -1032,17 +1025,8 @@ fn lower_grid_cell(
     let [comment_element] = comment_elements.as_slice() else {
         return None;
     };
-    let first_group = first_cell
-        && comment_element
-            .as_node()
-            .is_some_and(|node| node.kind() == SyntaxKind::MATH_GROUP);
-    let lower = if first_group {
-        lower::try_lower_first_grid_cell
-    } else {
-        lower::try_lower_elements
-    };
-    let mut document = lower(elements.to_vec(), scope)?;
-    let comment_document = lower(vec![(*comment_element).clone()], scope)?;
+    let mut document = lower::try_lower_elements(elements.to_vec(), scope)?;
+    let comment_document = lower::try_lower_elements(vec![(*comment_element).clone()], scope)?;
     let printer = Printer::new(usize::MAX / 2, INDENT.len());
     let first_line = printer.print(&document, 0).lines().next()?.to_string();
     let comment_first_line = printer
@@ -1056,9 +1040,6 @@ fn lower_grid_cell(
         .chars()
         .count();
     document = Ir::align(offset, document);
-    if first_group {
-        document = Ir::align(1, document);
-    }
     Some(document)
 }
 

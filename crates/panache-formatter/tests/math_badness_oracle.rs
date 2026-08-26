@@ -290,7 +290,7 @@ fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> Strin
     let divergent = total - parity - rejected;
     let mut report = String::new();
     writeln!(report, "Badness math formatter parity baseline").unwrap();
-    writeln!(report, "Oracle: badness-formatter =0.6.0").unwrap();
+    writeln!(report, "Oracle: badness-formatter =0.7.0").unwrap();
     writeln!(report, "Corpus: tests/fixtures/math_corpus").unwrap();
     writeln!(report, "Cases: {corpus_count}").unwrap();
     writeln!(report, "Context runs: {total}").unwrap();

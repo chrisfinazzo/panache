@@ -97,14 +97,6 @@ pub(super) fn try_lower_elements(
     lower_body(elements, scope, Spacing::Normal, true, false)
 }
 
-/// Lower a first alignment cell using Badness's line-local comment context.
-pub(super) fn try_lower_first_grid_cell(
-    elements: Vec<SyntaxElement>,
-    scope: &SignatureScope,
-) -> Option<Ir> {
-    lower_body(elements, scope, Spacing::Normal, false, false)
-}
-
 /// Lower a bracketed body, routing comment-bearing bodies through hard lines.
 fn lower_body(
     elements: Vec<SyntaxElement>,
