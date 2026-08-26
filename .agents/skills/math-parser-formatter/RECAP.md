@@ -45,30 +45,34 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Typed authored relation-chain alignment.** Fitting free-display chains split
-by authored `\\` markers now stay in the typed lowering path instead of being
-diverted to the legacy renderer for their continuation geometry.
+**Typed width-driven free-display wrapping.** Supported free-display rows now
+stay in the typed lowering path whether they fit, wrap automatically, or occur
+after an authored `\\` marker. The final over-width authored-row compatibility
+check in `render_display` is gone.
 
-- The lowering derives the first top-level relation, its source column, its RHS
-  column, and assignment status from the shared semantic atom stream and typed
-  command/script structure. Equality chains align at the relation; ordinary
-  relations following `\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq` align
-  at the assignment RHS, while repeated assignments align at the operator.
-- The alignment is top-level only and composes through `Ir::Align`; nested
-  authored rows retain their own bracket hanging indent, and top-level `&`
-  shapes remain outside the implicit-chain rule.
-- Rows that still require width-driven binary splitting remain on the legacy
-  display path. This preserves the existing over-width layout until display
-  wrapping itself is lowered into the document IR.
-- Formatter output and oracle classifications are unchanged. The complete
-  formatter crate suite, including Badness parity, corpus properties, and
-  MathML cross-validation, passes.
+- The typed document layout ranks top-level relations above binaries, keeps
+  fixed and `\left`/`\right` delimiter interiors opaque, aligns equality chains
+  at the first relation, and anchors ordinary relations after assignments at
+  the assignment RHS. Over-width relation segments then split at each binary
+  operator with the established nested indentation.
+- Width accounting subtracts the host `math-indent` once and subtracts an
+  authored continuation's semantic alignment before laying out that row. The
+  resulting relative geometry composes through `Ir::Align` and remains
+  idempotent.
+- A mandatory narrow-display oracle case pins relation-first and binary-second
+  byte parity with Badness. The regenerated corpus report keeps the same
+  classification counts, but four display outputs now use typed/Badness
+  spelling for scripts and paired delimiters instead of legacy flattening.
+- The complete formatter crate suite passes, including Badness parity, corpus
+  properties, and MathML cross-validation. All four project-required workspace
+  validation commands also pass.
 
 ### Suggested next sub-targets
 
-1. Lower width-driven free-display relation/binary wrapping into the shared IR,
-   then remove the final over-width authored-break compatibility check.
-2. Expand structured-delimiter environment lowering to mixed bodies only when a
+1. Expand structured-delimiter environment lowering to mixed bodies only when a
    representative oracle case can pin the spacing and break policy.
-3. Expand grid-comment parity to rows combining multiple multiline cells if a
+2. Expand grid-comment parity to rows combining multiple multiline cells if a
    motivating corpus case appears.
+3. Retire more of the legacy free-display breaker only as its remaining
+   unsupported definition-relation and scripted-composite seams gain safe typed
+   handling; keep the known Badness-defect cases on compatibility paths.

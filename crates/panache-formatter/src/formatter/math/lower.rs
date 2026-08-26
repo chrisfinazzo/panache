@@ -34,15 +34,49 @@ pub(super) fn try_lower_content(content: &MathContent, scope: &SignatureScope) -
 pub(super) fn try_lower_display_content(
     content: &MathContent,
     scope: &SignatureScope,
+    line_width: usize,
 ) -> Option<Ir> {
-    lower_body_configured(
-        content.elements().collect(),
-        scope,
-        Spacing::Normal,
-        true,
-        false,
-        true,
-    )
+    let elements = content.elements().collect::<Vec<_>>();
+    let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
+    if elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK)
+    {
+        lower_authored_breaks(
+            elements,
+            semantic_atoms,
+            scope,
+            Spacing::Normal,
+            AuthoredBreakOptions {
+                preserve_comment_context: true,
+                environment_rows: false,
+                align_authored_relations: true,
+                display_width: Some(line_width),
+            },
+        )
+    } else if elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_COMMENT)
+    {
+        lower_body_with_atoms(
+            elements,
+            semantic_atoms,
+            scope,
+            Spacing::Normal,
+            true,
+            false,
+        )
+    } else {
+        let pieces = lower_pieces_with_atoms(
+            &elements,
+            &semantic_atoms,
+            scope,
+            Spacing::Normal,
+            true,
+            false,
+        )?;
+        Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
+    }
 }
 
 /// Lower a closed paired delimiter whose body is one well-formed environment.
@@ -151,9 +185,12 @@ fn lower_body_configured(
             semantic_atoms,
             scope,
             spacing,
-            preserve_comment_context,
-            environment_rows,
-            align_authored_relations,
+            AuthoredBreakOptions {
+                preserve_comment_context,
+                environment_rows,
+                align_authored_relations,
+                display_width: None,
+            },
         )
     } else {
         lower_body_with_atoms(
@@ -206,15 +243,27 @@ struct RelationLayout {
     assignment: bool,
 }
 
+#[derive(Clone, Copy)]
+struct AuthoredBreakOptions {
+    preserve_comment_context: bool,
+    environment_rows: bool,
+    align_authored_relations: bool,
+    display_width: Option<usize>,
+}
+
 fn lower_authored_breaks(
     elements: Vec<SyntaxElement>,
     semantic_atoms: Vec<SemanticMathAtom>,
     scope: &SignatureScope,
     spacing: Spacing,
-    preserve_comment_context: bool,
-    environment_rows: bool,
-    align_authored_relations: bool,
+    options: AuthoredBreakOptions,
 ) -> Option<Ir> {
+    let AuthoredBreakOptions {
+        preserve_comment_context,
+        environment_rows,
+        align_authored_relations,
+        display_width,
+    } = options;
     struct AuthoredRow {
         document: Ir,
         marker: Option<String>,
@@ -223,6 +272,7 @@ fn lower_authored_breaks(
         first_relation: Option<RelationLayout>,
         starts_with_relation: bool,
         has_align: bool,
+        breakable_pieces: Option<Vec<Piece>>,
     }
 
     let mut rows = Vec::new();
@@ -267,6 +317,21 @@ fn lower_authored_breaks(
             (None, false)
         };
         let row_elements = std::mem::take(&mut row);
+        let breakable_pieces = (!has_align
+            && !row_elements
+                .iter()
+                .any(|element| element.kind() == SyntaxKind::MATH_COMMENT))
+        .then(|| {
+            lower_pieces_with_atoms(
+                &row_elements,
+                &row_atoms,
+                scope,
+                spacing,
+                preserve_comment_context,
+                environment_rows,
+            )
+        })
+        .flatten();
         let document = lower_authored_row(
             row_elements,
             &row_atoms,
@@ -307,6 +372,7 @@ fn lower_authored_breaks(
             first_relation,
             starts_with_relation,
             has_align,
+            breakable_pieces,
         });
     }
 
@@ -330,6 +396,21 @@ fn lower_authored_breaks(
     } else {
         (None, false)
     };
+    let breakable_pieces = (!has_align
+        && !row
+            .iter()
+            .any(|element| element.kind() == SyntaxKind::MATH_COMMENT))
+    .then(|| {
+        lower_pieces_with_atoms(
+            &row,
+            &row_atoms,
+            scope,
+            spacing,
+            preserve_comment_context,
+            environment_rows,
+        )
+    })
+    .flatten();
     let document = lower_authored_row(
         row,
         &row_atoms,
@@ -346,6 +427,7 @@ fn lower_authored_breaks(
         first_relation,
         starts_with_relation,
         has_align,
+        breakable_pieces,
     });
 
     // A final row with no content of its own would otherwise leave a trailing
@@ -400,7 +482,15 @@ fn lower_authored_breaks(
     let mut documents = Vec::new();
     for (index, row) in rows.into_iter().enumerate() {
         let row_width = row.document.flat_width();
-        let mut row_documents = vec![row.document];
+        let document = match (display_width, row.breakable_pieces) {
+            (Some(width), Some(pieces)) => layout_display_pieces(
+                &pieces,
+                width.saturating_sub(relation_indents[index]),
+                spacing,
+            ),
+            _ => row.document,
+        };
+        let mut row_documents = vec![document];
         if let Some(marker) = row.marker {
             if environment_rows {
                 let padding = row_width.map_or(1, |width| max_row_width.saturating_sub(width) + 1);
@@ -679,6 +769,8 @@ fn lower_pieces_with_atoms(
         pieces.push(Piece {
             role: Role::from(atom.break_priority),
             delimiter: atom.delimiter,
+            assignment: atom.break_priority == MathBreakPriority::Relation
+                && relation_is_assignment(atom, elements),
             unary: atom.coerced_unary,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
             slash: atom_document.slash,
@@ -694,28 +786,169 @@ fn lower_pieces_with_atoms(
 }
 
 fn document_from_pieces(pieces: &[Piece], spacing: Spacing) -> Ir {
-    let base_gaps = (0..pieces.len())
-        .map(|index| gap_before(pieces, index, spacing))
-        .collect::<Vec<_>>();
-    let spaced_slashes = (0..pieces.len())
-        .map(|index| {
-            pieces[index].slash
-                && (pieces[index].authored_space_before
-                    || pieces
-                        .get(index + 1)
-                        .is_some_and(|piece| piece.authored_space_before)
-                    || adjacent_operator(pieces, index, spacing))
-        })
-        .collect::<Vec<_>>();
-
     let mut documents = Vec::new();
     for (index, piece) in pieces.iter().enumerate() {
-        if index > 0 && (base_gaps[index] || spaced_slashes[index - 1] || spaced_slashes[index]) {
+        if piece_gap_before(pieces, index, spacing) {
             documents.push(Ir::text(" "));
         }
         documents.push(piece.document.clone());
     }
 
+    Ir::concat(documents)
+}
+
+fn piece_gap_before(pieces: &[Piece], index: usize, spacing: Spacing) -> bool {
+    if index == 0 {
+        return false;
+    }
+    let slash_is_spaced = |slash_index: usize| {
+        pieces[slash_index].slash
+            && (pieces[slash_index].authored_space_before
+                || pieces
+                    .get(slash_index + 1)
+                    .is_some_and(|piece| piece.authored_space_before)
+                || adjacent_operator(pieces, slash_index, spacing))
+    };
+    gap_before(pieces, index, spacing) || slash_is_spaced(index - 1) || slash_is_spaced(index)
+}
+
+fn piece_columns(pieces: &[Piece], spacing: Spacing) -> Option<Vec<(usize, usize)>> {
+    let mut column = 0usize;
+    let mut columns = Vec::with_capacity(pieces.len());
+    for (index, piece) in pieces.iter().enumerate() {
+        if piece_gap_before(pieces, index, spacing) {
+            column = column.checked_add(1)?;
+        }
+        let start = column;
+        column = column.checked_add(piece.document.flat_width()?)?;
+        columns.push((start, column));
+    }
+    Some(columns)
+}
+
+fn top_level_operators(pieces: &[Piece]) -> Vec<(usize, Role)> {
+    let mut depth = 0usize;
+    let mut operators = Vec::new();
+    for (index, piece) in pieces.iter().enumerate() {
+        if depth == 0 && piece.role != Role::Operand {
+            operators.push((index, piece.role));
+        }
+        match piece.delimiter {
+            Some(DelimiterRole::Open) => depth += 1,
+            Some(DelimiterRole::Close) => depth = depth.saturating_sub(1),
+            Some(DelimiterRole::Fence) | None => {}
+        }
+    }
+    operators
+}
+
+/// Lay out a typed free-display row using the same relation-first hierarchy as
+/// the legacy breaker: relation continuations align semantically, and an
+/// over-width relation segment breaks again at each binary operator.
+fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) -> Ir {
+    let flat = document_from_pieces(pieces, spacing);
+    if flat.flat_width().is_none_or(|width| width <= line_width) {
+        return flat;
+    }
+
+    let relations = top_level_operators(pieces)
+        .into_iter()
+        .filter_map(|(index, role)| (role == Role::Relation).then_some(index))
+        .collect::<Vec<_>>();
+    let mut lines = Vec::<(usize, Ir)>::new();
+
+    if relations.len() < 2 {
+        lines.extend(layout_display_segment(pieces, 0, line_width, spacing));
+    } else {
+        let Some(columns) = piece_columns(pieces, spacing) else {
+            return flat;
+        };
+        let first = relations[0];
+        let relation_column = columns.get(first).map_or(0, |&(start, _)| start);
+        let rhs_start = columns
+            .get(first)
+            .map_or(relation_column, |&(_, end)| end.saturating_add(1));
+        let first_assignment = pieces[first].assignment;
+        let bounds = std::iter::once(0)
+            .chain(relations.iter().skip(1).copied())
+            .chain(std::iter::once(pieces.len()))
+            .collect::<Vec<_>>();
+        for segment in 0..bounds.len() - 1 {
+            let start = bounds[segment];
+            let end = bounds[segment + 1];
+            let indent = if segment == 0 {
+                0
+            } else if !first_assignment || pieces[start].assignment {
+                relation_column
+            } else {
+                rhs_start
+            };
+            lines.extend(layout_display_segment(
+                &pieces[start..end],
+                indent,
+                line_width,
+                spacing,
+            ));
+        }
+    }
+
+    lines_document(lines)
+}
+
+fn layout_display_segment(
+    pieces: &[Piece],
+    base_indent: usize,
+    line_width: usize,
+    spacing: Spacing,
+) -> Vec<(usize, Ir)> {
+    let flat = document_from_pieces(pieces, spacing);
+    if flat
+        .flat_width()
+        .is_none_or(|width| base_indent.saturating_add(width) <= line_width)
+    {
+        return vec![(base_indent, flat)];
+    }
+
+    let operators = top_level_operators(pieces);
+    let binaries = operators
+        .iter()
+        .filter_map(|&(index, role)| (role == Role::Binary).then_some(index))
+        .collect::<Vec<_>>();
+    let Some(&first_binary) = binaries.first() else {
+        return vec![(base_indent, flat)];
+    };
+    let Some(columns) = piece_columns(pieces, spacing) else {
+        return vec![(base_indent, flat)];
+    };
+    let rhs_offset = operators
+        .iter()
+        .find(|&&(index, role)| role == Role::Relation && index < first_binary)
+        .and_then(|&(index, _)| columns.get(index))
+        .map_or(0, |&(_, end)| end.saturating_add(1));
+
+    let mut lines = Vec::new();
+    let head = document_from_pieces(&pieces[..first_binary], spacing);
+    if !matches!(head, Ir::Nil) {
+        lines.push((base_indent, head));
+    }
+    for (position, &start) in binaries.iter().enumerate() {
+        let end = binaries.get(position + 1).copied().unwrap_or(pieces.len());
+        lines.push((
+            base_indent.saturating_add(rhs_offset),
+            document_from_pieces(&pieces[start..end], spacing),
+        ));
+    }
+    lines
+}
+
+fn lines_document(mut lines: Vec<(usize, Ir)>) -> Ir {
+    let Some((_, first)) = lines.first().cloned() else {
+        return Ir::Nil;
+    };
+    let mut documents = vec![first];
+    for (indent, document) in lines.drain(1..) {
+        documents.push(Ir::align(indent, Ir::concat([Ir::HardLine, document])));
+    }
     Ir::concat(documents)
 }
 
@@ -1249,6 +1482,7 @@ fn matched_math_arguments(
 struct Piece {
     role: Role,
     delimiter: Option<DelimiterRole>,
+    assignment: bool,
     /// A `+`/`-` that TeX coerced to a unary sign. It binds to the operand
     /// beside it, so it strips the authored space on either side.
     unary: bool,
@@ -1422,8 +1656,12 @@ mod tests {
     }
 
     fn lower_display(input: &str) -> Option<String> {
-        try_lower_display_content(&content(input), &SignatureScope::default())
-            .map(|document| Printer::new(80, 2).print(&document, 0))
+        lower_display_width(input, 80)
+    }
+
+    fn lower_display_width(input: &str, line_width: usize) -> Option<String> {
+        try_lower_display_content(&content(input), &SignatureScope::default(), line_width)
+            .map(|document| Printer::new(line_width, 2).print(&document, 0))
     }
 
     #[test]
@@ -1816,6 +2054,32 @@ mod tests {
             Some("{x = a \\\\\n = b}"),
             "nested authored rows must not acquire top-level relation alignment",
         );
+    }
+
+    #[test]
+    fn lowers_width_driven_relation_and_binary_breaks() {
+        let cases = [
+            (
+                "A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd",
+                "A = aaaaaaaaaa\n    + bbbbbbbbbb\n  = cccccccccc\n    + dddddddddd",
+            ),
+            (
+                concat!(r"x = a \\", "\n", "= bbbbbbbb + cccccccc + dddddddd"),
+                concat!(
+                    r"x = a \\",
+                    "\n  = bbbbbbbb\n    + cccccccc\n    + dddddddd"
+                ),
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let once = lower_display_width(input, 20).expect("supported display wrapping");
+            assert_eq!(once, expected, "{input:?}");
+            assert_eq!(
+                lower_display_width(&once, 20).as_deref(),
+                Some(once.as_str()),
+            );
+        }
     }
 
     #[test]

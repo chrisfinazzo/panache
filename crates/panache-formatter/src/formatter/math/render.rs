@@ -142,33 +142,20 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
         }
         return output;
     }
-    let has_comment = tree
-        .descendants_with_tokens()
-        .any(|element| element.kind() == SyntaxKind::MATH_COMMENT);
-    let has_authored_break = tree
-        .descendants_with_tokens()
-        .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK);
     if !top.iter().any(contains_environment)
-        && (has_comment || has_authored_break)
-        && let Some(document) = MathContent::cast(tree.clone())
-            .and_then(|content| lower::try_lower_display_content(&content, &opts.signature_scope))
+        && let Some(document) = MathContent::cast(tree.clone()).and_then(|content| {
+            lower::try_lower_display_content(
+                &content,
+                &opts.signature_scope,
+                opts.line_width.saturating_sub(opts.math_indent),
+            )
+        })
     {
-        let output = trimmed_body(
+        return trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             opts.math_indent,
         );
-        // Width-driven row splitting still belongs to the legacy display path.
-        // Typed authored-row lowering owns chains whose rows already fit; the
-        // display-wrapping slice will retire this final compatibility check.
-        if !has_authored_break
-            || has_comment
-            || output
-                .lines()
-                .all(|line| line.chars().count() <= opts.line_width)
-        {
-            return output;
-        }
     }
 
     if has_mixed_environment_content(top) {

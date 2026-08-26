@@ -168,7 +168,7 @@ fn badness_body_with_preamble_and_width(
 }
 
 fn panache_body(body: &str, context: OracleContext) -> Result<String, String> {
-    panache_body_with_preamble(body, None, context)
+    panache_body_with_preamble_and_width(body, None, context, 80)
 }
 
 fn panache_body_with_preamble(
@@ -176,12 +176,21 @@ fn panache_body_with_preamble(
     preamble: Option<&str>,
     context: OracleContext,
 ) -> Result<String, String> {
+    panache_body_with_preamble_and_width(body, preamble, context, 80)
+}
+
+fn panache_body_with_preamble_and_width(
+    body: &str,
+    preamble: Option<&str>,
+    context: OracleContext,
+    line_width: usize,
+) -> Result<String, String> {
     format_math(
         body,
         &MathFormatOptions {
             enabled: true,
             math_indent: 2,
-            line_width: 80,
+            line_width,
             bookdown_equation_labels: false,
             context: context.panache_context(),
             signature_scope: signature_scope(preamble),
@@ -1055,6 +1064,17 @@ fn oracle_ranks_relations_above_binaries_and_never_breaks_at_unary_signs() {
         .find_map(|(indent, operator)| (*operator == '+').then_some(*indent))
         .unwrap();
     assert!(relation_indent < binary_indent, "{formatted:?}");
+}
+
+#[test]
+fn width_driven_display_migration_slice_matches_badness() {
+    let body = "A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd";
+    let width = 22;
+    let badness = badness_body_with_width(body, OracleContext::Display, width)
+        .expect("Badness display-math oracle");
+    let panache = panache_body_with_preamble_and_width(body, None, OracleContext::Display, width)
+        .expect("Panache display-math formatter");
+    assert_eq!(panache, badness);
 }
 
 #[test]

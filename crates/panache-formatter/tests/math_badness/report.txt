@@ -612,7 +612,7 @@ Panache: "  E = mc^2"
 --- display/sum_over_n.tex [display] ---
 Input: "\\sum_{i=1}^{N} x_i y_i\n"
 Badness: "  \\sum_{i=1}^{N} x_i y_i\n"
-Panache: "  \\sum_{i = 1}^{N} x_i y_i"
+Panache: "  \\sum_{i=1}^{N} x_i y_i"
 
 --- display/sum_over_n.tex [environment] ---
 Input: "\\sum_{i=1}^{N} x_i y_i\n"
@@ -992,7 +992,7 @@ Panache: "  \\left( a + b \\right)"
 --- groups/left_right_trivia.tex [display] ---
 Input: "\\left [ x \\right ]\n"
 Badness: "  \\left[ x \\right]\n"
-Panache: "  \\left [ x \\right ]"
+Panache: "  \\left[ x \\right]"
 
 --- groups/left_right_trivia.tex [environment] ---
 Input: "\\left [ x \\right ]\n"
@@ -1267,7 +1267,7 @@ Panache: "  e^{x^2}"
 --- scripts/prod_bounds.tex [display] ---
 Input: "\\prod_{k=1}^{m} a_k\n"
 Badness: "  \\prod_{k=1}^{m} a_k\n"
-Panache: "  \\prod_{k = 1}^{m} a_k"
+Panache: "  \\prod_{k=1}^{m} a_k"
 
 --- scripts/prod_bounds.tex [environment] ---
 Input: "\\prod_{k=1}^{m} a_k\n"
@@ -1287,7 +1287,7 @@ Panache: "  {a + b}^2"
 --- scripts/sum_bounds.tex [display] ---
 Input: "\\sum_{i=1}^{n} i\n"
 Badness: "  \\sum_{i=1}^{n} i\n"
-Panache: "  \\sum_{i = 1}^{n} i"
+Panache: "  \\sum_{i=1}^{n} i"
 
 --- scripts/sum_bounds.tex [environment] ---
 Input: "\\sum_{i=1}^{n} i\n"
