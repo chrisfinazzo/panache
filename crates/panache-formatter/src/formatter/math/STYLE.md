@@ -122,8 +122,10 @@ Returned unchanged, never reflowed:
    For Badness parity, a multiline non-final cell switches the entire
    environment to tight separators: `&` has no surrounding grid space, columns
    are not padded, and a trailing `\\` is not preceded by a synthesized space.
-   Cell contents still receive ordinary operator formatting. The pinned oracle
-   has one construct-sensitive inconsistency: after a comment in an ordinary
+   Cell contents still receive ordinary operator formatting, but every multiline
+   cell's continuation resets to the environment body indent instead of
+   inheriting its cell column or preceding atom offset. The pinned oracle has
+   one construct-sensitive inconsistency: after a comment in an ordinary
    first-column group---including a single-cell row---the next operator receives
    line-local context, and the continuation gains one column, while commands,
    scripts, paired delimiters, and later columns preserve semantic context

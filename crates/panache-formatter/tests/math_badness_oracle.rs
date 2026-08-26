@@ -854,6 +854,24 @@ fn environment_grid_nonfinal_cell_comment_migration_slice_matches_badness() {
 }
 
 #[test]
+fn environment_grid_multiple_multiline_cells_match_badness() {
+    for body in [
+        "{a % left cell\n+b}&={c % right cell\n+d}\\\\\ne&=f",
+        "\\frac{a % numerator\n+b}{c}&=x^{d % exponent\n+e}\\\\\nf&=g",
+        "\\left( a % left delimiter\n+b \\right)&=\\left( c % right delimiter\n+d \\right)\\\\\ne&=f",
+        "x+{a % left group\n+b}&=y+{c % right group\n+d}\\\\\ne&=f",
+    ] {
+        assert_formatter_parity(body, OracleContext::Environment);
+        let once = panache_body(body, OracleContext::Environment).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Environment).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "environment row with multiple multiline cells is not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn nested_environment_comment_migration_slice_matches_badness() {
     for body in [
         "\\begin{gathered}\n{a % inner\n+b}\n\\end{gathered}",

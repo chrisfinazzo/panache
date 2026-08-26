@@ -773,14 +773,14 @@ enum BodyItem {
 
 enum BodyCell {
     Flat(String),
-    Document(Ir),
+    Document { document: Ir, atom_offset: usize },
 }
 
 impl BodyCell {
     fn first_line_width(&self, printer: &Printer) -> usize {
         match self {
             Self::Flat(text) => text.chars().count(),
-            Self::Document(document) => printer
+            Self::Document { document, .. } => printer
                 .print(document, 0)
                 .lines()
                 .next()
@@ -793,7 +793,7 @@ impl BodyCell {
     fn starts_relation(&self) -> bool {
         let first_line = match self {
             Self::Flat(text) => text.as_str(),
-            Self::Document(document) => {
+            Self::Document { document, .. } => {
                 let rendered = Printer::new(usize::MAX / 2, INDENT.len()).print(document, 0);
                 return rendered.lines().next().is_some_and(starts_relation);
             }
@@ -842,7 +842,10 @@ fn render_body_lines(
                 .map(|cell| {
                     if cell.iter().any(contains_nested_comment) {
                         lower_grid_cell(cell, &opts.signature_scope)
-                            .map(BodyCell::Document)
+                            .map(|(document, atom_offset)| BodyCell::Document {
+                                document,
+                                atom_offset,
+                            })
                             .unwrap_or_else(|| {
                                 BodyCell::Flat(
                                     render_inline(cell, &opts.signature_scope)
@@ -852,7 +855,10 @@ fn render_body_lines(
                             })
                     } else if has_authored_break {
                         lower::try_lower_elements(cell.clone(), &opts.signature_scope)
-                            .map(BodyCell::Document)
+                            .map(|document| BodyCell::Document {
+                                document,
+                                atom_offset: 0,
+                            })
                             .unwrap_or_else(|| {
                                 BodyCell::Flat(
                                     render_inline(cell, &opts.signature_scope)
@@ -882,7 +888,7 @@ fn render_body_lines(
             cells
                 .iter()
                 .take(last)
-                .any(|cell| matches!(cell, BodyCell::Document(document) if document.contains_forced_break()))
+                .any(|cell| matches!(cell, BodyCell::Document { document, .. } if document.contains_forced_break()))
         }
         BodyItem::Block(_) => false,
     });
@@ -897,7 +903,7 @@ fn render_body_lines(
                     out.push(printer.print(&document, indent.len()));
                 } else if cells
                     .iter()
-                    .any(|cell| matches!(cell, BodyCell::Document(_)))
+                    .any(|cell| matches!(cell, BodyCell::Document { .. }))
                 {
                     let document = join_cell_documents(&cells, &widths, break_text.as_deref());
                     out.push(printer.print(&document, indent.len()));
@@ -906,7 +912,7 @@ fn render_body_lines(
                         .iter()
                         .map(|cell| match cell {
                             BodyCell::Flat(text) => text.clone(),
-                            BodyCell::Document(_) => unreachable!("handled typed row"),
+                            BodyCell::Document { .. } => unreachable!("handled typed row"),
                         })
                         .collect::<Vec<_>>();
                     let line = join_cells(&cells, &widths, break_text.is_some());
@@ -934,7 +940,9 @@ fn join_tight_cell_documents(cells: &[BodyCell], break_text: Option<&str>) -> Ir
         }
         let document = match cell {
             BodyCell::Flat(text) => Ir::verbatim(text.clone()),
-            BodyCell::Document(document) => document.clone(),
+            // Badness resets every multiline cell's continuation to the body
+            // indent once a non-final multiline cell makes the grid tight.
+            BodyCell::Document { document, .. } => document.clone(),
         };
         documents.push(document);
     }
@@ -978,7 +986,10 @@ fn join_cell_documents(cells: &[BodyCell], widths: &[usize], break_text: Option<
         }
         let document = match cell {
             BodyCell::Flat(text) => Ir::verbatim(text.clone()),
-            BodyCell::Document(document) => document.clone(),
+            BodyCell::Document {
+                document,
+                atom_offset,
+            } => Ir::align(*atom_offset, document.clone()),
         };
         documents.push(Ir::align(prefix_width, document));
 
@@ -1033,7 +1044,7 @@ fn can_render_environment_body_comments(
     })
 }
 
-fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option<Ir> {
+fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option<(Ir, usize)> {
     let comment_elements = elements
         .iter()
         .filter(|element| contains_nested_comment(element))
@@ -1041,7 +1052,7 @@ fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option
     let [comment_element] = comment_elements.as_slice() else {
         return None;
     };
-    let mut document = lower::try_lower_elements(elements.to_vec(), scope)?;
+    let document = lower::try_lower_elements(elements.to_vec(), scope)?;
     let comment_document = lower::try_lower_elements(vec![(*comment_element).clone()], scope)?;
     let printer = Printer::new(usize::MAX / 2, INDENT.len());
     let first_line = printer.print(&document, 0).lines().next()?.to_string();
@@ -1055,8 +1066,7 @@ fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option
     let offset = first_line[..first_line.rfind(&comment_first_line)?]
         .chars()
         .count();
-    document = Ir::align(offset, document);
-    Some(document)
+    Some((document, offset))
 }
 
 fn contains_nested_comment(element: &SyntaxElement) -> bool {

@@ -45,33 +45,33 @@ rewrite those sections instead of accumulating history.
   later relation under the definition colon. In authored `\\` rows, a
   definition-led chain stays flush at the display indent. Assignment-arrow
   commands retain their RHS anchor.
+- **Tight environment grids discard cell-relative continuation offsets.** When
+  any non-final cell is multiline, Badness removes grid padding and resets
+  every multiline cell's continuation to the environment body indent. Preserve
+  the atom-relative offset separately for ordinary aligned grids; do not bake it
+  into the cell document.
 
 --------------------------------------------------------------------------------
 
 ## Latest session
 
-**Mixed structured-delimiter environments.** A well-formed `\left…\right` body
-may now contain one environment with free expression content on either side.
+**Multiple multiline cells in one environment row.** Tight-grid composition now
+matches Badness when two or more cells contain comment-broken typed constructs.
 
-- A mandatory oracle case pins inline, display, and environment contexts plus
-  second-pass idempotency. Badness keeps the structured-delimiter body as one
-  segment: only the environment creates hard lines, and those lines hang under
-  its `\begin` column.
-- The narrow document composition rejects comments or authored breaks in the
-  surrounding expression, multiple or malformed environments, nested
-  environment-bearing operands, and unbalanced ordinary delimiters, leaving
-  them on the compatibility path. The environment body retains its normal row
-  and comment policy.
-- `STYLE.md` now distinguishes this policy from the punctuation breaks used by
-  mixed ordinary-delimiter bodies.
-- The complete formatter oracle passes. The corpus and its parity
-  classifications did not change, so the committed report did not require
-  regeneration.
+- Mandatory oracle cases cover groups, fractions, scripts, paired delimiters,
+  and constructs preceded by free expression content; each case also pins
+  second-pass idempotency.
+- `BodyCell` retains the typed document and its atom-relative offset separately.
+  Ordinary aligned grids apply that offset, while tight grids reset every
+  multiline continuation to the environment body indent.
+- `STYLE.md` records the tight-grid continuation rule. The complete formatter
+  oracle passes. The corpus and its parity classifications did not change, so
+  the committed report did not require regeneration.
 
 ### Suggested next sub-targets
 
-1. Expand grid-comment parity to rows combining multiple multiline cells if a
-   motivating corpus case appears.
+1. Add a multi-row grid case combining multiline cells in different columns if
+   the pinned oracle exposes another row-composition distinction.
 2. Admit a second structured-delimiter environment shape only when an oracle
    case can pin its comment or authored-break policy without weakening the
    compatibility boundary.
