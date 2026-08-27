@@ -348,11 +348,11 @@ formatter-off output byte-identical.
    - [x] Run parser losslessness, formatter idempotency, trivia-perturbation
      convergence, comment preservation, Badness parity, applicable MathML
      equivalence, and representative TeX/PDF checks.
-   - [ ] Run the workspace checks, compare parser and formatter performance with
+   - [x] Run the workspace checks, compare parser and formatter performance with
      the pre-migration baseline, and review WASM size.
-   - [ ] Document the resulting math style, intentional Badness differences,
+   - [x] Document the resulting math style, intentional Badness differences,
      preservation boundary, and supported semantic/configuration model.
-   - [ ] Turn `format-math` into a stable option and deprecate the experimental
+   - [x] Turn `format-math` into a stable option and deprecate the experimental
      setting.
 
 ## Parser

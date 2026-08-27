@@ -1,4 +1,4 @@
 flavor = "rmarkdown"
 
-[experimental]
+[format]
 format-math = true

@@ -106,6 +106,24 @@ fn test_format_with_config() {
 }
 
 #[test]
+fn test_deprecated_experimental_format_math_warns() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_file = temp_dir.path().join("panache.toml");
+    fs::write(&config_file, "[experimental]\nformat-math = true\n").unwrap();
+
+    cargo_bin_cmd!("panache")
+        .args(["format", "--config", config_file.to_str().unwrap()])
+        .write_stdin("$a+b$\n")
+        .assert()
+        .success()
+        .stdout("$a + b$\n")
+        .stderr(predicate::str::contains(
+            "`[experimental] format-math` is deprecated",
+        ))
+        .stderr(predicate::str::contains("use `[format] format-math`"));
+}
+
+#[test]
 fn test_format_multiple_files() {
     let temp_dir = TempDir::new().unwrap();
     let file1 = temp_dir.path().join("test1.qmd");

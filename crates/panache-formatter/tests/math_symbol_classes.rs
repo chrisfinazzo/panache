@@ -1,4 +1,4 @@
-//! Tier 3 symbol → atom-class fixture for the experimental math formatter
+//! Tier 3 symbol → atom-class fixture for the math formatter
 //! (Phase 5b).
 //!
 //! Where Tier 2 (`math_cross_validation.rs`) asserts *render invariance* — the

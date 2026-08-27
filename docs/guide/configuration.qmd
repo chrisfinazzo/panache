@@ -574,6 +574,7 @@ Configure how math delimiters are formatted:
 [format]
 math-delimiter-style = "preserve"
 math-indent = 2
+format-math = false
 ```
 
 Math delimiter styles:
@@ -589,6 +590,26 @@ Math delimiter styles:
 
 The `math-indent` field specifies indentation (in spaces) for display math
 blocks. Default is 2; set it to 0 to keep content flush against the left margin.
+
+#### `format-math` {#format-math}
+
+Set `format-math = true` to reformat the **content** of math spans (`$...$`,
+`$$...$$`, `\(...\)`, and `\[...\]`) and recognized raw math environments. The
+formatter collapses inline whitespace, tightens scripts, trims math-mode group
+interiors, normalizes `\\` row breaks, indents environment bodies, aligns `&`
+columns, spaces operators according to their role, and wraps over-width display
+equations at top-level relations and binary operators.
+
+Macros are never rewritten: Panache does not canonicalize `\frac`/`\dfrac`,
+insert alignment markers, or expand user definitions. Alignment measures source
+characters rather than rendered glyphs, so `\alpha` counts as six columns.
+Malformed math, a lone unescaped `$`, and structures whose semantics Panache
+cannot establish safely are preserved. See [Math](formatting.qmd#math) for the
+complete style and preservation boundary.
+
+The option is stable, defaults to `false`, and is independent of Markdown flavor
+and parser extensions. The parser always builds the lossless math CST; this
+option controls only whether the formatter rewrites its content.
 
 ### Math Command Signatures {#math-command-signatures}
 
@@ -614,8 +635,7 @@ complete built-in signature for that command. A `\newcommand`, `\def`, or other
 recognized raw-TeX definition in the document shadows both configured and
 built-in signatures because Panache does not expand replacement bodies.
 
-The setting is stable, but it changes output only while the experimental
-[`format-math`](#format-math) formatter is enabled.
+Signatures change output only while [`format-math`](#format-math) is enabled.
 
 ### Table Indentation
 
@@ -660,43 +680,18 @@ tab-width = 4
 `tab-width`
 :   Number of spaces per tab when normalizing (default 4).
 
-## Experimental Features
+## Deprecated Experimental Setting {#experimental-features}
 
-The `[experimental]` table gates features that are **opt-in and unstable**.
-Their behavior---and the option surface itself---may change, or be removed,
-**without a major release**. Do not depend on them for stable output.
+The former experimental spelling remains a compatibility alias:
 
 ```toml
 [experimental]
 format-math = false
 ```
 
-### `format-math`
-
-When enabled, Panache reformats the **content** of math spans (`$...$`,
-`$$...$$`, and `\(...\)` or `\[...\]`) structurally:
-
-- inline whitespace runs collapse to a single space;
-- leading top-level `%` comments stay on their own lines, and same-line trailing
-  comments retain their terminating newlines;
-- environment bodies (`\begin{aligned}…\end{aligned}` and friends) are indented
-  two spaces and laid out one row per line;
-- `\\` line breaks are normalized to a trailing `\\`;
-- `&` columns in alignment environments are aligned;
-- operators are spaced precedence-aware---a binary or relational operator gets
-  one space on each side (`a+b` → `a + b`, `a<=b` → `a <= b`), while a unary
-  minus or plus stays tight (`x = -y`, `f(-x)`).
-
-Macros are not rewritten---no `\frac`/`\dfrac` canonicalization and no inserting
-alignment `&`. Column alignment uses **source character widths**, so it tidies
-the source rather than aligning rendered glyphs (`\alpha` counts as six
-columns). Malformed math (unbalanced braces or environments) and content with a
-lone unescaped `$` is left verbatim.
-
-Standalone TeX blocks (a bare `\begin{env}…\end{env}` that is not wrapped in
-math delimiters) are not affected---they are kept opaque by the parser.
-
-Default is `false` (math content is emitted verbatim).
+Panache warns when it reads this spelling. Move the value to `[format]`; if a
+configuration contains both spellings, `[format] format-math` wins. The alias
+will be removed in a future major release.
 
 ## Extensions
 

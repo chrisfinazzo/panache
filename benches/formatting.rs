@@ -45,6 +45,7 @@ struct BenchmarkResult {
     line_count: usize,
     iterations: usize,
     built_in_greedy_wrap: bool,
+    format_math: bool,
     full_avg_us: f64,
     parse_avg_us: f64,
     format_avg_us: f64,
@@ -58,7 +59,13 @@ struct BenchmarkReport {
 }
 
 fn run_benchmark(name: &str, doc_id: &str, input: &str, iterations: usize) -> BenchmarkResult {
-    let config = panache::Config::default();
+    let config = panache::Config {
+        format_math: env::var("PANACHE_BENCH_FORMAT_MATH")
+            .ok()
+            .as_deref()
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true")),
+        ..Default::default()
+    };
     run_benchmark_with_config(name, doc_id, input, &config, iterations)
 }
 
@@ -132,6 +139,7 @@ fn run_benchmark_with_config(
         line_count: input.lines().count(),
         iterations,
         built_in_greedy_wrap: config.built_in_greedy_wrap,
+        format_math: config.format_math,
         full_avg_us: full_avg,
         parse_avg_us: parse_avg,
         format_avg_us: format_avg,

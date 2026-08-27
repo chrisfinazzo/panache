@@ -248,11 +248,9 @@ pub struct Config {
     pub external_max_parallel: usize,
     /// Compatibility target for ambiguous Pandoc behavior.
     pub parser: PandocCompat,
-    /// Experimental, opt-in: structurally reformat math *content* (inline
-    /// whitespace, environment-body indentation, `\\` normalization, `&`-column
-    /// alignment). Default false ⇒ math is emitted verbatim. Unstable surface —
-    /// may change without a major release.
-    pub experimental_format_math: bool,
+    /// Structurally reformat math content. When false, math is emitted
+    /// verbatim.
+    pub format_math: bool,
 }
 
 impl Default for Config {
@@ -279,7 +277,7 @@ impl Default for Config {
             formatters: HashMap::new(), // Opt-in: empty by default
             external_max_parallel: default_external_max_parallel(),
             parser: PandocCompat::default(),
-            experimental_format_math: false,
+            format_math: false,
         }
     }
 }

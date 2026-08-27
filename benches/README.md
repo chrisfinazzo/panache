@@ -11,6 +11,10 @@ cd benches/documents && ./download.sh && cd ../..
 # Run benchmarks
 cargo bench --bench formatting
 
+# Isolate the stable math formatter on a selected corpus document
+PANACHE_BENCH_DOC=math.qmd PANACHE_BENCH_FORMAT_MATH=1 \
+  cargo bench --bench formatting
+
 # Run LSP incremental didChange benchmarks
 cargo bench --bench lsp_incremental
 

@@ -64,36 +64,41 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**The final math correctness gates pass.** The corpus property harness now
-asserts exact TeX-comment retention as well as parser losslessness, formatter
-idempotency, and gate-off preservation for every corpus case.
+**Math formatting is stable.** The user-facing option is now `[format]
+format-math = true`; the former `[experimental] format-math` spelling remains a
+deprecated alias, emits a CLI warning, and loses to the stable spelling when
+both are present. The formatter's public config and benchmark harness use the
+stable `format_math` field, the generated schema advertises the stable key, and
+all in-repo behavior fixtures use it.
 
-- Every eligible comment-free typed case in the display, environment, group,
-  inline, operator, and script corpus families converges after expanding
-  existing layout spaces and continuation indentation; a coverage floor keeps
-  the gate broad. Curated insertion/removal cases additionally cover inline
-  operators and scripts, signature-proven math arguments, paired delimiters,
-  and aligned environments. Control-word/argument separators remain outside
-  this claim because the pinned Badness style intentionally preserves authored
-  spaces.
-- Every comment-bearing corpus case retains the exact `MATH_COMMENT` token
-  bytes in source order after formatting, including comments nested in groups,
-  arguments, and environments.
-- Structural and semantic Badness parity pass, and the enforced formatter
-  audit still classifies all 321 corpus/context runs. Applicable corpus cases
-  retain normalized MathML before and after formatting.
-- An explicit external gate compiles representative inline, wrapped-display,
-  commented-environment, and delimited-operand-environment inputs before and
-  after formatting with `pdflatex`; all eight invocations produce valid,
-  nonempty PDFs. The ignored Rust test keeps this check reproducible without
-  requiring TeX in ordinary workspace tests.
+- The configuration and formatting guides document the complete style,
+  parser/formatter boundary, configured and document-derived command
+  signatures, preservation boundary, and every intentional difference from
+  the pinned Badness oracle. The canonical `STYLE.md` matches that contract.
+- On Linux 6.18.45 with Rust 1.97.1, nine alternating 400-iteration release
+  runs over the identical 30,112-byte `benches/documents/math.qmd` compared
+  `e4dcaf00` (the parent of the native migration) with the stabilized tree.
+  Median parse time was 566.86 → 565.86 µs (-0.18%), formatter-only time was
+  1,014.75 → 1,008.93 µs (-0.57%), and the full pipeline was 1,670.16 →
+  1,664.71 µs (-0.33%). `PANACHE_BENCH_FORMAT_MATH=1` makes the comparison
+  reproducible.
+- Production-style `wasm-pack --release --target web` output grew from
+  1,502,384 to 1,710,641 bytes (+208,257, 13.86%); gzip size grew from 545,616
+  to 620,750 bytes (+75,134, 13.77%). `llvm-size` attributes about 128 KB of the
+  increase to code and 80 KB to data, consistent with the native typed
+  formatter and exhaustive 2,448-symbol semantic tables. The increase is
+  explicit and reviewed; no Badness code ships at runtime.
+- `cargo check --workspace`, `cargo test --workspace`,
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`, and
+  `cargo fmt --all -- --check` pass. Both changed guide pages also pass Panache's
+  own formatting check and render independently with Quarto.
 
 ### Suggested next sub-targets
 
-1. Compare parser and formatter performance with the pre-migration baseline,
-   and review WASM size. Rerun the workspace checks after any resulting
-   changes.
-2. Document the final style and supported semantic/configuration model, then
-   stabilize the `format-math` option.
-3. Keep non-colon scripted composite relations as a named intentional
+1. Keep non-colon scripted composite relations as a named intentional
    difference until the pinned Badness formatter defect is corrected.
+2. Remove `[experimental] format-math` only in a future major release, after the
+   documented deprecation window.
+3. Track the optimized WASM module size when the semantic tables or typed
+   formatter grow; the stabilization review establishes 1,710,641 bytes raw and
+   620,750 bytes gzip as the new reference point.

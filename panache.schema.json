@@ -60,11 +60,11 @@
     },
     "ExperimentalConfig": {
       "additionalProperties": false,
-      "description": "Experimental, opt-in features.\n\nEverything under `[experimental]` is unstable: behavior and the option\nsurface itself may change (or be removed) **without a major release**. Do not\ndepend on it for stable output.",
+      "description": "Deprecated experimental configuration aliases.",
       "properties": {
         "format-math": {
           "default": false,
-          "description": "Reformat the *content* of math (`$...$`, `$$...$$`, environments) —\ncollapse inline whitespace, indent environment bodies, normalize `\\\\`\nline breaks, align `&` columns, and apply precedence-aware operator\nspacing (`a+b` → `a + b`, unary `-x` stays tight). Default off: math is\nemitted verbatim. No macro rewriting or `\\frac` canonicalization.",
+          "description": "Deprecated: use `[format] format-math` instead.",
           "type": "boolean"
         }
       },
@@ -296,6 +296,11 @@
           "description": "Use panache-native greedy wrapping instead of textwrap.",
           "type": "boolean"
         },
+        "format-math": {
+          "default": false,
+          "description": "Reformat TeX math content structurally. The default is false, which\npreserves math content verbatim.",
+          "type": "boolean"
+        },
         "horizontal-rule-style": {
           "$ref": "#/$defs/HorizontalRuleStyle",
           "description": "Horizontal rule rendering: expanded to the line width or compact `---`"
@@ -482,7 +487,7 @@
           "type": "null"
         }
       ],
-      "description": "Opt-in experimental features (`[experimental]`). Unstable surface."
+      "description": "Deprecated aliases retained under `[experimental]` for migration."
     },
     "extend": {
       "default": null,

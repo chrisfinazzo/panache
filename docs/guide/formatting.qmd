@@ -1022,7 +1022,8 @@ Output (`wrap = "sentence"`)
 
 ### Inline Math
 
-Inline math is (currently) untouched.
+Inline math content is untouched when `format-math` is disabled. When it is
+enabled, Panache applies the single-line rules described below.
 
 ### Display Math
 
@@ -1045,16 +1046,16 @@ Output
 
 Set `math-indent = 0` to keep the content flush against the left margin.
 
-### Content-Aware Math Formatting (experimental)
+### Content-Aware Math Formatting
 
 By default the *content* between math delimiters is emitted verbatim. Enabling
-the experimental [`format-math`](configuration.qmd#format-math) option turns on
+the stable [`format-math`](configuration.qmd#format-math) option turns on
 structural reformatting of that content---inline whitespace collapse, tight
 sub/superscripts, math-mode group-interior trimming, environment-body
 indentation, `\\` normalization, and `&`-column alignment:
 
 ```toml
-[experimental]
+[format]
 format-math = true
 ```
 
@@ -1143,21 +1144,20 @@ Output
     $$
     ```
 
-An **assignment** arrow (`\gets`, `\leftarrow`, `\mapsto`, `\coloneqq`, `:=`) is
+An **assignment** arrow (`\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq`) is
 treated differently: it *defines* its left-hand side rather than equating it, so
 the equality continuations it introduces anchor under the assignment's
-right-hand side instead of under the arrow. This keeps a wide arrow from
-dragging
-
+right-hand side instead of under the arrow. Definition relations such as `:=`
+follow the ordinary relation-chain policy. This keeps a wide arrow from dragging
 the continuations far left:
 
-:   ```markdown
-    $$
-      \beta_0 \gets \beta_0 + \frac{4}{n} \sum_{i = 1}^n (y_i - p_i)
-                    = \beta_0 - \frac{1}{L_0} \partial_0 F, \qquad L_0
-                    = 1/4,
-    $$
-    ```
+```markdown
+$$
+  \beta_0 \gets \beta_0 + \frac{4}{n} \sum_{i = 1}^n (y_i - p_i)
+                = \beta_0 - \frac{1}{L_0} \partial_0 F, \qquad L_0
+                = 1/4,
+$$
+```
 
 The break is source-cosmetic---math ignores whitespace, so the rendered equation
 is unchanged. The layout is fully deterministic: it depends only on the content,
@@ -1171,9 +1171,41 @@ point. An over-width row with a single relation breaks its binary right-hand
 side; one with no relation at all (a standalone binary chain) breaks with its
 head term first and each following term flush beneath it. Only an equation with
 **no** top-level relation or binary operator (e.g. a single wide `\frac{…}{…}`)
-is left on one line when it overflows. The option is unstable and may change
-without a major release---see [Experimental
-Features](configuration.qmd#experimental-features).
+is left on one line when it overflows.
+
+#### Preservation Boundary
+
+Panache rewrites math only when the lossless CST proves that the operation is
+safe. It preserves the content when math formatting is disabled; the body has a
+lone unescaped `$`; braces, scripts, `\left`/`\right`, or environments are
+malformed; or the formatter cannot lower a supported structure without losing
+comments or argument-domain information. In particular, text, unknown,
+unmatched, over-attached, and document-redefined command arguments remain
+opaque. A comment between a command and its first proven argument, multiple
+environments without a punctuation boundary, and mixed free segments that
+contain comments or authored `\\` breaks also remain verbatim.
+
+Preservation applies to the math content, not its Markdown host. Display
+delimiters and their configured outer indentation may still be normalized by the
+ordinary Markdown formatter.
+
+#### Intentional Badness Differences
+
+Panache uses a pinned Badness release as a development-only formatting oracle;
+Badness is not a runtime dependency. The remaining differences are deliberate or
+compensate for a pinned oracle defect:
+
+- Markdown inline hosts flatten layout lines unless a TeX `%` comment requires a
+  newline. A standalone display environment owns its indentation instead of
+  receiving `math-indent` around the environment markers.
+- A soft newline before a signature-proven command argument collapses like other
+  insignificant whitespace.
+- Unary signs bind tightly even when the author inserted spaces (`- x` → `-x`).
+  Panache also applies TeX's binary-to-ordinary coercion after punctuation; the
+  pinned Badness sequencer does not.
+- Panache keeps scripted composite relations intact (`<=_i`, `>=_i`, `==_i`).
+  The pinned Badness formatter incorrectly splits their relation heads from
+  their scripts.
 
 ## Links
 

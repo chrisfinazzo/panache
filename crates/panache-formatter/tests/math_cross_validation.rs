@@ -1,4 +1,4 @@
-//! Tier 2 semantic-equivalence oracle for the experimental math formatter
+//! Tier 2 semantic-equivalence oracle for the math formatter
 //! (Phase 4).
 //!
 //! Unlike YAML — where `pretty_yaml` is an *output* oracle and byte-exact parity

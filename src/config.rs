@@ -2071,21 +2071,44 @@ mod tests {
     }
 
     #[test]
-    fn experimental_format_math_defaults_off() {
+    fn format_math_defaults_off() {
         let cfg = parse_config_str("flavor = \"quarto\"\n", Path::new("panache.toml"))
-            .expect("config without [experimental] must parse");
+            .expect("config without format-math must parse");
+        assert!(!cfg.format_math, "format-math must default to false");
+    }
+
+    #[test]
+    fn stable_format_math_opt_in_parses() {
+        let toml = "[format]\nformat-math = true\n";
+        let cfg = parse_config_str(toml, Path::new("panache.toml"))
+            .expect("[format] format-math must parse");
+        assert!(cfg.format_math, "stable opt-in must enable math formatting");
+    }
+
+    #[test]
+    fn deprecated_experimental_format_math_alias_still_parses() {
+        let toml = "[experimental]\nformat-math = true\n";
+        let cfg = parse_config_str(toml, Path::new("panache.toml"))
+            .expect("deprecated [experimental] format-math must parse");
         assert!(
-            !cfg.experimental.format_math,
-            "format-math must default to false"
+            cfg.format_math,
+            "deprecated opt-in must still enable math formatting"
         );
     }
 
     #[test]
-    fn experimental_format_math_opt_in_parses() {
-        let toml = "[experimental]\nformat-math = true\n";
-        let cfg = parse_config_str(toml, Path::new("panache.toml"))
-            .expect("[experimental] format-math must parse");
-        assert!(cfg.experimental.format_math, "opt-in must enable the gate");
+    fn stable_format_math_wins_over_deprecated_alias() {
+        for (stable, deprecated) in [(false, true), (true, false)] {
+            let toml = format!(
+                "[format]\nformat-math = {stable}\n\n[experimental]\nformat-math = {deprecated}\n"
+            );
+            let cfg = parse_config_str(&toml, Path::new("panache.toml"))
+                .expect("both format-math spellings must parse");
+            assert_eq!(
+                cfg.format_math, stable,
+                "the stable [format] value must take precedence"
+            );
+        }
     }
 
     #[test]

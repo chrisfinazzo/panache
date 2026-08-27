@@ -1,9 +1,9 @@
 flavor = "rmarkdown"
 
+[format]
+format-math = true
+
 [extensions]
 tex-math-gfm = true
 tex-math-single-backslash = true
 tex-math-double-backslash = true
-
-[experimental]
-format-math = true

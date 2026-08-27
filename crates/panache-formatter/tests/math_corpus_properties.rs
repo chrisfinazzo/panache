@@ -1,4 +1,4 @@
-//! Tier 1 property harness for the experimental math formatter (Phase 4).
+//! Tier 1 property harness for the math formatter.
 //!
 //! For each `*.tex` case under
 //! `crates/panache-formatter/tests/fixtures/math_corpus/`, asserts four
@@ -11,7 +11,7 @@
 //!    surface — same shape as `debug format --checks losslessness`.)
 //! 3. **Gate-off returns `None`.** `format_math(x, { enabled: false, .. })` is
 //!    `None`, so the caller falls back to its verbatim path and a mis-wired call
-//!    site can never change bytes when the experimental gate is off.
+//!    site can never change bytes when the formatter gate is off.
 //! 4. **Comment preservation.** Formatting retains every TeX comment byte and
 //!    its source order, including comments nested inside groups, arguments, and
 //!    environments.

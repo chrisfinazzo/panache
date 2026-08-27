@@ -18,6 +18,9 @@ extend-exclude = [
   ".agents/**/*",
 ]
 
+[format]
+format-math = true
+
 [flavor-overrides]
 "TODO.md" = "gfm"
 "AGENTS.md" = "gfm"
@@ -50,6 +53,3 @@ python = "ruff"
 sh = "shellcheck"
 js = "eslint"
 go = "staticcheck"
-
-[experimental]
-format-math = true

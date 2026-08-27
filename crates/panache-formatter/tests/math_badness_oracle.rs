@@ -1,4 +1,4 @@
-//! Byte-exact Badness output oracle for Panache's experimental math formatter.
+//! Byte-exact Badness output oracle for Panache's math formatter.
 //!
 //! Badness formats complete LaTeX documents, whereas Panache's math entry point
 //! receives a delimiter-free body. These test-only adapters place the same body

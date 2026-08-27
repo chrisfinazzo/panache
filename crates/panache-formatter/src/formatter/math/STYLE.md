@@ -1,15 +1,15 @@
 # Math content formatting --- canonical style rules
 
-The experimental math formatter (`Config::experimental_format_math`, default
-off) reformats the **content** of math spans. It does structurally-safe layout
-(whitespace collapse, `&`-column alignment, environment indentation, `\\`
-normalization) plus **precedence-aware operator spacing** (see Rule 6) and
-**semantic line-breaking of over-width display rows** (see Rule 7). It stays
-conservative beyond that: never macro rewriting, `\frac`/`\dfrac`
-canonicalization, or auto-`&` insertion. There is no pandoc oracle for math
-*formatting* (pandoc passes math through); the reference for alignment behavior
-is `latexindent`, and operator spacing is meaning-validated against a dev-only
-MathML oracle (`tests/math_cross_validation.rs`).
+The math formatter (`Config::format_math`, default off) reformats the
+**content** of math spans. It does structurally-safe layout (whitespace
+collapse, `&`-column alignment, environment indentation, `\\` normalization)
+plus **precedence-aware operator spacing** (see Rule 6) and **semantic
+line-breaking of over-width display rows** (see Rule 7). It stays conservative
+beyond that: never macro rewriting, `\frac`/`\dfrac` canonicalization, or
+auto-`&` insertion. There is no pandoc oracle for math *formatting* (pandoc
+passes math through). The pinned `badness-formatter` crate is the byte-layout
+oracle, while independent MathML and TeX/PDF checks validate meaning
+preservation. Both oracles are development-only dependencies.
 
 The formatter **re-parses the clean content string** (delimiters excluded) into
 a `MATH_CONTENT` CST and re-emits it. Re-parsing the already-prefix-stripped
@@ -25,6 +25,32 @@ Returned unchanged, never reflowed:
    `has_unescaped_single_dollar_in_content` preservation guard).
 3. The structural parse reports any diagnostic (unclosed/mismatched braces or
    environments). Malformed math has an untrustworthy row/column structure.
+4. A dangling script or structurally malformed environment makes attachment or
+   row boundaries untrustworthy.
+5. A command argument's math domain is unproven and the surrounding structure
+   cannot preserve that argument as an opaque fragment.
+6. Typed lowering does not yet cover the exact shape. The current named cases
+   are a comment between a command and its argument, an otherwise
+   whitespace-only proven argument containing a comment, multiple environments
+   in one punctuation segment, unbalanced ordinary delimiters, and mixed free
+   segments containing a comment or authored `\\`.
+
+Text-domain, unknown, unmatched, over-attached, and document-redefined command
+arguments are opaque preservation islands when the surrounding expression can
+still be lowered safely; they do not automatically preserve the whole span.
+
+## Intentional Badness differences
+
+- Markdown inline hosts join layout lines unless a TeX comment pins the break.
+- Standalone display environments own their indentation; `math_indent` is not
+  applied around their markers.
+- A soft newline before a signature-proven argument collapses as insignificant
+  whitespace.
+- Panache tightens authored whitespace after unary signs and applies the full
+  TeXbook Bin-to-Ord rule after punctuation.
+- Panache preserves scripted composite relations such as `<=_i`, `>=_i`, and
+  `==_i`; the pinned formatter incorrectly separates the relation head from its
+  CST-separated script.
 
 ## Rules
 
@@ -53,9 +79,8 @@ Returned unchanged, never reflowed:
 3. **Environment layout.** A standalone `\begin{name}` and `\end{name}` each go
    on their own line at the environment's indent. The body is indented **one
    level (2 spaces) deeper**, accumulating for nested environments.
-   `math_indent` does **not** apply inside standalone environments (hardcoded
-   2-space, opinionated --- may become configurable later under the experimental
-   clause).
+   `math_indent` does **not** apply inside standalone environments; their
+   two-space body indent is a fixed part of the stable style.
 
    A free comment-bearing body without `&`, an authored `\\`, or a nested
    environment follows the typed comment rules from Rule 1 at the environment's

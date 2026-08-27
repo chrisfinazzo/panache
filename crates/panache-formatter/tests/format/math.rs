@@ -8,7 +8,7 @@ fn math_config(format_math: bool) -> Config {
     Config {
         flavor,
         parser_extensions: Extensions::for_flavor(flavor),
-        experimental_format_math: format_math,
+        format_math,
         ..Default::default()
     }
 }
@@ -85,7 +85,7 @@ fn assert_math_host_body(
 }
 
 #[test]
-fn experimental_format_math_defaults_off() {
+fn stable_format_math_defaults_off() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(false)), None);
@@ -93,7 +93,7 @@ fn experimental_format_math_defaults_off() {
 }
 
 #[test]
-fn experimental_math_host_matrix_formats_simple_and_scripted_bodies_identically() {
+fn stable_math_host_matrix_formats_simple_and_scripted_bodies_identically() {
     let config = math_host_matrix_config(true);
     let hosts = [
         MathHost::DollarInline,
@@ -129,7 +129,7 @@ fn experimental_math_host_matrix_formats_simple_and_scripted_bodies_identically(
 }
 
 #[test]
-fn experimental_math_host_matrix_formats_commented_bodies_identically() {
+fn stable_math_host_matrix_formats_commented_bodies_identically() {
     let config = math_host_matrix_config(true);
     let input = "a=% relation before comment\n-b";
     let expected = "a =% relation before comment\n-b";
@@ -162,7 +162,7 @@ fn experimental_math_host_matrix_formats_commented_bodies_identically() {
 }
 
 #[test]
-fn experimental_math_host_matrix_wraps_display_bodies_identically() {
+fn stable_math_host_matrix_wraps_display_bodies_identically() {
     let config = Config {
         line_width: 30,
         math_indent: 0,
@@ -177,7 +177,7 @@ fn experimental_math_host_matrix_wraps_display_bodies_identically() {
 }
 
 #[test]
-fn experimental_math_host_matrix_formats_environment_bodies_identically() {
+fn stable_math_host_matrix_formats_environment_bodies_identically() {
     let config = math_host_matrix_config(true);
     let input_rows = "x &= 1 \\\\\ny &= 22";
     let expected_rows = "  x & = 1  \\\\\n  y & = 22";
@@ -303,7 +303,7 @@ fn display_math_indent_zero_stays_flush() {
 }
 
 #[test]
-fn experimental_format_math_aligns_environment() {
+fn stable_format_math_aligns_environment() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}\n$$\n";
     let expected = "$$\n\\begin{aligned}\n  x & = 1   \\\\\n  y & = 22  \\\\\n  z & = 333\n\\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(true)), None);
@@ -313,7 +313,7 @@ fn experimental_format_math_aligns_environment() {
 }
 
 #[test]
-fn experimental_format_math_collapses_inline_whitespace() {
+fn stable_format_math_collapses_inline_whitespace() {
     let input = "Inline $a   +   b$ end.\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("$a + b$"), "got: {output}");
@@ -322,7 +322,7 @@ fn experimental_format_math_collapses_inline_whitespace() {
 }
 
 #[test]
-fn experimental_format_math_preserves_malformed() {
+fn stable_format_math_preserves_malformed() {
     let input = "$$\n\\frac{1}{2\n$$\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("\\frac{1}{2"), "got: {output}");
@@ -343,7 +343,7 @@ fn math_no_wrap() {
 }
 
 /// Config like [`math_config`] but with an explicit `line-width` for the
-/// experimental display line-breaker. Pins `math_indent` to 0 so these
+/// display line-breaker. Pins `math_indent` to 0 so these
 /// line-break geometry assertions are isolated from the default base indent
 /// (covered separately by the `display_math_default_indent_*` tests).
 fn math_config_width(format_math: bool, width: usize) -> Config {
@@ -355,7 +355,7 @@ fn math_config_width(format_math: bool, width: usize) -> Config {
 }
 
 #[test]
-fn experimental_format_math_breaks_overwidth_display_chain() {
+fn stable_format_math_breaks_overwidth_display_chain() {
     let cfg = math_config_width(true, 30);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
     let expected = "$$\nA = aaaaaaaaaa + bbbbbbbbbb\n  = cccccccccc + dddddddddd\n$$\n";
@@ -366,7 +366,7 @@ fn experimental_format_math_breaks_overwidth_display_chain() {
 }
 
 #[test]
-fn experimental_line_break_budget_accounts_for_math_indent() {
+fn stable_line_break_budget_accounts_for_math_indent() {
     let cfg = Config {
         line_width: 22,
         ..math_config(true) // default math_indent = 2
@@ -380,7 +380,7 @@ fn experimental_line_break_budget_accounts_for_math_indent() {
 }
 
 #[test]
-fn experimental_format_math_nests_binary_under_relations() {
+fn stable_format_math_nests_binary_under_relations() {
     let cfg = math_config_width(true, 20);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
     let expected = "$$\nA = aaaaaaaaaa\n    + bbbbbbbbbb\n  = cccccccccc\n    + dddddddddd\n$$\n";
@@ -391,7 +391,7 @@ fn experimental_format_math_nests_binary_under_relations() {
 }
 
 #[test]
-fn experimental_binary_continuations_flush_under_operand_no_relation() {
+fn stable_binary_continuations_flush_under_operand_no_relation() {
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -405,7 +405,7 @@ fn experimental_binary_continuations_flush_under_operand_no_relation() {
 }
 
 #[test]
-fn experimental_binary_continuations_flush_under_rhs_one_relation() {
+fn stable_binary_continuations_flush_under_rhs_one_relation() {
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -419,7 +419,7 @@ fn experimental_binary_continuations_flush_under_rhs_one_relation() {
 }
 
 #[test]
-fn experimental_relation_continuations_keep_alignment_with_math_indent() {
+fn stable_relation_continuations_keep_alignment_with_math_indent() {
     let cfg = Config {
         line_width: 20,
         ..math_config(true)
@@ -434,7 +434,7 @@ fn experimental_relation_continuations_keep_alignment_with_math_indent() {
 }
 
 #[test]
-fn experimental_format_math_leaves_fitting_display_untouched() {
+fn stable_format_math_leaves_fitting_display_untouched() {
     let cfg = Config {
         math_indent: 0,
         ..math_config(true)
@@ -447,7 +447,7 @@ fn experimental_format_math_leaves_fitting_display_untouched() {
 }
 
 #[test]
-fn experimental_format_math_does_not_break_overwidth_fraction() {
+fn stable_format_math_does_not_break_overwidth_fraction() {
     let cfg = math_config_width(true, 12);
     let input = "$$\n\\frac{aaaaaaaa}{bbbbbbbb}\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
@@ -457,7 +457,7 @@ fn experimental_format_math_does_not_break_overwidth_fraction() {
 }
 
 #[test]
-fn experimental_format_math_breaks_standalone_binary_chain() {
+fn stable_format_math_breaks_standalone_binary_chain() {
     let cfg = math_config_width(true, 12);
     let input = "$$\naaaa + bbbb + cccc + dddd\n$$\n";
     let expected = "$$\naaaa\n+ bbbb\n+ cccc\n+ dddd\n$$\n";
@@ -468,7 +468,7 @@ fn experimental_format_math_breaks_standalone_binary_chain() {
 }
 
 #[test]
-fn experimental_format_math_nests_binary_under_single_relation() {
+fn stable_format_math_nests_binary_under_single_relation() {
     let cfg = math_config_width(true, 20);
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb + cccccccccc\n$$\n";
     let expected = "$$\nA = aaaaaaaaaa\n    + bbbbbbbbbb\n    + cccccccccc\n$$\n";
@@ -617,7 +617,7 @@ moment generating function is well known.
 }
 
 #[test]
-fn experimental_format_math_tightens_scripts() {
+fn stable_format_math_tightens_scripts() {
     let input = "$$\n  H _{ 00}^{-1 }\n$$\n";
     let expected = "$$\n  H_{00}^{-1}\n$$\n";
     let output = format(input, Some(math_config(true)), None);
@@ -627,7 +627,7 @@ fn experimental_format_math_tightens_scripts() {
 }
 
 #[test]
-fn experimental_format_math_trims_math_group_interiors() {
+fn stable_format_math_trims_math_group_interiors() {
     let input = "Inline $x_{ a }$ and ${ { a } }$ end.\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("$x_{a}$"), "got: {output}");
@@ -637,7 +637,7 @@ fn experimental_format_math_trims_math_group_interiors() {
 }
 
 #[test]
-fn experimental_format_math_preserves_text_group_interiors() {
+fn stable_format_math_preserves_text_group_interiors() {
     let input = "Inline $\\text{ a }$ and $\\text{a {b} c}$ end.\n";
     let output = format(input, Some(math_config(true)), None);
     assert!(output.contains("$\\text{ a }$"), "got: {output}");
@@ -647,7 +647,7 @@ fn experimental_format_math_preserves_text_group_interiors() {
 }
 
 #[test]
-fn experimental_format_math_preserves_unproven_argument_interiors() {
+fn stable_format_math_preserves_unproven_argument_interiors() {
     let input = "Inline $\\unknown{ a   +   b }\\sqrt{ c   +   d }{ e   +   f }$ end.\n";
     let expected = "Inline $\\unknown{ a   +   b }\\sqrt{c + d}{ e   +   f }$ end.\n";
     let output = format(input, Some(math_config(true)), None);
@@ -656,7 +656,7 @@ fn experimental_format_math_preserves_unproven_argument_interiors() {
 }
 
 #[test]
-fn experimental_format_math_preserves_malformed_argument_bytes() {
+fn stable_format_math_preserves_malformed_argument_bytes() {
     let input = "Inline $\\frac{ a   +   b }{ c   +   d$ end.\n";
     similar_asserts::assert_eq!(format(input, Some(math_config(true)), None), input);
 }

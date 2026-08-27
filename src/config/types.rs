@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use panache_formatter::config::{FormatterExtensions, MathArgumentConfig};
@@ -299,6 +299,10 @@ pub struct StyleConfig {
     pub math_delimiter_style: MathDelimiterStyle,
     /// Math indentation (spaces)
     pub math_indent: usize,
+    /// Reformat TeX math content structurally. The default is false, which
+    /// preserves math content verbatim.
+    #[schemars(with = "bool", transform = stable_format_math_schema)]
+    pub format_math: Option<bool>,
     /// Explicit positional signatures for TeX math commands. Keys omit the
     /// leading backslash and contain only ASCII letters or `@`.
     pub math_signatures: std::collections::BTreeMap<String, Vec<MathArgumentConfig>>,
@@ -332,6 +336,7 @@ impl Default for StyleConfig {
             blank_lines: BlankLines::Collapse,
             math_delimiter_style: MathDelimiterStyle::default(),
             math_indent: 2,
+            format_math: None,
             math_signatures: std::collections::BTreeMap::new(),
             table_indent: DEFAULT_TABLE_INDENT,
             tab_stops: TabStopMode::Normalize,
@@ -348,20 +353,17 @@ impl StyleConfig {
     // No flavor-specific defaults needed - just use field defaults
 }
 
-/// Experimental, opt-in features.
-///
-/// Everything under `[experimental]` is unstable: behavior and the option
-/// surface itself may change (or be removed) **without a major release**. Do not
-/// depend on it for stable output.
+fn stable_format_math_schema(schema: &mut Schema) {
+    schema.insert("default".to_string(), serde_json::Value::Bool(false));
+}
+
+/// Deprecated experimental configuration aliases.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema, PartialEq)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct ExperimentalConfig {
-    /// Reformat the *content* of math (`$...$`, `$$...$$`, environments) —
-    /// collapse inline whitespace, indent environment bodies, normalize `\\`
-    /// line breaks, align `&` columns, and apply precedence-aware operator
-    /// spacing (`a+b` → `a + b`, unary `-x` stays tight). Default off: math is
-    /// emitted verbatim. No macro rewriting or `\frac` canonicalization.
-    pub format_math: bool,
+    /// Deprecated: use `[format] format-math` instead.
+    #[schemars(with = "bool", transform = stable_format_math_schema)]
+    pub format_math: Option<bool>,
 }
 
 /// Linter configuration.
@@ -592,7 +594,7 @@ struct RawConfig {
     #[serde(default)]
     flavor_overrides: HashMap<String, Flavor>,
 
-    /// Opt-in experimental features (`[experimental]`). Unstable surface.
+    /// Deprecated aliases retained under `[experimental]` for migration.
     #[serde(default)]
     experimental: Option<ExperimentalConfig>,
 
@@ -759,6 +761,21 @@ impl RawConfig {
             self.blank_lines
         };
 
+        let experimental = self.experimental.unwrap_or_default();
+        if experimental.format_math.is_some() {
+            eprintln!(
+                "Warning: `[experimental] format-math` is deprecated; \
+                 use `[format] format-math` instead."
+            );
+        }
+        // The stable spelling wins when both are present. Keeping the alias as
+        // a fallback lets existing configurations migrate without changing
+        // their output.
+        let format_math = style
+            .format_math
+            .or(experimental.format_math)
+            .unwrap_or(false);
+
         // `line-width`/`line-ending` now live under `[format]`; the top-level
         // keys are deprecated aliases. The `[format]` value wins when both are
         // set; otherwise fall back to the top-level alias, then the default.
@@ -797,6 +814,7 @@ impl RawConfig {
             horizontal_rule_style: style.horizontal_rule_style,
             math_delimiter_style: style.math_delimiter_style,
             math_indent: style.math_indent,
+            format_math,
             math_signatures: style.math_signatures,
             table_indent: style.table_indent,
             tab_stops: style.tab_stops,
@@ -822,7 +840,6 @@ impl RawConfig {
             include: self.include,
             extend_include: self.extend_include,
             flavor_overrides: self.flavor_overrides,
-            experimental: self.experimental.unwrap_or_default(),
             crossref_prefixes: self.crossref_prefixes,
         })
     }
@@ -917,6 +934,8 @@ pub struct Config {
     pub line_ending: Option<LineEnding>,
     pub line_width: usize,
     pub math_indent: usize,
+    /// Whether TeX math content is structurally formatted.
+    pub format_math: bool,
     /// Explicit positional signatures for TeX math commands.
     pub math_signatures: std::collections::BTreeMap<String, Vec<MathArgumentConfig>>,
     pub math_delimiter_style: MathDelimiterStyle,
@@ -955,8 +974,6 @@ pub struct Config {
     pub include: Option<Vec<String>>,
     pub extend_include: Vec<String>,
     pub flavor_overrides: HashMap<String, Flavor>,
-    /// Opt-in experimental features (`[experimental]`). Unstable surface.
-    pub experimental: ExperimentalConfig,
 }
 
 impl<'de> Deserialize<'de> for Config {
@@ -994,6 +1011,7 @@ impl Default for Config {
             line_ending: Some(LineEnding::Auto),
             line_width: 80,
             math_indent: 2,
+            format_math: false,
             math_signatures: std::collections::BTreeMap::new(),
             math_delimiter_style: MathDelimiterStyle::default(),
             table_indent: DEFAULT_TABLE_INDENT,
@@ -1018,7 +1036,6 @@ impl Default for Config {
             include: None,
             extend_include: Vec::new(),
             flavor_overrides: HashMap::new(),
-            experimental: ExperimentalConfig::default(),
         }
     }
 }
@@ -1042,6 +1059,11 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    pub fn format_math(mut self, enabled: bool) -> Self {
+        self.config.format_math = enabled;
+        self
+    }
+
     pub fn math_indent(mut self, indent: usize) -> Self {
         self.config.math_indent = indent;
         self

@@ -1,4 +1,4 @@
-//! In-tree TeX math **content** formatter (experimental, opt-in).
+//! In-tree TeX math **content** formatter.
 //!
 //! Consumes the lossless structural math CST built by
 //! [`panache_parser::parser::math`] and re-emits the content with structurally
@@ -20,7 +20,7 @@
 //! Still out of scope: `\frac` canonicalization, auto-`&` insertion, and macro
 //! rewriting.
 //!
-//! The gate is [`crate::config::Config::experimental_format_math`]. Off (the
+//! The gate is [`crate::config::Config::format_math`]. Off (the
 //! default) callers emit math verbatim and never reach this module; on, they
 //! route content through [`format_math`].
 
@@ -263,7 +263,7 @@ impl MathFormatOptions {
     /// Derive options from the host config for a given span context.
     pub fn from_config(config: &crate::config::Config, context: MathContext) -> Self {
         Self {
-            enabled: config.experimental_format_math,
+            enabled: config.format_math,
             math_indent: config.math_indent,
             line_width: config.line_width,
             bookdown_equation_labels: config.parser_extensions.bookdown_equation_references,
