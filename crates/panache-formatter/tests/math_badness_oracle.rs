@@ -35,7 +35,14 @@ impl OracleContext {
 
     fn wrapper(self, body: &str) -> (String, String, String) {
         match self {
-            Self::Inline => (format!("${body}$\n"), "$".into(), "$\n".into()),
+            Self::Inline => {
+                let suffix = if final_line_has_tex_comment(body) {
+                    "\n$\n"
+                } else {
+                    "$\n"
+                };
+                (format!("${body}{suffix}"), "$".into(), suffix.into())
+            }
             Self::Display => {
                 let suffix = if body.ends_with('\n') {
                     "\\]\n"
@@ -201,26 +208,210 @@ fn panache_body_with_preamble_and_width(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Classification {
-    Parity,
-    ControlledWrapperRejection {
-        reason: String,
-    },
-    Divergence {
+    MandatoryByteParity,
+    IntentionalDifference {
+        reason: IntentionalDifference,
         badness: String,
+        panache: String,
+    },
+    Preserved {
+        reason: PreservationReason,
+        badness: Result<String, String>,
+    },
+    Unclassified {
+        badness: Result<String, String>,
         panache: Option<String>,
     },
 }
 
-fn classify_result(badness: Result<String, String>, panache: Option<String>) -> Classification {
-    match badness {
-        Err(reason) => Classification::ControlledWrapperRejection { reason },
-        Ok(badness) if panache.as_deref() == Some(badness.as_str()) => Classification::Parity,
-        Ok(badness) => Classification::Divergence { badness, panache },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntentionalDifference {
+    InlineHostFlattening,
+    SoftNewlineBeforeArguments,
+    StandaloneDisplayEnvironmentIndentation,
+}
+
+impl IntentionalDifference {
+    fn label(self) -> &'static str {
+        match self {
+            Self::InlineHostFlattening => "inline-host-flattening",
+            Self::SoftNewlineBeforeArguments => "soft-newline-before-arguments",
+            Self::StandaloneDisplayEnvironmentIndentation => {
+                "standalone-display-environment-indentation"
+            }
+        }
+    }
+
+    fn explanation(self) -> &'static str {
+        match self {
+            Self::InlineHostFlattening => {
+                "Markdown inline math joins Badness layout lines unless a TeX comment pins them."
+            }
+            Self::SoftNewlineBeforeArguments => {
+                "Panache collapses an authored soft newline before proven command arguments; Badness preserves it."
+            }
+            Self::StandaloneDisplayEnvironmentIndentation => {
+                "A standalone environment owns its indentation in Panache, so display math-indent is not added around it."
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreservationReason {
+    MalformedMath,
+    MissingNestedCommentLowering,
+}
+
+const PRESERVATION_BOUNDARY: [(&str, PreservationReason); 10] = [
+    (
+        "commands/argument_after_comment.tex",
+        PreservationReason::MissingNestedCommentLowering,
+    ),
+    (
+        "commands/math_argument_whitespace.tex",
+        PreservationReason::MissingNestedCommentLowering,
+    ),
+    (
+        "environments/recovery/comment_before_name.tex",
+        PreservationReason::MalformedMath,
+    ),
+    (
+        "environments/recovery/mismatched.tex",
+        PreservationReason::MalformedMath,
+    ),
+    (
+        "environments/recovery/trivia_before_name.tex",
+        PreservationReason::MalformedMath,
+    ),
+    (
+        "groups/left_right_group_boundary.tex",
+        PreservationReason::MalformedMath,
+    ),
+    (
+        "groups/left_right_stray.tex",
+        PreservationReason::MalformedMath,
+    ),
+    (
+        "groups/left_right_unclosed.tex",
+        PreservationReason::MalformedMath,
+    ),
+    ("groups/unclosed.tex", PreservationReason::MalformedMath),
+    (
+        "scripts/missing_argument.tex",
+        PreservationReason::MalformedMath,
+    ),
+];
+
+impl PreservationReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::MalformedMath => "malformed-math",
+            Self::MissingNestedCommentLowering => {
+                "missing-supported-shape: nested-comment-lowering"
+            }
+        }
+    }
+}
+
+fn preservation_reason(id: &str) -> Option<PreservationReason> {
+    PRESERVATION_BOUNDARY
+        .iter()
+        .find_map(|(candidate, reason)| (*candidate == id).then_some(*reason))
+}
+
+fn is_standalone_environment(body: &str) -> bool {
+    let root = SyntaxNode::new_root(parse_math_content(body, MathParseOptions::default()));
+    let significant = root
+        .children_with_tokens()
+        .filter(|element| {
+            !matches!(
+                element.kind(),
+                SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE
+            )
+        })
+        .collect::<Vec<_>>();
+    matches!(significant.as_slice(), [NodeOrToken::Node(node)] if node.kind() == SyntaxKind::MATH_ENVIRONMENT)
+}
+
+fn remove_two_space_indent(body: &str) -> Option<String> {
+    body.lines()
+        .map(|line| line.strip_prefix("  "))
+        .collect::<Option<Vec<_>>>()
+        .map(|lines| lines.join("\n"))
+}
+
+fn classify_result(
+    id: &str,
+    input: &str,
+    context: OracleContext,
+    badness: Result<String, String>,
+    panache: Option<String>,
+) -> Classification {
+    if let Some(reason) = preservation_reason(id) {
+        return if panache.is_none() {
+            Classification::Preserved { reason, badness }
+        } else {
+            Classification::Unclassified { badness, panache }
+        };
+    }
+
+    let Ok(badness_output) = badness else {
+        return Classification::Unclassified { badness, panache };
+    };
+    let Some(panache_output) = panache else {
+        return Classification::Unclassified {
+            badness: Ok(badness_output),
+            panache: None,
+        };
+    };
+
+    if panache_output == badness_output {
+        return Classification::MandatoryByteParity;
+    }
+
+    let reason = if id == "commands/argument_after_newline.tex"
+        && badness_output.replacen('\n', " ", 1) == panache_output
+    {
+        Some(IntentionalDifference::SoftNewlineBeforeArguments)
+    } else if context == OracleContext::Inline
+        && !has_tex_comment(input)
+        && panache_output == flatten_inline(&badness_output)
+    {
+        Some(IntentionalDifference::InlineHostFlattening)
+    } else if context == OracleContext::Display
+        && is_standalone_environment(input)
+        && remove_two_space_indent(&badness_output).as_deref() == Some(panache_output.as_str())
+    {
+        Some(IntentionalDifference::StandaloneDisplayEnvironmentIndentation)
+    } else {
+        None
+    };
+
+    match reason {
+        Some(reason) => Classification::IntentionalDifference {
+            reason,
+            badness: badness_output,
+            panache: panache_output,
+        },
+        None => Classification::Unclassified {
+            badness: Ok(badness_output),
+            panache: Some(panache_output),
+        },
+    }
+}
+
+fn classification_label(classification: &Classification) -> &'static str {
+    match classification {
+        Classification::MandatoryByteParity => "parity",
+        Classification::IntentionalDifference { .. } => "intentional",
+        Classification::Preserved { .. } => "preserved",
+        Classification::Unclassified { .. } => "unclassified",
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BaselineRecord {
+struct AuditRecord {
     id: String,
     context: OracleContext,
     input: String,
@@ -253,56 +444,66 @@ fn is_flat_inline_candidate(body: &str) -> bool {
     })
 }
 
-fn collect_baseline_records() -> (usize, Vec<BaselineRecord>) {
+fn collect_audit_records() -> (usize, Vec<AuditRecord>) {
     let root = corpus_root();
     let cases = discover_cases(&root);
     let mut records = Vec::with_capacity(cases.len() * OracleContext::ALL.len());
     for path in &cases {
         let id = normalized_id(&root, path);
-        let input = fs::read_to_string(path)
+        let source = fs::read_to_string(path)
             .unwrap_or_else(|error| panic!("failed to read `{id}`: {error}"));
+        let input = source.strip_suffix('\n').unwrap_or(&source).to_owned();
         let preamble = read_preamble(path)
             .unwrap_or_else(|error| panic!("failed to read preamble for `{id}`: {error}"));
         for context in OracleContext::ALL {
             let badness = badness_body_with_preamble(&input, preamble.as_deref(), context);
             let panache = panache_body_with_preamble(&input, preamble.as_deref(), context).ok();
-            records.push(BaselineRecord {
+            records.push(AuditRecord {
                 id: id.clone(),
                 context,
                 input: input.clone(),
-                classification: classify_result(badness, panache),
+                classification: classify_result(&id, &input, context, badness, panache),
             });
         }
     }
     (cases.len(), records)
 }
 
-fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> String {
+fn render_report(mut records: Vec<AuditRecord>, corpus_count: usize) -> String {
     records.sort_by(|left, right| (&left.id, left.context).cmp(&(&right.id, right.context)));
     let total = records.len();
     let parity = records
         .iter()
-        .filter(|record| matches!(record.classification, Classification::Parity))
+        .filter(|record| matches!(record.classification, Classification::MandatoryByteParity))
         .count();
-    let rejected = records
+    let intentional = records
         .iter()
         .filter(|record| {
             matches!(
                 record.classification,
-                Classification::ControlledWrapperRejection { .. }
+                Classification::IntentionalDifference { .. }
             )
         })
         .count();
-    let divergent = total - parity - rejected;
+    let preserved = records
+        .iter()
+        .filter(|record| matches!(record.classification, Classification::Preserved { .. }))
+        .count();
+    let unclassified = total - parity - intentional - preserved;
     let mut report = String::new();
-    writeln!(report, "Badness math formatter parity baseline").unwrap();
+    writeln!(report, "Panache/Badness math formatter audit").unwrap();
     writeln!(report, "Oracle: badness-formatter =0.7.0").unwrap();
     writeln!(report, "Corpus: tests/fixtures/math_corpus").unwrap();
     writeln!(report, "Cases: {corpus_count}").unwrap();
     writeln!(report, "Context runs: {total}").unwrap();
-    writeln!(report, "Parity: {parity} / {total}").unwrap();
-    writeln!(report, "Controlled wrapper rejection: {rejected} / {total}").unwrap();
-    writeln!(report, "Divergent: {divergent} / {total}\n").unwrap();
+    writeln!(report, "Mandatory byte parity: {parity} / {total}").unwrap();
+    writeln!(
+        report,
+        "Named intentional difference: {intentional} / {total}"
+    )
+    .unwrap();
+    writeln!(report, "Preserved at named boundary: {preserved} / {total}").unwrap();
+    writeln!(report, "Unclassified: {unclassified} / {total}\n").unwrap();
     writeln!(report, "Regenerate with:").unwrap();
     writeln!(
         report,
@@ -311,59 +512,89 @@ fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> Strin
     .unwrap();
     writeln!(report, "=== Counts by context ===").unwrap();
     for context in OracleContext::ALL {
-        let in_context = records.iter().filter(|record| record.context == context);
-        let context_parity = in_context
-            .clone()
-            .filter(|record| matches!(record.classification, Classification::Parity))
-            .count();
-        let context_rejected = in_context
-            .clone()
-            .filter(|record| {
-                matches!(
-                    record.classification,
-                    Classification::ControlledWrapperRejection { .. }
-                )
-            })
-            .count();
+        let counts = ["parity", "intentional", "preserved", "unclassified"].map(|label| {
+            records
+                .iter()
+                .filter(|record| {
+                    record.context == context
+                        && classification_label(&record.classification) == label
+                })
+                .count()
+        });
         writeln!(
             report,
-            "{}: parity {}, rejected {}, divergent {}",
+            "{}: parity {}, intentional {}, preserved {}, unclassified {}",
             context.label(),
-            context_parity,
-            context_rejected,
-            corpus_count - context_parity - context_rejected,
+            counts[0],
+            counts[1],
+            counts[2],
+            counts[3],
         )
         .unwrap();
     }
-    writeln!(report, "\n=== All parity candidates ===").unwrap();
+    writeln!(report, "\n=== Mandatory byte parity ===").unwrap();
     for record in records
         .iter()
-        .filter(|record| matches!(record.classification, Classification::Parity))
+        .filter(|record| matches!(record.classification, Classification::MandatoryByteParity))
     {
         writeln!(report, "{} [{}]", record.id, record.context.label()).unwrap();
     }
-    writeln!(report, "\n=== Controlled wrapper rejections ===").unwrap();
+
+    writeln!(report, "\n=== Named intentional differences ===").unwrap();
     for record in &records {
-        if let Classification::ControlledWrapperRejection { reason } = &record.classification {
+        if let Classification::IntentionalDifference {
+            reason,
+            badness,
+            panache,
+        } = &record.classification
+        {
             writeln!(
                 report,
-                "\n--- {} [{}] ---\nReason: {reason:?}",
+                "\n--- {} [{}] ---\nReason: {}\nPolicy: {}\nInput: {:?}\nBadness: {:?}\nPanache: {:?}",
                 record.id,
-                record.context.label()
+                record.context.label(),
+                reason.label(),
+                reason.explanation(),
+                record.input,
+                badness,
+                panache,
             )
             .unwrap();
         }
     }
-    writeln!(report, "\n=== Divergences ===").unwrap();
+
+    writeln!(report, "\n=== Preserved at the named boundary ===").unwrap();
     for record in &records {
-        if let Classification::Divergence { badness, panache } = &record.classification {
+        if let Classification::Preserved { reason, badness } = &record.classification {
             writeln!(
                 report,
-                "\n--- {} [{}] ---\nInput: {:?}\nBadness: {:?}\nPanache: {}",
+                "{} [{}]: {} (Badness: {})",
+                record.id,
+                record.context.label(),
+                reason.label(),
+                if badness.is_ok() {
+                    "formatted"
+                } else {
+                    "rejected"
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    writeln!(report, "\n=== Unclassified (must stay empty) ===").unwrap();
+    for record in &records {
+        if let Classification::Unclassified { badness, panache } = &record.classification {
+            writeln!(
+                report,
+                "\n--- {} [{}] ---\nInput: {:?}\nBadness: {}\nPanache: {}",
                 record.id,
                 record.context.label(),
                 record.input,
-                badness,
+                badness.as_ref().map_or_else(
+                    |error| format!("<rejected: {error}>"),
+                    |output| format!("{output:?}")
+                ),
                 panache
                     .as_ref()
                     .map_or_else(|| "<declined>".to_owned(), |output| format!("{output:?}")),
@@ -374,29 +605,30 @@ fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> Strin
     report
 }
 
-fn sample_report_records() -> Vec<BaselineRecord> {
+fn sample_report_records() -> Vec<AuditRecord> {
     vec![
-        BaselineRecord {
+        AuditRecord {
             id: "b.tex".to_owned(),
             context: OracleContext::Environment,
             input: "b".to_owned(),
-            classification: Classification::Divergence {
-                badness: "b".to_owned(),
+            classification: Classification::Unclassified {
+                badness: Ok("b".to_owned()),
                 panache: None,
             },
         },
-        BaselineRecord {
+        AuditRecord {
             id: "a.tex".to_owned(),
             context: OracleContext::Inline,
             input: "a".to_owned(),
-            classification: Classification::Parity,
+            classification: Classification::MandatoryByteParity,
         },
-        BaselineRecord {
+        AuditRecord {
             id: "a.tex".to_owned(),
             context: OracleContext::Display,
             input: "a".to_owned(),
-            classification: Classification::ControlledWrapperRejection {
-                reason: "wrapper".to_owned(),
+            classification: Classification::Preserved {
+                reason: PreservationReason::MalformedMath,
+                badness: Err("wrapper".to_owned()),
             },
         },
     ]
@@ -414,6 +646,10 @@ fn has_tex_comment(body: &str) -> bool {
         }
     }
     false
+}
+
+fn final_line_has_tex_comment(body: &str) -> bool {
+    has_tex_comment(body.rsplit_once('\n').map_or(body, |(_, line)| line))
 }
 
 /// Join the lines of a Badness inline body the way Panache prints them.
@@ -1384,22 +1620,52 @@ fn free_display_definition_relations_match_badness() {
 }
 
 #[test]
-fn result_classification_distinguishes_all_baseline_outcomes() {
+fn result_classification_distinguishes_all_audit_outcomes() {
     assert!(matches!(
-        classify_result(Ok("same".to_owned()), Some("same".to_owned())),
-        Classification::Parity
+        classify_result(
+            "same.tex",
+            "same",
+            OracleContext::Inline,
+            Ok("same".to_owned()),
+            Some("same".to_owned()),
+        ),
+        Classification::MandatoryByteParity
     ));
     assert!(matches!(
-        classify_result(Err("wrapper".to_owned()), Some("same".to_owned())),
-        Classification::ControlledWrapperRejection { .. }
+        classify_result(
+            "inline-flattening.tex",
+            "a\nb",
+            OracleContext::Inline,
+            Ok("a\nb".to_owned()),
+            Some("a b".to_owned()),
+        ),
+        Classification::IntentionalDifference {
+            reason: IntentionalDifference::InlineHostFlattening,
+            ..
+        }
     ));
     assert!(matches!(
-        classify_result(Ok("badness".to_owned()), Some("panache".to_owned())),
-        Classification::Divergence { .. }
+        classify_result(
+            "groups/unclosed.tex",
+            "{",
+            OracleContext::Inline,
+            Err("wrapper".to_owned()),
+            None,
+        ),
+        Classification::Preserved {
+            reason: PreservationReason::MalformedMath,
+            ..
+        }
     ));
     assert!(matches!(
-        classify_result(Ok("badness".to_owned()), None),
-        Classification::Divergence { panache: None, .. }
+        classify_result(
+            "unknown.tex",
+            "badness",
+            OracleContext::Inline,
+            Ok("badness".to_owned()),
+            Some("panache".to_owned()),
+        ),
+        Classification::Unclassified { .. }
     ));
 }
 
@@ -1409,9 +1675,63 @@ fn report_rendering_is_deterministic() {
     let forward = render_report(records.clone(), 2);
     let reverse = render_report(records.into_iter().rev().collect(), 2);
     assert_eq!(forward, reverse);
-    assert!(forward.contains("Parity: 1 / 3"));
-    assert!(forward.contains("Controlled wrapper rejection: 1 / 3"));
-    assert!(forward.contains("Divergent: 1 / 3"));
+    assert!(forward.contains("Mandatory byte parity: 1 / 3"));
+    assert!(forward.contains("Preserved at named boundary: 1 / 3"));
+    assert!(forward.contains("Unclassified: 1 / 3"));
+}
+
+#[test]
+fn complete_report_requires_an_explicit_outcome_for_every_context_run() {
+    let (corpus_count, records) = collect_audit_records();
+    let report = render_report(records, corpus_count);
+
+    assert!(
+        report.contains("Unclassified: 0 /"),
+        "the formatter report still has unaudited context runs:\n{report}"
+    );
+    assert!(
+        report.contains("Mandatory byte parity:"),
+        "the formatter report does not identify its mandatory parity set:\n{report}"
+    );
+}
+
+#[test]
+fn complete_report_exercises_every_preservation_boundary_entry() {
+    let (_, records) = collect_audit_records();
+
+    for (id, expected_reason) in PRESERVATION_BOUNDARY {
+        let preserved = records
+            .iter()
+            .filter(|record| record.id == id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            preserved.len(),
+            OracleContext::ALL.len(),
+            "preservation boundary entry `{id}` does not cover every context"
+        );
+        for record in preserved {
+            assert!(
+                matches!(
+                    record.classification,
+                    Classification::Preserved { reason, .. } if reason == expected_reason
+                ),
+                "preservation boundary entry `{id}` no longer has its named reason in {:?}: {:?}",
+                record.context,
+                record.classification,
+            );
+        }
+    }
+}
+
+#[test]
+fn math_badness_audit_matches_committed_report() {
+    let (corpus_count, records) = collect_audit_records();
+    let actual = render_report(records, corpus_count);
+    let path = manifest_path(REPORT_REL);
+    let expected = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+
+    similar_asserts::assert_eq!(actual, expected);
 }
 
 #[test]
@@ -1427,9 +1747,9 @@ fn document_preamble_shadows_builtin_signatures_in_both_formatters() {
 }
 
 #[test]
-#[ignore = "manual: regenerate the committed Badness formatter baseline"]
+#[ignore = "manual: regenerate the committed Badness formatter audit"]
 fn math_badness_full_report() {
-    let (corpus_count, records) = collect_baseline_records();
+    let (corpus_count, records) = collect_audit_records();
     let report = render_report(records, corpus_count);
     let path = manifest_path(REPORT_REL);
     fs::create_dir_all(path.parent().expect("report path has a parent"))

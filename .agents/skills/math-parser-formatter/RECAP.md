@@ -64,30 +64,31 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**The formatter host matrix is closed.** Focused integration tests now compare
-delimiter-free TeX bodies across every applicable Markdown host route.
+**The complete formatter report is an enforced audit.** The controlled oracle
+now removes each corpus file's terminal framing newline before wrapping the
+delimiter-free body, including a comment-safe inline wrapper.
 
-- Simple, scripted, and comment-bearing bodies produce identical logical TeX
-  through `$…$`, `\(…\)`, `$$…$$`, `\[…\]`, and raw `equation` environments;
-  the comparison removes only each block host's established base indentation.
-- Over-width free-display bodies produce byte-identical wrapping through
-  `$$…$$` and `\[…\]`. Inline and raw-environment hosts are intentionally not
-  in that slice because semantic line breaking is display-only.
-- Environment grids are identical between the two inline delimiters, between
-  the two display delimiters, and between display-nested and raw `align` rows.
-  The tests retain the documented context distinction: inline environments
-  flatten to remain in a paragraph, while display and raw environments stay
-  multiline.
-- Gate-off output is pinned exactly for all five host forms, including legacy
-  display indentation and verbatim raw-environment bodies. Every matrix case
-  also asserts host-level idempotency.
+- All 321 corpus/context runs have a required outcome: 256 have mandatory
+  byte parity, 35 have a named intentional difference, 30 are preserved at a
+  named boundary, and none are unclassified.
+- The three intentional policies are inline-host flattening, soft-newline
+  collapse before command arguments, and standalone display-environment
+  indentation. Each report entry records the policy and both formatter
+  outputs.
+- The preservation boundary is a closed ten-case table. Its 30 context runs
+  are either malformed math or the still-missing nested-comment lowering
+  shape; tests require every table entry in all three contexts.
+- Ordinary test runs regenerate the audit in memory and compare it with the
+  committed report. Any new mismatch, declined applicable case, stale
+  preservation entry, or report drift now fails.
 
 ### Suggested next sub-targets
 
-1. Regenerate the complete formatter report, and audit every preserved case
-   against the named preservation boundary.
-2. Run the remaining final gates, including corpus convergence, MathML/TeX
-   checks, performance comparison, and WASM size review.
+1. Run the remaining correctness gates: parser losslessness, formatter
+   idempotency, trivia convergence, comment preservation, MathML equivalence,
+   and representative TeX/PDF checks.
+2. Compare parser and formatter performance with the pre-migration baseline,
+   review WASM size, and run the workspace checks.
 3. Document the final style and supported semantic/configuration model, then
    stabilize the `format-math` option.
 4. Keep non-colon scripted composite relations as a named intentional

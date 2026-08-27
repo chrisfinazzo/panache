@@ -341,7 +341,7 @@ formatter-off output byte-identical.
 
 5. **Enforce the final gates and stabilize math formatting.**
 
-   - [ ] Regenerate the complete formatter report. Every applicable
+   - [x] Regenerate the complete formatter report. Every applicable
      corpus/context pair must have mandatory byte parity or a named
      intentional difference; every preserved input must satisfy the boundary
      above.
