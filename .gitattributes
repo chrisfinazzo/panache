@@ -31,6 +31,10 @@ tests/fixtures/bibtex_samples/*.cst eol=lf
 # Generated schema must use LF — test compares against bytes produced with `\n`
 panache.schema.json eol=lf
 
+# Generated math census must use LF — its test compares against a `String`
+# assembled with `writeln!`, which always emits `\n`.
+crates/panache-formatter/tests/math_badness/migration_census.txt eol=lf
+
 # `tests/linter_rules_docs.rs` `include_str!`s this doc and searches for
 # LF-anchored substrings (`\n## Rules\n`, etc.), so it must check out with LF
 # on every platform (Windows would otherwise get CRLF and the test panics).

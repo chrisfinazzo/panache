@@ -82,6 +82,8 @@ through the parser-owned semantic atom stream and the shared document IR.
   instead of being normalized by a compatibility renderer. Conservative
   argument-domain handling remains explicit: proven math arguments recurse,
   while nonmath and unknown domains remain opaque.
+- The generated migration census is pinned to LF in `.gitattributes`, so its
+  exact-match test compares the same bytes on Windows, macOS, and Linux.
 
 ### Suggested next sub-targets
 
