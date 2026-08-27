@@ -345,7 +345,7 @@ formatter-off output byte-identical.
      corpus/context pair must have mandatory byte parity or a named
      intentional difference; every preserved input must satisfy the boundary
      above.
-   - [ ] Run parser losslessness, formatter idempotency, trivia-perturbation
+   - [x] Run parser losslessness, formatter idempotency, trivia-perturbation
      convergence, comment preservation, Badness parity, applicable MathML
      equivalence, and representative TeX/PDF checks.
    - [ ] Run the workspace checks, compare parser and formatter performance with

@@ -20,6 +20,11 @@ Three harnesses walk this tree:
 - `tests/math_badness_oracle.rs` runs every body in controlled inline, display,
   and environment contexts and records byte-exact formatter parity.
 
+The ignored `tests/math_tex_pdf.rs` gate complements the corpus harnesses by
+compiling representative original and formatted inline, wrapped, commented, and
+environment shapes with `pdflatex`, then verifying that each invocation produced
+a nonempty PDF.
+
 ## Context mapping
 
 The `MathContext` is chosen by subdirectory: `inline/` → `Inline`; everything

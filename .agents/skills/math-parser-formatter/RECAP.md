@@ -64,32 +64,36 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**The complete formatter report is an enforced audit.** The controlled oracle
-now removes each corpus file's terminal framing newline before wrapping the
-delimiter-free body, including a comment-safe inline wrapper.
+**The final math correctness gates pass.** The corpus property harness now
+asserts exact TeX-comment retention as well as parser losslessness, formatter
+idempotency, and gate-off preservation for every corpus case.
 
-- All 321 corpus/context runs have a required outcome: 256 have mandatory
-  byte parity, 35 have a named intentional difference, 30 are preserved at a
-  named boundary, and none are unclassified.
-- The three intentional policies are inline-host flattening, soft-newline
-  collapse before command arguments, and standalone display-environment
-  indentation. Each report entry records the policy and both formatter
-  outputs.
-- The preservation boundary is a closed ten-case table. Its 30 context runs
-  are either malformed math or the still-missing nested-comment lowering
-  shape; tests require every table entry in all three contexts.
-- Ordinary test runs regenerate the audit in memory and compare it with the
-  committed report. Any new mismatch, declined applicable case, stale
-  preservation entry, or report drift now fails.
+- Every eligible comment-free typed case in the display, environment, group,
+  inline, operator, and script corpus families converges after expanding
+  existing layout spaces and continuation indentation; a coverage floor keeps
+  the gate broad. Curated insertion/removal cases additionally cover inline
+  operators and scripts, signature-proven math arguments, paired delimiters,
+  and aligned environments. Control-word/argument separators remain outside
+  this claim because the pinned Badness style intentionally preserves authored
+  spaces.
+- Every comment-bearing corpus case retains the exact `MATH_COMMENT` token
+  bytes in source order after formatting, including comments nested in groups,
+  arguments, and environments.
+- Structural and semantic Badness parity pass, and the enforced formatter
+  audit still classifies all 321 corpus/context runs. Applicable corpus cases
+  retain normalized MathML before and after formatting.
+- An explicit external gate compiles representative inline, wrapped-display,
+  commented-environment, and delimited-operand-environment inputs before and
+  after formatting with `pdflatex`; all eight invocations produce valid,
+  nonempty PDFs. The ignored Rust test keeps this check reproducible without
+  requiring TeX in ordinary workspace tests.
 
 ### Suggested next sub-targets
 
-1. Run the remaining correctness gates: parser losslessness, formatter
-   idempotency, trivia convergence, comment preservation, MathML equivalence,
-   and representative TeX/PDF checks.
-2. Compare parser and formatter performance with the pre-migration baseline,
-   review WASM size, and run the workspace checks.
-3. Document the final style and supported semantic/configuration model, then
+1. Compare parser and formatter performance with the pre-migration baseline,
+   and review WASM size. Rerun the workspace checks after any resulting
+   changes.
+2. Document the final style and supported semantic/configuration model, then
    stabilize the `format-math` option.
-4. Keep non-colon scripted composite relations as a named intentional
+3. Keep non-colon scripted composite relations as a named intentional
    difference until the pinned Badness formatter defect is corrected.
