@@ -13,12 +13,231 @@ fn math_config(format_math: bool) -> Config {
     }
 }
 
+fn math_host_matrix_config(format_math: bool) -> Config {
+    let mut config = math_config(format_math);
+    config.parser_extensions.tex_math_single_backslash = true;
+    config
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MathHost {
+    DollarInline,
+    ParenInline,
+    DollarDisplay,
+    BracketDisplay,
+    RawEnvironment(&'static str),
+}
+
+impl MathHost {
+    fn document(self, body: &str) -> String {
+        match self {
+            Self::DollarInline => format!("${body}$\n"),
+            Self::ParenInline => format!("\\({body}\\)\n"),
+            Self::DollarDisplay => format!("$$\n{body}\n$$\n"),
+            Self::BracketDisplay => format!("\\[\n{body}\n\\]\n"),
+            Self::RawEnvironment(name) => {
+                format!("\\begin{{{name}}}\n{body}\n\\end{{{name}}}\n")
+            }
+        }
+    }
+
+    fn body(self, document: &str) -> &str {
+        let (open, close) = match self {
+            Self::DollarInline => ("$", "$\n"),
+            Self::ParenInline => (r"\(", "\\)\n"),
+            Self::DollarDisplay => ("$$\n", "\n$$\n"),
+            Self::BracketDisplay => ("\\[\n", "\n\\]\n"),
+            Self::RawEnvironment(name) => {
+                let open = format!("\\begin{{{name}}}\n");
+                let close = format!("\n\\end{{{name}}}\n");
+                return document
+                    .strip_prefix(&open)
+                    .and_then(|body| body.strip_suffix(&close))
+                    .expect("formatted raw math host should retain its delimiters");
+            }
+        };
+        document
+            .strip_prefix(open)
+            .and_then(|body| body.strip_suffix(close))
+            .expect("formatted math host should retain its delimiters")
+    }
+}
+
+fn indent_math_body(body: &str) -> String {
+    body.lines()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assert_math_host_body(
+    host: MathHost,
+    input_body: &str,
+    expected_body: &str,
+    config: &Config,
+) -> String {
+    let input = host.document(input_body);
+    let expected = host.document(expected_body);
+    let output = format(&input, Some(config.clone()), None);
+    similar_asserts::assert_eq!(output, expected);
+    similar_asserts::assert_eq!(format(&output, Some(config.clone()), None), output);
+    host.body(&output).to_string()
+}
+
 #[test]
 fn experimental_format_math_defaults_off() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(false)), None);
     similar_asserts::assert_eq!(output, expected);
+}
+
+#[test]
+fn experimental_math_host_matrix_formats_simple_and_scripted_bodies_identically() {
+    let config = math_host_matrix_config(true);
+    let hosts = [
+        MathHost::DollarInline,
+        MathHost::ParenInline,
+        MathHost::DollarDisplay,
+        MathHost::BracketDisplay,
+        MathHost::RawEnvironment("equation"),
+    ];
+
+    for (input, expected) in [("a   +   b", "a + b"), ("H _{ 00}^{-1 }", "H_{00}^{-1}")] {
+        for host in hosts {
+            let expected_host_body = match host {
+                MathHost::DollarInline | MathHost::ParenInline => expected.to_string(),
+                MathHost::DollarDisplay
+                | MathHost::BracketDisplay
+                | MathHost::RawEnvironment(_) => indent_math_body(expected),
+            };
+            let body = assert_math_host_body(host, input, &expected_host_body, &config);
+            let logical_body = match host {
+                MathHost::DollarInline | MathHost::ParenInline => body,
+                _ => body
+                    .lines()
+                    .map(|line| {
+                        line.strip_prefix("  ")
+                            .expect("host body should be indented")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            };
+            assert_eq!(logical_body, expected, "body differed through {host:?}");
+        }
+    }
+}
+
+#[test]
+fn experimental_math_host_matrix_formats_commented_bodies_identically() {
+    let config = math_host_matrix_config(true);
+    let input = "a=% relation before comment\n-b";
+    let expected = "a =% relation before comment\n-b";
+
+    for host in [
+        MathHost::DollarInline,
+        MathHost::ParenInline,
+        MathHost::DollarDisplay,
+        MathHost::BracketDisplay,
+        MathHost::RawEnvironment("equation"),
+    ] {
+        let expected_host_body = match host {
+            MathHost::DollarInline | MathHost::ParenInline => expected.to_string(),
+            _ => indent_math_body(expected),
+        };
+        let body = assert_math_host_body(host, input, &expected_host_body, &config);
+        let logical_body = match host {
+            MathHost::DollarInline | MathHost::ParenInline => body,
+            _ => body
+                .lines()
+                .map(|line| {
+                    line.strip_prefix("  ")
+                        .expect("host body should be indented")
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert_eq!(logical_body, expected, "body differed through {host:?}");
+    }
+}
+
+#[test]
+fn experimental_math_host_matrix_wraps_display_bodies_identically() {
+    let config = Config {
+        line_width: 30,
+        math_indent: 0,
+        ..math_host_matrix_config(true)
+    };
+    let input = "A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd";
+    let expected = "A = aaaaaaaaaa + bbbbbbbbbb\n  = cccccccccc + dddddddddd";
+    let dollar = assert_math_host_body(MathHost::DollarDisplay, input, expected, &config);
+    let bracket = assert_math_host_body(MathHost::BracketDisplay, input, expected, &config);
+
+    assert_eq!(dollar, bracket);
+}
+
+#[test]
+fn experimental_math_host_matrix_formats_environment_bodies_identically() {
+    let config = math_host_matrix_config(true);
+    let input_rows = "x &= 1 \\\\\ny &= 22";
+    let expected_rows = "  x & = 1  \\\\\n  y & = 22";
+    let input_environment = format!("\\begin{{aligned}}\n{input_rows}\n\\end{{aligned}}");
+    let inline_environment = r"\begin{aligned} x & = 1  \\ y & = 22 \end{aligned}";
+    let display_environment = format!("\\begin{{aligned}}\n{expected_rows}\n\\end{{aligned}}");
+
+    let dollar_inline = assert_math_host_body(
+        MathHost::DollarInline,
+        &input_environment,
+        inline_environment,
+        &config,
+    );
+    let paren_inline = assert_math_host_body(
+        MathHost::ParenInline,
+        &input_environment,
+        inline_environment,
+        &config,
+    );
+    assert_eq!(dollar_inline, paren_inline);
+
+    let dollar_display = assert_math_host_body(
+        MathHost::DollarDisplay,
+        &input_environment,
+        &display_environment,
+        &config,
+    );
+    let bracket_display = assert_math_host_body(
+        MathHost::BracketDisplay,
+        &input_environment,
+        &display_environment,
+        &config,
+    );
+    assert_eq!(dollar_display, bracket_display);
+
+    let raw_rows = assert_math_host_body(
+        MathHost::RawEnvironment("align"),
+        input_rows,
+        expected_rows,
+        &config,
+    );
+    let display_rows = dollar_display
+        .strip_prefix("\\begin{aligned}\n")
+        .and_then(|body| body.strip_suffix("\n\\end{aligned}"))
+        .expect("display environment should retain its TeX delimiters");
+    assert_eq!(display_rows, raw_rows);
+}
+
+#[test]
+fn math_host_matrix_gate_off_preserves_established_output() {
+    let config = math_host_matrix_config(false);
+    let input = "a   +   b";
+
+    for host in [MathHost::DollarInline, MathHost::ParenInline] {
+        assert_math_host_body(host, input, input, &config);
+    }
+    for host in [MathHost::DollarDisplay, MathHost::BracketDisplay] {
+        assert_math_host_body(host, input, &indent_math_body(input), &config);
+    }
+    assert_math_host_body(MathHost::RawEnvironment("equation"), input, input, &config);
 }
 
 #[test]

@@ -333,7 +333,7 @@ formatter-off output byte-identical.
      formatter-local operator semantics, then delete those implementations.
      The census must contain no well-formed supported input on the legacy
      route.
-   - [ ] **Close the host matrix.** For representative simple, scripted,
+   - [x] **Close the host matrix.** For representative simple, scripted,
      commented, wrapped, and environment content, assert identical TeX
      bodies through `$…$`, `\(…\)`, `$$…$$`, `\[…\]`, and raw environments
      as applicable. Assert the established gate-off output for every host

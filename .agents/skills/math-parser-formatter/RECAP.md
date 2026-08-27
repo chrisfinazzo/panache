@@ -64,34 +64,31 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**The flattened formatter was deleted.** Every supported math shape now lowers
-through the parser-owned semantic atom stream and the shared document IR.
+**The formatter host matrix is closed.** Focused integration tests now compare
+delimiter-free TeX bodies across every applicable Markdown host route.
 
-- The exact-match migration census classifies all 321 corpus/context runs: 291
-  typed, 0 legacy, and 30 verbatim. The legacy route and its reason tracker no
-  longer exist.
-- The old flat-token stream, script sentinels, display line breaker, and
-  formatter-local operator table were deleted. Operator classes, delimiter
-  roles, contextual unary coercion, and break priority now have one owner in
-  `panache_parser::semantic::math`.
-- The final legacy families—bare known commands, optional brackets, control
-  symbols, scripted composite relations, authored comment rows, and display
-  equation labels—now lower through typed documents. Nested environments in
-  cells also compose through the same typed environment path.
-- Malformed environment spellings now cross the verbatim preservation boundary
-  instead of being normalized by a compatibility renderer. Conservative
-  argument-domain handling remains explicit: proven math arguments recurse,
-  while nonmath and unknown domains remain opaque.
-- The generated migration census is pinned to LF in `.gitattributes`, so its
-  exact-match test compares the same bytes on Windows, macOS, and Linux.
+- Simple, scripted, and comment-bearing bodies produce identical logical TeX
+  through `$…$`, `\(…\)`, `$$…$$`, `\[…\]`, and raw `equation` environments;
+  the comparison removes only each block host's established base indentation.
+- Over-width free-display bodies produce byte-identical wrapping through
+  `$$…$$` and `\[…\]`. Inline and raw-environment hosts are intentionally not
+  in that slice because semantic line breaking is display-only.
+- Environment grids are identical between the two inline delimiters, between
+  the two display delimiters, and between display-nested and raw `align` rows.
+  The tests retain the documented context distinction: inline environments
+  flatten to remain in a paragraph, while display and raw environments stay
+  multiline.
+- Gate-off output is pinned exactly for all five host forms, including legacy
+  display indentation and verbatim raw-environment bodies. Every matrix case
+  also asserts host-level idempotency.
 
 ### Suggested next sub-targets
 
-1. Close the inline/display/raw host matrix with representative simple,
-   scripted, commented, wrapped, and environment bodies.
-2. Regenerate the complete formatter report, and audit every preserved case
+1. Regenerate the complete formatter report, and audit every preserved case
    against the named preservation boundary.
-3. Run the remaining final gates, including corpus convergence, MathML/TeX
+2. Run the remaining final gates, including corpus convergence, MathML/TeX
    checks, performance comparison, and WASM size review.
+3. Document the final style and supported semantic/configuration model, then
+   stabilize the `format-math` option.
 4. Keep non-colon scripted composite relations as a named intentional
    difference until the pinned Badness formatter defect is corrected.
