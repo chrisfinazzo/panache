@@ -1,9 +1,10 @@
 ---
 name: math-parser-formatter
-description: Maintain and debug Panache's TeX math parser, lossless CST,
-  semantic model, formatter, diagnostics, and Badness parity. Use for
-  math-specific regressions, behavior changes, or oracle updates; do not use
-  for ordinary Markdown syntax or generic formatter work.
+description: Implement or debug Panache's TeX math parser and formatter
+  internals, including the lossless CST, semantic model, diagnostics, and
+  Badness parity. Use when modifying math implementation code or regression
+  tests. Do not use for explanatory questions, configuration or API design
+  discussions, or documentation-only work.
 ---
 
 # Maintain the math parser and formatter
