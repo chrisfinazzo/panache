@@ -1110,7 +1110,7 @@ fn comment_bearing_embedded_display_environment_with_trailing_content_matches_ba
     assert_eq!(
         panache_body(&delimiter_framed, OracleContext::Display).as_deref(),
         Ok(badness.as_str()),
-        "delimiter-owned edge newlines must not force the compatibility path"
+        "delimiter-owned edge newlines must remain on the typed path"
     );
 
     let operator_suffixes = [
@@ -1209,12 +1209,9 @@ fn multiple_delimited_environments_match_badness() {
 }
 
 #[test]
-fn malformed_embedded_environment_stays_on_compatibility_path() {
+fn malformed_embedded_environment_crosses_the_preservation_boundary() {
     let body = r"\begin {aligned}x\end {aligned}";
-    assert_eq!(
-        panache_body(body, OracleContext::Inline).as_deref(),
-        Ok(body)
-    );
+    assert!(panache_body(body, OracleContext::Inline).is_err());
 }
 
 #[test]

@@ -1,15 +1,15 @@
 # Tier-3 vendored symbol → atom-class fixture.
 #
-# Pins `formatter::math::operators` (the math operator interpretation table)
-# against the `pulldown-latex` parser Event stream. See README.md.
+# Pins the parser-owned semantic math table against the `pulldown-latex` parser
+# Event stream. See README.md.
 #
 # Tab-separated, three columns:
 #   token        the TeX symbol AS WRITTEN; leading `\` => command row, else
 #                a char row.
-#   atom_class   expected `operators::AtomClass`
+#   atom_class   expected parser `MathClass`
 #                (Ord | Bin | Rel | Open | Close | Punct | Op).
-#                `Ord` on a command row means "not in the table" (command_class
-#                returns None; the formatter defaults such commands to Ord).
+#                `Ord` on a command row includes unknown commands, which the
+#                semantic table conservatively classifies as ordinary.
 #   oracle       expected pulldown-latex Content variant for the probe `a <tok> b`
 #                (binop | relation | largeop | function | open | close | punct |
 #                ordinary), or `skip` when the symbol emits no probeable Content
@@ -17,8 +17,7 @@
 #
 # Lines beginning with `#` and blank lines are ignored.
 
-# --- char operators (classify_operator) + delimiters (parser kind ->
-#     delimiter_class) ---
+# --- char operators and delimiters ---
 +	Bin	binop
 -	Bin	binop
 *	Bin	binop
@@ -125,7 +124,7 @@
 # +/- to unary), so we keep Op and record the oracle's Function here.
 \lim	Op	function
 
-# --- ordinary controls (command_class returns None) ---
+# --- ordinary controls ---
 \alpha	Ord	ordinary
 \beta	Ord	ordinary
 \frac	Ord	skip

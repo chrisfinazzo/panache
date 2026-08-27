@@ -3,16 +3,15 @@
 //!
 //! Where Tier 2 (`math_cross_validation.rs`) asserts *render invariance* — the
 //! formatter must not change the MathML a renderer produces — this tier pins the
-//! **static interpretation table** itself: `formatter::math::operators`, the
-//! hand-curated map from a TeX symbol to its [`AtomClass`] that drives operator
-//! spacing (Phase 5) and the upcoming semantic line-breaking (Phase 6). Nothing
-//! else guards that table; a typo'd class or a dropped command would pass every
-//! other test today.
+//! **static interpretation table** itself: the parser-owned semantic math map
+//! from a TeX symbol to its [`MathClass`] that drives operator spacing and
+//! semantic line-breaking. This dedicated cross-validation catches a typo'd
+//! class or a dropped non-ordinary command directly.
 //!
 //! The vendored fixture (`fixtures/math_symbol_classes/symbol-classes.tsv`) is an
 //! *independent* enumeration of the table's surface, so it catches drift in both
 //! directions: a changed class, and a deleted entry (the row's table lookup then
-//! fails). Each row carries the expected [`AtomClass`] **and** the expected
+//! fails). Each row carries the expected [`MathClass`] **and** the expected
 //! `pulldown-latex` parser Event class, so the fixture is itself cross-validated
 //! against a real LaTeX parser rather than asserting our own table against
 //! itself.
@@ -29,7 +28,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use panache_formatter::formatter::math::operators::{self, AtomClass};
+use panache_parser::semantic::math::{MathClass, math_char_info, math_command_info};
 use pulldown_latex::event::{Content, DelimiterType, Event};
 use pulldown_latex::{Parser, Storage};
 
@@ -55,20 +54,20 @@ enum Oracle {
 
 struct Row {
     token: String,
-    atom_class: AtomClass,
+    atom_class: MathClass,
     oracle: Oracle,
     line: usize,
 }
 
-fn parse_atom_class(s: &str, line: usize) -> AtomClass {
+fn parse_atom_class(s: &str, line: usize) -> MathClass {
     match s {
-        "Ord" => AtomClass::Ord,
-        "Bin" => AtomClass::Bin,
-        "Rel" => AtomClass::Rel,
-        "Open" => AtomClass::Open,
-        "Close" => AtomClass::Close,
-        "Punct" => AtomClass::Punct,
-        "Op" => AtomClass::Op,
+        "Ord" => MathClass::Ord,
+        "Bin" => MathClass::Bin,
+        "Rel" => MathClass::Rel,
+        "Open" => MathClass::Open,
+        "Close" => MathClass::Close,
+        "Punct" => MathClass::Punct,
+        "Op" => MathClass::Op,
         other => panic!("line {line}: unknown atom_class token {other:?}"),
     }
 }
@@ -113,10 +112,14 @@ fn load_rows() -> Vec<Row> {
     rows
 }
 
-fn char_class(token: &str) -> AtomClass {
-    let atoms = operators::word_atoms(token).collect::<Vec<_>>();
-    assert_eq!(atoms.len(), 1, "expected one semantic atom for {token:?}");
-    atoms[0].class
+fn char_class(token: &str) -> MathClass {
+    let mut characters = token.chars();
+    let character = characters.next().expect("fixture token is not empty");
+    assert!(
+        characters.next().is_none(),
+        "expected one Unicode scalar for {token:?}"
+    );
+    math_char_info(character).class
 }
 
 fn classify_content(content: Content<'_>) -> Oracle {
@@ -179,16 +182,11 @@ fn table_matches_vendored_fixture() {
 
     for row in &rows {
         if let Some(name) = row.token.strip_prefix('\\') {
-            let want = if row.atom_class == AtomClass::Ord {
-                None
-            } else {
-                Some(row.atom_class)
-            };
-            let got = operators::command_class(name);
-            if got != want {
+            let got = math_command_info(name).class;
+            if got != row.atom_class {
                 failures.push(format!(
-                    "line {}: `\\{name}`: command_class = {got:?}, fixture expects {want:?}",
-                    row.line
+                    "line {}: `\\{name}`: class = {got:?}, fixture expects {:?}",
+                    row.line, row.atom_class
                 ));
             }
         } else {
@@ -204,7 +202,7 @@ fn table_matches_vendored_fixture() {
 
     assert!(
         failures.is_empty(),
-        "{} fixture row(s) disagree with `operators` — the table drifted from the \
+        "{} fixture row(s) disagree with the semantic math table — it drifted from the \
          vendored intent:\n{}",
         failures.len(),
         failures.join("\n"),
@@ -258,17 +256,17 @@ fn fixture_pins_table_coverage() {
     let command_rows = rows.iter().filter(|r| r.token.starts_with('\\')).count();
     assert!(
         command_rows >= 65,
-        "expected at least 65 command rows pinning `command_class`, found {command_rows}"
+        "expected at least 65 command rows pinning `math_command_info`, found {command_rows}"
     );
 
     for class in [
-        AtomClass::Ord,
-        AtomClass::Bin,
-        AtomClass::Rel,
-        AtomClass::Open,
-        AtomClass::Close,
-        AtomClass::Punct,
-        AtomClass::Op,
+        MathClass::Ord,
+        MathClass::Bin,
+        MathClass::Rel,
+        MathClass::Open,
+        MathClass::Close,
+        MathClass::Punct,
+        MathClass::Op,
     ] {
         assert!(
             rows.iter().any(|r| r.atom_class == class),

@@ -2,9 +2,9 @@ Panache math formatter migration census
 Corpus: tests/fixtures/math_corpus
 Cases: 107
 Context runs: 321
-Typed: 266
-Legacy: 28
-Verbatim: 27
+Typed: 291
+Legacy: 0
+Verbatim: 30
 
 Regenerate with:
   cargo test -p panache-formatter math_migration_census_report -- --ignored --nocapture
@@ -19,9 +19,9 @@ commands/argument_after_newline.tex [environment]: typed
 commands/argument_after_space.tex [inline]: typed
 commands/argument_after_space.tex [display]: typed
 commands/argument_after_space.tex [environment]: typed
-commands/big_delimiter_bracket.tex [inline]: legacy (missing-inline-content-lowering)
-commands/big_delimiter_bracket.tex [display]: legacy (missing-display-content-lowering)
-commands/big_delimiter_bracket.tex [environment]: legacy (missing-environment-body-lowering)
+commands/big_delimiter_bracket.tex [inline]: typed
+commands/big_delimiter_bracket.tex [display]: typed
+commands/big_delimiter_bracket.tex [environment]: typed
 commands/math_argument_whitespace.tex [inline]: verbatim (missing-nested-comment-lowering)
 commands/math_argument_whitespace.tex [display]: verbatim (missing-nested-comment-lowering)
 commands/math_argument_whitespace.tex [environment]: verbatim (missing-nested-comment-lowering)
@@ -31,9 +31,9 @@ commands/nested_optional.tex [environment]: typed
 commands/optional_argument.tex [inline]: typed
 commands/optional_argument.tex [display]: typed
 commands/optional_argument.tex [environment]: typed
-commands/optional_tight_gate.tex [inline]: legacy (missing-inline-content-lowering)
-commands/optional_tight_gate.tex [display]: legacy (missing-display-content-lowering)
-commands/optional_tight_gate.tex [environment]: legacy (missing-environment-body-lowering)
+commands/optional_tight_gate.tex [inline]: typed
+commands/optional_tight_gate.tex [display]: typed
+commands/optional_tight_gate.tex [environment]: typed
 commands/over_attached_argument.tex [inline]: typed
 commands/over_attached_argument.tex [display]: typed
 commands/over_attached_argument.tex [environment]: typed
@@ -49,12 +49,12 @@ commands/script_on_arguments.tex [environment]: typed
 commands/script_on_frac.tex [inline]: typed
 commands/script_on_frac.tex [display]: typed
 commands/script_on_frac.tex [environment]: typed
-commands/single_token_commands.tex [inline]: legacy (missing-inline-content-lowering)
-commands/single_token_commands.tex [display]: legacy (missing-display-content-lowering)
-commands/single_token_commands.tex [environment]: legacy (missing-environment-body-lowering)
-commands/single_token_numeral.tex [inline]: legacy (missing-inline-content-lowering)
-commands/single_token_numeral.tex [display]: legacy (missing-display-content-lowering)
-commands/single_token_numeral.tex [environment]: legacy (missing-environment-body-lowering)
+commands/single_token_commands.tex [inline]: typed
+commands/single_token_commands.tex [display]: typed
+commands/single_token_commands.tex [environment]: typed
+commands/single_token_numeral.tex [inline]: typed
+commands/single_token_numeral.tex [display]: typed
+commands/single_token_numeral.tex [environment]: typed
 commands/star_optional.tex [inline]: typed
 commands/star_optional.tex [display]: typed
 commands/star_optional.tex [environment]: typed
@@ -121,11 +121,11 @@ display/authored_newline.tex [environment]: typed
 display/fraction_block.tex [inline]: typed
 display/fraction_block.tex [display]: typed
 display/fraction_block.tex [environment]: typed
-display/integral.tex [inline]: legacy (missing-inline-content-lowering)
-display/integral.tex [display]: legacy (missing-display-content-lowering)
-display/integral.tex [environment]: legacy (missing-environment-body-lowering)
+display/integral.tex [inline]: typed
+display/integral.tex [display]: typed
+display/integral.tex [environment]: typed
 display/line_break_comment.tex [inline]: typed
-display/line_break_comment.tex [display]: legacy (missing-display-content-lowering)
+display/line_break_comment.tex [display]: typed
 display/line_break_comment.tex [environment]: typed
 display/line_break_modifiers.tex [inline]: typed
 display/line_break_modifiers.tex [display]: typed
@@ -184,24 +184,24 @@ environments/matrix/three_by_three.tex [environment]: typed
 environments/nested/delimited_matrix.tex [inline]: typed
 environments/nested/delimited_matrix.tex [display]: typed
 environments/nested/delimited_matrix.tex [environment]: typed
-environments/recovery/comment_before_name.tex [inline]: verbatim (missing-nested-comment-lowering)
-environments/recovery/comment_before_name.tex [display]: verbatim (missing-nested-comment-lowering)
-environments/recovery/comment_before_name.tex [environment]: verbatim (missing-nested-comment-lowering)
+environments/recovery/comment_before_name.tex [inline]: verbatim (malformed-math)
+environments/recovery/comment_before_name.tex [display]: verbatim (malformed-math)
+environments/recovery/comment_before_name.tex [environment]: verbatim (malformed-math)
 environments/recovery/mismatched.tex [inline]: verbatim (malformed-math)
 environments/recovery/mismatched.tex [display]: verbatim (malformed-math)
 environments/recovery/mismatched.tex [environment]: verbatim (malformed-math)
 environments/recovery/nested.tex [inline]: typed
 environments/recovery/nested.tex [display]: typed
 environments/recovery/nested.tex [environment]: typed
-environments/recovery/trivia_before_name.tex [inline]: legacy (malformed-environment-syntax)
-environments/recovery/trivia_before_name.tex [display]: legacy (malformed-environment-syntax)
-environments/recovery/trivia_before_name.tex [environment]: legacy (malformed-environment-syntax)
-escapes/escaped_brace.tex [inline]: legacy (missing-inline-content-lowering)
-escapes/escaped_brace.tex [display]: legacy (missing-display-content-lowering)
-escapes/escaped_brace.tex [environment]: legacy (missing-environment-body-lowering)
-escapes/escaped_dollar.tex [inline]: legacy (missing-inline-content-lowering)
-escapes/escaped_dollar.tex [display]: legacy (missing-display-content-lowering)
-escapes/escaped_dollar.tex [environment]: legacy (missing-environment-body-lowering)
+environments/recovery/trivia_before_name.tex [inline]: verbatim (malformed-math)
+environments/recovery/trivia_before_name.tex [display]: verbatim (malformed-math)
+environments/recovery/trivia_before_name.tex [environment]: verbatim (malformed-math)
+escapes/escaped_brace.tex [inline]: typed
+escapes/escaped_brace.tex [display]: typed
+escapes/escaped_brace.tex [environment]: typed
+escapes/escaped_dollar.tex [inline]: typed
+escapes/escaped_dollar.tex [display]: typed
+escapes/escaped_dollar.tex [environment]: typed
 escapes/literal_backslash_in_env.tex [inline]: typed
 escapes/literal_backslash_in_env.tex [display]: typed
 escapes/literal_backslash_in_env.tex [environment]: typed
@@ -313,9 +313,9 @@ operators/unary_minus.tex [environment]: typed
 scripts/double_subscript.tex [inline]: typed
 scripts/double_subscript.tex [display]: typed
 scripts/double_subscript.tex [environment]: typed
-scripts/integral_bounds.tex [inline]: legacy (missing-inline-content-lowering)
-scripts/integral_bounds.tex [display]: legacy (missing-display-content-lowering)
-scripts/integral_bounds.tex [environment]: legacy (missing-environment-body-lowering)
+scripts/integral_bounds.tex [inline]: typed
+scripts/integral_bounds.tex [display]: typed
+scripts/integral_bounds.tex [environment]: typed
 scripts/missing_argument.tex [inline]: verbatim (malformed-math)
 scripts/missing_argument.tex [display]: verbatim (malformed-math)
 scripts/missing_argument.tex [environment]: verbatim (malformed-math)

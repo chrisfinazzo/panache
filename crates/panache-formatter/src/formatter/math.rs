@@ -14,10 +14,11 @@
 //! [`panache_parser::syntax::math::math_content_text`]) sidesteps that entirely.
 //!
 //! Operator spacing is *interpretation*, not a CST shape: the parser emits
-//! neutral `MATH_WORD` runs. Migrated slices consume the parser's semantic atom
-//! stream; the legacy fallback still uses [`operators`] until its remaining
-//! shapes reach Badness parity. Still out of scope: `\frac` canonicalization,
-//! auto-`&` insertion, and macro rewriting.
+//! neutral `MATH_WORD` runs, and the formatter consumes the parser-owned
+//! semantic atom stream. Unsupported or malformed shapes cross the explicit
+//! preservation boundary instead of entering a second formatting pipeline.
+//! Still out of scope: `\frac` canonicalization, auto-`&` insertion, and macro
+//! rewriting.
 //!
 //! The gate is [`crate::config::Config::experimental_format_math`]. Off (the
 //! default) callers emit math verbatim and never reach this module; on, they
@@ -33,12 +34,9 @@ use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::semantic::math::SignatureScope;
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
-use std::collections::BTreeSet;
 
 mod ir;
-mod linebreak;
 mod lower;
-pub mod operators;
 mod printer;
 mod render;
 
@@ -195,16 +193,15 @@ pub enum MathContext {
 /// at each call site.
 #[derive(Debug, Clone)]
 pub struct MathFormatOptions {
-    /// Master gate. False ⇒ [`format_math`] returns its input verbatim, so a
-    /// mis-wired call site can never change bytes.
+    /// Master gate. False ⇒ [`format_math`] returns `None`, so the caller emits
+    /// its original input and a mis-wired call site can never change bytes.
     pub enabled: bool,
     /// Flat per-line indent applied to non-environment `$$` content only
     /// (mirrors today's `math_indent`). Environment bodies ignore it.
     pub math_indent: usize,
-    /// Target line width (host `line-width`). Only the display free-row
-    /// line-breaker reads it: a free row wider than this is broken at its
-    /// highest-priority top-level operators. Inline and environment layout
-    /// ignore it.
+    /// Target line width (host `line-width`). Only typed display layout reads
+    /// it: a free row wider than this is broken at its highest-priority
+    /// top-level operators. Inline and environment layout ignore it.
     pub line_width: usize,
     /// Recognize bookdown `(\#eq:label)` labels — must match the host's
     /// parse-time option so the re-parse reproduces the same token shape.
@@ -215,38 +212,14 @@ pub struct MathFormatOptions {
     pub signature_scope: SignatureScope,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum LegacyReason {
-    KnownBadnessScriptedCompositeRelation,
-    MalformedEnvironmentSyntax,
-    MissingDisplayContentLowering,
-    MissingEnvironmentBodyLowering,
-    MissingInlineContentLowering,
-    UnprovenArgumentDomain,
-}
-
-impl LegacyReason {
-    #[cfg(test)]
-    fn label(self) -> &'static str {
-        match self {
-            Self::KnownBadnessScriptedCompositeRelation => {
-                "known-badness-scripted-composite-relation"
-            }
-            Self::MalformedEnvironmentSyntax => "malformed-environment-syntax",
-            Self::MissingDisplayContentLowering => "missing-display-content-lowering",
-            Self::MissingEnvironmentBodyLowering => "missing-environment-body-lowering",
-            Self::MissingInlineContentLowering => "missing-inline-content-lowering",
-            Self::UnprovenArgumentDomain => "unproven-argument-domain",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VerbatimReason {
     GateDisabled,
     MalformedMath,
+    MissingSupportedShape,
     MissingNestedCommentLowering,
     UnescapedLoneDollar,
+    UnprovenArgumentDomain,
 }
 
 impl VerbatimReason {
@@ -255,8 +228,10 @@ impl VerbatimReason {
         match self {
             Self::GateDisabled => "gate-disabled",
             Self::MalformedMath => "malformed-math",
+            Self::MissingSupportedShape => "missing-supported-shape",
             Self::MissingNestedCommentLowering => "missing-nested-comment-lowering",
             Self::UnescapedLoneDollar => "unescaped-lone-dollar",
+            Self::UnprovenArgumentDomain => "unproven-argument-domain",
         }
     }
 }
@@ -264,7 +239,6 @@ impl VerbatimReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FormatRoute {
     Typed,
-    Legacy(BTreeSet<LegacyReason>),
     Verbatim(VerbatimReason),
 }
 
@@ -273,40 +247,7 @@ impl FormatRoute {
     fn label(&self) -> String {
         match self {
             Self::Typed => "typed".to_string(),
-            Self::Legacy(reasons) => format!(
-                "legacy ({})",
-                reasons
-                    .iter()
-                    .map(|reason| reason.label())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
             Self::Verbatim(reason) => format!("verbatim ({})", reason.label()),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct RouteTracker {
-    legacy_reasons: BTreeSet<LegacyReason>,
-}
-
-impl RouteTracker {
-    fn new() -> Self {
-        Self {
-            legacy_reasons: BTreeSet::new(),
-        }
-    }
-
-    fn legacy(&mut self, reason: LegacyReason) {
-        self.legacy_reasons.insert(reason);
-    }
-
-    fn finish(self) -> FormatRoute {
-        if self.legacy_reasons.is_empty() {
-            FormatRoute::Typed
-        } else {
-            FormatRoute::Legacy(self.legacy_reasons)
         }
     }
 }
@@ -377,18 +318,30 @@ fn format_math_outcome(input: &str, opts: &MathFormatOptions) -> FormatMathOutco
             route: FormatRoute::Verbatim(VerbatimReason::MalformedMath),
         };
     }
+    if lower::contains_malformed_environment(&tree) {
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::MalformedMath),
+        };
+    }
     if has_nested_comment(&tree) && !can_lower_nested_comments(&tree, opts) {
         return FormatMathOutcome {
             output: None,
             route: FormatRoute::Verbatim(VerbatimReason::MissingNestedCommentLowering),
         };
     }
-    let mut tracker = RouteTracker::new();
-    let output = render::render(&tree, opts, &mut tracker);
-    FormatMathOutcome {
-        output: Some(output),
-        route: tracker.finish(),
-    }
+    let output = render::render(&tree, opts);
+    let route = if output.is_some() {
+        FormatRoute::Typed
+    } else if lower::has_unproven_argument_domain(
+        &tree.children_with_tokens().collect::<Vec<_>>(),
+        &opts.signature_scope,
+    ) {
+        FormatRoute::Verbatim(VerbatimReason::UnprovenArgumentDomain)
+    } else {
+        FormatRoute::Verbatim(VerbatimReason::MissingSupportedShape)
+    };
+    FormatMathOutcome { output, route }
 }
 
 /// Whether a comment occurs inside a construct that historically rendered on
@@ -521,7 +474,7 @@ mod tests {
         let cases = discover_corpus_cases(&root);
         let mut records = Vec::with_capacity(cases.len() * census_contexts().len());
         let mut typed = 0;
-        let mut legacy = 0;
+        let legacy = 0;
         let mut verbatim = 0;
 
         for case in &cases {
@@ -555,17 +508,8 @@ mod tests {
                         signature_scope: signature_scope.clone(),
                     },
                 );
-                if input.contains(r"\begin")
-                    && let FormatRoute::Legacy(reasons) = &outcome.route
-                {
-                    assert!(
-                        reasons.contains(&LegacyReason::MalformedEnvironmentSyntax),
-                        "well-formed environment `{id}` [{label}] used the legacy route: {reasons:?}",
-                    );
-                }
                 match outcome.route {
                     FormatRoute::Typed => typed += 1,
-                    FormatRoute::Legacy(_) => legacy += 1,
                     FormatRoute::Verbatim(_) => verbatim += 1,
                 }
                 records.push((id.clone(), label, outcome.route.label()));
@@ -599,6 +543,19 @@ mod tests {
         let expected = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         similar_asserts::assert_eq!(census_report(), expected);
+    }
+
+    #[test]
+    fn math_migration_census_has_no_legacy_routes() {
+        let report = census_report();
+        assert!(
+            report.contains("Legacy: 0\n"),
+            "the flattened math formatter still has census callers:\n{report}"
+        );
+        assert!(
+            !report.contains(": legacy (") && !report.contains("missing-supported-shape"),
+            "a supported corpus shape still lacks typed lowering:\n{report}"
+        );
     }
 
     #[test]
@@ -749,15 +706,13 @@ mod tests {
     #[test]
     fn comment_before_embedded_environment_stays_verbatim() {
         let input = "f(% reason\n\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
     fn mismatched_delimiters_around_environment_stay_verbatim() {
         let input = "f[\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -779,8 +734,7 @@ mod tests {
     #[test]
     fn nested_environment_shape_stays_verbatim() {
         let input = "f({  \\begin{bmatrix}1 \\\\ 2\\end{bmatrix}  })";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -805,8 +759,7 @@ mod tests {
     #[test]
     fn comment_before_delimited_environment_stays_verbatim() {
         let input = "% reason\nf(\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -837,8 +790,7 @@ mod tests {
     #[test]
     fn indirect_and_direct_environments_in_one_segment_stay_verbatim() {
         let input = "f({\\begin{matrix}a\\end{matrix}}+\\begin{matrix}b\\end{matrix})";
-        assert_eq!(fmt(input, MathContext::Display), input);
-        assert_idempotent(input, MathContext::Display);
+        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
     }
 
     #[test]
@@ -959,6 +911,16 @@ mod tests {
         let once = fmt_with(input, &o);
         assert!(once.contains("(\\#eq:my-label)"), "got: {once}");
         assert_eq!(fmt_with(&once, &o), once);
+    }
+
+    #[test]
+    fn inline_equation_labels_keep_typed_operator_spacing() {
+        let o = MathFormatOptions {
+            bookdown_equation_labels: true,
+            ..opts(MathContext::Inline)
+        };
+        let input = r"a+b (\#eq:sum)";
+        assert_eq!(fmt_with(input, &o), r"a + b (\#eq:sum)");
     }
 
     #[test]

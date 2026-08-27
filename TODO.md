@@ -328,7 +328,7 @@ formatter-off output byte-identical.
      assembly, row/grid renderer, and its environment-specific inline
      helpers. The census must contain no well-formed environment on the
      legacy route.
-   - [ ] **Delete the flattened formatter.** Replace the remaining callers of
+   - [x] **Delete the flattened formatter.** Replace the remaining callers of
      `flatten_tokens`, script sentinels, the old line breaker, and
      formatter-local operator semantics, then delete those implementations.
      The census must contain no well-formed supported input on the legacy

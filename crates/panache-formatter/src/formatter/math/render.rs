@@ -10,29 +10,25 @@
 use rowan::NodeOrToken;
 
 use super::ir::Ir;
-use super::operators::{self, AtomClass};
 use super::printer::Printer;
-use super::{LegacyReason, MathContext, MathFormatOptions, RouteTracker, linebreak, lower};
+use super::{MathContext, MathFormatOptions, lower};
 use crate::syntax::{
-    AstNode, MathContent, MathEnvironment, MathLineBreak, MathScripted, SyntaxElement, SyntaxKind,
+    AstNode, MathCommand, MathContent, MathLineBreak, MathScripted, SyntaxElement, SyntaxKind,
     SyntaxNode, SyntaxToken,
 };
-use panache_parser::parser::math::MathParseOptions;
-use panache_parser::semantic::math::{ArgKind, ArgumentDomain, SignatureScope, match_arg_slot};
+use panache_parser::semantic::math::{
+    DelimiterRole, MathClass, SemanticMathAtom, math_atoms, semantic_math_atoms_in,
+};
 
 const INDENT: &str = "  ";
 
 /// Entry point: dispatch on context. Returns delimiter-free content.
-pub(super) fn render(
-    tree: &SyntaxNode,
-    opts: &MathFormatOptions,
-    tracker: &mut RouteTracker,
-) -> String {
+pub(super) fn render(tree: &SyntaxNode, opts: &MathFormatOptions) -> Option<String> {
     let top: Vec<SyntaxElement> = tree.children_with_tokens().collect();
     match opts.context {
-        MathContext::Inline => render_inline_content(tree, &top, opts, tracker),
-        MathContext::Display => render_display(tree, &top, opts, tracker),
-        MathContext::EnvironmentBody => render_environment_body(tree, &top, opts, tracker),
+        MathContext::Inline => render_inline_content(tree, &top, opts),
+        MathContext::Display => render_display(tree, &top, opts),
+        MathContext::EnvironmentBody => render_environment_body(tree, &top, opts),
     }
 }
 
@@ -40,8 +36,7 @@ fn render_environment_body(
     tree: &SyntaxNode,
     elements: &[SyntaxElement],
     opts: &MathFormatOptions,
-    tracker: &mut RouteTracker,
-) -> String {
+) -> Option<String> {
     if let Some(document) = MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
     {
@@ -49,7 +44,7 @@ fn render_environment_body(
         if ends_in_math_newline(elements) {
             output.push('\n');
         }
-        return output;
+        return Some(output);
     }
     if !elements
         .iter()
@@ -58,18 +53,18 @@ fn render_environment_body(
             lower::try_lower_environment_content(&content, &opts.signature_scope)
         })
     {
-        return trimmed_body(
+        return Some(trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             INDENT.len(),
-        );
+        ));
     }
     if let Some(document) = lower::try_lower_environment_body(elements, opts) {
-        return trimmed_body(
+        return Some(trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             INDENT.len(),
-        );
+        ));
     }
     let has_comment = tree
         .descendants_with_tokens()
@@ -95,28 +90,13 @@ fn render_environment_body(
             lower::try_lower_environment_content(&content, &opts.signature_scope)
         })
     {
-        return trimmed_body(
+        return Some(trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             INDENT.len(),
-        );
+        ));
     }
-
-    tracker.legacy(if contains_malformed_environment(tree) {
-        LegacyReason::MalformedEnvironmentSyntax
-    } else if lower::has_unproven_argument_domain(elements, &opts.signature_scope) {
-        LegacyReason::UnprovenArgumentDomain
-    } else {
-        LegacyReason::MissingEnvironmentBodyLowering
-    });
-    let content = render_inline(elements, &opts.signature_scope)
-        .trim_matches(['\r', '\n'])
-        .to_string();
-    content
-        .lines()
-        .map(|line| format!("{INDENT}{line}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    None
 }
 
 /// Inline math shares its line with the host paragraph or table cell, so a
@@ -127,8 +107,7 @@ fn render_inline_content(
     tree: &SyntaxNode,
     elements: &[SyntaxElement],
     opts: &MathFormatOptions,
-    tracker: &mut RouteTracker,
-) -> String {
+) -> Option<String> {
     let printer = Printer::new(opts.line_width, INDENT.len());
     let keeps_breaks = tree
         .descendants_with_tokens()
@@ -144,35 +123,20 @@ fn render_inline_content(
     if let Some(document) = MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
     {
-        return print(&document);
+        return Some(print(&document));
     }
     if elements.iter().any(contains_environment) {
         if let Some(document) = lower::try_lower_inline_environment(elements.to_vec(), opts) {
-            return print(&document);
+            return Some(print(&document));
         }
         let hanging_offset = keeps_breaks.then_some(1);
         if let Some(document) = mixed_segment_doc(elements, opts, hanging_offset) {
-            return print(&document);
+            return Some(print(&document));
         }
     }
-    if let Some(document) = MathContent::cast(tree.clone())
+    MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_content(&content, &opts.signature_scope))
-    {
-        print(&document)
-    } else {
-        tracker.legacy(if contains_malformed_environment(tree) {
-            LegacyReason::MalformedEnvironmentSyntax
-        } else if lower::has_unsupported_scripted_composite_relation(elements) {
-            LegacyReason::KnownBadnessScriptedCompositeRelation
-        } else if lower::has_unproven_argument_domain(elements, &opts.signature_scope) {
-            LegacyReason::UnprovenArgumentDomain
-        } else {
-            LegacyReason::MissingInlineContentLowering
-        });
-        render_inline(elements, &opts.signature_scope)
-            .trim()
-            .to_string()
-    }
+        .map(|document| print(&document))
 }
 
 /// Print a delimited body without its own trailing break. A body that ends in
@@ -187,8 +151,7 @@ fn render_display(
     tree: &SyntaxNode,
     top: &[SyntaxElement],
     opts: &MathFormatOptions,
-    tracker: &mut RouteTracker,
-) -> String {
+) -> Option<String> {
     if let Some(document) = MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
     {
@@ -197,7 +160,7 @@ fn render_display(
         if ends_in_math_newline(top) {
             output.push('\n');
         }
-        return output;
+        return Some(output);
     }
     if !top.iter().any(contains_environment)
         && let Some(document) = MathContent::cast(tree.clone()).and_then(|content| {
@@ -208,11 +171,11 @@ fn render_display(
             )
         })
     {
-        return trimmed_body(
+        return Some(trimmed_body(
             &Printer::new(opts.line_width, INDENT.len()),
             &document,
             opts.math_indent,
-        );
+        ));
     }
 
     // An ordinary delimiter enclosing a block environment must itself take
@@ -222,10 +185,11 @@ fn render_display(
     if has_mixed_environment_content(top)
         && let Some(output) = render_typed_mixed_delimited_display(top, opts)
     {
-        return output;
+        return Some(output);
     }
 
     if top.iter().any(contains_environment)
+        && ordinary_delimiters_balanced(top)
         && let Some(document) = lower::try_lower_display_environment(
             top.to_vec(),
             opts,
@@ -250,43 +214,16 @@ fn render_display(
         } else {
             opts.math_indent
         };
-        return Printer::new(opts.line_width, INDENT.len()).print(&document, base_indent);
+        return Some(Printer::new(opts.line_width, INDENT.len()).print(&document, base_indent));
     }
 
     if has_mixed_environment_content(top) {
         if let Some(output) = render_top_level_mixed_environment(top, opts) {
-            return output;
+            return Some(output);
         }
-        tracker.legacy(LegacyReason::MissingDisplayContentLowering);
-        let content: String = top.iter().map(ToString::to_string).collect();
-        return content.trim_matches(['\r', '\n']).to_string();
+        return None;
     }
-
-    tracker.legacy(if contains_malformed_environment(tree) {
-        LegacyReason::MalformedEnvironmentSyntax
-    } else if lower::has_unsupported_scripted_composite_relation(top) {
-        LegacyReason::KnownBadnessScriptedCompositeRelation
-    } else if lower::has_unproven_argument_domain(top, &opts.signature_scope) {
-        LegacyReason::UnprovenArgumentDomain
-    } else {
-        LegacyReason::MissingDisplayContentLowering
-    });
-
-    let mut lines: Vec<String> = Vec::new();
-    let flat_indent = " ".repeat(opts.math_indent);
-    let parse_opts = MathParseOptions {
-        bookdown_equation_labels: opts.bookdown_equation_labels,
-    };
-
-    flush_free_rows(
-        top,
-        &flat_indent,
-        opts.line_width,
-        parse_opts,
-        &opts.signature_scope,
-        &mut lines,
-    );
-    lines.join("\n")
+    None
 }
 
 fn ends_in_math_newline(elements: &[SyntaxElement]) -> bool {
@@ -367,14 +304,14 @@ fn enclosing_delimiters(
     environments: &[usize],
 ) -> Option<(usize, usize)> {
     for open in 0..elements.len() {
-        if element_word_class(&elements[open]) != Some(AtomClass::Open) {
+        if element_word_class(&elements[open]) != Some(MathClass::Open) {
             continue;
         }
         let mut delimiters = vec![element_text(&elements[open])?];
         for (close, element) in elements.iter().enumerate().skip(open + 1) {
             match element_word_class(element) {
-                Some(AtomClass::Open) => delimiters.push(element_text(element)?),
-                Some(AtomClass::Close) => {
+                Some(MathClass::Open) => delimiters.push(element_text(element)?),
+                Some(MathClass::Close) => {
                     let opening = delimiters.pop()?;
                     if !delimiters_match(&opening, &element_text(element)?) {
                         break;
@@ -412,13 +349,17 @@ fn contains_comment(element: &SyntaxElement) -> bool {
 fn element_atom_token(element: &SyntaxElement) -> Option<SyntaxToken> {
     match element {
         NodeOrToken::Token(token) => Some(token.clone()),
-        NodeOrToken::Node(_) => operators::command_name_token(element).or_else(|| {
-            let base = operators::scripted_base(element)?;
-            match base {
-                NodeOrToken::Token(token) => Some(token),
-                NodeOrToken::Node(_) => operators::command_name_token(&base),
-            }
-        }),
+        NodeOrToken::Node(node) => MathCommand::cast(node.clone())
+            .and_then(|command| command.name_token())
+            .or_else(|| {
+                let base = MathScripted::cast(node.clone())?.base()?;
+                match base {
+                    NodeOrToken::Token(token) => Some(token),
+                    NodeOrToken::Node(node) => {
+                        MathCommand::cast(node).and_then(|command| command.name_token())
+                    }
+                }
+            }),
     }
 }
 
@@ -426,12 +367,13 @@ fn element_text(element: &SyntaxElement) -> Option<String> {
     element_atom_token(element).map(|token| token.text().to_string())
 }
 
-fn element_word_class(element: &SyntaxElement) -> Option<AtomClass> {
+fn element_word_class(element: &SyntaxElement) -> Option<MathClass> {
     let token = element_atom_token(element)?;
     if token.kind() != SyntaxKind::MATH_WORD {
         return None;
     }
-    let mut atoms = operators::word_atoms(token.text());
+    let element = SyntaxElement::Token(token);
+    let mut atoms = math_atoms(&element);
     let atom = atoms.next()?;
     atoms.next().is_none().then_some(atom.class)
 }
@@ -474,29 +416,44 @@ pub(super) fn can_render_mixed_environment_comments(
 
 fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {
     let mut openings = Vec::new();
-    for element in elems {
-        match element_word_class(element) {
-            Some(AtomClass::Open) => {
-                let Some(text) = element_text(element) else {
+    for atom in semantic_math_atoms_in(elems.iter().cloned()) {
+        match atom.delimiter {
+            Some(DelimiterRole::Open) => {
+                let Some(text) = semantic_atom_text(atom, elems) else {
                     return false;
                 };
                 openings.push(text);
             }
-            Some(AtomClass::Close) => {
+            Some(DelimiterRole::Close) => {
                 let Some(opening) = openings.pop() else {
                     return false;
                 };
-                let Some(closing) = element_text(element) else {
+                let Some(closing) = semantic_atom_text(atom, elems) else {
                     return false;
                 };
                 if !delimiters_match(&opening, &closing) {
                     return false;
                 }
             }
-            _ => {}
+            Some(DelimiterRole::Fence) | None => {}
         }
     }
     openings.is_empty()
+}
+
+fn semantic_atom_text(atom: SemanticMathAtom, elements: &[SyntaxElement]) -> Option<String> {
+    let element = elements.iter().find(|element| {
+        element.text_range().start() <= atom.range.start()
+            && element.text_range().end() >= atom.range.end()
+    })?;
+    match element {
+        SyntaxElement::Token(token) => {
+            let start = usize::from(atom.range.start() - token.text_range().start());
+            let end = usize::from(atom.range.end() - token.text_range().start());
+            token.text().get(start..end).map(ToOwned::to_owned)
+        }
+        SyntaxElement::Node(_) => element_text(element),
+    }
 }
 
 fn delimited_body_doc_configured(
@@ -510,9 +467,9 @@ fn delimited_body_doc_configured(
 
     for (index, element) in body.iter().enumerate() {
         match element_word_class(element) {
-            Some(AtomClass::Open) => depth += 1,
-            Some(AtomClass::Close) => depth = depth.saturating_sub(1),
-            Some(AtomClass::Punct) if depth == 0 => {
+            Some(MathClass::Open) => depth += 1,
+            Some(MathClass::Close) => depth = depth.saturating_sub(1),
+            Some(MathClass::Punct) if depth == 0 => {
                 segments.push(Ir::concat([
                     mixed_segment_doc(&body[start..index], opts, Some(0))?,
                     Ir::text(element.to_string()),
@@ -578,8 +535,8 @@ fn mixed_segment_doc(
 ///
 /// Comments or authored breaks in the surrounding expression, malformed or
 /// unpunctuated multiple environments, and unbalanced ordinary delimiters
-/// remain on the compatibility path. Each environment body retains its normal
-/// row policy.
+/// cross the verbatim preservation boundary. Each environment body retains its
+/// normal row policy.
 pub(super) fn mixed_delimited_environment_document(
     body: &MathContent,
     opts: &MathFormatOptions,
@@ -611,27 +568,6 @@ pub(super) fn mixed_delimited_environment_document(
     }
 }
 
-fn is_well_formed_environment(environment: &SyntaxNode) -> bool {
-    let Some(environment) = MathEnvironment::cast(environment.clone()) else {
-        return false;
-    };
-    let (Some(begin), Some(end)) = (environment.begin(), environment.end()) else {
-        return false;
-    };
-    let (Some(begin_name), Some(end_name)) = (begin.name(), end.name()) else {
-        return false;
-    };
-    begin_name == end_name
-        && begin.syntax().text().to_string() == format!(r"\begin{{{begin_name}}}")
-        && end.syntax().text().to_string() == format!(r"\end{{{end_name}}}")
-}
-
-fn contains_malformed_environment(tree: &SyntaxNode) -> bool {
-    tree.descendants()
-        .filter(|node| node.kind() == SyntaxKind::MATH_ENVIRONMENT)
-        .any(|environment| !is_well_formed_environment(&environment))
-}
-
 fn contains_unsafe_mixed_trivia(element: &SyntaxElement) -> bool {
     match environment_block(element) {
         // The environment interior is laid out row by row, where breaks and
@@ -654,617 +590,7 @@ fn has_comment_or_line_break(element: &SyntaxElement) -> bool {
     })
 }
 
-/// Free (non-environment) display content: one *logical* row per equation,
-/// whitespace collapsed, never column-aligned (a bare `&` outside an
-/// environment is not a column separator). A logical row is split only on a
-/// top-level hard break (`\\`); a soft newline is insignificant whitespace
-/// (math ignores it), so it is *not* a row boundary — this lets the line-breaker
-/// re-join its own continuations on a later pass and recompute the same layout
-/// (idempotency). Each logical row is then handed to [`linebreak::break_free_row`],
-/// which keeps it on one line unless it exceeds `line_width`.
-fn flush_free_rows(
-    elems: &[SyntaxElement],
-    indent: &str,
-    line_width: usize,
-    parse_opts: MathParseOptions,
-    scope: &SignatureScope,
-    lines: &mut Vec<String>,
-) {
-    let rows = split_logical_rows(elems);
-    let extra = relation_chain_alignment(&rows, parse_opts, scope);
-    for (idx, row) in rows.iter().enumerate() {
-        if row.is_blank() {
-            continue;
-        }
-        let ei = extra[idx];
-        let pad = " ".repeat(ei);
-        let budget = line_width.saturating_sub(indent.chars().count() + ei);
-        let physical = linebreak::break_free_row(&row.elems, budget, parse_opts, scope);
-        let last = physical.len() - 1;
-        for (i, content) in physical.into_iter().enumerate() {
-            let content = if i == last {
-                with_break(content, row.break_text.as_deref())
-            } else {
-                content
-            };
-            lines.push(format!("{indent}{pad}{content}"));
-        }
-    }
-}
-
-fn relation_chain_alignment(
-    rows: &[Row],
-    parse_opts: MathParseOptions,
-    scope: &SignatureScope,
-) -> Vec<usize> {
-    let mut extra = vec![0usize; rows.len()];
-    let mut i = 0;
-    while i < rows.len() {
-        if rows[i].break_text.is_some() && !rows[i].is_blank() {
-            let mut k = i;
-            while rows[k].break_text.is_some()
-                && k + 1 < rows.len()
-                && !rows[k + 1].is_blank()
-                && linebreak::begins_with_top_level_relation(&rows[k + 1].elems, parse_opts, scope)
-            {
-                k += 1;
-            }
-            if k > i && !rows[i..=k].iter().any(|r| has_top_level_align(&r.elems)) {
-                for continuation in i + 1..=k {
-                    extra[continuation] = linebreak::continuation_anchor_for(
-                        &rows[i].elems,
-                        &rows[continuation].elems,
-                        parse_opts,
-                        scope,
-                    );
-                }
-                i = k + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    extra
-}
-
-fn has_top_level_align(elems: &[SyntaxElement]) -> bool {
-    elems.iter().any(|el| el.kind() == SyntaxKind::MATH_ALIGN)
-}
-
-fn with_break(line: String, break_text: Option<&str>) -> String {
-    let Some(break_text) = break_text else {
-        return line;
-    };
-    if line.is_empty() {
-        break_text.to_string()
-    } else {
-        format!(r"{line} {break_text}")
-    }
-}
-
-struct Row {
-    elems: Vec<SyntaxElement>,
-    break_text: Option<String>,
-}
-
-impl Row {
-    fn is_blank(&self) -> bool {
-        self.break_text.is_none() && self.elems.iter().all(is_layout_whitespace)
-    }
-}
-
-/// Split a flat element run into *logical* rows for free display content: only a
-/// top-level hard break (`\\`) ends a row. A soft newline stays *inside* the row
-/// as insignificant whitespace (the rendered equation is identical with or
-/// without it), so a multi-line author equation — or one the line-breaker split
-/// itself on a prior pass — collapses back to a single logical unit and is
-/// re-laid-out identically. Contrast [`split_rows`], which also breaks on soft
-/// newlines and is used for environment-body layout.
-///
-/// **Exception: a soft newline that terminates a `%` comment IS significant** —
-/// a comment runs to end-of-line, so joining past it would absorb the next
-/// line's content into the comment (and silently delete it from the rendered
-/// math). Such a newline ends the logical row. A `MATH_COMMENT` always runs up
-/// to the next newline, so it is the last content token before this newline;
-/// keeping the boundary leaves the comment alone on its line, matching the
-/// pre-line-breaking behavior.
-fn split_logical_rows(elems: &[SyntaxElement]) -> Vec<Row> {
-    let mut rows: Vec<Row> = Vec::new();
-    let mut cur: Vec<SyntaxElement> = Vec::new();
-    let mut cur_has_comment = false;
-    for el in elems {
-        match el.kind() {
-            SyntaxKind::MATH_LINE_BREAK => {
-                rows.push(Row {
-                    elems: std::mem::take(&mut cur),
-                    break_text: Some(el.to_string()),
-                });
-                cur_has_comment = false;
-            }
-            SyntaxKind::MATH_NEWLINE if cur_has_comment => {
-                rows.push(Row {
-                    elems: std::mem::take(&mut cur),
-                    break_text: None,
-                });
-                cur_has_comment = false;
-            }
-            kind => {
-                if kind == SyntaxKind::MATH_COMMENT {
-                    cur_has_comment = true;
-                }
-                cur.push(el.clone());
-            }
-        }
-    }
-    if !cur.is_empty() {
-        rows.push(Row {
-            elems: cur,
-            break_text: None,
-        });
-    }
-    rows
-}
-
 pub(super) fn is_layout_whitespace(el: &SyntaxElement) -> bool {
     matches!(el.kind(), SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE)
         && el.as_token().is_some()
-}
-
-/// Render a run of elements onto a single line. Groups and nested environments
-/// are flattened in document order, whitespace runs collapse to one space, and
-/// operators are re-spaced precedence-aware (`a+b` → `a + b`, unary `-x` stays
-/// tight) per [`super::operators`]. Not trimmed — callers trim at the cell/row
-/// level so that group interiors (`\text{ a }`) keep their spacing.
-///
-/// `pub(super)` so the line-breaker ([`linebreak`]) can render each broken
-/// segment through the same single-line path, guaranteeing the segments re-space
-/// exactly as the unbroken row would.
-pub(super) fn render_inline(elems: &[SyntaxElement], scope: &SignatureScope) -> String {
-    render_inline_seeded(elems, None, scope)
-}
-
-/// Like [`render_inline`] but seeds the preceding-atom class. The line-breaker
-/// uses this for a continuation that *starts* with a binary operator: rendered
-/// in isolation the `+`/`-` would coerce to a unary sign (`+b`), but seeding a
-/// closing-operand class keeps it binary (`+ b`). `None` reproduces
-/// [`render_inline`] exactly.
-pub(super) fn render_inline_seeded(
-    elems: &[SyntaxElement],
-    seed: Option<AtomClass>,
-    scope: &SignatureScope,
-) -> String {
-    let toks = flatten_tokens(elems, scope);
-    space_operators(&toks, seed)
-}
-
-enum FlatToken {
-    Token(SyntaxKind, String),
-    /// A `\left`/`\right` delimiter whose role comes from its position, not
-    /// from the delimiter glyph's ordinary lexical class.
-    Delimiter(String, AtomClass),
-    /// A starred-variant marker whose command-node ownership proves that it is
-    /// a modifier rather than a binary operator.
-    CommandStar(String),
-    /// An argument whose domain is not proven math; preserve every interior byte.
-    Opaque(String),
-    ScriptStart,
-    ScriptEnd,
-}
-
-impl FlatToken {
-    fn token(&self) -> Option<(SyntaxKind, &str)> {
-        match self {
-            Self::Token(kind, text) => Some((*kind, text)),
-            Self::CommandStar(text) => Some((SyntaxKind::MATH_WORD, text)),
-            Self::Delimiter(_, _) | Self::Opaque(_) | Self::ScriptStart | Self::ScriptEnd => None,
-        }
-    }
-}
-
-fn flatten_tokens(elems: &[SyntaxElement], scope: &SignatureScope) -> Vec<FlatToken> {
-    let mut out = Vec::new();
-    for el in elems {
-        flatten_element(el, scope, &mut out);
-    }
-    out
-}
-
-fn flatten_element(element: &SyntaxElement, scope: &SignatureScope, out: &mut Vec<FlatToken>) {
-    match element {
-        NodeOrToken::Token(token) => {
-            out.push(FlatToken::Token(token.kind(), token.text().to_string()))
-        }
-        // A line break flattens to one composite token so the spacing pass
-        // sees the same `\\` atom it did when the parser emitted it flat.
-        NodeOrToken::Node(node) if node.kind() == SyntaxKind::MATH_LINE_BREAK => {
-            out.push(FlatToken::Token(
-                SyntaxKind::MATH_LINE_BREAK,
-                node.text().to_string(),
-            ));
-        }
-        NodeOrToken::Node(node) if node.kind() == SyntaxKind::MATH_COMMAND => {
-            let name = operators::command_name_token(element)
-                .and_then(|token| token.text().strip_prefix('\\').map(str::to_owned));
-            let signature = name
-                .as_deref()
-                .and_then(|name| scope.command_signature(name));
-            let mut slot = 0usize;
-            for child in node.children_with_tokens() {
-                let group_kind = match child.kind() {
-                    SyntaxKind::MATH_GROUP => Some(ArgKind::Brace),
-                    SyntaxKind::MATH_OPTIONAL => Some(ArgKind::Bracket),
-                    _ => None,
-                };
-                if let Some(kind) = group_kind {
-                    let domain = signature
-                        .and_then(|signature| match_arg_slot(&signature.arguments, &mut slot, kind))
-                        .map_or(ArgumentDomain::Unknown, |argument| argument.domain);
-                    if domain == ArgumentDomain::Math {
-                        flatten_element(&child, scope, out);
-                    } else {
-                        out.push(FlatToken::Opaque(child.to_string()));
-                    }
-                } else if child.as_token().is_some_and(|token| {
-                    token.kind() == SyntaxKind::MATH_WORD && token.text() == "*"
-                }) {
-                    out.push(FlatToken::CommandStar("*".to_string()));
-                } else {
-                    flatten_element(&child, scope, out);
-                }
-            }
-        }
-        NodeOrToken::Node(node) if node.kind() == SyntaxKind::MATH_DELIMITED => {
-            let mut delimiter_role = None;
-            for child in node.children_with_tokens() {
-                match &child {
-                    NodeOrToken::Token(token)
-                        if token.kind() == SyntaxKind::MATH_CONTROL_WORD
-                            && token.text() == r"\left" =>
-                    {
-                        flatten_element(&child, scope, out);
-                        delimiter_role = Some(AtomClass::Open);
-                    }
-                    NodeOrToken::Token(token)
-                        if token.kind() == SyntaxKind::MATH_CONTROL_WORD
-                            && token.text() == r"\right" =>
-                    {
-                        flatten_element(&child, scope, out);
-                        delimiter_role = Some(AtomClass::Close);
-                    }
-                    NodeOrToken::Token(token)
-                        if delimiter_role.is_some()
-                            && matches!(
-                                token.kind(),
-                                SyntaxKind::MATH_SPACE
-                                    | SyntaxKind::MATH_NEWLINE
-                                    | SyntaxKind::MATH_COMMENT
-                            ) =>
-                    {
-                        flatten_element(&child, scope, out);
-                    }
-                    NodeOrToken::Token(token) if delimiter_role.is_some() => {
-                        out.push(FlatToken::Delimiter(
-                            token.text().to_string(),
-                            delimiter_role.take().expect("delimiter role is present"),
-                        ));
-                    }
-                    NodeOrToken::Node(_) => {
-                        delimiter_role = None;
-                        flatten_element(&child, scope, out);
-                    }
-                    _ => flatten_element(&child, scope, out),
-                }
-            }
-        }
-        // Star-modifier handling lives in the `MATH_COMMAND` arm above; only a
-        // command node owns a `*` that is a modifier rather than an operator.
-        NodeOrToken::Node(node) => {
-            let is_script = matches!(
-                node.kind(),
-                SyntaxKind::MATH_SUBSCRIPT | SyntaxKind::MATH_SUPERSCRIPT
-            );
-            if is_script {
-                out.push(FlatToken::ScriptStart);
-            }
-            for child in node.children_with_tokens() {
-                flatten_element(&child, scope, out);
-            }
-            if is_script {
-                out.push(FlatToken::ScriptEnd);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Demand {
-    /// Nothing emitted yet — no leading space before the first atom.
-    Start,
-    /// An ordinary atom: keep author whitespace, add nothing.
-    Plain,
-    /// A binary/relation operator run: one space on each side.
-    SpacedOp,
-    /// A unary (coerced) operator run: tight; strips adjacent author space.
-    TightOp,
-}
-
-/// Whether `atom` — the final atom of its word token — is a relation head the
-/// parser's script split severed from its final scalar (`a:` + scripted `:=`,
-/// `x<` + scripted `=`). The severed scalar is always the '='/`<`/`>`-led
-/// `MATH_WORD` token that immediately follows.
-fn severed_relation_head(atom: &operators::WordAtom, next: Option<&FlatToken>) -> bool {
-    let Some((SyntaxKind::MATH_WORD, next_text)) = next.and_then(FlatToken::token) else {
-        return false;
-    };
-    match atom.class {
-        // A definition colon fuses only with a following definition relation.
-        // A bare colon run is punctuation; `:=` is already a relation.
-        AtomClass::Punct => {
-            atom.text.chars().all(|character| character == ':')
-                && operators::word_atoms(next_text)
-                    .next()
-                    .is_some_and(|next| next.class == AtomClass::Rel && next.text.ends_with('='))
-        }
-        AtomClass::Rel => next_text.starts_with(['=', '<', '>']),
-        _ => false,
-    }
-}
-
-fn space_operators(toks: &[FlatToken], seed: Option<AtomClass>) -> String {
-    let mut out = String::new();
-    let mut prev_class: Option<AtomClass> = seed;
-    let mut prev_demand = Demand::Start;
-    let mut pending_space = false;
-    let mut group_stack: Vec<bool> = Vec::new();
-    let mut prev_sig_is_text_cmd = false;
-    let mut star_modifier_pending = false;
-    // A deferred severed relation head (see [`severed_relation_head`]); it is
-    // only ever set when the next token is a relation-led `MATH_WORD`, whose
-    // first atom consumes it, so no other arm needs to flush it.
-    let mut severed_head: Option<&str> = None;
-    let mut script_stack = Vec::new();
-
-    let mut i = 0;
-    while i < toks.len() {
-        match &toks[i] {
-            FlatToken::ScriptStart => {
-                script_stack.push((prev_class, prev_demand, group_stack.len()));
-                pending_space = false;
-                prev_class = Some(AtomClass::Open);
-                prev_demand = Demand::TightOp;
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-                continue;
-            }
-            FlatToken::ScriptEnd => {
-                if let Some((class, demand, group_depth)) = script_stack.pop() {
-                    prev_class = class;
-                    prev_demand = demand;
-                    group_stack.truncate(group_depth);
-                }
-                pending_space = false;
-                // Keep `prev_sig_is_text_cmd`: a text-mode command used as an
-                // unbraced script argument (`x_\text{ max }`) still owns the
-                // brace group that follows the script node.
-                star_modifier_pending = false;
-                i += 1;
-                continue;
-            }
-            FlatToken::Delimiter(text, class) => {
-                emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_class = Some(*class);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-                continue;
-            }
-            FlatToken::Opaque(text) => {
-                emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_class = Some(AtomClass::Close);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-                continue;
-            }
-            FlatToken::Token(_, _) | FlatToken::CommandStar(_) => {}
-        }
-        let command_star = matches!(toks[i], FlatToken::CommandStar(_));
-        let (kind, text) = toks[i]
-            .token()
-            .expect("script boundaries are handled before math tokens");
-        match kind {
-            SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE => {
-                pending_space = true;
-                i += 1;
-            }
-            SyntaxKind::MATH_WORD => {
-                let mut atoms = operators::word_atoms(text).peekable();
-                let mut first = true;
-                while let Some(atom) = atoms.next() {
-                    if atoms.peek().is_none() && severed_relation_head(&atom, toks.get(i + 1)) {
-                        severed_head = Some(atom.text);
-                        pending_space = false;
-                        break;
-                    }
-                    let fused;
-                    let (atom_text, atom_class) = match severed_head.take() {
-                        Some(head) => {
-                            fused = format!("{head}{}", atom.text);
-                            (fused.as_str(), AtomClass::Rel)
-                        }
-                        None => (atom.text, atom.class),
-                    };
-                    let is_modifier =
-                        first && atom.text == "*" && (star_modifier_pending || command_star);
-                    let class = if is_modifier {
-                        AtomClass::Ord
-                    } else {
-                        operators::coerce(atom_class, prev_class)
-                    };
-                    let demand = if is_modifier {
-                        Demand::TightOp
-                    } else if operators::is_spaced(class) {
-                        Demand::SpacedOp
-                    } else if atom_class == AtomClass::Bin {
-                        Demand::TightOp
-                    } else {
-                        Demand::Plain
-                    };
-                    emit_atom(&mut out, prev_demand, demand, pending_space, atom_text);
-                    pending_space = false;
-                    prev_demand = demand;
-                    prev_class = Some(class);
-                    first = false;
-                }
-                i += 1;
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-            }
-            SyntaxKind::MATH_CONTROL_WORD | SyntaxKind::MATH_CONTROL_SYMBOL => {
-                let name = text.strip_prefix('\\').unwrap_or(text);
-                let demand = match operators::command_class(name) {
-                    Some(raw) => {
-                        let class = operators::coerce(raw, prev_class);
-                        prev_class = Some(class);
-                        if operators::is_spaced(class) {
-                            Demand::SpacedOp
-                        } else {
-                            Demand::Plain
-                        }
-                    }
-                    None => {
-                        prev_class = Some(AtomClass::Ord);
-                        Demand::Plain
-                    }
-                };
-                emit_atom(&mut out, prev_demand, demand, pending_space, text);
-                pending_space = false;
-                prev_demand = demand;
-                prev_sig_is_text_cmd = operators::is_text_mode_command(name);
-                star_modifier_pending = operators::takes_star_modifier(name);
-                i += 1;
-            }
-            SyntaxKind::MATH_COMMENT => {
-                emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            SyntaxKind::MATH_CARET | SyntaxKind::MATH_UNDERSCORE => {
-                emit_atom(&mut out, prev_demand, Demand::TightOp, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::TightOp;
-                prev_class = Some(AtomClass::Open);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            SyntaxKind::MATH_GROUP_OPEN => {
-                let parent_text = group_stack.last().copied().unwrap_or(false);
-                let is_text = prev_sig_is_text_cmd || parent_text;
-                group_stack.push(is_text);
-                emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
-                pending_space = false;
-                prev_demand = if is_text {
-                    Demand::Plain
-                } else {
-                    Demand::TightOp
-                };
-                prev_class = Some(AtomClass::Open);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            SyntaxKind::MATH_BRACKET_OPEN => {
-                emit_atom(&mut out, prev_demand, Demand::TightOp, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::TightOp;
-                prev_class = Some(AtomClass::Open);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            SyntaxKind::MATH_BRACKET_CLOSE => {
-                emit_atom(&mut out, prev_demand, Demand::TightOp, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_class = Some(AtomClass::Close);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            SyntaxKind::MATH_GROUP_CLOSE => {
-                let is_text = group_stack.pop().unwrap_or(false);
-                let cur = if is_text {
-                    Demand::Plain
-                } else {
-                    Demand::TightOp
-                };
-                emit_atom(&mut out, prev_demand, cur, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_class = Some(AtomClass::Close);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-            _ => {
-                emit_atom(&mut out, prev_demand, Demand::Plain, pending_space, text);
-                pending_space = false;
-                prev_demand = Demand::Plain;
-                prev_class = atom_prev_class(kind, text);
-                prev_sig_is_text_cmd = false;
-                star_modifier_pending = false;
-                i += 1;
-            }
-        }
-    }
-    debug_assert!(
-        severed_head.is_none(),
-        "a severed relation head is always consumed by the next word token"
-    );
-    out
-}
-
-fn emit_atom(out: &mut String, prev: Demand, cur: Demand, pending_space: bool, text: &str) {
-    if prev != Demand::Start && gap_space(prev, cur, pending_space) {
-        out.push(' ');
-    }
-    out.push_str(text);
-}
-
-/// Resolve the gap between two adjacent atoms: a spaced operator always wins
-/// (one space); a tight operator otherwise strips the gap; plain atoms preserve
-/// author whitespace.
-fn gap_space(prev: Demand, cur: Demand, pending_space: bool) -> bool {
-    if prev == Demand::SpacedOp || cur == Demand::SpacedOp {
-        true
-    } else if prev == Demand::TightOp || cur == Demand::TightOp {
-        false
-    } else {
-        pending_space
-    }
-}
-
-fn atom_prev_class(kind: SyntaxKind, _text: &str) -> Option<AtomClass> {
-    let class = match kind {
-        SyntaxKind::MATH_WORD => AtomClass::Ord,
-        SyntaxKind::MATH_GROUP_OPEN => AtomClass::Open,
-        SyntaxKind::MATH_GROUP_CLOSE => AtomClass::Close,
-        SyntaxKind::MATH_BRACKET_OPEN => AtomClass::Open,
-        SyntaxKind::MATH_BRACKET_CLOSE => AtomClass::Close,
-        SyntaxKind::MATH_CARET | SyntaxKind::MATH_UNDERSCORE | SyntaxKind::MATH_ALIGN => {
-            AtomClass::Open
-        }
-        SyntaxKind::MATH_LINE_BREAK => return None,
-        _ => AtomClass::Ord,
-    };
-    Some(class)
 }

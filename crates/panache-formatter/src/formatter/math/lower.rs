@@ -2,14 +2,14 @@
 
 use panache_parser::semantic::math::{
     ArgKind, ArgumentDomain, DelimiterRole, MathBreakPriority, MathClass, SemanticMathAtom,
-    SignatureScope, match_arg_slot, math_atoms, semantic_math_atoms_in,
+    SignatureScope, match_arg_slot, math_atoms, math_command_info, semantic_math_atoms_in,
 };
 use rowan::TextRange;
 use rowan::ast::AstNode;
 
 use crate::syntax::{
     MathArgument, MathCommand, MathContent, MathDelimited, MathEnvironment, MathGroup,
-    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxToken,
+    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
 };
 
 use super::ir::Ir;
@@ -20,16 +20,22 @@ const INDENT_WIDTH: usize = 2;
 
 /// Lower a supported math content body into the shared document IR.
 ///
-/// Returning `None` keeps every unsupported shape on the legacy renderer until
-/// its own parity slice lands.
+/// Returning `None` keeps an unsupported shape on the formatter's verbatim
+/// preservation boundary.
 pub(super) fn try_lower_content(content: &MathContent, scope: &SignatureScope) -> Option<Ir> {
-    lower_body(
-        content.elements().collect(),
-        scope,
-        Spacing::Normal,
-        true,
-        false,
-    )
+    let elements = content.elements().collect::<Vec<_>>();
+    if elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
+    {
+        let (body, label) = split_trailing_equation_label(elements)?;
+        return Some(Ir::concat([
+            lower_body(body, scope, Spacing::Normal, true, false)?,
+            Ir::text(" "),
+            Ir::verbatim(label),
+        ]));
+    }
+    lower_body(elements, scope, Spacing::Normal, true, false)
 }
 
 /// Lower a free display body, including Panache's implicit alignment for
@@ -49,6 +55,12 @@ pub(super) fn try_lower_display_elements(
     scope: &SignatureScope,
     line_width: usize,
 ) -> Option<Ir> {
+    if elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
+    {
+        return lower_display_equation_label(elements, scope, line_width);
+    }
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
     if elements
         .iter()
@@ -89,6 +101,40 @@ pub(super) fn try_lower_display_elements(
         )?;
         Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
     }
+}
+
+fn lower_display_equation_label(
+    elements: Vec<SyntaxElement>,
+    scope: &SignatureScope,
+    line_width: usize,
+) -> Option<Ir> {
+    let (body_elements, label) = split_trailing_equation_label(elements)?;
+    let body = try_lower_display_elements(
+        body_elements,
+        scope,
+        line_width.saturating_sub(label.chars().count() + 1),
+    )?;
+    Some(Ir::concat([body, Ir::text(" "), Ir::verbatim(label)]))
+}
+
+fn split_trailing_equation_label(
+    elements: Vec<SyntaxElement>,
+) -> Option<(Vec<SyntaxElement>, String)> {
+    let mut labels = elements
+        .iter()
+        .enumerate()
+        .filter(|(_, element)| element.kind() == SyntaxKind::MATH_EQUATION_LABEL);
+    let (label_index, label) = labels.next()?;
+    if labels.next().is_some()
+        || elements[label_index + 1..]
+            .iter()
+            .any(|element| !is_layout_trivia(element))
+        || elements[..label_index].iter().all(is_layout_trivia)
+    {
+        return None;
+    }
+
+    Some((elements[..label_index].to_vec(), label.to_string()))
 }
 
 /// Lower inline content containing one top-level environment.
@@ -400,6 +446,22 @@ pub(super) fn try_lower_environment_document(
     ]))
 }
 
+pub(super) fn contains_malformed_environment(tree: &SyntaxNode) -> bool {
+    tree.descendants()
+        .filter_map(MathEnvironment::cast)
+        .any(|environment| {
+            let (Some(begin), Some(end)) = (environment.begin(), environment.end()) else {
+                return true;
+            };
+            let (Some(begin_name), Some(end_name)) = (begin.name(), end.name()) else {
+                return true;
+            };
+            begin_name != end_name
+                || begin.syntax().text().to_string() != format!(r"\begin{{{begin_name}}}")
+                || end.syntax().text().to_string() != format!(r"\end{{{end_name}}}")
+        })
+}
+
 #[derive(Debug)]
 struct EnvironmentRow {
     elements: Vec<SyntaxElement>,
@@ -458,7 +520,7 @@ impl EnvironmentCell {
             .chars()
             .take_while(|character| character.is_ascii_alphabetic())
             .collect::<String>();
-        super::operators::command_class(&name) == Some(super::operators::AtomClass::Rel)
+        math_command_info(&name).class == MathClass::Rel
     }
 }
 
@@ -490,7 +552,7 @@ fn lower_environment_rows(elements: &[SyntaxElement], opts: &MathFormatOptions) 
 
         let cells = split_environment_cells(&row.elements)
             .into_iter()
-            .map(|elements| lower_environment_cell(elements, &opts.signature_scope))
+            .map(|elements| lower_environment_cell(elements, opts))
             .collect::<Option<Vec<_>>>()?;
         items.push(EnvironmentBodyItem::Row {
             cells,
@@ -529,18 +591,19 @@ fn lower_environment_rows(elements: &[SyntaxElement], opts: &MathFormatOptions) 
 
 fn lower_environment_cell(
     elements: Vec<SyntaxElement>,
-    scope: &SignatureScope,
+    opts: &MathFormatOptions,
 ) -> Option<EnvironmentCell> {
     let comment_elements = elements
         .iter()
         .filter(|element| contains_nested_comment(element))
         .cloned()
         .collect::<Vec<_>>();
-    let document = lower_environment_cell_elements(elements, scope)?;
+    let document = lower_environment_cell_elements(elements, opts)?;
     let atom_offset = match comment_elements.as_slice() {
         [] => 0,
         [comment_element] => {
-            let comment_document = try_lower_elements(vec![comment_element.clone()], scope)?;
+            let comment_document =
+                try_lower_elements(vec![comment_element.clone()], &opts.signature_scope)?;
             let printer = Printer::new(usize::MAX / 2, INDENT_WIDTH);
             let first_line = printer.print(&document, 0).lines().next()?.to_string();
             let comment_first_line = printer
@@ -562,13 +625,19 @@ fn lower_environment_cell(
 
 fn lower_environment_cell_elements(
     elements: Vec<SyntaxElement>,
-    scope: &SignatureScope,
+    opts: &MathFormatOptions,
 ) -> Option<Ir> {
+    if elements
+        .iter()
+        .any(|element| display_environment(element).is_some())
+    {
+        return try_lower_environment_composition(elements, opts, 0);
+    }
     if !elements
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
     {
-        return try_lower_elements(elements, scope);
+        return try_lower_elements(elements, &opts.signature_scope);
     }
 
     let mut documents = Vec::new();
@@ -578,7 +647,10 @@ fn lower_environment_cell_elements(
             let trailing_space = segment
                 .last()
                 .is_some_and(|element: &SyntaxElement| element.kind() == SyntaxKind::MATH_SPACE);
-            documents.push(try_lower_elements(std::mem::take(&mut segment), scope)?);
+            documents.push(try_lower_elements(
+                std::mem::take(&mut segment),
+                &opts.signature_scope,
+            )?);
             if trailing_space {
                 documents.push(Ir::text(" "));
             }
@@ -587,7 +659,7 @@ fn lower_environment_cell_elements(
             segment.push(element);
         }
     }
-    documents.push(try_lower_elements(segment, scope)?);
+    documents.push(try_lower_elements(segment, &opts.signature_scope)?);
     Some(Ir::concat(documents))
 }
 
@@ -880,34 +952,35 @@ fn lower_authored_breaks(
         let has_align = row
             .iter()
             .any(|element| element.kind() == SyntaxKind::MATH_ALIGN);
-        let (first_relation, starts_with_relation) = if align_authored_relations && !has_align {
-            relation_layout(
-                &row,
-                &row_atoms,
-                scope,
-                spacing,
-                preserve_comment_context,
-                environment_rows,
-            )?
-        } else {
-            (None, false)
-        };
+        let has_comment = row
+            .iter()
+            .any(|element| element.kind() == SyntaxKind::MATH_COMMENT);
+        let (first_relation, starts_with_relation) =
+            if align_authored_relations && !has_align && !has_comment {
+                relation_layout(
+                    &row,
+                    &row_atoms,
+                    scope,
+                    spacing,
+                    preserve_comment_context,
+                    environment_rows,
+                )?
+            } else {
+                (None, false)
+            };
         let row_elements = std::mem::take(&mut row);
-        let breakable_pieces = (!has_align
-            && !row_elements
-                .iter()
-                .any(|element| element.kind() == SyntaxKind::MATH_COMMENT))
-        .then(|| {
-            lower_pieces_with_atoms(
-                &row_elements,
-                &row_atoms,
-                scope,
-                spacing,
-                preserve_comment_context,
-                environment_rows,
-            )
-        })
-        .flatten();
+        let breakable_pieces = (!has_align && !has_comment)
+            .then(|| {
+                lower_pieces_with_atoms(
+                    &row_elements,
+                    &row_atoms,
+                    scope,
+                    spacing,
+                    preserve_comment_context,
+                    environment_rows,
+                )
+            })
+            .flatten();
         let document = lower_authored_row(
             row_elements,
             &row_atoms,
@@ -960,33 +1033,34 @@ fn lower_authored_breaks(
     let has_align = row
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_ALIGN);
-    let (first_relation, starts_with_relation) = if align_authored_relations && !has_align {
-        relation_layout(
-            &row,
-            &row_atoms,
-            scope,
-            spacing,
-            preserve_comment_context,
-            environment_rows,
-        )?
-    } else {
-        (None, false)
-    };
-    let breakable_pieces = (!has_align
-        && !row
-            .iter()
-            .any(|element| element.kind() == SyntaxKind::MATH_COMMENT))
-    .then(|| {
-        lower_pieces_with_atoms(
-            &row,
-            &row_atoms,
-            scope,
-            spacing,
-            preserve_comment_context,
-            environment_rows,
-        )
-    })
-    .flatten();
+    let has_comment = row
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_COMMENT);
+    let (first_relation, starts_with_relation) =
+        if align_authored_relations && !has_align && !has_comment {
+            relation_layout(
+                &row,
+                &row_atoms,
+                scope,
+                spacing,
+                preserve_comment_context,
+                environment_rows,
+            )?
+        } else {
+            (None, false)
+        };
+    let breakable_pieces = (!has_align && !has_comment)
+        .then(|| {
+            lower_pieces_with_atoms(
+                &row,
+                &row_atoms,
+                scope,
+                spacing,
+                preserve_comment_context,
+                environment_rows,
+            )
+        })
+        .flatten();
     let document = lower_authored_row(
         row,
         &row_atoms,
@@ -1322,20 +1396,19 @@ fn lower_pieces_with_atoms(
     preserve_comment_context: bool,
     environment_rows: bool,
 ) -> Option<Vec<Piece>> {
-    if has_unsupported_scripted_composite_relation(elements)
-        || !elements
-            .iter()
-            .all(|element| is_supported_element(element, scope))
+    if !elements
+        .iter()
+        .all(|element| is_supported_element(element, scope))
     {
         return None;
     }
 
-    let semantic_atoms = coalesce_definition_relations(elements, semantic_atoms);
+    let semantic_atoms = coalesce_scripted_relations(elements, semantic_atoms);
     let mut pieces = Vec::new();
     let mut previous_end = None;
 
     for atom in semantic_atoms {
-        let atom_document = definition_relation_document(
+        let atom_document = scripted_relation_document(
             atom,
             elements,
             scope,
@@ -1376,12 +1449,12 @@ fn lower_pieces_with_atoms(
     Some(pieces)
 }
 
-/// Badness's semantic stream keeps each definition colon as punctuation, but
-/// its formatter prints the contiguous colon run and following `=` relation as
-/// one operator. Authored whitespace still separates the scalars; a scripted
-/// equals may cross the CST boundary because its script belongs to the whole
-/// definition relation.
-fn coalesce_definition_relations(
+/// Coalesce a composite relation split between a word token and a scripted
+/// tail. Definition-colon runs remain punctuation in the parser stream, while
+/// the following relation scalar can own the script; non-colon composite
+/// relations have the same CST seam. Authored whitespace still prevents
+/// coalescing.
+fn coalesce_scripted_relations(
     elements: &[SyntaxElement],
     semantic_atoms: &[SemanticMathAtom],
 ) -> Vec<SemanticMathAtom> {
@@ -1399,19 +1472,22 @@ fn coalesce_definition_relations(
             index += 1;
             continue;
         };
-        if first.class != MathClass::Punct || token_slice(first.range, word).as_deref() != Some(":")
-        {
+        let definition = first.class == MathClass::Punct
+            && token_slice(first.range, word).as_deref() == Some(":");
+        if first.class != MathClass::Rel && !definition {
             coalesced.push(first);
             index += 1;
             continue;
         }
 
         let mut relation_index = index + 1;
-        while semantic_atoms.get(relation_index).is_some_and(|atom| {
-            atom.class == MathClass::Punct
-                && semantic_atoms[relation_index - 1].range.end() == atom.range.start()
-                && token_slice(atom.range, word).as_deref() == Some(":")
-        }) {
+        while definition
+            && semantic_atoms.get(relation_index).is_some_and(|atom| {
+                atom.class == MathClass::Punct
+                    && semantic_atoms[relation_index - 1].range.end() == atom.range.start()
+                    && token_slice(atom.range, word).as_deref() == Some(":")
+            })
+        {
             relation_index += 1;
         }
         let Some(&relation) = semantic_atoms.get(relation_index) else {
@@ -1419,9 +1495,11 @@ fn coalesce_definition_relations(
             index += 1;
             continue;
         };
+        let combined = TextRange::new(first.range.start(), relation.range.end());
         if relation.class != MathClass::Rel
             || semantic_atoms[relation_index - 1].range.end() != relation.range.start()
-            || !atom_starts_with_equals(relation, elements)
+            || definition && !atom_starts_with_equals(relation, elements)
+            || !definition && scripted_relation_parts(combined, elements).is_none()
         {
             coalesced.push(first);
             index += 1;
@@ -1429,7 +1507,7 @@ fn coalesce_definition_relations(
         }
 
         coalesced.push(SemanticMathAtom {
-            range: TextRange::new(first.range.start(), relation.range.end()),
+            range: combined,
             class: MathClass::Rel,
             delimiter: None,
             break_priority: MathBreakPriority::Relation,
@@ -1531,9 +1609,9 @@ fn top_level_operators(pieces: &[Piece]) -> Vec<(usize, Role)> {
     operators
 }
 
-/// Lay out a typed free-display row using the same relation-first hierarchy as
-/// the legacy breaker: relation continuations align semantically, and an
-/// over-width relation segment breaks again at each binary operator.
+/// Lay out a typed free-display row with a relation-first hierarchy: relation
+/// continuations align semantically, and an over-width relation segment breaks
+/// again at each binary operator.
 fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) -> Ir {
     let flat = document_from_pieces(pieces, spacing);
     if flat.flat_width().is_some_and(|width| width <= line_width) {
@@ -1740,7 +1818,8 @@ fn is_definition_relation(atom: SemanticMathAtom, elements: &[SyntaxElement]) ->
                 .is_some_and(|text| text.starts_with(':') && text.ends_with('='))
         }
         _ => false,
-    }) || definition_relation_parts(atom, elements).is_some()
+    }) || scripted_relation_parts(atom.range, elements)
+        .is_some_and(|(prefix, _)| prefix.starts_with(':'))
 }
 
 fn assignment_element(element: &SyntaxElement) -> bool {
@@ -1763,40 +1842,6 @@ fn assignment_element(element: &SyntaxElement) -> bool {
                 .is_some_and(|base| assignment_element(&base))
         }
     }
-}
-
-pub(super) fn has_unsupported_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
-    // The legacy renderer fuses an adjacent relation head with the scalar that
-    // owns the script (`x<` + `=_i`). Definition relations are supported by
-    // typed lowering; keep the other seams on the fallback because the pinned
-    // Badness formatter still splits them.
-    elements.windows(2).any(|pair| {
-        let [SyntaxElement::Token(head), SyntaxElement::Node(node)] = pair else {
-            return false;
-        };
-        if head.kind() != SyntaxKind::MATH_WORD
-            || head.text_range().end() != node.text_range().start()
-        {
-            return false;
-        }
-        let Some(base) = MathScripted::cast(node.clone())
-            .and_then(|scripted| scripted.base())
-            .and_then(SyntaxElement::into_token)
-            .filter(|base| base.kind() == SyntaxKind::MATH_WORD)
-        else {
-            return false;
-        };
-        let (Some(head), Some(base)) = (head.text().chars().last(), base.text().chars().next())
-        else {
-            return false;
-        };
-
-        match head {
-            ':' => base == ':',
-            '=' | '<' | '>' => matches!(base, '=' | '<' | '>'),
-            _ => false,
-        }
-    })
 }
 
 pub(super) fn has_unproven_argument_domain(
@@ -1843,7 +1888,12 @@ fn is_supported_element(element: &SyntaxElement, scope: &SignatureScope) -> bool
     match element {
         SyntaxElement::Token(token) => matches!(
             token.kind(),
-            SyntaxKind::MATH_WORD | SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE
+            SyntaxKind::MATH_WORD
+                | SyntaxKind::MATH_SPACE
+                | SyntaxKind::MATH_NEWLINE
+                | SyntaxKind::MATH_BRACKET_OPEN
+                | SyntaxKind::MATH_BRACKET_CLOSE
+                | SyntaxKind::MATH_CONTROL_SYMBOL
         ),
         SyntaxElement::Node(node) => {
             MathGroup::cast(node.clone()).is_some_and(|group| {
@@ -1883,7 +1933,15 @@ fn atom_document(
         element.text_range().start() <= range.start() && element.text_range().end() >= range.end()
     })?;
     let (document, slash) = match element {
-        SyntaxElement::Token(token) if token.kind() == SyntaxKind::MATH_WORD => {
+        SyntaxElement::Token(token)
+            if matches!(
+                token.kind(),
+                SyntaxKind::MATH_WORD
+                    | SyntaxKind::MATH_BRACKET_OPEN
+                    | SyntaxKind::MATH_BRACKET_CLOSE
+                    | SyntaxKind::MATH_CONTROL_SYMBOL
+            ) =>
+        {
             let text = token_slice(range, token)?;
             let slash = text == "/";
             (Ir::verbatim(text), slash)
@@ -1958,7 +2016,7 @@ fn atom_document(
     })
 }
 
-fn definition_relation_document(
+fn scripted_relation_document(
     atom: SemanticMathAtom,
     elements: &[SyntaxElement],
     scope: &SignatureScope,
@@ -1966,7 +2024,7 @@ fn definition_relation_document(
     preserve_comment_context: bool,
     environment_rows: bool,
 ) -> Option<AtomDocument> {
-    let (prefix, scripted) = definition_relation_parts(atom, elements)?;
+    let (prefix, scripted) = scripted_relation_parts(atom.range, elements)?;
     let scripted = lower_scripted(
         &scripted,
         scope,
@@ -1983,8 +2041,8 @@ fn definition_relation_document(
     })
 }
 
-fn definition_relation_parts(
-    atom: SemanticMathAtom,
+fn scripted_relation_parts(
+    range: TextRange,
     elements: &[SyntaxElement],
 ) -> Option<(String, MathScripted)> {
     elements.windows(2).find_map(|pair| {
@@ -1992,9 +2050,9 @@ fn definition_relation_parts(
             return None;
         };
         if head.kind() != SyntaxKind::MATH_WORD
-            || head.text_range().start() > atom.range.start()
+            || head.text_range().start() > range.start()
             || head.text_range().end() != node.text_range().start()
-            || node.text_range().end() != atom.range.end()
+            || node.text_range().end() != range.end()
         {
             return None;
         }
@@ -2003,10 +2061,16 @@ fn definition_relation_parts(
         if base.kind() != SyntaxKind::MATH_WORD || !base.text().starts_with('=') {
             return None;
         }
-        let prefix_range = TextRange::new(atom.range.start(), head.text_range().end());
+        let prefix_range = TextRange::new(range.start(), head.text_range().end());
         let prefix = token_slice(prefix_range, head)?;
-        (!prefix.is_empty() && prefix.chars().all(|character| character == ':'))
-            .then_some((prefix, scripted))
+        let base_starts_relation = base.text().starts_with(['=', '<', '>']);
+        let definition =
+            prefix.chars().all(|character| character == ':') && base.text().starts_with('=');
+        let composite = prefix
+            .chars()
+            .all(|character| matches!(character, '=' | '<' | '>'))
+            && base_starts_relation;
+        (!prefix.is_empty() && (definition || composite)).then_some((prefix, scripted))
     })
 }
 
@@ -2268,12 +2332,7 @@ fn is_supported_bare_command(command: &MathCommand, scope: &SignatureScope) -> b
         return false;
     }
 
-    scope.command_signature(&name).is_none_or(|signature| {
-        signature
-            .arguments
-            .iter()
-            .all(|argument| !argument.required)
-    })
+    true
 }
 
 fn matched_command_arguments(
@@ -2527,6 +2586,21 @@ mod tests {
         ];
 
         for (input, expected) in cases {
+            assert_eq!(lower(input).as_deref(), Some(expected), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn lowers_the_last_flattened_formatter_shapes() {
+        for (input, expected) in [
+            (r"\Big[ x \Big]", r"\Big[ x \Big]"),
+            (r"\sqrt [3]{x}", r"\sqrt [3]{x}"),
+            (r"\frac\alpha\beta", r"\frac\alpha\beta"),
+            (r"\frac12", r"\frac12"),
+            (r"\{ a \}", r"\{ a \}"),
+            (r"a = \$ 5", r"a = \$ 5"),
+            (r"\int_0^1 x \, dx", r"\int_0^1 x \, dx"),
+        ] {
             assert_eq!(lower(input).as_deref(), Some(expected), "{input:?}");
         }
     }
@@ -2955,15 +3029,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_and_unsupported_scripts() {
-        for input in [
-            "x^",
-            "x^% argument comment\n2",
-            r"x<=_iy",
-            r"x>=_iy",
-            r"a==_kb",
-        ] {
+    fn rejects_malformed_scripts() {
+        for input in ["x^", "x^% argument comment\n2"] {
             assert_eq!(lower(input), None, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn lowers_scripted_composite_relations_as_one_atom() {
+        for (input, expected) in [
+            (r"x<=_iy", r"x <=_i y"),
+            (r"x>=_iy", r"x >=_i y"),
+            (r"a==_kb", r"a ==_k b"),
+        ] {
+            assert_eq!(lower(input).as_deref(), Some(expected), "{input:?}");
         }
     }
 
@@ -2979,9 +3058,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_redefined_and_incomplete_bare_commands() {
+    fn lowers_unattached_required_commands_but_rejects_redefined_semantics() {
         for input in [r"\frac", r"\sqrt", r"\text"] {
-            assert_eq!(lower(input), None, "{input:?}");
+            assert_eq!(lower(input).as_deref(), Some(input), "{input:?}");
         }
 
         let document = parse("\\newcommand{\\leq}{x}\n\n$\\leq$\n", None);

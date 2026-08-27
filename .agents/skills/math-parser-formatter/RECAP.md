@@ -37,9 +37,9 @@ rewrite those sections instead of accumulating history.
 - **Some scripted composite relations expose a pinned Badness defect.** Badness
   still splits a non-colon relation head from its CST-separated scripted tail
   (`<=_i` → `< =_i`, likewise `>=_i` and `==_i`). Panache preserves those
-  relations through the compatibility path; exclude them from mandatory byte
-  parity until the pinned oracle is corrected. Definition relations, including
-  `:=_i`, now have byte parity.
+  relations on the typed path; exclude them from mandatory byte parity until
+  the pinned oracle is corrected. Definition relations, including `:=_i`, now
+  have byte parity.
 - **Free-display definition relations follow Badness's two layout policies.**
   Automatic wrapping treats `:=` and `:=_i` as ordinary relations and aligns a
   later relation under the definition colon. In authored `\\` rows, a
@@ -54,7 +54,7 @@ rewrite those sections instead of accumulating history.
   boundaries.** Each top-level punctuation-delimited segment may own one
   well-formed environment. The next environment glues to the punctuation on the
   preceding `\end` line, then hangs from that actual source column. Adjacent
-  environments in one segment remain on the compatibility path.
+  environments in one segment cross the verbatim preservation boundary.
 - **Environment composition follows semantic atoms from the original CST.**
   Ordinary delimiters and punctuation can share one lexical word token, so
   composition must use the semantic atom stream for those boundaries while
@@ -64,34 +64,32 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Typed environment composition completed.** The formatter now has a measured
-preservation boundary and one typed path for every well-formed environment
-shape in the shared corpus.
+**The flattened formatter was deleted.** Every supported math shape now lowers
+through the parser-owned semantic atom stream and the shared document IR.
 
-- A committed, exact-match migration census classifies all 321 corpus/context
-  runs: 266 typed, 28 legacy, and 27 verbatim. Every non-typed route carries a
-  closed reason instead of an `unsupported` catch-all.
-- Environment rows, cells, alignment, comments, nesting, scripts, and mixed or
-  delimited compositions lower into the shared document IR. The separate
-  environment string assembler and row/grid renderer have been deleted.
-- Semantic atom boundaries now drive ordinary-delimiter and punctuation layout
-  even when several atoms share one CST word token. Authored spaces after an
-  environment remain source-range decisions.
-- No well-formed corpus environment uses the legacy route. Only the malformed
-  `environments/recovery/trivia_before_name.tex` fixture remains there, with an
-  explicit `malformed-environment-syntax` reason in all three contexts.
-- Conservative argument-domain handling is explicit: proven math arguments
-  recurse, nonmath and unknown domains remain opaque, and incomplete known
-  signatures still preserve through the compatibility boundary.
+- The exact-match migration census classifies all 321 corpus/context runs: 291
+  typed, 0 legacy, and 30 verbatim. The legacy route and its reason tracker no
+  longer exist.
+- The old flat-token stream, script sentinels, display line breaker, and
+  formatter-local operator table were deleted. Operator classes, delimiter
+  roles, contextual unary coercion, and break priority now have one owner in
+  `panache_parser::semantic::math`.
+- The final legacy families—bare known commands, optional brackets, control
+  symbols, scripted composite relations, authored comment rows, and display
+  equation labels—now lower through typed documents. Nested environments in
+  cells also compose through the same typed environment path.
+- Malformed environment spellings now cross the verbatim preservation boundary
+  instead of being normalized by a compatibility renderer. Conservative
+  argument-domain handling remains explicit: proven math arguments recurse,
+  while nonmath and unknown domains remain opaque.
 
 ### Suggested next sub-targets
 
-1. Delete the flattened formatter by migrating the remaining 28 classified
-   legacy routes, starting with the repeated missing-lowering families visible
-   in `tests/math_badness/migration_census.txt`.
-2. Remove formatter-local operator semantics and script sentinels only as their
-   last census callers disappear; keep the exact route report green after each
-   coherent deletion.
-3. Close the inline/display/raw host matrix after the legacy count reaches zero.
+1. Close the inline/display/raw host matrix with representative simple,
+   scripted, commented, wrapped, and environment bodies.
+2. Regenerate the complete formatter report, and audit every preserved case
+   against the named preservation boundary.
+3. Run the remaining final gates, including corpus convergence, MathML/TeX
+   checks, performance comparison, and WASM size review.
 4. Keep non-colon scripted composite relations as a named intentional
    difference until the pinned Badness formatter defect is corrected.

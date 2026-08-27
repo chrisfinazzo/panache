@@ -169,58 +169,60 @@ Returned unchanged, never reflowed:
    inside such an environment recurse through the same typed layout and safety
    checks at every nesting depth.
 
-6. **Operator spacing.** The char operators `+ - * = < >` (the parser's neutral
-   `MATH_OPERATOR` tokens) are spaced by *interpretation*, not by CST shape ---
-   the class/precedence logic lives in `operators.rs`, the math analog of YAML
-   scalar cooking, keyed on operator text + command name. A run of adjacent
-   operator chars splits into atoms: adjacent **relation** chars (`= < >`) merge
-   into one composite relation (`<=`, `==` stay one unit), while each **sign**
-   char (`+ - *`) is its own atom --- so `=-` is a relation `=` then a sign `-`,
-   giving `x = -y`, and `a--b` is binary-then-unary `a - -b`. A sign atom in a
-   *unary* position --- list start, or after another Bin/Rel/Open/Punct/large-op ---
-   is coerced to ordinary (TeX's unary-minus rule). Binary/relation atoms get
-   one space on each side; unary atoms are **tight**, *stripping* adjacent
-   author spaces (`- x` → `-x`, `f( - x)` → `f(-x)`), except a space demanded by
-   a neighboring spaced operator still wins (`x = - y` → `x = -y`). The
-   preceding atom's class comes from the last significant token: a `MATH_TEXT`
-   run by its last char (`(`/`[` → open, `)`/`]` → close, `,`/`;` → punct), a
-   command via the `operators.rs` table (`\leq` → Rel, `\cdot` → Bin, `\sum` →
-   large op, else ordinary), `{`/`^`/`_`/`&` as unary-inducing, `\\` resetting
-   to start. Author whitespace between two ordinary atoms is preserved, so a
-   command-terminating space (`\alpha x`) and a `\text{ a }` interior survive.
-   Command operators (`\leq`, `\cdot`) are re-spaced the same way: a binary or
-   relation command gets one space on each side (`a\cdot b` → `a \cdot b`,
-   `a\leq b` → `a \leq b`), classed via the `operators.rs` table. They are
-   **never** made tight, though --- a command's terminating space is mandatory
-   (stripping `\leq b` to `\leqb` would name a different control word), so a
-   unary-position command op, a large operator (`\sum`), and ordinary commands
-   all keep their author space verbatim. The structural `MATH_DELIMITED` node,
-   rather than the command table, identifies `\left`/`\right` framing.
+6. **Operator spacing.** The char operators `+ - * = < >` in the parser's
+   neutral `MATH_WORD` tokens are spaced by *interpretation*, not by CST shape.
+   The parser-owned semantic math stream classifies operator text and command
+   names, and supplies precedence to the formatter. A run of adjacent operator
+   chars splits into atoms: adjacent **relation** chars (`= < >`) merge into one
+   composite relation (`<=`, `==` stay one unit), while each **sign** char
+   (`+ - *`) is its own atom---so `=-` is a relation `=` then a sign `-`, giving
+   `x = -y`, and `a--b` is binary-then-unary `a - -b`. A sign atom in a *unary*
+   position --- list start, or after another Bin/Rel/Open/Punct/large-op --- is
+   coerced to ordinary (TeX's unary-minus rule). Binary/relation atoms get one
+   space on each side; unary atoms are **tight**, *stripping* adjacent author
+   spaces (`- x` → `-x`, `f( - x)` → `f(-x)`), except a space demanded by a
+   neighboring spaced operator still wins (`x = - y` → `x = -y`). The preceding
+   atom's class comes from the last significant token: a `MATH_WORD` run by its
+   last char (`(`/`[` → open, `)`/`]` → close, `,`/`;` → punct), a command via
+   the parser semantic table (`\leq` → Rel, `\cdot` → Bin, `\sum` → large op,
+   else ordinary), `{`/`^`/`_`/`&` as unary-inducing, `\\` preserving context
+   across authored rows. Author whitespace between two ordinary atoms is
+   preserved, so a command-terminating space (`\alpha x`) and a `\text{ a }`
+   interior survive. Command operators (`\leq`, `\cdot`) are re-spaced the same
+   way: a binary or relation command gets one space on each side (`a\cdot b` →
+   `a \cdot b`, `a\leq b` → `a \leq b`), classed by the parser semantic table.
+   They are **never** made tight, though --- a command's terminating space is
+   mandatory (stripping `\leq b` to `\leqb` would name a different control
+   word), so a unary-position command op, a large operator (`\sum`), and
+   ordinary commands all keep their author space verbatim. The structural
+   `MATH_DELIMITED` node, rather than the command table, identifies
+   `\left`/`\right` framing.
 
    **The definition `:=`.** A `:` is an ordinary atom whose spacing is the
    author's (`x:y` and `f: A` are left alone), *except* when an `=` follows it
    immediately: then the two are one composite relation, spaced as a unit
    (`x:=y` → `x := y`, never `x : = y`). The parser gives the `:` its own
-   `MATH_TEXT` token precisely so the pair has an element boundary --- the
-   line-breaker anchors and breaks on the `:`, so a chain can never be split
-   between a colon and its `=`. The selector is
-   `operators::is_definition_colon`; only the leading form fuses, so `=:` stays
-   an `=` relation followed by an ordinary `:`.
+   `MATH_WORD` token precisely so the pair has an element boundary---the typed
+   display layout anchors and breaks on the `:`, so a chain can never be split
+   between a colon and its `=`. `coalesce_scripted_relations` repairs the
+   semantic boundary when a script splits the relation in the CST; only the
+   leading form fuses, so `=:` stays an `=` relation followed by an ordinary
+   `:`.
 
 7. **Display line-breaking.** A free display row (`$$…$$`, non-environment)
    wider than `line-width` is broken at its **top-level** operators in a
-   two-level hierarchy keyed on `operators::break_priority` (**relations** >
+   two-level hierarchy keyed on parser `MathBreakPriority` (**relations** >
    **binary** > everything else). The first relation stays on the opening line;
    every later relation starts a continuation aligned under the **first
-   relation** (`linebreak::relation_column`) --- the classic stacked-`=` layout
-   for an equality/comparison chain. Then any relation segment that is still
-   over-width splits before each top-level **binary** operator, with each
-   `+ term` sitting **flush** under that segment's own right-hand side. The
-   relation/RHS offset alone supplies the visual nesting; binary continuations
-   never pick up an extra step. The width budget charges the flat `math-indent`
-   against `line-width`, so a broken line plus its leading indent still stays
-   within `line-width`. It is source-cosmetic only --- math ignores whitespace,
-   so the rendered equation is unchanged:
+   relation**---the classic stacked-`=` layout for an equality/comparison chain.
+   Then any relation segment that is still over-width splits before each
+   top-level **binary** operator, with each `+ term` sitting **flush** under
+   that segment's own right-hand side. The relation/RHS offset alone supplies
+   the visual nesting; binary continuations never pick up an extra step. The
+   width budget charges the flat `math-indent` against `line-width`, so a broken
+   line plus its leading indent still stays within `line-width`. It is
+   source-cosmetic only --- math ignores whitespace, so the rendered equation is
+   unchanged:
 
    ```
    A = aaaaaaaaaa
@@ -236,13 +238,12 @@ Returned unchanged, never reflowed:
    (`\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq`), the arrow defines its LHS
    rather than equating it, so it is **not** part of an equality chain it
    introduces. An equality or comparison continuation anchors under the
-   assignment's *right-hand side* (`linebreak::rhs_start_column`) instead of
-   under the arrow, so a wide arrow (`\gets` is 5 cols) does not drag it left. A
-   repeated assignment, however, aligns its operator under the first assignment
-   operator. The continuation's relation kind selects the anchor via
-   `linebreak::continuation_anchor_for` and `relation_is_assignment`. `:=`,
-   `\to`, and `\rightarrow` are intentionally *not* assignments for automatic
-   layout; they participate in the relation chain.
+   assignment's *right-hand side* instead of under the arrow, so a wide arrow
+   (`\gets` is 5 cols) does not drag it left. A repeated assignment, however,
+   aligns its operator under the first assignment operator. Typed relation
+   layout selects the anchor from `RelationLayout` and `relation_is_assignment`.
+   `:=`, `\to`, and `\rightarrow` are intentionally *not* assignments for
+   automatic layout; they participate in the relation chain.
 
    ```
    \beta_0 \gets \beta_0 + \frac{4}{n} …
@@ -262,12 +263,11 @@ Returned unchanged, never reflowed:
      `MATH_DELIMITED` (`\left…\right`), `MATH_GROUP`, and `MATH_ENVIRONMENT`
      nodes are opaque operands that the break scan never descends into, so their
      interior operators are likewise excluded.
-   - **Spaced operators only.** A candidate is a *spaced* operator
-     (`operators::is_spaced` after `coerce`); a unary `+`/`-` is `Ord` and never
-     a break site. A relation continuation re-spaces correctly in isolation
-     (relations never coerce); a binary continuation is rendered with a seeded
-     closing-operand class (`render_inline_seeded`) so its leading `+`/`-` stays
-     binary instead of coercing to a sign.
+   - **Spaced operators only.** A candidate has parser
+     `MathBreakPriority::Binary` or `MathBreakPriority::Relation`; a unary
+     `+`/`-` is `Ord` and never a break site. Typed lowering keeps the semantic
+     atom stream intact across continuation segments, so a leading binary
+     operator stays binary instead of coercing to a sign.
    - **A logical row is one equation.** Free rows split into logical rows only
      on a top-level hard `\\`; a soft newline is insignificant whitespace and
      does **not** start a new row, so a multi-line authored equation (and the

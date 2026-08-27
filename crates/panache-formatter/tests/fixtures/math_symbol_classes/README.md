@@ -1,9 +1,8 @@
 # Math symbol-class fixture (Tier 3)
 
-Pins `formatter::math::operators` --- the math operator *interpretation table*
-that maps a TeX symbol to its `AtomClass` (`Ord`/`Bin`/`Rel`/`Open`/`Close`/
-`Punct`/`Op`) and drives operator spacing (Phase 5) and the upcoming semantic
-line-breaking (Phase 6).
+Pins the parser-owned semantic math table that maps a TeX symbol to its
+`MathClass` (`Ord`/`Bin`/`Rel`/`Open`/`Close`/`Punct`/`Op`) and drives formatter
+operator spacing and semantic line-breaking.
 
 Where the Tier-1 corpus (`math_corpus/`) checks parser/format properties and the
 Tier-2 oracle (`math_cross_validation.rs`) checks *render invariance*, this tier
@@ -16,11 +15,11 @@ other test today. The harness is `tests/math_symbol_classes.rs`; the
 
 Tab-separated, three columns; `#` comment lines and blank lines ignored.
 
-  | column       | meaning                                                                                                                                                            |
-  | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | `token`      | the TeX symbol **as written** — leading `\` ⇒ command row, else char row.                                                                                          |
-  | `atom_class` | expected `operators::AtomClass`. On a command row, `Ord` means *not in the table* (`command_class` returns `None`; the formatter defaults such commands to `Ord`). |
-  | `oracle`     | expected `pulldown-latex` `Content` class for the probe `a <token> b`, or `skip`.                                                                                  |
+  | column       | meaning                                                                                                                               |
+  | ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | `token`      | the TeX symbol **as written** — leading `\` ⇒ command row, else char row.                                                             |
+  | `atom_class` | expected parser `MathClass`. On a command row, `Ord` includes commands that the semantic table conservatively classifies as ordinary. |
+  | `oracle`     | expected `pulldown-latex` `Content` class for the probe `a <token> b`, or `skip`.                                                     |
 
 `oracle` tokens: `binop`, `relation`, `largeop`, `function`, `open`, `close`,
 `punct`, `ordinary`, `skip`.
@@ -32,11 +31,11 @@ each recorded class in a real LaTeX parser (assertion 2).
 
 ## `oracle = skip`
 
-`\left` / `\right` are delimiter framing represented by `MATH_DELIMITED`, not
-entries in `command_class`; pulldown emits no standalone `Content` event for
-them. `\frac` is a multi-argument visual, so the probe `a <token> b` is likewise
-meaningless. These rows skip the oracle check while still pinning that the
-command table returns `None` (assertion 1).
+`\left` / `\right` are delimiter framing represented by `MATH_DELIMITED`, and
+pulldown emits no standalone `Content` event for them. `\frac` is a
+multi-argument visual, so the probe `a <token> b` is likewise meaningless. These
+rows skip the oracle check while still pinning the parser-owned ordinary
+classification (assertion 1).
 
 ## Recorded divergences (do **not** "fix" them)
 
@@ -52,6 +51,6 @@ pulldown's view in the `oracle` column while we keep our (deliberate) class:
 
 ## Known limitation
 
-The fixture cannot detect a command *added* to `command_class` but not added
-here --- a `match` arm isn't enumerable from the test. When you extend the
-table, add the corresponding row(s) to keep coverage honest.
+The fixture cannot detect a command *added* to the semantic table but not added
+here---the generated and curated maps are not enumerable through the public API.
+When you extend the table, add the corresponding row(s) to keep coverage honest.

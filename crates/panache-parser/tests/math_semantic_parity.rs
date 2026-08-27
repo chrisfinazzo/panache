@@ -628,8 +628,8 @@ fn semantic_atom_stream_matches_badness_differentially() {
 
 /// Badness's sequencer leaves a binary atom binary after punctuation. Panache
 /// applies the full TeXbook Bin-to-Ord rule instead, so `a,-b` reads `-b` as a
-/// unary sign -- matching `operators::coerce` and the formatter output Panache
-/// has always shipped.
+/// unary sign—matching `coerces_binary_to_ordinary` and the formatter output
+/// Panache has always shipped.
 #[test]
 fn panache_coerces_after_punctuation_where_badness_does_not() {
     use MathBreakPriority::{Binary, None as NoBreak};

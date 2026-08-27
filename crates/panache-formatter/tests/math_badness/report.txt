@@ -3,22 +3,24 @@ Oracle: badness-formatter =0.7.0
 Corpus: tests/fixtures/math_corpus
 Cases: 107
 Context runs: 321
-Parity: 79 / 321
+Parity: 81 / 321
 Controlled wrapper rejection: 15 / 321
-Divergent: 227 / 321
+Divergent: 225 / 321
 
 Regenerate with:
   cargo test -p panache-formatter --test math_badness_oracle math_badness_full_report -- --ignored --nocapture
 
 === Counts by context ===
-inline: parity 77, rejected 5, divergent 25
+inline: parity 79, rejected 5, divergent 23
 display: parity 1, rejected 5, divergent 101
 environment: parity 1, rejected 5, divergent 101
 
 === All parity candidates ===
 commands/argument_after_space.tex [inline]
+commands/big_delimiter_bracket.tex [inline]
 commands/nested_optional.tex [inline]
 commands/optional_argument.tex [inline]
+commands/optional_tight_gate.tex [inline]
 commands/over_attached_argument.tex [inline]
 commands/redefined_frac.tex [inline]
 commands/script_command_argument.tex [inline]
@@ -185,20 +187,15 @@ Input: "x = \\frac {1}{2}\n"
 Badness: "  x = \\frac {1}{2}\n"
 Panache: "  x = \\frac {1}{2}"
 
---- commands/big_delimiter_bracket.tex [inline] ---
-Input: "\\Big[ x \\Big]\n"
-Badness: "\\Big[ x \\Big]"
-Panache: "\\Big[x \\Big]"
-
 --- commands/big_delimiter_bracket.tex [display] ---
 Input: "\\Big[ x \\Big]\n"
 Badness: "  \\Big[ x \\Big]\n"
-Panache: "  \\Big[x \\Big]"
+Panache: "  \\Big[ x \\Big]"
 
 --- commands/big_delimiter_bracket.tex [environment] ---
 Input: "\\Big[ x \\Big]\n"
 Badness: "  \\Big[ x \\Big]\n"
-Panache: "  \\Big[x \\Big]"
+Panache: "  \\Big[ x \\Big]"
 
 --- commands/math_argument_whitespace.tex [inline] ---
 Input: "\\frac % numerator\n{ a   +   b } { c   +   d }\n"
@@ -235,20 +232,15 @@ Input: "\\sqrt[3]{x}\n"
 Badness: "  \\sqrt[3]{x}\n"
 Panache: "  \\sqrt[3]{x}"
 
---- commands/optional_tight_gate.tex [inline] ---
-Input: "\\sqrt [3]{x}\n"
-Badness: "\\sqrt [3]{x}"
-Panache: "\\sqrt[3]{x}"
-
 --- commands/optional_tight_gate.tex [display] ---
 Input: "\\sqrt [3]{x}\n"
 Badness: "  \\sqrt [3]{x}\n"
-Panache: "  \\sqrt[3]{x}"
+Panache: "  \\sqrt [3]{x}"
 
 --- commands/optional_tight_gate.tex [environment] ---
 Input: "\\sqrt [3]{x}\n"
 Badness: "  \\sqrt [3]{x}\n"
-Panache: "  \\sqrt[3]{x}"
+Panache: "  \\sqrt [3]{x}"
 
 --- commands/over_attached_argument.tex [display] ---
 Input: "\\sqrt { a   +   b } { c   +   d }\n"
@@ -848,17 +840,17 @@ Panache: "  \\begin{aligned}\n    \\begin{matrix}\n      x\n    \\end{matrix}\n 
 --- environments/recovery/trivia_before_name.tex [inline] ---
 Input: "\\begin {aligned}x\\end {aligned}\n"
 Badness: "\\begin\n   {aligned}x\n \\end {aligned}"
-Panache: "\\begin {aligned}x\\end {aligned}"
+Panache: <declined>
 
 --- environments/recovery/trivia_before_name.tex [display] ---
 Input: "\\begin {aligned}x\\end {aligned}\n"
 Badness: "  \\begin\n    {aligned}x\n  \\end {aligned}\n"
-Panache: "  \\begin {aligned}x\\end {aligned}"
+Panache: <declined>
 
 --- environments/recovery/trivia_before_name.tex [environment] ---
 Input: "\\begin {aligned}x\\end {aligned}\n"
 Badness: "  \\begin\n    {aligned}x\n  \\end {aligned}\n"
-Panache: "  \\begin {aligned}x\\end {aligned}"
+Panache: <declined>
 
 --- escapes/escaped_brace.tex [display] ---
 Input: "\\{ a \\}\n"

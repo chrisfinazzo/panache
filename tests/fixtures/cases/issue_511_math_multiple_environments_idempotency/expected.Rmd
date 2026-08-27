@@ -1,5 +1,5 @@
 \[
-\left( \begin{array}{c} a \\ b \end{array} \right) =
-x_i =
-\left( \begin{array}{c} \sum_{i=1}^N c_i \\ d \end{array} \right)
+  \left( \begin{array}{c} a \\ b \end{array} \right) =
+  x_i =
+  \left( \begin{array}{c} \sum_{i=1}^N c_i \\ d \end{array} \right)
 \]
