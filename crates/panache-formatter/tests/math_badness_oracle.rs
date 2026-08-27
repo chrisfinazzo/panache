@@ -1047,14 +1047,18 @@ fn comment_bearing_embedded_display_environment_with_trailing_content_matches_ba
         "delimiter-owned edge newlines must not force the compatibility path"
     );
 
-    for body in [
+    let operator_suffixes = [
         format!("x+{environment}+y"),
         format!("x={environment}=y"),
         format!("x\\gets{environment}\\leq y"),
-    ] {
-        assert!(
-            panache_body(&body, OracleContext::Display).is_err(),
-            "operator-bearing suffix must stay on the compatibility path: {body:?}"
+    ];
+    for body in operator_suffixes {
+        assert_formatter_parity(&body, OracleContext::Display);
+        let once = panache_body(&body, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "operator-bearing display suffix is not idempotent: {body:?}"
         );
     }
 }

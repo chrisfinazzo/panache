@@ -165,6 +165,16 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
     if has_mixed_environment_content(top) {
         let semantic = expand_word_elements(top);
         return render_mixed_delimited_display(&semantic, opts)
+            .or_else(|| {
+                lower::try_lower_display_environment(
+                    top.to_vec(),
+                    opts,
+                    opts.line_width.saturating_sub(opts.math_indent),
+                )
+                .map(|document| {
+                    Printer::new(opts.line_width, INDENT.len()).print(&document, opts.math_indent)
+                })
+            })
             .or_else(|| render_top_level_commented_environment(top, opts))
             .or_else(|| render_top_level_mixed_environment(&semantic, opts))
             .unwrap_or_else(|| {
@@ -513,7 +523,15 @@ pub(super) fn can_render_mixed_environment_comments(
         MathContext::Inline => {
             mixed_segment_doc(&expand_word_elements(&elements), opts, Some(1)).is_some()
         }
-        MathContext::Display => top_level_commented_environment_doc(&elements, opts).is_some(),
+        MathContext::Display => {
+            lower::try_lower_display_environment(
+                elements.clone(),
+                opts,
+                opts.line_width.saturating_sub(opts.math_indent),
+            )
+            .is_some()
+                || top_level_commented_environment_doc(&elements, opts).is_some()
+        }
         MathContext::EnvironmentBody => false,
     }
 }

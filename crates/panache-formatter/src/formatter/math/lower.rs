@@ -88,6 +88,98 @@ pub(super) fn try_lower_display_elements(
     }
 }
 
+/// Lower a free display containing one comment-bearing top-level environment.
+///
+/// The environment is a semantic operand whose forced lines participate in
+/// the same binary- and relation-led layout as every other typed atom. Its
+/// closing-line width lets following atoms compose without flattening the
+/// environment document.
+pub(super) fn try_lower_display_environment(
+    elements: Vec<SyntaxElement>,
+    opts: &MathFormatOptions,
+    line_width: usize,
+) -> Option<Ir> {
+    let environment_indices = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            element
+                .as_node()
+                .and_then(|node| MathEnvironment::cast(node.clone()))
+                .map(|_| index)
+        })
+        .collect::<Vec<_>>();
+    let [environment_index] = environment_indices.as_slice() else {
+        return None;
+    };
+    let environment = elements[*environment_index]
+        .as_node()
+        .cloned()
+        .and_then(MathEnvironment::cast)?;
+    if !environment
+        .syntax()
+        .descendants_with_tokens()
+        .any(|descendant| descendant.kind() == SyntaxKind::MATH_COMMENT)
+    {
+        return None;
+    }
+    let end = environment.end()?;
+    let end_width = end.syntax().text().to_string().chars().count();
+    let environment_document = render::environment_document(environment.syntax(), opts)?;
+    let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
+    let environment_atom = semantic_atoms.iter().copied().find(|atom| {
+        atom.range.start() == environment.syntax().text_range().start()
+            && atom.range.end() == environment.syntax().text_range().end()
+    })?;
+
+    let before = &elements[..*environment_index];
+    let after = &elements[*environment_index + 1..];
+    let before_atoms = semantic_atoms_for(before, &semantic_atoms);
+    if before_atoms.len() < 2
+        || !matches!(
+            before_atoms.last()?.break_priority,
+            MathBreakPriority::Binary | MathBreakPriority::Relation
+        )
+    {
+        return None;
+    }
+    let mut pieces = lower_pieces_with_atoms(
+        before,
+        &before_atoms,
+        &opts.signature_scope,
+        Spacing::Normal,
+        true,
+        false,
+    )?;
+    pieces.push(Piece {
+        role: Role::from(environment_atom.break_priority),
+        delimiter: environment_atom.delimiter,
+        assignment: false,
+        definition: false,
+        unary: environment_atom.coerced_unary,
+        authored_space_before: before_atoms
+            .last()
+            .is_some_and(|atom| atom.range.end() < environment_atom.range.start()),
+        slash: false,
+        control_word_operator: false,
+        starts_control_word_letter: false,
+        ends_control_word: false,
+        multiline_tail_width: Some(end_width),
+        document: environment_document,
+    });
+    let after_pieces = lower_pieces_with_atoms(
+        after,
+        &semantic_atoms_for(after, &semantic_atoms),
+        &opts.signature_scope,
+        Spacing::Normal,
+        true,
+        false,
+    )?;
+    pieces.extend(after_pieces);
+
+    Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
+}
+
 /// Lower a closed paired delimiter whose body contains one well-formed environment.
 ///
 /// This stays separate from ordinary atom lowering until environments become
@@ -804,6 +896,7 @@ fn lower_pieces_with_atoms(
             control_word_operator: atom_document.control_word_operator,
             starts_control_word_letter: atom_document.starts_control_word_letter,
             ends_control_word: atom_document.ends_control_word,
+            multiline_tail_width: None,
             document: atom_document.document,
         });
         previous_end = Some(atom.range.end());
@@ -900,11 +993,19 @@ fn atom_starts_with_equals(atom: SemanticMathAtom, elements: &[SyntaxElement]) -
 
 fn document_from_pieces(pieces: &[Piece], spacing: Spacing) -> Ir {
     let mut documents = Vec::new();
+    let mut column = 0usize;
     for (index, piece) in pieces.iter().enumerate() {
         if piece_gap_before(pieces, index, spacing) {
             documents.push(Ir::text(" "));
+            column += 1;
         }
-        documents.push(piece.document.clone());
+        if let Some(tail_width) = piece.multiline_tail_width {
+            documents.push(Ir::align(column, piece.document.clone()));
+            column += tail_width;
+        } else {
+            column += piece.document.flat_width().unwrap_or(0);
+            documents.push(piece.document.clone());
+        }
     }
 
     Ir::concat(documents)
@@ -933,7 +1034,11 @@ fn piece_columns(pieces: &[Piece], spacing: Spacing) -> Option<Vec<(usize, usize
             column = column.checked_add(1)?;
         }
         let start = column;
-        column = column.checked_add(piece.document.flat_width()?)?;
+        column = column.checked_add(
+            piece
+                .multiline_tail_width
+                .or_else(|| piece.document.flat_width())?,
+        )?;
         columns.push((start, column));
     }
     Some(columns)
@@ -960,7 +1065,14 @@ fn top_level_operators(pieces: &[Piece]) -> Vec<(usize, Role)> {
 /// over-width relation segment breaks again at each binary operator.
 fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) -> Ir {
     let flat = document_from_pieces(pieces, spacing);
-    if flat.flat_width().is_none_or(|width| width <= line_width) {
+    if flat.flat_width().is_some_and(|width| width <= line_width) {
+        return flat;
+    }
+    if !pieces
+        .iter()
+        .any(|piece| piece.multiline_tail_width.is_some())
+        && flat.flat_width().is_none()
+    {
         return flat;
     }
 
@@ -989,9 +1101,12 @@ fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) 
         for segment in 0..bounds.len() - 1 {
             let start = bounds[segment];
             let end = bounds[segment + 1];
+            let crosses_multiline_atom = pieces[..start]
+                .iter()
+                .any(|piece| piece.multiline_tail_width.is_some());
             let indent = if segment == 0 {
                 0
-            } else if !first_assignment || pieces[start].assignment {
+            } else if !first_assignment || pieces[start].assignment || crosses_multiline_atom {
                 relation_column
             } else {
                 rhs_start
@@ -1017,7 +1132,14 @@ fn layout_display_segment(
     let flat = document_from_pieces(pieces, spacing);
     if flat
         .flat_width()
-        .is_none_or(|width| base_indent.saturating_add(width) <= line_width)
+        .is_some_and(|width| base_indent.saturating_add(width) <= line_width)
+    {
+        return vec![(base_indent, flat)];
+    }
+    if !pieces
+        .iter()
+        .any(|piece| piece.multiline_tail_width.is_some())
+        && flat.flat_width().is_none()
     {
         return vec![(base_indent, flat)];
     }
@@ -1640,6 +1762,8 @@ struct Piece {
     control_word_operator: bool,
     starts_control_word_letter: bool,
     ends_control_word: bool,
+    /// Width of the atom's final forced line, measured from its own start.
+    multiline_tail_width: Option<usize>,
     document: Ir,
 }
 

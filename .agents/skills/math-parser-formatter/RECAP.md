@@ -64,34 +64,34 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Trailing free content after comment-bearing display environments.** A display
-shape such as `x+\begin{matrix}...%...\end{matrix},y` now uses the typed mixed
-document instead of declining the entire math body.
+**Operator-bearing suffixes after comment-bearing display environments.** A
+single top-level environment now participates in typed free-display layout as a
+multiline operand instead of forcing the mixed-environment compatibility path.
 
-- The mandatory oracle regression pins Badness's punctuation layout byte for
-  byte: `,y` stays tight on the `\end{matrix}` line. It also verifies
-  idempotency and the delimiter-owned leading/trailing newline shape passed by
-  the Markdown host.
-- Typed prefix lowering now consumes original CST elements. The temporary
-  zero-based `MATH_WORD` expansion remains confined to ordinary-delimiter
-  balance checks, fixing the host-only decline caused by shifted source ranges.
-- The safety gate admits only trailing top-level atoms without binary or
-  relation classes. Badness starts operator-bearing suffixes on a new display
-  line; those shapes remain on the compatibility path until environments become
-  first-class typed display atoms.
-- The experimental embedded-environment golden fixture covers the host-visible
-  result, and `STYLE.md` records the narrowed rule. The focused formatter oracle
-  and all workspace validation gates pass. The shared corpus and its parity
-  classifications did not change, so the committed report needs no update.
+- `Piece` records the final-line width of a multiline atom. Typed document
+  composition uses that width to hang the environment body from the actual
+  `\begin` column and to place any same-line suffix relative to `\end` without
+  flattening the environment.
+- The shared relation/binary hierarchy now sees the environment as an opaque
+  semantic operand. A following binary operator starts flush on a new display
+  line; a following relation aligns with the leading relation, including after
+  an assignment-arrow head when the forced multiline operand separates them.
+- Mandatory oracle cases cover `+ environment +`, `= environment =`, and
+  `\gets environment \leq` byte for byte and verify idempotency. The host golden
+  covers the binary and relation forms, and `STYLE.md` records the rule.
+- The narrow gate still requires exactly one well-formed top-level environment,
+  a nested comment, and a binary- or relation-led prefix. The unary-prefix and
+  multiple-environment shapes remain on their existing compatibility paths.
+- The shared corpus and its parity classifications did not change, so the
+  committed report needs no update.
 
 ### Suggested next sub-targets
 
-1. Make environments first-class typed display atoms, beginning with the pinned
-   trailing binary and relation suffixes that the current safety gate rejects.
-   This should let the separate mixed-environment compositor shrink rather than
-   teaching it another operator-layout variant.
+1. Extend the typed multiline-atom path to scripted environment bases, pinning
+   how scripts glue to `\end` before any following operator.
 2. Continue converging the separate structured-delimiter and mixed-environment
-   paths once the typed environment atom composes in free displays.
+   paths now that a typed environment atom composes in free displays; remove the
+   superseded prefix-only compositor only after its remaining shapes migrate.
 3. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness

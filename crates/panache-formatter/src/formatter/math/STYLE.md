@@ -82,9 +82,10 @@ Returned unchanged, never reflowed:
    in the flat head with the environment when it fits; the body hangs from that
    later `\begin` column. Safe trailing content with no top-level binary or
    relation stays on the environment's `\end` line; punctuation remains tight
-   when the oracle keeps it tight. An operator-bearing suffix stays verbatim
-   until environments participate in the typed display-atom layout. Inline math
-   follows Badness's distinct layout: the environment's continuation lines
+   when the oracle keeps it tight. The environment participates as a typed
+   multiline operand: a following binary operator starts flush on a new display
+   line, while a following relation aligns with the leading relation. Inline
+   math follows Badness's distinct layout: the environment's continuation lines
    return to the math body's base column when the body prints flat. If a nested
    `%` comment pins the inline breaks, the environment instead hangs from its
    actual `\begin` source column, including the host `$` opener's column.
