@@ -225,7 +225,6 @@ struct BaselineRecord {
     context: OracleContext,
     input: String,
     classification: Classification,
-    first_slice_candidate: bool,
 }
 
 fn corpus_root() -> PathBuf {
@@ -264,7 +263,6 @@ fn collect_baseline_records() -> (usize, Vec<BaselineRecord>) {
             .unwrap_or_else(|error| panic!("failed to read `{id}`: {error}"));
         let preamble = read_preamble(path)
             .unwrap_or_else(|error| panic!("failed to read preamble for `{id}`: {error}"));
-        let flat = is_flat_inline_candidate(&input);
         for context in OracleContext::ALL {
             let badness = badness_body_with_preamble(&input, preamble.as_deref(), context);
             let panache = panache_body_with_preamble(&input, preamble.as_deref(), context).ok();
@@ -273,7 +271,6 @@ fn collect_baseline_records() -> (usize, Vec<BaselineRecord>) {
                 context,
                 input: input.clone(),
                 classification: classify_result(badness, panache),
-                first_slice_candidate: context == OracleContext::Inline && flat,
             });
         }
     }
@@ -312,17 +309,6 @@ fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> Strin
         "  cargo test -p panache-formatter --test math_badness_oracle math_badness_full_report -- --ignored --nocapture\n"
     )
     .unwrap();
-    writeln!(report, "Selected first migration slice:").unwrap();
-    writeln!(
-        report,
-        "  Inline bodies containing only MATH_WORD, MATH_SPACE, and MATH_NEWLINE."
-    )
-    .unwrap();
-    writeln!(
-        report,
-        "  Every other shape remains on the conservative legacy fallback.\n"
-    )
-    .unwrap();
     writeln!(report, "=== Counts by context ===").unwrap();
     for context in OracleContext::ALL {
         let in_context = records.iter().filter(|record| record.context == context);
@@ -348,12 +334,6 @@ fn render_report(mut records: Vec<BaselineRecord>, corpus_count: usize) -> Strin
             corpus_count - context_parity - context_rejected,
         )
         .unwrap();
-    }
-    writeln!(report, "\n=== First-slice parity candidates ===").unwrap();
-    for record in records.iter().filter(|record| {
-        record.first_slice_candidate && matches!(record.classification, Classification::Parity)
-    }) {
-        writeln!(report, "{} [{}]", record.id, record.context.label()).unwrap();
     }
     writeln!(report, "\n=== All parity candidates ===").unwrap();
     for record in records
@@ -404,14 +384,12 @@ fn sample_report_records() -> Vec<BaselineRecord> {
                 badness: "b".to_owned(),
                 panache: None,
             },
-            first_slice_candidate: false,
         },
         BaselineRecord {
             id: "a.tex".to_owned(),
             context: OracleContext::Inline,
             input: "a".to_owned(),
             classification: Classification::Parity,
-            first_slice_candidate: true,
         },
         BaselineRecord {
             id: "a.tex".to_owned(),
@@ -420,7 +398,6 @@ fn sample_report_records() -> Vec<BaselineRecord> {
             classification: Classification::ControlledWrapperRejection {
                 reason: "wrapper".to_owned(),
             },
-            first_slice_candidate: false,
         },
     ]
 }

@@ -1,0 +1,333 @@
+Panache math formatter migration census
+Corpus: tests/fixtures/math_corpus
+Cases: 107
+Context runs: 321
+Typed: 266
+Legacy: 28
+Verbatim: 27
+
+Regenerate with:
+  cargo test -p panache-formatter math_migration_census_report -- --ignored --nocapture
+
+=== Routes ===
+commands/argument_after_comment.tex [inline]: verbatim (missing-nested-comment-lowering)
+commands/argument_after_comment.tex [display]: verbatim (missing-nested-comment-lowering)
+commands/argument_after_comment.tex [environment]: verbatim (missing-nested-comment-lowering)
+commands/argument_after_newline.tex [inline]: typed
+commands/argument_after_newline.tex [display]: typed
+commands/argument_after_newline.tex [environment]: typed
+commands/argument_after_space.tex [inline]: typed
+commands/argument_after_space.tex [display]: typed
+commands/argument_after_space.tex [environment]: typed
+commands/big_delimiter_bracket.tex [inline]: legacy (missing-inline-content-lowering)
+commands/big_delimiter_bracket.tex [display]: legacy (missing-display-content-lowering)
+commands/big_delimiter_bracket.tex [environment]: legacy (missing-environment-body-lowering)
+commands/math_argument_whitespace.tex [inline]: verbatim (missing-nested-comment-lowering)
+commands/math_argument_whitespace.tex [display]: verbatim (missing-nested-comment-lowering)
+commands/math_argument_whitespace.tex [environment]: verbatim (missing-nested-comment-lowering)
+commands/nested_optional.tex [inline]: typed
+commands/nested_optional.tex [display]: typed
+commands/nested_optional.tex [environment]: typed
+commands/optional_argument.tex [inline]: typed
+commands/optional_argument.tex [display]: typed
+commands/optional_argument.tex [environment]: typed
+commands/optional_tight_gate.tex [inline]: legacy (missing-inline-content-lowering)
+commands/optional_tight_gate.tex [display]: legacy (missing-display-content-lowering)
+commands/optional_tight_gate.tex [environment]: legacy (missing-environment-body-lowering)
+commands/over_attached_argument.tex [inline]: typed
+commands/over_attached_argument.tex [display]: typed
+commands/over_attached_argument.tex [environment]: typed
+commands/redefined_frac.tex [inline]: typed
+commands/redefined_frac.tex [display]: typed
+commands/redefined_frac.tex [environment]: typed
+commands/script_command_argument.tex [inline]: typed
+commands/script_command_argument.tex [display]: typed
+commands/script_command_argument.tex [environment]: typed
+commands/script_on_arguments.tex [inline]: typed
+commands/script_on_arguments.tex [display]: typed
+commands/script_on_arguments.tex [environment]: typed
+commands/script_on_frac.tex [inline]: typed
+commands/script_on_frac.tex [display]: typed
+commands/script_on_frac.tex [environment]: typed
+commands/single_token_commands.tex [inline]: legacy (missing-inline-content-lowering)
+commands/single_token_commands.tex [display]: legacy (missing-display-content-lowering)
+commands/single_token_commands.tex [environment]: legacy (missing-environment-body-lowering)
+commands/single_token_numeral.tex [inline]: legacy (missing-inline-content-lowering)
+commands/single_token_numeral.tex [display]: legacy (missing-display-content-lowering)
+commands/single_token_numeral.tex [environment]: legacy (missing-environment-body-lowering)
+commands/star_optional.tex [inline]: typed
+commands/star_optional.tex [display]: typed
+commands/star_optional.tex [environment]: typed
+commands/star_variant.tex [inline]: typed
+commands/star_variant.tex [display]: typed
+commands/star_variant.tex [environment]: typed
+commands/text_argument_whitespace.tex [inline]: typed
+commands/text_argument_whitespace.tex [display]: typed
+commands/text_argument_whitespace.tex [environment]: typed
+commands/unknown_argument_whitespace.tex [inline]: typed
+commands/unknown_argument_whitespace.tex [display]: typed
+commands/unknown_argument_whitespace.tex [environment]: typed
+comments/argument_leading.tex [inline]: typed
+comments/argument_leading.tex [display]: typed
+comments/argument_leading.tex [environment]: typed
+comments/argument_trailing.tex [inline]: typed
+comments/argument_trailing.tex [display]: typed
+comments/argument_trailing.tex [environment]: typed
+comments/comment_line.tex [inline]: typed
+comments/comment_line.tex [display]: typed
+comments/comment_line.tex [environment]: typed
+comments/delimiter_body_mid.tex [inline]: typed
+comments/delimiter_body_mid.tex [display]: typed
+comments/delimiter_body_mid.tex [environment]: typed
+comments/delimiter_body_trailing.tex [inline]: typed
+comments/delimiter_body_trailing.tex [display]: typed
+comments/delimiter_body_trailing.tex [environment]: typed
+comments/group_leading.tex [inline]: typed
+comments/group_leading.tex [display]: typed
+comments/group_leading.tex [environment]: typed
+comments/group_nested.tex [inline]: typed
+comments/group_nested.tex [display]: typed
+comments/group_nested.tex [environment]: typed
+comments/group_trailing.tex [inline]: typed
+comments/group_trailing.tex [display]: typed
+comments/group_trailing.tex [environment]: typed
+comments/inside_math_argument.tex [inline]: typed
+comments/inside_math_argument.tex [display]: typed
+comments/inside_math_argument.tex [environment]: typed
+comments/mid_expression_after_binary.tex [inline]: typed
+comments/mid_expression_after_binary.tex [display]: typed
+comments/mid_expression_after_binary.tex [environment]: typed
+comments/mid_expression_after_operand.tex [inline]: typed
+comments/mid_expression_after_operand.tex [display]: typed
+comments/mid_expression_after_operand.tex [environment]: typed
+comments/mid_expression_after_relation.tex [inline]: typed
+comments/mid_expression_after_relation.tex [display]: typed
+comments/mid_expression_after_relation.tex [environment]: typed
+comments/optional_argument_leading.tex [inline]: typed
+comments/optional_argument_leading.tex [display]: typed
+comments/optional_argument_leading.tex [environment]: typed
+comments/script_argument_mid.tex [inline]: typed
+comments/script_argument_mid.tex [display]: typed
+comments/script_argument_mid.tex [environment]: typed
+comments/script_argument_trailing.tex [inline]: typed
+comments/script_argument_trailing.tex [display]: typed
+comments/script_argument_trailing.tex [environment]: typed
+comments/trailing_comment.tex [inline]: typed
+comments/trailing_comment.tex [display]: typed
+comments/trailing_comment.tex [environment]: typed
+display/authored_newline.tex [inline]: typed
+display/authored_newline.tex [display]: typed
+display/authored_newline.tex [environment]: typed
+display/fraction_block.tex [inline]: typed
+display/fraction_block.tex [display]: typed
+display/fraction_block.tex [environment]: typed
+display/integral.tex [inline]: legacy (missing-inline-content-lowering)
+display/integral.tex [display]: legacy (missing-display-content-lowering)
+display/integral.tex [environment]: legacy (missing-environment-body-lowering)
+display/line_break_comment.tex [inline]: typed
+display/line_break_comment.tex [display]: legacy (missing-display-content-lowering)
+display/line_break_comment.tex [environment]: typed
+display/line_break_modifiers.tex [inline]: typed
+display/line_break_modifiers.tex [display]: typed
+display/line_break_modifiers.tex [environment]: typed
+display/long_chain.tex [inline]: typed
+display/long_chain.tex [display]: typed
+display/long_chain.tex [environment]: typed
+display/single_equation.tex [inline]: typed
+display/single_equation.tex [display]: typed
+display/single_equation.tex [environment]: typed
+display/sum_over_n.tex [inline]: typed
+display/sum_over_n.tex [display]: typed
+display/sum_over_n.tex [environment]: typed
+display/with_text.tex [inline]: typed
+display/with_text.tex [display]: typed
+display/with_text.tex [environment]: typed
+environments/aligned/multi_ampersand.tex [inline]: typed
+environments/aligned/multi_ampersand.tex [display]: typed
+environments/aligned/multi_ampersand.tex [environment]: typed
+environments/aligned/ragged_columns.tex [inline]: typed
+environments/aligned/ragged_columns.tex [display]: typed
+environments/aligned/ragged_columns.tex [environment]: typed
+environments/aligned/single_row.tex [inline]: typed
+environments/aligned/single_row.tex [display]: typed
+environments/aligned/single_row.tex [environment]: typed
+environments/aligned/three_rows.tex [inline]: typed
+environments/aligned/three_rows.tex [display]: typed
+environments/aligned/three_rows.tex [environment]: typed
+environments/aligned/two_rows.tex [inline]: typed
+environments/aligned/two_rows.tex [display]: typed
+environments/aligned/two_rows.tex [environment]: typed
+environments/aligned/with_frac.tex [inline]: typed
+environments/aligned/with_frac.tex [display]: typed
+environments/aligned/with_frac.tex [environment]: typed
+environments/cases/piecewise.tex [inline]: typed
+environments/cases/piecewise.tex [display]: typed
+environments/cases/piecewise.tex [environment]: typed
+environments/cases/sign.tex [inline]: typed
+environments/cases/sign.tex [display]: typed
+environments/cases/sign.tex [environment]: typed
+environments/cases/single.tex [inline]: typed
+environments/cases/single.tex [display]: typed
+environments/cases/single.tex [environment]: typed
+environments/matrix/bmatrix.tex [inline]: typed
+environments/matrix/bmatrix.tex [display]: typed
+environments/matrix/bmatrix.tex [environment]: typed
+environments/matrix/plain.tex [inline]: typed
+environments/matrix/plain.tex [display]: typed
+environments/matrix/plain.tex [environment]: typed
+environments/matrix/pmatrix.tex [inline]: typed
+environments/matrix/pmatrix.tex [display]: typed
+environments/matrix/pmatrix.tex [environment]: typed
+environments/matrix/three_by_three.tex [inline]: typed
+environments/matrix/three_by_three.tex [display]: typed
+environments/matrix/three_by_three.tex [environment]: typed
+environments/nested/delimited_matrix.tex [inline]: typed
+environments/nested/delimited_matrix.tex [display]: typed
+environments/nested/delimited_matrix.tex [environment]: typed
+environments/recovery/comment_before_name.tex [inline]: verbatim (missing-nested-comment-lowering)
+environments/recovery/comment_before_name.tex [display]: verbatim (missing-nested-comment-lowering)
+environments/recovery/comment_before_name.tex [environment]: verbatim (missing-nested-comment-lowering)
+environments/recovery/mismatched.tex [inline]: verbatim (malformed-math)
+environments/recovery/mismatched.tex [display]: verbatim (malformed-math)
+environments/recovery/mismatched.tex [environment]: verbatim (malformed-math)
+environments/recovery/nested.tex [inline]: typed
+environments/recovery/nested.tex [display]: typed
+environments/recovery/nested.tex [environment]: typed
+environments/recovery/trivia_before_name.tex [inline]: legacy (malformed-environment-syntax)
+environments/recovery/trivia_before_name.tex [display]: legacy (malformed-environment-syntax)
+environments/recovery/trivia_before_name.tex [environment]: legacy (malformed-environment-syntax)
+escapes/escaped_brace.tex [inline]: legacy (missing-inline-content-lowering)
+escapes/escaped_brace.tex [display]: legacy (missing-display-content-lowering)
+escapes/escaped_brace.tex [environment]: legacy (missing-environment-body-lowering)
+escapes/escaped_dollar.tex [inline]: legacy (missing-inline-content-lowering)
+escapes/escaped_dollar.tex [display]: legacy (missing-display-content-lowering)
+escapes/escaped_dollar.tex [environment]: legacy (missing-environment-body-lowering)
+escapes/literal_backslash_in_env.tex [inline]: typed
+escapes/literal_backslash_in_env.tex [display]: typed
+escapes/literal_backslash_in_env.tex [environment]: typed
+groups/braced_group.tex [inline]: typed
+groups/braced_group.tex [display]: typed
+groups/braced_group.tex [environment]: typed
+groups/deep_nesting.tex [inline]: typed
+groups/deep_nesting.tex [display]: typed
+groups/deep_nesting.tex [environment]: typed
+groups/group_with_command.tex [inline]: typed
+groups/group_with_command.tex [display]: typed
+groups/group_with_command.tex [environment]: typed
+groups/left_right_asymmetric.tex [inline]: typed
+groups/left_right_asymmetric.tex [display]: typed
+groups/left_right_asymmetric.tex [environment]: typed
+groups/left_right_bracket.tex [inline]: typed
+groups/left_right_bracket.tex [display]: typed
+groups/left_right_bracket.tex [environment]: typed
+groups/left_right_group_boundary.tex [inline]: verbatim (malformed-math)
+groups/left_right_group_boundary.tex [display]: verbatim (malformed-math)
+groups/left_right_group_boundary.tex [environment]: verbatim (malformed-math)
+groups/left_right_nested.tex [inline]: typed
+groups/left_right_nested.tex [display]: typed
+groups/left_right_nested.tex [environment]: typed
+groups/left_right_null.tex [inline]: typed
+groups/left_right_null.tex [display]: typed
+groups/left_right_null.tex [environment]: typed
+groups/left_right_paren.tex [inline]: typed
+groups/left_right_paren.tex [display]: typed
+groups/left_right_paren.tex [environment]: typed
+groups/left_right_stray.tex [inline]: verbatim (malformed-math)
+groups/left_right_stray.tex [display]: verbatim (malformed-math)
+groups/left_right_stray.tex [environment]: verbatim (malformed-math)
+groups/left_right_trivia.tex [inline]: typed
+groups/left_right_trivia.tex [display]: typed
+groups/left_right_trivia.tex [environment]: typed
+groups/left_right_unclosed.tex [inline]: verbatim (malformed-math)
+groups/left_right_unclosed.tex [display]: verbatim (malformed-math)
+groups/left_right_unclosed.tex [environment]: verbatim (malformed-math)
+groups/nested_braces.tex [inline]: typed
+groups/nested_braces.tex [display]: typed
+groups/nested_braces.tex [environment]: typed
+groups/unclosed.tex [inline]: verbatim (malformed-math)
+groups/unclosed.tex [display]: verbatim (malformed-math)
+groups/unclosed.tex [environment]: verbatim (malformed-math)
+inline/binomial_frac.tex [inline]: typed
+inline/binomial_frac.tex [display]: typed
+inline/binomial_frac.tex [environment]: typed
+inline/greek_and_cdot.tex [inline]: typed
+inline/greek_and_cdot.tex [display]: typed
+inline/greek_and_cdot.tex [environment]: typed
+inline/mixed_scripts.tex [inline]: typed
+inline/mixed_scripts.tex [display]: typed
+inline/mixed_scripts.tex [environment]: typed
+inline/nested_frac.tex [inline]: typed
+inline/nested_frac.tex [display]: typed
+inline/nested_frac.tex [environment]: typed
+inline/simple_equality.tex [inline]: typed
+inline/simple_equality.tex [display]: typed
+inline/simple_equality.tex [environment]: typed
+inline/sqrt.tex [inline]: typed
+inline/sqrt.tex [display]: typed
+inline/sqrt.tex [environment]: typed
+inline/subscript.tex [inline]: typed
+inline/subscript.tex [display]: typed
+inline/subscript.tex [environment]: typed
+inline/sum_expression.tex [inline]: typed
+inline/sum_expression.tex [display]: typed
+inline/sum_expression.tex [environment]: typed
+inline/superscript.tex [inline]: typed
+inline/superscript.tex [display]: typed
+inline/superscript.tex [environment]: typed
+inline/whitespace_heavy.tex [inline]: typed
+inline/whitespace_heavy.tex [display]: typed
+inline/whitespace_heavy.tex [environment]: typed
+macro_dependent/custom_var.tex [inline]: typed
+macro_dependent/custom_var.tex [display]: typed
+macro_dependent/custom_var.tex [environment]: typed
+macro_dependent/expectation.tex [inline]: typed
+macro_dependent/expectation.tex [display]: typed
+macro_dependent/expectation.tex [environment]: typed
+macro_dependent/unknown_arguments.tex [inline]: typed
+macro_dependent/unknown_arguments.tex [display]: typed
+macro_dependent/unknown_arguments.tex [environment]: typed
+operators/cdot.tex [inline]: typed
+operators/cdot.tex [display]: typed
+operators/cdot.tex [environment]: typed
+operators/double_minus.tex [inline]: typed
+operators/double_minus.tex [display]: typed
+operators/double_minus.tex [environment]: typed
+operators/leq.tex [inline]: typed
+operators/leq.tex [display]: typed
+operators/leq.tex [environment]: typed
+operators/neq.tex [inline]: typed
+operators/neq.tex [display]: typed
+operators/neq.tex [environment]: typed
+operators/plus.tex [inline]: typed
+operators/plus.tex [display]: typed
+operators/plus.tex [environment]: typed
+operators/plus_tight.tex [inline]: typed
+operators/plus_tight.tex [display]: typed
+operators/plus_tight.tex [environment]: typed
+operators/relation_chain.tex [inline]: typed
+operators/relation_chain.tex [display]: typed
+operators/relation_chain.tex [environment]: typed
+operators/unary_minus.tex [inline]: typed
+operators/unary_minus.tex [display]: typed
+operators/unary_minus.tex [environment]: typed
+scripts/double_subscript.tex [inline]: typed
+scripts/double_subscript.tex [display]: typed
+scripts/double_subscript.tex [environment]: typed
+scripts/integral_bounds.tex [inline]: legacy (missing-inline-content-lowering)
+scripts/integral_bounds.tex [display]: legacy (missing-display-content-lowering)
+scripts/integral_bounds.tex [environment]: legacy (missing-environment-body-lowering)
+scripts/missing_argument.tex [inline]: verbatim (malformed-math)
+scripts/missing_argument.tex [display]: verbatim (malformed-math)
+scripts/missing_argument.tex [environment]: verbatim (malformed-math)
+scripts/nested_superscript.tex [inline]: typed
+scripts/nested_superscript.tex [display]: typed
+scripts/nested_superscript.tex [environment]: typed
+scripts/prod_bounds.tex [inline]: typed
+scripts/prod_bounds.tex [display]: typed
+scripts/prod_bounds.tex [environment]: typed
+scripts/script_on_group.tex [inline]: typed
+scripts/script_on_group.tex [display]: typed
+scripts/script_on_group.tex [environment]: typed
+scripts/sum_bounds.tex [inline]: typed
+scripts/sum_bounds.tex [display]: typed
+scripts/sum_bounds.tex [environment]: typed

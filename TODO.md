@@ -311,18 +311,18 @@ formatter-off output byte-identical.
    Complete the remaining work in this order. Each deletion step must leave the
    mandatory parity and idempotency suites green.
 
-   - [ ] **Add a migration census.** Record, for every shared-corpus case and
+   - [x] **Add a migration census.** Record, for every shared-corpus case and
      controlled context, whether formatting used typed lowering, the legacy
      renderer, or verbatim preservation. Commit a generated report and fail
      the test if a case silently changes route without an intentional
      update. This replaces the stale first-slice summary as the progress
      measure.
-   - [ ] **Define the preservation boundary.** Give every remaining verbatim or
+   - [x] **Define the preservation boundary.** Give every remaining verbatim or
      legacy census entry one explicit reason: malformed math, an unescaped
      lone dollar, an unproven argument domain, a documented Panache/Badness
      difference, or a still-missing supported shape. No catch-all
      "unsupported" bucket may remain.
-   - [ ] **Unify environment composition.** Route supported inline, display,
+   - [x] **Unify environment composition.** Route supported inline, display,
      delimited, mixed, and scripted environment compositions through typed
      lowering. Then delete the separate embedded-environment string
      assembly, row/grid renderer, and its environment-specific inline

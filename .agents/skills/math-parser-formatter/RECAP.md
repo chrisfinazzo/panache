@@ -55,36 +55,43 @@ rewrite those sections instead of accumulating history.
   well-formed environment. The next environment glues to the punctuation on the
   preceding `\end` line, then hangs from that actual source column. Adjacent
   environments in one segment remain on the compatibility path.
-- **Synthetic word expansion is for classification only.** Its temporary Rowan
-  tree starts at byte zero, so range-based typed lowering must consume the
-  original CST elements. Use expanded elements only for atom-by-atom delimiter
-  and segment scans.
+- **Environment composition follows semantic atoms from the original CST.**
+  Ordinary delimiters and punctuation can share one lexical word token, so
+  composition must use the semantic atom stream for those boundaries while
+  retaining source ranges for typed lowering and authored-space decisions.
 
 --------------------------------------------------------------------------------
 
 ## Latest session
 
-**Migration roadmap reset.** The implementation audit found that the Phase 4
-checkboxes understated behavioral progress while concealing how much legacy
-renderer code remained live.
+**Typed environment composition completed.** The formatter now has a measured
+preservation boundary and one typed path for every well-formed environment
+shape in the shared corpus.
 
-- `TODO.md` now records the typed behaviors already delivered instead of
-  leaving their compound migration-and-deletion items unchecked.
-- The remaining work is ordered by deletion boundary: measure renderer routes,
-  classify every preserved case, unify environment composition, delete the
-  flattened formatter, and close the host-delimiter matrix.
-- The roadmap now forbids an unclassified catch-all compatibility bucket and
-  gives Phase 4 an observable exit condition: no well-formed supported input
-  may use the legacy route.
-- No formatter behavior changed in this documentation-only session.
+- A committed, exact-match migration census classifies all 321 corpus/context
+  runs: 266 typed, 28 legacy, and 27 verbatim. Every non-typed route carries a
+  closed reason instead of an `unsupported` catch-all.
+- Environment rows, cells, alignment, comments, nesting, scripts, and mixed or
+  delimited compositions lower into the shared document IR. The separate
+  environment string assembler and row/grid renderer have been deleted.
+- Semantic atom boundaries now drive ordinary-delimiter and punctuation layout
+  even when several atoms share one CST word token. Authored spaces after an
+  environment remain source-range decisions.
+- No well-formed corpus environment uses the legacy route. Only the malformed
+  `environments/recovery/trivia_before_name.tex` fixture remains there, with an
+  explicit `malformed-environment-syntax` reason in all three contexts.
+- Conservative argument-domain handling is explicit: proven math arguments
+  recurse, nonmath and unknown domains remain opaque, and incomplete known
+  signatures still preserve through the compatibility boundary.
 
 ### Suggested next sub-targets
 
-1. Add the migration census described in `TODO.md`. Expose a test-visible route
-   classification (`Typed`, `Legacy`, or `Verbatim`) without changing formatter
-   output, run it over every shared-corpus context, and commit the report.
-2. Use the census—not ad hoc operand discovery—to choose the first legacy
-   environment subsystem whose complete removal eliminates a coherent group of
-   legacy entries.
-3. Keep non-colon scripted composite relations as a named intentional
+1. Delete the flattened formatter by migrating the remaining 28 classified
+   legacy routes, starting with the repeated missing-lowering families visible
+   in `tests/math_badness/migration_census.txt`.
+2. Remove formatter-local operator semantics and script sentinels only as their
+   last census callers disappear; keep the exact route report green after each
+   coherent deletion.
+3. Close the inline/display/raw host matrix after the legacy count reaches zero.
+4. Keep non-colon scripted composite relations as a named intentional
    difference until the pinned Badness formatter defect is corrected.

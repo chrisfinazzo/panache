@@ -33,6 +33,7 @@ use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::semantic::math::SignatureScope;
 use rowan::NodeOrToken;
 use rowan::ast::AstNode;
+use std::collections::BTreeSet;
 
 mod ir;
 mod linebreak;
@@ -214,6 +215,109 @@ pub struct MathFormatOptions {
     pub signature_scope: SignatureScope,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LegacyReason {
+    KnownBadnessScriptedCompositeRelation,
+    MalformedEnvironmentSyntax,
+    MissingDisplayContentLowering,
+    MissingEnvironmentBodyLowering,
+    MissingInlineContentLowering,
+    UnprovenArgumentDomain,
+}
+
+impl LegacyReason {
+    #[cfg(test)]
+    fn label(self) -> &'static str {
+        match self {
+            Self::KnownBadnessScriptedCompositeRelation => {
+                "known-badness-scripted-composite-relation"
+            }
+            Self::MalformedEnvironmentSyntax => "malformed-environment-syntax",
+            Self::MissingDisplayContentLowering => "missing-display-content-lowering",
+            Self::MissingEnvironmentBodyLowering => "missing-environment-body-lowering",
+            Self::MissingInlineContentLowering => "missing-inline-content-lowering",
+            Self::UnprovenArgumentDomain => "unproven-argument-domain",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerbatimReason {
+    GateDisabled,
+    MalformedMath,
+    MissingNestedCommentLowering,
+    UnescapedLoneDollar,
+}
+
+impl VerbatimReason {
+    #[cfg(test)]
+    fn label(self) -> &'static str {
+        match self {
+            Self::GateDisabled => "gate-disabled",
+            Self::MalformedMath => "malformed-math",
+            Self::MissingNestedCommentLowering => "missing-nested-comment-lowering",
+            Self::UnescapedLoneDollar => "unescaped-lone-dollar",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FormatRoute {
+    Typed,
+    Legacy(BTreeSet<LegacyReason>),
+    Verbatim(VerbatimReason),
+}
+
+impl FormatRoute {
+    #[cfg(test)]
+    fn label(&self) -> String {
+        match self {
+            Self::Typed => "typed".to_string(),
+            Self::Legacy(reasons) => format!(
+                "legacy ({})",
+                reasons
+                    .iter()
+                    .map(|reason| reason.label())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::Verbatim(reason) => format!("verbatim ({})", reason.label()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RouteTracker {
+    legacy_reasons: BTreeSet<LegacyReason>,
+}
+
+impl RouteTracker {
+    fn new() -> Self {
+        Self {
+            legacy_reasons: BTreeSet::new(),
+        }
+    }
+
+    fn legacy(&mut self, reason: LegacyReason) {
+        self.legacy_reasons.insert(reason);
+    }
+
+    fn finish(self) -> FormatRoute {
+        if self.legacy_reasons.is_empty() {
+            FormatRoute::Typed
+        } else {
+            FormatRoute::Legacy(self.legacy_reasons)
+        }
+    }
+}
+
+#[derive(Debug)]
+struct FormatMathOutcome {
+    output: Option<String>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    route: FormatRoute,
+}
+
 impl MathFormatOptions {
     /// Derive options from the host config for a given span context.
     pub fn from_config(config: &crate::config::Config, context: MathContext) -> Self {
@@ -238,11 +342,22 @@ impl MathFormatOptions {
 /// and no fence-padding normalization is duplicated here. On success it returns
 /// the reflowed content per `STYLE.md`.
 pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
+    let FormatMathOutcome { output, route: _ } = format_math_outcome(input, opts);
+    output
+}
+
+fn format_math_outcome(input: &str, opts: &MathFormatOptions) -> FormatMathOutcome {
     if !opts.enabled {
-        return None;
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::GateDisabled),
+        };
     }
     if has_unescaped_single_dollar(input) {
-        return None;
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::UnescapedLoneDollar),
+        };
     }
     let tree = SyntaxNode::new_root(parse_math_content(
         input,
@@ -251,15 +366,29 @@ pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
         },
     ));
     if !math_diagnostics(&tree).is_empty() {
-        return None;
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::MalformedMath),
+        };
     }
     if has_dangling_script(&tree) {
-        return None;
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::MalformedMath),
+        };
     }
     if has_nested_comment(&tree) && !can_lower_nested_comments(&tree, opts) {
-        return None;
+        return FormatMathOutcome {
+            output: None,
+            route: FormatRoute::Verbatim(VerbatimReason::MissingNestedCommentLowering),
+        };
     }
-    Some(render::render(&tree, opts))
+    let mut tracker = RouteTracker::new();
+    let output = render::render(&tree, opts, &mut tracker);
+    FormatMathOutcome {
+        output: Some(output),
+        route: tracker.finish(),
+    }
 }
 
 /// Whether a comment occurs inside a construct that historically rendered on
@@ -293,7 +422,8 @@ fn can_lower_nested_comments(tree: &SyntaxNode, opts: &MathFormatOptions) -> boo
     }
 
     if opts.context == MathContext::EnvironmentBody {
-        return render::can_render_environment_comments(tree, &opts.signature_scope);
+        let elements = tree.children_with_tokens().collect::<Vec<_>>();
+        return lower::try_lower_environment_body(&elements, opts).is_some();
     }
 
     let context_is_supported = opts.context != MathContext::Display
@@ -347,6 +477,137 @@ fn has_unescaped_single_dollar(content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+    use std::fmt::Write as _;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    const CENSUS_REPORT_REL: &str = "tests/math_badness/migration_census.txt";
+
+    fn corpus_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/math_corpus")
+    }
+
+    fn discover_corpus_cases(root: &Path) -> Vec<PathBuf> {
+        fn walk(directory: &Path, cases: &mut Vec<PathBuf>) {
+            for entry in fs::read_dir(directory)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
+            {
+                let path = entry.expect("failed to read corpus entry").path();
+                if path.is_dir() {
+                    walk(&path, cases);
+                } else if path.extension() == Some(OsStr::new("tex")) {
+                    cases.push(path);
+                }
+            }
+        }
+
+        let mut cases = Vec::new();
+        walk(root, &mut cases);
+        cases.sort();
+        cases
+    }
+
+    fn census_contexts() -> [(MathContext, &'static str); 3] {
+        [
+            (MathContext::Inline, "inline"),
+            (MathContext::Display, "display"),
+            (MathContext::EnvironmentBody, "environment"),
+        ]
+    }
+
+    fn census_report() -> String {
+        let root = corpus_root();
+        let cases = discover_corpus_cases(&root);
+        let mut records = Vec::with_capacity(cases.len() * census_contexts().len());
+        let mut typed = 0;
+        let mut legacy = 0;
+        let mut verbatim = 0;
+
+        for case in &cases {
+            let id = case
+                .strip_prefix(&root)
+                .expect("corpus case outside root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let input = fs::read_to_string(case)
+                .unwrap_or_else(|error| panic!("failed to read {id}: {error}"));
+            let signature_scope = match fs::read_to_string(case.with_extension("preamble")) {
+                Ok(source) => {
+                    let root = panache_parser::parse(&source, None);
+                    SignatureScope::from_root(&root)
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    SignatureScope::default()
+                }
+                Err(error) => panic!("failed to read preamble for {id}: {error}"),
+            };
+
+            for (context, label) in census_contexts() {
+                let outcome = format_math_outcome(
+                    &input,
+                    &MathFormatOptions {
+                        enabled: true,
+                        math_indent: 2,
+                        line_width: 80,
+                        bookdown_equation_labels: false,
+                        context,
+                        signature_scope: signature_scope.clone(),
+                    },
+                );
+                if input.contains(r"\begin")
+                    && let FormatRoute::Legacy(reasons) = &outcome.route
+                {
+                    assert!(
+                        reasons.contains(&LegacyReason::MalformedEnvironmentSyntax),
+                        "well-formed environment `{id}` [{label}] used the legacy route: {reasons:?}",
+                    );
+                }
+                match outcome.route {
+                    FormatRoute::Typed => typed += 1,
+                    FormatRoute::Legacy(_) => legacy += 1,
+                    FormatRoute::Verbatim(_) => verbatim += 1,
+                }
+                records.push((id.clone(), label, outcome.route.label()));
+            }
+        }
+
+        let mut report = String::new();
+        writeln!(report, "Panache math formatter migration census").unwrap();
+        writeln!(report, "Corpus: tests/fixtures/math_corpus").unwrap();
+        writeln!(report, "Cases: {}", cases.len()).unwrap();
+        writeln!(report, "Context runs: {}", records.len()).unwrap();
+        writeln!(report, "Typed: {typed}").unwrap();
+        writeln!(report, "Legacy: {legacy}").unwrap();
+        writeln!(report, "Verbatim: {verbatim}\n").unwrap();
+        writeln!(report, "Regenerate with:").unwrap();
+        writeln!(
+            report,
+            "  cargo test -p panache-formatter math_migration_census_report -- --ignored --nocapture\n"
+        )
+        .unwrap();
+        writeln!(report, "=== Routes ===").unwrap();
+        for (id, context, route) in records {
+            writeln!(report, "{id} [{context}]: {route}").unwrap();
+        }
+        report
+    }
+
+    #[test]
+    fn math_migration_census_matches_committed_report() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(CENSUS_REPORT_REL);
+        let expected = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        similar_asserts::assert_eq!(census_report(), expected);
+    }
+
+    #[test]
+    #[ignore = "manual: regenerate the committed math migration census"]
+    fn math_migration_census_report() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(CENSUS_REPORT_REL);
+        fs::write(&path, census_report())
+            .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
+    }
 
     fn opts(context: MathContext) -> MathFormatOptions {
         MathFormatOptions {
@@ -508,12 +769,11 @@ mod tests {
     }
 
     #[test]
-    fn nested_comment_before_environment_stays_verbatim() {
-        // A group-nested comment forces the `None` fallback (the caller emits
-        // the content verbatim): reflowing would absorb the group remainder
-        // into the comment.
+    fn nested_comment_before_environment_uses_typed_composition() {
         let input = "f({% reason\nx}+\\begin{bmatrix}1 \\\\ 2\\end{bmatrix})";
-        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
+        let expected = "f(\n  {% reason\n   x} + \\begin{bmatrix}\n       1 \\\\\n       2\n     \\end{bmatrix}\n)";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
     }
 
     #[test]
@@ -550,11 +810,12 @@ mod tests {
     }
 
     #[test]
-    fn comment_inside_embedded_environment_stays_verbatim() {
-        // The comment sits inside a group within the environment row, so the
-        // `None` fallback applies (the caller emits the content verbatim).
+    fn comment_inside_embedded_environment_uses_typed_composition() {
         let input = "f(\\begin{bmatrix}{% reason\nx} \\\\ 2\\end{bmatrix})";
-        assert_eq!(format_math(input, &opts(MathContext::Display)), None);
+        let expected =
+            "f(\n  \\begin{bmatrix}\n    {% reason\n     x} \\\\\n    2\n  \\end{bmatrix}\n)";
+        assert_eq!(fmt(input, MathContext::Display), expected);
+        assert_idempotent(input, MathContext::Display);
     }
 
     #[test]

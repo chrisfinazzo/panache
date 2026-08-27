@@ -10,24 +10,10 @@ Divergent: 227 / 321
 Regenerate with:
   cargo test -p panache-formatter --test math_badness_oracle math_badness_full_report -- --ignored --nocapture
 
-Selected first migration slice:
-  Inline bodies containing only MATH_WORD, MATH_SPACE, and MATH_NEWLINE.
-  Every other shape remains on the conservative legacy fallback.
-
 === Counts by context ===
 inline: parity 77, rejected 5, divergent 25
 display: parity 1, rejected 5, divergent 101
 environment: parity 1, rejected 5, divergent 101
-
-=== First-slice parity candidates ===
-display/authored_newline.tex [inline]
-inline/simple_equality.tex [inline]
-inline/sum_expression.tex [inline]
-operators/double_minus.tex [inline]
-operators/plus.tex [inline]
-operators/plus_tight.tex [inline]
-operators/relation_chain.tex [inline]
-operators/unary_minus.tex [inline]
 
 === All parity candidates ===
 commands/argument_after_space.tex [inline]
@@ -542,7 +528,7 @@ Panache: "  a + b = c + d"
 --- display/authored_newline.tex [environment] ---
 Input: "a + b\n= c + d\n"
 Badness: "  a + b = c + d\n"
-Panache: "  a + b\n  = c + d"
+Panache: "  a + b = c + d"
 
 --- display/fraction_block.tex [display] ---
 Input: "\\frac{\\partial f}{\\partial x} = 2x\n"
@@ -617,7 +603,7 @@ Panache: "  \\sum_{i=1}^{N} x_i y_i"
 --- display/sum_over_n.tex [environment] ---
 Input: "\\sum_{i=1}^{N} x_i y_i\n"
 Badness: "  \\sum_{i=1}^{N} x_i y_i\n"
-Panache: "  \\sum_{i = 1}^{N} x_i y_i"
+Panache: "  \\sum_{i=1}^{N} x_i y_i"
 
 --- display/with_text.tex [display] ---
 Input: "x = y \\quad \\text{and} \\quad z = w\n"
@@ -842,7 +828,7 @@ Panache: <declined>
 --- environments/recovery/comment_before_name.tex [environment] ---
 Input: "\\begin% opener\n{aligned}x\\end% closer\n{aligned}\n"
 Badness: "  \\begin% opener\n    {aligned}x\n  \\end% closer\n  {aligned}\n"
-Panache: "  \\begin% opener\n{aligned}\n    x\n  \\end% closer\n{aligned}"
+Panache: <declined>
 
 --- environments/recovery/nested.tex [inline] ---
 Input: "\\begin{aligned}\\begin{matrix}x\\end{matrix}\\end{aligned}\n"
@@ -867,12 +853,12 @@ Panache: "\\begin {aligned}x\\end {aligned}"
 --- environments/recovery/trivia_before_name.tex [display] ---
 Input: "\\begin {aligned}x\\end {aligned}\n"
 Badness: "  \\begin\n    {aligned}x\n  \\end {aligned}\n"
-Panache: "\\begin {aligned}\n  x\n\\end {aligned}"
+Panache: "  \\begin {aligned}x\\end {aligned}"
 
 --- environments/recovery/trivia_before_name.tex [environment] ---
 Input: "\\begin {aligned}x\\end {aligned}\n"
 Badness: "  \\begin\n    {aligned}x\n  \\end {aligned}\n"
-Panache: "  \\begin {aligned}\n    x\n  \\end {aligned}"
+Panache: "  \\begin {aligned}x\\end {aligned}"
 
 --- escapes/escaped_brace.tex [display] ---
 Input: "\\{ a \\}\n"
@@ -997,7 +983,7 @@ Panache: "  \\left[ x \\right]"
 --- groups/left_right_trivia.tex [environment] ---
 Input: "\\left [ x \\right ]\n"
 Badness: "  \\left[ x \\right]\n"
-Panache: "  \\left [ x \\right ]"
+Panache: "  \\left[ x \\right]"
 
 --- groups/left_right_unclosed.tex [inline] ---
 Input: "\\left( x\n"
@@ -1272,7 +1258,7 @@ Panache: "  \\prod_{k=1}^{m} a_k"
 --- scripts/prod_bounds.tex [environment] ---
 Input: "\\prod_{k=1}^{m} a_k\n"
 Badness: "  \\prod_{k=1}^{m} a_k\n"
-Panache: "  \\prod_{k = 1}^{m} a_k"
+Panache: "  \\prod_{k=1}^{m} a_k"
 
 --- scripts/script_on_group.tex [display] ---
 Input: "{a+b}^2\n"
@@ -1292,4 +1278,4 @@ Panache: "  \\sum_{i=1}^{n} i"
 --- scripts/sum_bounds.tex [environment] ---
 Input: "\\sum_{i=1}^{n} i\n"
 Badness: "  \\sum_{i=1}^{n} i\n"
-Panache: "  \\sum_{i = 1}^{n} i"
+Panache: "  \\sum_{i=1}^{n} i"

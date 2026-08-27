@@ -7,12 +7,12 @@
 //! *trailing only*, so a second pass measures the same content widths and emits
 //! identical bytes.
 
-use rowan::{GreenNodeBuilder, NodeOrToken};
+use rowan::NodeOrToken;
 
 use super::ir::Ir;
 use super::operators::{self, AtomClass};
 use super::printer::Printer;
-use super::{MathContext, MathFormatOptions, linebreak, lower};
+use super::{LegacyReason, MathContext, MathFormatOptions, RouteTracker, linebreak, lower};
 use crate::syntax::{
     AstNode, MathContent, MathEnvironment, MathLineBreak, MathScripted, SyntaxElement, SyntaxKind,
     SyntaxNode, SyntaxToken,
@@ -23,12 +23,16 @@ use panache_parser::semantic::math::{ArgKind, ArgumentDomain, SignatureScope, ma
 const INDENT: &str = "  ";
 
 /// Entry point: dispatch on context. Returns delimiter-free content.
-pub(super) fn render(tree: &SyntaxNode, opts: &MathFormatOptions) -> String {
+pub(super) fn render(
+    tree: &SyntaxNode,
+    opts: &MathFormatOptions,
+    tracker: &mut RouteTracker,
+) -> String {
     let top: Vec<SyntaxElement> = tree.children_with_tokens().collect();
     match opts.context {
-        MathContext::Inline => render_inline_content(tree, &top, opts),
-        MathContext::Display => render_display(tree, &top, opts),
-        MathContext::EnvironmentBody => render_environment_body(tree, &top, opts),
+        MathContext::Inline => render_inline_content(tree, &top, opts, tracker),
+        MathContext::Display => render_display(tree, &top, opts, tracker),
+        MathContext::EnvironmentBody => render_environment_body(tree, &top, opts, tracker),
     }
 }
 
@@ -36,6 +40,7 @@ fn render_environment_body(
     tree: &SyntaxNode,
     elements: &[SyntaxElement],
     opts: &MathFormatOptions,
+    tracker: &mut RouteTracker,
 ) -> String {
     if let Some(document) = MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
@@ -45,6 +50,26 @@ fn render_environment_body(
             output.push('\n');
         }
         return output;
+    }
+    if !elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_ALIGN)
+        && let Some(document) = MathContent::cast(tree.clone()).and_then(|content| {
+            lower::try_lower_environment_content(&content, &opts.signature_scope)
+        })
+    {
+        return trimmed_body(
+            &Printer::new(opts.line_width, INDENT.len()),
+            &document,
+            INDENT.len(),
+        );
+    }
+    if let Some(document) = lower::try_lower_environment_body(elements, opts) {
+        return trimmed_body(
+            &Printer::new(opts.line_width, INDENT.len()),
+            &document,
+            INDENT.len(),
+        );
     }
     let has_comment = tree
         .descendants_with_tokens()
@@ -77,7 +102,21 @@ fn render_environment_body(
         );
     }
 
-    render_body_lines(elements, 1, opts).join("\n")
+    tracker.legacy(if contains_malformed_environment(tree) {
+        LegacyReason::MalformedEnvironmentSyntax
+    } else if lower::has_unproven_argument_domain(elements, &opts.signature_scope) {
+        LegacyReason::UnprovenArgumentDomain
+    } else {
+        LegacyReason::MissingEnvironmentBodyLowering
+    });
+    let content = render_inline(elements, &opts.signature_scope)
+        .trim_matches(['\r', '\n'])
+        .to_string();
+    content
+        .lines()
+        .map(|line| format!("{INDENT}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Inline math shares its line with the host paragraph or table cell, so a
@@ -88,6 +127,7 @@ fn render_inline_content(
     tree: &SyntaxNode,
     elements: &[SyntaxElement],
     opts: &MathFormatOptions,
+    tracker: &mut RouteTracker,
 ) -> String {
     let printer = Printer::new(opts.line_width, INDENT.len());
     let keeps_breaks = tree
@@ -107,9 +147,11 @@ fn render_inline_content(
         return print(&document);
     }
     if elements.iter().any(contains_environment) {
-        let semantic = expand_word_elements(elements);
+        if let Some(document) = lower::try_lower_inline_environment(elements.to_vec(), opts) {
+            return print(&document);
+        }
         let hanging_offset = keeps_breaks.then_some(1);
-        if let Some(document) = mixed_segment_doc(&semantic, opts, hanging_offset) {
+        if let Some(document) = mixed_segment_doc(elements, opts, hanging_offset) {
             return print(&document);
         }
     }
@@ -118,6 +160,15 @@ fn render_inline_content(
     {
         print(&document)
     } else {
+        tracker.legacy(if contains_malformed_environment(tree) {
+            LegacyReason::MalformedEnvironmentSyntax
+        } else if lower::has_unsupported_scripted_composite_relation(elements) {
+            LegacyReason::KnownBadnessScriptedCompositeRelation
+        } else if lower::has_unproven_argument_domain(elements, &opts.signature_scope) {
+            LegacyReason::UnprovenArgumentDomain
+        } else {
+            LegacyReason::MissingInlineContentLowering
+        });
         render_inline(elements, &opts.signature_scope)
             .trim()
             .to_string()
@@ -132,7 +183,12 @@ fn trimmed_body(printer: &Printer, document: &Ir, indent: usize) -> String {
     printer.print(document, indent).trim_end().to_string()
 }
 
-fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOptions) -> String {
+fn render_display(
+    tree: &SyntaxNode,
+    top: &[SyntaxElement],
+    opts: &MathFormatOptions,
+    tracker: &mut RouteTracker,
+) -> String {
     if let Some(document) = MathContent::cast(tree.clone())
         .and_then(|content| lower::try_lower_delimited_environment(&content, opts))
     {
@@ -159,53 +215,71 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
         );
     }
 
-    if has_mixed_environment_content(top) {
-        let semantic = expand_word_elements(top);
-        return render_mixed_delimited_display(&semantic, opts)
-            .or_else(|| {
-                lower::try_lower_display_environment(
-                    top.to_vec(),
-                    opts,
-                    opts.line_width.saturating_sub(opts.math_indent),
-                )
-                .map(|document| {
-                    Printer::new(opts.line_width, INDENT.len()).print(&document, opts.math_indent)
-                })
-            })
-            .or_else(|| render_top_level_mixed_environment(&semantic, opts))
-            .unwrap_or_else(|| {
-                let content: String = top.iter().map(ToString::to_string).collect();
-                content.trim_matches(['\r', '\n']).to_string()
-            });
+    // An ordinary delimiter enclosing a block environment must itself take
+    // the broken layout. Handle that structure before the generic atom
+    // composition path, which correctly aligns the environment but cannot
+    // make the surrounding delimiters participate in its forced breaks.
+    if has_mixed_environment_content(top)
+        && let Some(output) = render_typed_mixed_delimited_display(top, opts)
+    {
+        return output;
     }
 
+    if top.iter().any(contains_environment)
+        && let Some(document) = lower::try_lower_display_environment(
+            top.to_vec(),
+            opts,
+            opts.line_width.saturating_sub(opts.math_indent),
+        )
+    {
+        let significant = top
+            .iter()
+            .filter(|element| !is_layout_whitespace(element))
+            .collect::<Vec<_>>();
+        let base_indent = if significant.len() == 1
+            && significant[0].as_node().is_some_and(|node| {
+                node.kind() == SyntaxKind::MATH_ENVIRONMENT
+                    || MathScripted::cast(node.clone()).is_some_and(|scripted| {
+                        scripted
+                            .base()
+                            .and_then(SyntaxElement::into_node)
+                            .is_some_and(|base| base.kind() == SyntaxKind::MATH_ENVIRONMENT)
+                    })
+            }) {
+            0
+        } else {
+            opts.math_indent
+        };
+        return Printer::new(opts.line_width, INDENT.len()).print(&document, base_indent);
+    }
+
+    if has_mixed_environment_content(top) {
+        if let Some(output) = render_top_level_mixed_environment(top, opts) {
+            return output;
+        }
+        tracker.legacy(LegacyReason::MissingDisplayContentLowering);
+        let content: String = top.iter().map(ToString::to_string).collect();
+        return content.trim_matches(['\r', '\n']).to_string();
+    }
+
+    tracker.legacy(if contains_malformed_environment(tree) {
+        LegacyReason::MalformedEnvironmentSyntax
+    } else if lower::has_unsupported_scripted_composite_relation(top) {
+        LegacyReason::KnownBadnessScriptedCompositeRelation
+    } else if lower::has_unproven_argument_domain(top, &opts.signature_scope) {
+        LegacyReason::UnprovenArgumentDomain
+    } else {
+        LegacyReason::MissingDisplayContentLowering
+    });
+
     let mut lines: Vec<String> = Vec::new();
-    let mut pending: Vec<SyntaxElement> = Vec::new();
     let flat_indent = " ".repeat(opts.math_indent);
     let parse_opts = MathParseOptions {
         bookdown_equation_labels: opts.bookdown_equation_labels,
     };
 
-    for el in top {
-        if el.kind() == SyntaxKind::MATH_ENVIRONMENT {
-            flush_free_rows(
-                &pending,
-                &flat_indent,
-                opts.line_width,
-                parse_opts,
-                &opts.signature_scope,
-                &mut lines,
-            );
-            pending.clear();
-            if let Some(node) = el.as_node() {
-                lines.extend(render_environment_lines(node, 0, opts));
-            }
-        } else {
-            pending.push(el.clone());
-        }
-    }
     flush_free_rows(
-        &pending,
+        top,
         &flat_indent,
         opts.line_width,
         parse_opts,
@@ -219,33 +293,6 @@ fn ends_in_math_newline(elements: &[SyntaxElement]) -> bool {
     elements
         .last()
         .is_some_and(|element| element.kind() == SyntaxKind::MATH_NEWLINE)
-}
-
-/// Split each top-level multi-atom `MATH_WORD` token into one token per
-/// [`operators::word_atoms`] atom, so the delimiter and segment scans below
-/// can classify elements one atom at a time. Nodes are opaque operands to
-/// those scans and are kept as-is (rendering flattens their original tokens);
-/// only the split tokens live in a small synthetic tree of their own.
-fn expand_word_elements(elems: &[SyntaxElement]) -> Vec<SyntaxElement> {
-    let mut out = Vec::with_capacity(elems.len());
-    for element in elems {
-        match element {
-            NodeOrToken::Token(token)
-                if token.kind() == SyntaxKind::MATH_WORD
-                    && operators::word_atoms(token.text()).nth(1).is_some() =>
-            {
-                let mut builder = GreenNodeBuilder::new();
-                builder.start_node(SyntaxKind::MATH_CONTENT.into());
-                for atom in operators::word_atoms(token.text()) {
-                    builder.token(SyntaxKind::MATH_WORD.into(), atom.text);
-                }
-                builder.finish_node();
-                out.extend(SyntaxNode::new_root(builder.finish()).children_with_tokens());
-            }
-            _ => out.push(element.clone()),
-        }
-    }
-    out
 }
 
 fn has_mixed_environment_content(elems: &[SyntaxElement]) -> bool {
@@ -290,60 +337,41 @@ fn environment_block(element: &SyntaxElement) -> Option<(SyntaxNode, Vec<SyntaxE
     Some((base, scripts))
 }
 
-fn render_mixed_delimited_display(
-    elems: &[SyntaxElement],
+fn render_typed_mixed_delimited_display(
+    elements: &[SyntaxElement],
     opts: &MathFormatOptions,
 ) -> Option<String> {
-    if elems.iter().any(contains_comment) {
+    if elements.iter().any(contains_comment) {
         return None;
     }
-    let environments: Vec<usize> = elems
+    let environments = elements
         .iter()
         .enumerate()
         .filter_map(|(index, element)| environment_block(element).is_some().then_some(index))
-        .collect();
-    if environments.is_empty() {
-        return None;
-    }
-
-    let (open, close) = enclosing_delimiters(elems, &environments)?;
-    let prefix = render_inline(&elems[..=open], &opts.signature_scope)
-        .trim()
-        .to_string();
-    let suffix = render_inline_seeded(
-        &elems[close..],
-        Some(AtomClass::Close),
-        &opts.signature_scope,
-    )
-    .trim()
-    .to_string();
-    let body = delimited_body_doc(&elems[open + 1..close], opts)?;
-    let doc = Ir::group(Ir::concat([
-        Ir::text(prefix),
+        .collect::<Vec<_>>();
+    let (open, close) = enclosing_delimiters(elements, &environments)?;
+    let prefix = lower::try_lower_elements(elements[..=open].to_vec(), &opts.signature_scope)?;
+    let suffix = lower::try_lower_elements(elements[close..].to_vec(), &opts.signature_scope)?;
+    let body = delimited_body_doc_configured(&elements[open + 1..close], opts, true)?;
+    let document = Ir::group(Ir::concat([
+        prefix,
         Ir::indent(Ir::concat([Ir::SoftLine, body])),
         Ir::SoftLine,
-        Ir::text(suffix),
+        suffix,
     ]));
-
-    Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
+    Some(Printer::new(opts.line_width, INDENT.len()).print(&document, opts.math_indent))
 }
 
-fn contains_comment(element: &SyntaxElement) -> bool {
-    element.kind() == SyntaxKind::MATH_COMMENT
-        || element.as_node().is_some_and(|node| {
-            node.descendants_with_tokens()
-                .filter_map(|descendant| descendant.into_token())
-                .any(|token| token.kind() == SyntaxKind::MATH_COMMENT)
-        })
-}
-
-fn enclosing_delimiters(elems: &[SyntaxElement], environments: &[usize]) -> Option<(usize, usize)> {
-    for open in 0..elems.len() {
-        if element_word_class(&elems[open]) != Some(AtomClass::Open) {
+fn enclosing_delimiters(
+    elements: &[SyntaxElement],
+    environments: &[usize],
+) -> Option<(usize, usize)> {
+    for open in 0..elements.len() {
+        if element_word_class(&elements[open]) != Some(AtomClass::Open) {
             continue;
         }
-        let mut delimiters = vec![element_text(&elems[open])?];
-        for (close, element) in elems.iter().enumerate().skip(open + 1) {
+        let mut delimiters = vec![element_text(&elements[open])?];
+        for (close, element) in elements.iter().enumerate().skip(open + 1) {
             match element_word_class(element) {
                 Some(AtomClass::Open) => delimiters.push(element_text(element)?),
                 Some(AtomClass::Close) => {
@@ -366,6 +394,15 @@ fn enclosing_delimiters(elems: &[SyntaxElement], environments: &[usize]) -> Opti
         }
     }
     None
+}
+
+fn contains_comment(element: &SyntaxElement) -> bool {
+    element.kind() == SyntaxKind::MATH_COMMENT
+        || element.as_node().is_some_and(|node| {
+            node.descendants_with_tokens()
+                .filter_map(|descendant| descendant.into_token())
+                .any(|token| token.kind() == SyntaxKind::MATH_COMMENT)
+        })
 }
 
 /// The token that carries an element's atom identity for the delimiter and
@@ -410,7 +447,8 @@ fn render_top_level_mixed_environment(
     if elems.iter().any(contains_comment) || !ordinary_delimiters_balanced(elems) {
         return None;
     }
-    let doc = mixed_segment_doc(elems, opts, Some(0))?;
+    let doc = mixed_segment_doc(elems, opts, Some(0))
+        .or_else(|| delimited_body_doc_configured(elems, opts, true))?;
     Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
 }
 
@@ -423,9 +461,7 @@ pub(super) fn can_render_mixed_environment_comments(
         return false;
     }
     match opts.context {
-        MathContext::Inline => {
-            mixed_segment_doc(&expand_word_elements(&elements), opts, Some(1)).is_some()
-        }
+        MathContext::Inline => mixed_segment_doc(&elements, opts, Some(1)).is_some(),
         MathContext::Display => lower::try_lower_display_environment(
             elements,
             opts,
@@ -461,10 +497,6 @@ fn ordinary_delimiters_balanced(elems: &[SyntaxElement]) -> bool {
         }
     }
     openings.is_empty()
-}
-
-fn delimited_body_doc(body: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Ir> {
-    delimited_body_doc_configured(body, opts, true)
 }
 
 fn delimited_body_doc_configured(
@@ -532,52 +564,12 @@ fn mixed_segment_doc(
         .filter_map(|(index, element)| environment_block(element).is_some().then_some(index))
         .collect();
     match environment_indices.as_slice() {
-        [] => Some(Ir::text(
-            render_inline(segment, &opts.signature_scope)
-                .trim()
-                .to_string(),
-        )),
-        [environment_index] => {
-            let before = &segment[..*environment_index];
-            let after = &segment[*environment_index + 1..];
-            let prefix = render_before_operand(before, &opts.signature_scope);
-            let prefix_width = prefix.chars().count();
-            let (environment, scripts) = environment_block(&segment[*environment_index])?;
-            if !is_well_formed_environment(&environment) {
-                return None;
-            }
-            let environment_doc = Ir::join(
-                Ir::HardLine,
-                render_environment_lines(&environment, 0, opts)
-                    .into_iter()
-                    .map(Ir::text),
-            );
-            let mut suffix =
-                render_inline_seeded(after, Some(AtomClass::Close), &opts.signature_scope)
-                    .trim()
-                    .to_string();
-            if !suffix.is_empty() && needs_space_after_environment(after) {
-                suffix.insert(0, ' ');
-            }
-            if !scripts.is_empty() {
-                // Scripts attach to the environment itself, so they glue
-                // directly onto the `\end{...}` line before any other suffix.
-                suffix = format!(
-                    "{}{suffix}",
-                    render_inline(&scripts, &opts.signature_scope).trim()
-                );
-            }
-            let environment_doc = if let Some(hanging_offset) = hanging_offset {
-                Ir::align(prefix_width + hanging_offset, environment_doc)
-            } else {
-                environment_doc
-            };
-            Some(Ir::concat([
-                Ir::text(prefix),
-                environment_doc,
-                Ir::text(suffix),
-            ]))
-        }
+        [] => lower::try_lower_elements(segment.to_vec(), &opts.signature_scope),
+        [_] => lower::try_lower_environment_composition(
+            segment.to_vec(),
+            opts,
+            hanging_offset.unwrap_or(0),
+        ),
         _ => None,
     }
 }
@@ -592,7 +584,7 @@ pub(super) fn mixed_delimited_environment_document(
     body: &MathContent,
     opts: &MathFormatOptions,
 ) -> Option<Ir> {
-    let elements = expand_word_elements(&body.elements().collect::<Vec<_>>());
+    let elements = body.elements().collect::<Vec<_>>();
     if !ordinary_delimiters_balanced(&elements) {
         return None;
     }
@@ -634,6 +626,12 @@ fn is_well_formed_environment(environment: &SyntaxNode) -> bool {
         && end.syntax().text().to_string() == format!(r"\end{{{end_name}}}")
 }
 
+fn contains_malformed_environment(tree: &SyntaxNode) -> bool {
+    tree.descendants()
+        .filter(|node| node.kind() == SyntaxKind::MATH_ENVIRONMENT)
+        .any(|environment| !is_well_formed_environment(&environment))
+}
+
 fn contains_unsafe_mixed_trivia(element: &SyntaxElement) -> bool {
     match environment_block(element) {
         // The environment interior is laid out row by row, where breaks and
@@ -654,45 +652,6 @@ fn has_comment_or_line_break(element: &SyntaxElement) -> bool {
         node.descendants_with_tokens()
             .any(|descendant| is_marker(descendant.kind()))
     })
-}
-
-fn render_before_operand(before: &[SyntaxElement], scope: &SignatureScope) -> String {
-    let mut tokens = flatten_tokens(before, scope);
-    tokens.push(FlatToken::Token(SyntaxKind::MATH_WORD, "X".to_string()));
-    let rendered = space_operators(&tokens, None);
-    rendered
-        .strip_suffix('X')
-        .expect("synthetic trailing operand must survive spacing")
-        .trim_start()
-        .to_string()
-}
-
-fn needs_space_after_environment(after: &[SyntaxElement]) -> bool {
-    let had_space = after.first().is_some_and(is_layout_whitespace);
-    let Some(element) = after.iter().find(|element| !is_layout_whitespace(element)) else {
-        return false;
-    };
-    // A scripted atom spaces by its base: `=_i` after `\end{...}` behaves
-    // like `=`.
-    let Some(token) = element_atom_token(element) else {
-        return had_space;
-    };
-    if token.kind() == SyntaxKind::MATH_WORD {
-        let Some(first) = operators::word_atoms(token.text()).next() else {
-            return had_space;
-        };
-        return operators::is_spaced(operators::coerce(first.class, Some(AtomClass::Close)));
-    }
-    if matches!(
-        token.kind(),
-        SyntaxKind::MATH_CONTROL_WORD | SyntaxKind::MATH_CONTROL_SYMBOL
-    ) {
-        let name = token.text().strip_prefix('\\').unwrap_or(token.text());
-        return operators::command_class(name)
-            .map(|class| operators::is_spaced(operators::coerce(class, Some(AtomClass::Close))))
-            .unwrap_or(had_space);
-    }
-    had_space
 }
 
 /// Free (non-environment) display content: one *logical* row per equation,
@@ -772,423 +731,6 @@ fn has_top_level_align(elems: &[SyntaxElement]) -> bool {
     elems.iter().any(|el| el.kind() == SyntaxKind::MATH_ALIGN)
 }
 
-fn render_environment_lines(
-    env: &SyntaxNode,
-    depth: usize,
-    opts: &MathFormatOptions,
-) -> Vec<String> {
-    let Some(parts) = EnvParts::of(env) else {
-        return vec![render_inline(
-            &env.children_with_tokens().collect::<Vec<_>>(),
-            &opts.signature_scope,
-        )];
-    };
-    let indent = INDENT.repeat(depth);
-    let mut lines = vec![format!("{indent}{}", parts.begin_line)];
-    lines.extend(render_body_lines(&parts.body, depth + 1, opts));
-    lines.push(format!("{indent}{}", parts.end_line));
-    lines
-}
-
-pub(super) fn environment_document(
-    environment: &SyntaxNode,
-    opts: &MathFormatOptions,
-) -> Option<Ir> {
-    if !is_well_formed_environment(environment) {
-        return None;
-    }
-    Some(Ir::join(
-        Ir::HardLine,
-        render_environment_lines(environment, 0, opts)
-            .into_iter()
-            .map(Ir::text),
-    ))
-}
-
-struct EnvParts {
-    begin_line: String,
-    end_line: String,
-    body: Vec<SyntaxElement>,
-}
-
-impl EnvParts {
-    fn of(env: &SyntaxNode) -> Option<Self> {
-        let environment = MathEnvironment::cast(env.clone())?;
-        let begin_line = environment.begin()?.syntax().text().to_string();
-        let end_line = environment.end()?.syntax().text().to_string();
-        let body = environment
-            .body()?
-            .syntax()
-            .children_with_tokens()
-            .collect();
-        Some(Self {
-            begin_line,
-            end_line,
-            body,
-        })
-    }
-}
-
-enum BodyItem {
-    /// A nested environment rendered on its own line(s), already indented.
-    Block(Vec<String>),
-    /// A normal table row: trimmed cells split on top-level `&`.
-    Row {
-        cells: Vec<BodyCell>,
-        break_text: Option<String>,
-    },
-}
-
-enum BodyCell {
-    Flat(String),
-    Document { document: Ir, atom_offset: usize },
-}
-
-impl BodyCell {
-    fn first_line_width(&self, printer: &Printer) -> usize {
-        match self {
-            Self::Flat(text) => text.chars().count(),
-            Self::Document { document, .. } => printer
-                .print(document, 0)
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .chars()
-                .count(),
-        }
-    }
-
-    fn starts_relation(&self) -> bool {
-        let first_line = match self {
-            Self::Flat(text) => text.as_str(),
-            Self::Document { document, .. } => {
-                let rendered = Printer::new(usize::MAX / 2, INDENT.len()).print(document, 0);
-                return rendered.lines().next().is_some_and(starts_relation);
-            }
-        };
-        starts_relation(first_line)
-    }
-}
-
-fn starts_relation(text: &str) -> bool {
-    let text = text.trim_start();
-    if text.starts_with(['=', '<', '>']) || text.starts_with(":=") {
-        return true;
-    }
-    let Some(command) = text.strip_prefix('\\') else {
-        return false;
-    };
-    let name = command
-        .chars()
-        .take_while(|character| character.is_ascii_alphabetic())
-        .collect::<String>();
-    operators::command_class(&name) == Some(AtomClass::Rel)
-}
-
-fn render_body_lines(
-    body: &[SyntaxElement],
-    depth: usize,
-    opts: &MathFormatOptions,
-) -> Vec<String> {
-    let indent = INDENT.repeat(depth);
-    let printer = Printer::new(opts.line_width, INDENT.len());
-    let mut items: Vec<BodyItem> = Vec::new();
-    let has_authored_break = body
-        .iter()
-        .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK);
-
-    for row in split_rows(body) {
-        if row.is_blank() {
-            continue;
-        }
-        if let Some(env) = row.single_environment() {
-            items.push(BodyItem::Block(render_environment_lines(&env, depth, opts)));
-        } else {
-            let split = split_cells(&row.elems);
-            let cells = split
-                .iter()
-                .map(|cell| {
-                    if cell.iter().any(contains_nested_comment) {
-                        lower_grid_cell(cell, &opts.signature_scope)
-                            .map(|(document, atom_offset)| BodyCell::Document {
-                                document,
-                                atom_offset,
-                            })
-                            .unwrap_or_else(|| {
-                                BodyCell::Flat(
-                                    render_inline(cell, &opts.signature_scope)
-                                        .trim()
-                                        .to_string(),
-                                )
-                            })
-                    } else if has_authored_break {
-                        lower::try_lower_elements(cell.clone(), &opts.signature_scope)
-                            .map(|document| BodyCell::Document {
-                                document,
-                                atom_offset: 0,
-                            })
-                            .unwrap_or_else(|| {
-                                BodyCell::Flat(
-                                    render_inline(cell, &opts.signature_scope)
-                                        .trim()
-                                        .to_string(),
-                                )
-                            })
-                    } else {
-                        BodyCell::Flat(
-                            render_inline(cell, &opts.signature_scope)
-                                .trim()
-                                .to_string(),
-                        )
-                    }
-                })
-                .collect();
-            items.push(BodyItem::Row {
-                cells,
-                break_text: row.break_text,
-            });
-        }
-    }
-
-    let tight_grid = items.iter().any(|item| match item {
-        BodyItem::Row { cells, .. } => {
-            let last = cells.len().saturating_sub(1);
-            cells
-                .iter()
-                .take(last)
-                .any(|cell| matches!(cell, BodyCell::Document { document, .. } if document.contains_forced_break()))
-        }
-        BodyItem::Block(_) => false,
-    });
-    let widths = column_widths(&items, &printer);
-    let mut out: Vec<String> = Vec::new();
-    for item in items {
-        match item {
-            BodyItem::Block(lines) => out.extend(lines),
-            BodyItem::Row { cells, break_text } => {
-                if tight_grid {
-                    let document = join_tight_cell_documents(&cells, break_text.as_deref());
-                    out.extend(
-                        printer
-                            .print(&document, indent.len())
-                            .split('\n')
-                            .map(str::to_string),
-                    );
-                } else if cells
-                    .iter()
-                    .any(|cell| matches!(cell, BodyCell::Document { .. }))
-                {
-                    let document = join_cell_documents(&cells, &widths, break_text.as_deref());
-                    out.extend(
-                        printer
-                            .print(&document, indent.len())
-                            .split('\n')
-                            .map(str::to_string),
-                    );
-                } else {
-                    let cells = cells
-                        .iter()
-                        .map(|cell| match cell {
-                            BodyCell::Flat(text) => text.clone(),
-                            BodyCell::Document { .. } => unreachable!("handled typed row"),
-                        })
-                        .collect::<Vec<_>>();
-                    let line = join_cells(&cells, &widths, break_text.is_some());
-                    out.push(format!(
-                        "{indent}{}",
-                        with_break(line, break_text.as_deref())
-                    ));
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Badness suppresses grid padding and separator spaces for the whole
-/// environment when a non-final cell is multiline.
-fn join_tight_cell_documents(cells: &[BodyCell], break_text: Option<&str>) -> Ir {
-    let mut documents = Vec::new();
-    for (column, cell) in cells.iter().enumerate() {
-        if column > 0 {
-            documents.push(Ir::text("&"));
-            if cell.starts_relation() {
-                documents.push(Ir::text(" "));
-            }
-        }
-        let document = match cell {
-            BodyCell::Flat(text) => Ir::verbatim(text.clone()),
-            // Badness resets every multiline cell's continuation to the body
-            // indent once a non-final multiline cell makes the grid tight.
-            BodyCell::Document { document, .. } => document.clone(),
-        };
-        documents.push(document);
-    }
-    if let Some(marker) = break_text {
-        documents.push(Ir::verbatim(marker));
-    }
-    Ir::concat(documents)
-}
-
-/// Per-column max width over **every** cell of multi-cell rows (including the
-/// last column, so trailing `\\` can be aligned too). Single-cell rows have no
-/// separator and don't participate. Computed on already-trimmed cells — this is
-/// the idempotency engine.
-fn column_widths(items: &[BodyItem], printer: &Printer) -> Vec<usize> {
-    let mut widths: Vec<usize> = Vec::new();
-    for item in items {
-        if let BodyItem::Row { cells, .. } = item {
-            if cells.len() < 2 {
-                continue; // single cell ⇒ no column separator ⇒ nothing to pad
-            }
-            for (col, cell) in cells.iter().enumerate() {
-                let w = cell.first_line_width(printer);
-                if col >= widths.len() {
-                    widths.resize(col + 1, 0);
-                }
-                widths[col] = widths[col].max(w);
-            }
-        }
-    }
-    widths
-}
-
-fn join_cell_documents(cells: &[BodyCell], widths: &[usize], break_text: Option<&str>) -> Ir {
-    let last = cells.len().saturating_sub(1);
-    let mut documents = Vec::new();
-    let mut prefix_width = 0;
-    for (column, cell) in cells.iter().enumerate() {
-        if column > 0 {
-            documents.push(Ir::text(" & "));
-            prefix_width += 3;
-        }
-        let document = match cell {
-            BodyCell::Flat(text) => Ir::verbatim(text.clone()),
-            BodyCell::Document {
-                document,
-                atom_offset,
-            } => Ir::align(*atom_offset, document.clone()),
-        };
-        documents.push(Ir::align(prefix_width, document));
-
-        let cell_width = cell.first_line_width(&Printer::new(usize::MAX / 2, INDENT.len()));
-        let pad = if column == last && break_text.is_none() {
-            0
-        } else {
-            widths
-                .get(column)
-                .copied()
-                .unwrap_or(0)
-                .saturating_sub(cell_width)
-        };
-        if pad > 0 {
-            documents.push(Ir::text(" ".repeat(pad)));
-        }
-        prefix_width += cell_width + pad;
-    }
-    if let Some(marker) = break_text {
-        if !cells.is_empty() {
-            documents.push(Ir::text(" "));
-        }
-        documents.push(Ir::verbatim(marker));
-    }
-    Ir::concat(documents)
-}
-
-pub(super) fn can_render_environment_comments(tree: &SyntaxNode, scope: &SignatureScope) -> bool {
-    let elements = tree.children_with_tokens().collect::<Vec<_>>();
-    can_render_environment_body_comments(&elements, scope)
-}
-
-fn can_render_environment_body_comments(
-    elements: &[SyntaxElement],
-    scope: &SignatureScope,
-) -> bool {
-    split_rows(elements).into_iter().all(|row| {
-        if row.is_blank() {
-            return true;
-        }
-        if let Some(environment) = row.single_environment() {
-            let Some(parts) = EnvParts::of(&environment) else {
-                return false;
-            };
-            return can_render_environment_body_comments(&parts.body, scope);
-        }
-
-        let cells = split_cells(&row.elems);
-        cells.iter().all(|cell| {
-            !cell.iter().any(contains_nested_comment) || lower_grid_cell(cell, scope).is_some()
-        })
-    })
-}
-
-fn lower_grid_cell(elements: &[SyntaxElement], scope: &SignatureScope) -> Option<(Ir, usize)> {
-    let comment_elements = elements
-        .iter()
-        .filter(|element| contains_nested_comment(element))
-        .collect::<Vec<_>>();
-    let [comment_element] = comment_elements.as_slice() else {
-        return None;
-    };
-    let document = lower::try_lower_elements(elements.to_vec(), scope)?;
-    let comment_document = lower::try_lower_elements(vec![(*comment_element).clone()], scope)?;
-    let printer = Printer::new(usize::MAX / 2, INDENT.len());
-    let first_line = printer.print(&document, 0).lines().next()?.to_string();
-    let comment_first_line = printer
-        .print(&comment_document, 0)
-        .lines()
-        .next()?
-        .to_string();
-    // The nested document's own hanging indent is relative to its containing
-    // atom, so carry that atom's formatted cell offset into the row document.
-    let offset = first_line[..first_line.rfind(&comment_first_line)?]
-        .chars()
-        .count();
-    Some((document, offset))
-}
-
-fn contains_nested_comment(element: &SyntaxElement) -> bool {
-    element.as_node().is_some_and(|node| {
-        node.descendants_with_tokens()
-            .filter_map(|descendant| descendant.into_token())
-            .any(|token| token.kind() == SyntaxKind::MATH_COMMENT)
-    })
-}
-
-/// Pad cells to their column width and join with the canonical ` & ` separator
-/// (matches latexindent: one space on each side of `&`). The last cell is padded
-/// only when the row has a trailing `\\` — so the `\\` line up — and never on a
-/// final/soft-break row, which would leave trailing whitespace. Single-cell rows
-/// are never padded.
-fn join_cells(cells: &[String], widths: &[usize], has_break: bool) -> String {
-    if cells.is_empty() {
-        return String::new();
-    }
-    if cells.len() == 1 {
-        return cells[0].clone();
-    }
-    let last = cells.len() - 1;
-    let mut parts: Vec<String> = Vec::with_capacity(cells.len());
-    for (col, cell) in cells.iter().enumerate() {
-        if col == last && !has_break {
-            parts.push(cell.clone());
-        } else {
-            let width = widths.get(col).copied().unwrap_or(0);
-            parts.push(pad_right(cell, width));
-        }
-    }
-    parts.join(" & ")
-}
-
-fn pad_right(s: &str, width: usize) -> String {
-    let len = s.chars().count();
-    if len >= width {
-        s.to_string()
-    } else {
-        format!("{s}{}", " ".repeat(width - len))
-    }
-}
-
 fn with_break(line: String, break_text: Option<&str>) -> String {
     let Some(break_text) = break_text else {
         return line;
@@ -1208,21 +750,6 @@ struct Row {
 impl Row {
     fn is_blank(&self) -> bool {
         self.break_text.is_none() && self.elems.iter().all(is_layout_whitespace)
-    }
-
-    fn single_environment(&self) -> Option<SyntaxNode> {
-        if self.break_text.is_some() {
-            return None;
-        }
-        let mut content = self.elems.iter().filter(|el| !is_layout_whitespace(el));
-        let first = content.next()?;
-        if content.next().is_some() {
-            return None;
-        }
-        first
-            .as_node()
-            .filter(|n| n.kind() == SyntaxKind::MATH_ENVIRONMENT)
-            .cloned()
     }
 }
 
@@ -1276,47 +803,6 @@ fn split_logical_rows(elems: &[SyntaxElement]) -> Vec<Row> {
         });
     }
     rows
-}
-
-fn split_rows(elems: &[SyntaxElement]) -> Vec<Row> {
-    let mut rows: Vec<Row> = Vec::new();
-    let mut cur: Vec<SyntaxElement> = Vec::new();
-    for el in elems {
-        match el.kind() {
-            SyntaxKind::MATH_LINE_BREAK => {
-                rows.push(Row {
-                    elems: std::mem::take(&mut cur),
-                    break_text: Some(el.to_string()),
-                });
-            }
-            SyntaxKind::MATH_NEWLINE => {
-                rows.push(Row {
-                    elems: std::mem::take(&mut cur),
-                    break_text: None,
-                });
-            }
-            _ => cur.push(el.clone()),
-        }
-    }
-    if !cur.is_empty() {
-        rows.push(Row {
-            elems: cur,
-            break_text: None,
-        });
-    }
-    rows
-}
-
-fn split_cells(elems: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
-    let mut cells: Vec<Vec<SyntaxElement>> = vec![Vec::new()];
-    for el in elems {
-        if el.kind() == SyntaxKind::MATH_ALIGN {
-            cells.push(Vec::new());
-        } else {
-            cells.last_mut().expect("seeded").push(el.clone());
-        }
-    }
-    cells
 }
 
 pub(super) fn is_layout_whitespace(el: &SyntaxElement) -> bool {

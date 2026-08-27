@@ -9,11 +9,14 @@ use rowan::ast::AstNode;
 
 use crate::syntax::{
     MathArgument, MathCommand, MathContent, MathDelimited, MathEnvironment, MathGroup,
-    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
+    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxToken,
 };
 
 use super::ir::Ir;
+use super::printer::Printer;
 use super::{MathFormatOptions, render};
+
+const INDENT_WIDTH: usize = 2;
 
 /// Lower a supported math content body into the shared document IR.
 ///
@@ -88,7 +91,29 @@ pub(super) fn try_lower_display_elements(
     }
 }
 
-/// Lower a free display containing one comment-bearing top-level environment.
+/// Lower inline content containing one top-level environment.
+pub(super) fn try_lower_inline_environment(
+    elements: Vec<SyntaxElement>,
+    opts: &MathFormatOptions,
+) -> Option<Ir> {
+    try_lower_environment_composition(elements, opts, 1)
+}
+
+pub(super) fn try_lower_environment_composition(
+    elements: Vec<SyntaxElement>,
+    opts: &MathFormatOptions,
+    hanging_offset: usize,
+) -> Option<Ir> {
+    let mut pieces = try_lower_environment_pieces(elements, opts)?;
+    for piece in &mut pieces {
+        if piece.multiline_tail_width.is_some() {
+            piece.document = Ir::align(hanging_offset, piece.document.clone());
+        }
+    }
+    Some(document_from_pieces(&pieces, Spacing::Normal))
+}
+
+/// Lower a free display containing one top-level environment.
 ///
 /// The environment is a semantic operand whose forced lines participate in
 /// the same binary- and relation-led layout as every other typed atom. Its
@@ -99,6 +124,68 @@ pub(super) fn try_lower_display_environment(
     opts: &MathFormatOptions,
     line_width: usize,
 ) -> Option<Ir> {
+    let pieces = try_lower_environment_pieces(elements, opts)?;
+    Some(
+        layout_enclosed_environment(&pieces)
+            .unwrap_or_else(|| layout_display_pieces(&pieces, line_width, Spacing::Normal)),
+    )
+}
+
+/// Make ordinary delimiters participate in the forced layout of an enclosed
+/// environment. The semantic atom stream supplies delimiter and punctuation
+/// boundaries even when several characters share one CST word token.
+fn layout_enclosed_environment(pieces: &[Piece]) -> Option<Ir> {
+    let environment = pieces
+        .iter()
+        .position(|piece| piece.multiline_tail_width.is_some())?;
+    let mut openings = Vec::new();
+    let mut enclosure = None;
+    for (index, piece) in pieces.iter().enumerate() {
+        match piece.delimiter {
+            Some(DelimiterRole::Open) => openings.push(index),
+            Some(DelimiterRole::Close) => {
+                let open = openings.pop()?;
+                if open < environment && environment < index {
+                    enclosure = Some((open, index));
+                }
+            }
+            Some(DelimiterRole::Fence) | None => {}
+        }
+    }
+    let (open, close) = enclosure?;
+    let mut segments = Vec::new();
+    let mut start = open + 1;
+    let mut depth = 0usize;
+    for index in open + 1..close {
+        match pieces[index].delimiter {
+            Some(DelimiterRole::Open) => depth += 1,
+            Some(DelimiterRole::Close) => depth = depth.saturating_sub(1),
+            Some(DelimiterRole::Fence) | None => {}
+        }
+        if depth == 0 && pieces[index].punctuation {
+            segments.push(document_from_pieces(
+                &pieces[start..=index],
+                Spacing::Normal,
+            ));
+            start = index + 1;
+        }
+    }
+    if start < close {
+        segments.push(document_from_pieces(&pieces[start..close], Spacing::Normal));
+    }
+    let body = Ir::join(Ir::HardLine, segments);
+    Some(Ir::group(Ir::concat([
+        document_from_pieces(&pieces[..=open], Spacing::Normal),
+        Ir::indent(Ir::concat([Ir::SoftLine, body])),
+        Ir::SoftLine,
+        document_from_pieces(&pieces[close..], Spacing::Normal),
+    ])))
+}
+
+fn try_lower_environment_pieces(
+    elements: Vec<SyntaxElement>,
+    opts: &MathFormatOptions,
+) -> Option<Vec<Piece>> {
     let environment_indices = elements
         .iter()
         .enumerate()
@@ -109,13 +196,6 @@ pub(super) fn try_lower_display_environment(
     };
     let environment_element = &elements[*environment_index];
     let (environment, scripted) = display_environment(environment_element)?;
-    if !environment
-        .syntax()
-        .descendants_with_tokens()
-        .any(|descendant| descendant.kind() == SyntaxKind::MATH_COMMENT)
-    {
-        return None;
-    }
     let end = environment.end()?;
     let script_document = match scripted.as_ref() {
         Some(scripted) => {
@@ -134,7 +214,7 @@ pub(super) fn try_lower_display_environment(
     let script_width = script_document.as_ref().map_or(Some(0), Ir::flat_width)?;
     let end_width = end.syntax().text().to_string().chars().count() + script_width;
     let environment_document = Ir::concat([
-        render::environment_document(environment.syntax(), opts)?,
+        try_lower_environment_document(&environment, opts)?,
         script_document.unwrap_or(Ir::Nil),
     ]);
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
@@ -146,9 +226,6 @@ pub(super) fn try_lower_display_environment(
     let before = &elements[..*environment_index];
     let after = &elements[*environment_index + 1..];
     let before_atoms = semantic_atoms_for(before, &semantic_atoms);
-    if !display_environment_has_supported_prefix(before, &before_atoms) {
-        return None;
-    }
     let mut pieces = lower_pieces_with_atoms(
         before,
         &before_atoms,
@@ -162,6 +239,7 @@ pub(super) fn try_lower_display_environment(
         delimiter: environment_atom.delimiter,
         assignment: false,
         definition: false,
+        punctuation: false,
         unary: environment_atom.coerced_unary,
         authored_space_before: before_atoms
             .last()
@@ -173,78 +251,21 @@ pub(super) fn try_lower_display_environment(
         multiline_tail_width: Some(end_width),
         document: environment_document,
     });
-    let after_pieces = lower_pieces_with_atoms(
+    let after_atoms = semantic_atoms_for(after, &semantic_atoms);
+    let mut after_pieces = lower_pieces_with_atoms(
         after,
-        &semantic_atoms_for(after, &semantic_atoms),
+        &after_atoms,
         &opts.signature_scope,
         Spacing::Normal,
         true,
         false,
     )?;
+    if let (Some(piece), Some(atom)) = (after_pieces.first_mut(), after_atoms.first()) {
+        piece.authored_space_before = environment_atom.range.end() < atom.range.start();
+    }
     pieces.extend(after_pieces);
 
-    Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
-}
-
-fn display_environment_has_supported_prefix(
-    elements: &[SyntaxElement],
-    atoms: &[SemanticMathAtom],
-) -> bool {
-    let Some((last, prefix)) = atoms.split_last() else {
-        return false;
-    };
-    if matches!(
-        last.break_priority,
-        MathBreakPriority::Binary | MathBreakPriority::Relation
-    ) {
-        return !prefix.is_empty();
-    }
-
-    if !last.coerced_unary && last.class == MathClass::Ord {
-        return true;
-    }
-
-    if last.class == MathClass::Inner && is_structured_inner_operand(elements, last.range) {
-        return true;
-    }
-
-    last.coerced_unary
-        && prefix.last().is_some_and(|atom| {
-            matches!(
-                atom.break_priority,
-                MathBreakPriority::Binary | MathBreakPriority::Relation
-            )
-        })
-        && elements.iter().any(|element| {
-            let Some(token) = element.as_token().filter(|token| {
-                token.kind() == SyntaxKind::MATH_WORD
-                    && token.text_range().start() <= last.range.start()
-                    && token.text_range().end() >= last.range.end()
-            }) else {
-                return false;
-            };
-            token_slice(last.range, token).is_some_and(|text| matches!(text.as_str(), "+" | "-"))
-        })
-}
-
-fn is_structured_inner_operand(elements: &[SyntaxElement], range: TextRange) -> bool {
-    elements.iter().any(|element| {
-        if element.text_range() != range {
-            return false;
-        }
-        let Some(node) = element.as_node() else {
-            return false;
-        };
-        let is_supported_base = |node: SyntaxNode| {
-            MathDelimited::cast(node.clone()).is_some()
-                || MathGroup::cast(node).is_some_and(|group| group.is_closed())
-        };
-        is_supported_base(node.clone())
-            || MathScripted::cast(node.clone())
-                .and_then(|scripted| scripted.base())
-                .and_then(SyntaxElement::into_node)
-                .is_some_and(is_supported_base)
-    })
+    Some(pieces)
 }
 
 fn display_environment(element: &SyntaxElement) -> Option<(MathEnvironment, Option<MathScripted>)> {
@@ -306,7 +327,7 @@ pub(super) fn try_lower_delimited_environment(
     let body_document = match body_elements.as_slice() {
         [element] => {
             let environment = element.as_node().cloned().and_then(MathEnvironment::cast)?;
-            render::environment_document(environment.syntax(), opts)?
+            try_lower_environment_document(&environment, opts)?
         }
         _ => render::mixed_delimited_environment_document(&body, opts)?,
     };
@@ -338,6 +359,359 @@ pub(super) fn try_lower_environment_content(
         true,
         true,
     )
+}
+
+/// Lower the bare body of a host raw environment through the same row and cell
+/// path used by nested TeX environments.
+pub(super) fn try_lower_environment_body(
+    elements: &[SyntaxElement],
+    opts: &MathFormatOptions,
+) -> Option<Ir> {
+    lower_environment_rows(elements, opts)
+}
+
+/// Lower a well-formed TeX environment, including its derived row and cell
+/// layout, into the shared document IR.
+pub(super) fn try_lower_environment_document(
+    environment: &MathEnvironment,
+    opts: &MathFormatOptions,
+) -> Option<Ir> {
+    let begin = environment.begin()?;
+    let end = environment.end()?;
+    let begin_name = begin.name()?;
+    let end_name = end.name()?;
+    if begin_name != end_name
+        || begin.syntax().text().to_string() != format!(r"\begin{{{begin_name}}}")
+        || end.syntax().text().to_string() != format!(r"\end{{{end_name}}}")
+    {
+        return None;
+    }
+
+    let body = environment.body()?;
+    let body = lower_environment_rows(
+        &body.syntax().children_with_tokens().collect::<Vec<_>>(),
+        opts,
+    )?;
+    Some(Ir::concat([
+        Ir::verbatim(begin.syntax().text().to_string()),
+        Ir::indent(Ir::concat([Ir::HardLine, body])),
+        Ir::HardLine,
+        Ir::verbatim(end.syntax().text().to_string()),
+    ]))
+}
+
+#[derive(Debug)]
+struct EnvironmentRow {
+    elements: Vec<SyntaxElement>,
+    break_text: Option<String>,
+}
+
+impl EnvironmentRow {
+    fn is_blank(&self) -> bool {
+        self.break_text.is_none() && self.elements.iter().all(is_layout_trivia)
+    }
+
+    fn single_environment(&self) -> Option<MathEnvironment> {
+        if self.break_text.is_some() {
+            return None;
+        }
+        let mut content = self
+            .elements
+            .iter()
+            .filter(|element| !is_layout_trivia(element));
+        let environment = content
+            .next()?
+            .as_node()
+            .cloned()
+            .and_then(MathEnvironment::cast)?;
+        content.next().is_none().then_some(environment)
+    }
+}
+
+#[derive(Debug)]
+struct EnvironmentCell {
+    document: Ir,
+    atom_offset: usize,
+}
+
+impl EnvironmentCell {
+    fn first_line_width(&self, printer: &Printer) -> usize {
+        printer
+            .print(&self.document, 0)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count()
+    }
+
+    fn starts_relation(&self) -> bool {
+        let rendered = Printer::new(usize::MAX / 2, INDENT_WIDTH).print(&self.document, 0);
+        let text = rendered.trim_start();
+        if text.starts_with(['=', '<', '>']) || text.starts_with(":=") {
+            return true;
+        }
+        let Some(command) = text.strip_prefix('\\') else {
+            return false;
+        };
+        let name = command
+            .chars()
+            .take_while(|character| character.is_ascii_alphabetic())
+            .collect::<String>();
+        super::operators::command_class(&name) == Some(super::operators::AtomClass::Rel)
+    }
+}
+
+enum EnvironmentBodyItem {
+    Block(Ir),
+    Row {
+        cells: Vec<EnvironmentCell>,
+        break_text: Option<String>,
+    },
+}
+
+fn lower_environment_rows(elements: &[SyntaxElement], opts: &MathFormatOptions) -> Option<Ir> {
+    let printer = Printer::new(opts.line_width, INDENT_WIDTH);
+    let rows = split_environment_rows(elements);
+    let has_authored_break = rows.iter().any(|row| row.break_text.is_some());
+    let mut items = Vec::new();
+
+    for row in rows {
+        if row.is_blank() {
+            continue;
+        }
+        if let Some(environment) = row.single_environment() {
+            items.push(EnvironmentBodyItem::Block(try_lower_environment_document(
+                &environment,
+                opts,
+            )?));
+            continue;
+        }
+
+        let cells = split_environment_cells(&row.elements)
+            .into_iter()
+            .map(|elements| lower_environment_cell(elements, &opts.signature_scope))
+            .collect::<Option<Vec<_>>>()?;
+        items.push(EnvironmentBodyItem::Row {
+            cells,
+            break_text: row.break_text,
+        });
+    }
+
+    let tight_grid = items.iter().any(|item| match item {
+        EnvironmentBodyItem::Row { cells, .. } => cells
+            .iter()
+            .take(cells.len().saturating_sub(1))
+            .any(|cell| cell.document.contains_forced_break()),
+        EnvironmentBodyItem::Block(_) => false,
+    });
+    let widths = environment_column_widths(&items, &printer);
+    let mut rows = Vec::new();
+    for item in items {
+        let document = match item {
+            EnvironmentBodyItem::Block(document) => document,
+            EnvironmentBodyItem::Row { cells, break_text } if tight_grid => {
+                join_tight_environment_cells(&cells, break_text.as_deref())
+            }
+            EnvironmentBodyItem::Row { cells, break_text } => {
+                join_environment_cells(&cells, &widths, break_text.as_deref())
+            }
+        };
+        rows.push(document);
+    }
+
+    if rows.is_empty() && !has_authored_break {
+        Some(Ir::Nil)
+    } else {
+        Some(Ir::join(Ir::HardLine, rows))
+    }
+}
+
+fn lower_environment_cell(
+    elements: Vec<SyntaxElement>,
+    scope: &SignatureScope,
+) -> Option<EnvironmentCell> {
+    let comment_elements = elements
+        .iter()
+        .filter(|element| contains_nested_comment(element))
+        .cloned()
+        .collect::<Vec<_>>();
+    let document = lower_environment_cell_elements(elements, scope)?;
+    let atom_offset = match comment_elements.as_slice() {
+        [] => 0,
+        [comment_element] => {
+            let comment_document = try_lower_elements(vec![comment_element.clone()], scope)?;
+            let printer = Printer::new(usize::MAX / 2, INDENT_WIDTH);
+            let first_line = printer.print(&document, 0).lines().next()?.to_string();
+            let comment_first_line = printer
+                .print(&comment_document, 0)
+                .lines()
+                .next()?
+                .to_string();
+            first_line[..first_line.rfind(&comment_first_line)?]
+                .chars()
+                .count()
+        }
+        _ => return None,
+    };
+    Some(EnvironmentCell {
+        document,
+        atom_offset,
+    })
+}
+
+fn lower_environment_cell_elements(
+    elements: Vec<SyntaxElement>,
+    scope: &SignatureScope,
+) -> Option<Ir> {
+    if !elements
+        .iter()
+        .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
+    {
+        return try_lower_elements(elements, scope);
+    }
+
+    let mut documents = Vec::new();
+    let mut segment = Vec::new();
+    for element in elements {
+        if element.kind() == SyntaxKind::MATH_EQUATION_LABEL {
+            let trailing_space = segment
+                .last()
+                .is_some_and(|element: &SyntaxElement| element.kind() == SyntaxKind::MATH_SPACE);
+            documents.push(try_lower_elements(std::mem::take(&mut segment), scope)?);
+            if trailing_space {
+                documents.push(Ir::text(" "));
+            }
+            documents.push(Ir::verbatim(element.to_string()));
+        } else {
+            segment.push(element);
+        }
+    }
+    documents.push(try_lower_elements(segment, scope)?);
+    Some(Ir::concat(documents))
+}
+
+fn contains_nested_comment(element: &SyntaxElement) -> bool {
+    element.as_node().is_some_and(|node| {
+        node.descendants_with_tokens()
+            .any(|element| element.kind() == SyntaxKind::MATH_COMMENT)
+    })
+}
+
+fn split_environment_rows(elements: &[SyntaxElement]) -> Vec<EnvironmentRow> {
+    let mut rows = Vec::new();
+    let mut current = Vec::new();
+    for element in elements {
+        match element.kind() {
+            SyntaxKind::MATH_LINE_BREAK => rows.push(EnvironmentRow {
+                elements: std::mem::take(&mut current),
+                break_text: Some(element.to_string()),
+            }),
+            SyntaxKind::MATH_NEWLINE => rows.push(EnvironmentRow {
+                elements: std::mem::take(&mut current),
+                break_text: None,
+            }),
+            _ => current.push(element.clone()),
+        }
+    }
+    if !current.is_empty() {
+        rows.push(EnvironmentRow {
+            elements: current,
+            break_text: None,
+        });
+    }
+    rows
+}
+
+fn split_environment_cells(elements: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
+    let mut cells = vec![Vec::new()];
+    for element in elements {
+        if element.kind() == SyntaxKind::MATH_ALIGN {
+            cells.push(Vec::new());
+        } else {
+            cells.last_mut().expect("seeded cell").push(element.clone());
+        }
+    }
+    cells
+}
+
+fn environment_column_widths(items: &[EnvironmentBodyItem], printer: &Printer) -> Vec<usize> {
+    let mut widths = Vec::new();
+    for item in items {
+        let EnvironmentBodyItem::Row { cells, .. } = item else {
+            continue;
+        };
+        if cells.len() < 2 {
+            continue;
+        }
+        for (column, cell) in cells.iter().enumerate() {
+            if column >= widths.len() {
+                widths.resize(column + 1, 0);
+            }
+            widths[column] = widths[column].max(cell.first_line_width(printer));
+        }
+    }
+    widths
+}
+
+fn join_tight_environment_cells(cells: &[EnvironmentCell], break_text: Option<&str>) -> Ir {
+    let mut documents = Vec::new();
+    for (column, cell) in cells.iter().enumerate() {
+        if column > 0 {
+            documents.push(Ir::text("&"));
+            if cell.starts_relation() {
+                documents.push(Ir::text(" "));
+            }
+        }
+        documents.push(cell.document.clone());
+    }
+    if let Some(marker) = break_text {
+        documents.push(Ir::verbatim(marker));
+    }
+    Ir::concat(documents)
+}
+
+fn join_environment_cells(
+    cells: &[EnvironmentCell],
+    widths: &[usize],
+    break_text: Option<&str>,
+) -> Ir {
+    let printer = Printer::new(usize::MAX / 2, INDENT_WIDTH);
+    let last = cells.len().saturating_sub(1);
+    let mut documents = Vec::new();
+    let mut prefix_width = 0;
+    for (column, cell) in cells.iter().enumerate() {
+        if column > 0 {
+            documents.push(Ir::text(" & "));
+            prefix_width += 3;
+        }
+        let document = Ir::align(
+            prefix_width,
+            Ir::align(cell.atom_offset, cell.document.clone()),
+        );
+        documents.push(document);
+        let width = cell.first_line_width(&printer);
+        let padding = if column == last && break_text.is_none() {
+            0
+        } else {
+            widths
+                .get(column)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(width)
+        };
+        if padding > 0 {
+            documents.push(Ir::text(" ".repeat(padding)));
+        }
+        prefix_width += width + padding;
+    }
+    if let Some(marker) = break_text {
+        if !cells.is_empty() {
+            documents.push(Ir::text(" "));
+        }
+        documents.push(Ir::verbatim(marker));
+    }
+    Ir::concat(documents)
 }
 
 /// Lower a formatter-derived row or cell without inventing a CST wrapper.
@@ -986,6 +1360,7 @@ fn lower_pieces_with_atoms(
                 && relation_is_assignment(atom, elements),
             definition: atom.break_priority == MathBreakPriority::Relation
                 && is_definition_relation(atom, elements),
+            punctuation: atom.class == MathClass::Punct,
             unary: atom.coerced_unary,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
             slash: atom_document.slash,
@@ -1390,7 +1765,7 @@ fn assignment_element(element: &SyntaxElement) -> bool {
     }
 }
 
-fn has_unsupported_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
+pub(super) fn has_unsupported_scripted_composite_relation(elements: &[SyntaxElement]) -> bool {
     // The legacy renderer fuses an adjacent relation head with the scalar that
     // owns the script (`x<` + `=_i`). Definition relations are supported by
     // typed lowering; keep the other seams on the fallback because the pinned
@@ -1421,6 +1796,46 @@ fn has_unsupported_scripted_composite_relation(elements: &[SyntaxElement]) -> bo
             '=' | '<' | '>' => matches!(base, '=' | '<' | '>'),
             _ => false,
         }
+    })
+}
+
+pub(super) fn has_unproven_argument_domain(
+    elements: &[SyntaxElement],
+    scope: &SignatureScope,
+) -> bool {
+    elements.iter().any(|element| {
+        let Some(node) = element.as_node() else {
+            return false;
+        };
+        std::iter::once(node.clone())
+            .chain(node.descendants())
+            .filter_map(MathCommand::cast)
+            .any(|command| command_has_unproven_argument_domain(&command, scope))
+    })
+}
+
+fn command_has_unproven_argument_domain(command: &MathCommand, scope: &SignatureScope) -> bool {
+    let arguments = command.attached_arguments().collect::<Vec<_>>();
+    if arguments.is_empty() {
+        return false;
+    }
+    let Some(name) = command.name() else {
+        return true;
+    };
+    if scope.is_redefined(&name) {
+        return true;
+    }
+    let Some(signature) = scope.command_signature(&name) else {
+        return true;
+    };
+    let mut slot = 0;
+    arguments.into_iter().any(|argument| {
+        let kind = match argument {
+            MathArgument::Brace(_) => ArgKind::Brace,
+            MathArgument::Bracket(_) => ArgKind::Bracket,
+        };
+        match_arg_slot(&signature.arguments, &mut slot, kind)
+            .is_none_or(|argument| argument.domain != ArgumentDomain::Math)
     })
 }
 
@@ -1759,21 +2174,45 @@ fn lower_command(
         return Some(Ir::verbatim(name.text()));
     }
 
-    let arguments = matched_math_arguments(command, scope)?;
+    let Some(arguments) = matched_command_arguments(command, scope) else {
+        let source = opaque_command_source(command, scope)?;
+        return Some(if source.contains('\n') {
+            Ir::verbatim(source)
+        } else {
+            Ir::text(source)
+        });
+    };
     let mut previous_end = name.text_range().end();
     let mut documents = vec![Ir::verbatim(name.text())];
     if let Some(star) = command.star_token() {
         documents.push(Ir::verbatim(star.text()));
         previous_end = star.text_range().end();
     }
-    for argument in arguments {
+    for (argument, domain) in arguments {
         let open = argument.open_token()?;
         let close = argument.close_token()?;
-        let elements = argument.body_elements().collect::<Vec<_>>();
-        let body = hanging(
-            1,
-            lower_body(elements, scope, spacing, preserve_comment_context, false)?,
-        );
+        let body = if domain == ArgumentDomain::Math {
+            hanging(
+                1,
+                lower_body(
+                    argument.body_elements().collect(),
+                    scope,
+                    spacing,
+                    preserve_comment_context,
+                    false,
+                )?,
+            )
+        } else {
+            let source = argument.syntax().text().to_string();
+            let body = source
+                .strip_prefix(open.text())?
+                .strip_suffix(close.text())?;
+            if body.contains('\n') {
+                Ir::verbatim(body.to_owned())
+            } else {
+                Ir::text(body.to_owned())
+            }
+        };
         if previous_end < argument.syntax().text_range().start() {
             documents.push(Ir::text(" "));
         }
@@ -1784,7 +2223,35 @@ fn lower_command(
 }
 
 fn command_is_supported(command: &MathCommand, scope: &SignatureScope) -> bool {
-    is_supported_bare_command(command, scope) || matched_math_arguments(command, scope).is_some()
+    is_supported_bare_command(command, scope)
+        || matched_command_arguments(command, scope).is_some()
+        || opaque_command_source(command, scope).is_some()
+}
+
+fn opaque_command_source(command: &MathCommand, scope: &SignatureScope) -> Option<String> {
+    let name = command.name()?;
+    if scope.command_signature(&name).is_some() && !scope.is_redefined(&name) {
+        return None;
+    }
+    let arguments = command.attached_arguments().collect::<Vec<_>>();
+    if arguments.is_empty() || arguments.iter().any(|argument| !argument.is_closed()) {
+        return None;
+    }
+    command
+        .syntax()
+        .children_with_tokens()
+        .all(|element| match element {
+            SyntaxElement::Token(token) => {
+                matches!(
+                    token.kind(),
+                    SyntaxKind::MATH_CONTROL_WORD
+                        | SyntaxKind::MATH_SPACE
+                        | SyntaxKind::MATH_NEWLINE
+                ) || token.kind() == SyntaxKind::MATH_WORD && token.text() == "*"
+            }
+            SyntaxElement::Node(node) => MathArgument::cast(node).is_some(),
+        })
+        .then(|| command.syntax().text().to_string())
 }
 
 fn is_supported_bare_command(command: &MathCommand, scope: &SignatureScope) -> bool {
@@ -1809,10 +2276,10 @@ fn is_supported_bare_command(command: &MathCommand, scope: &SignatureScope) -> b
     })
 }
 
-fn matched_math_arguments(
+fn matched_command_arguments(
     command: &MathCommand,
     scope: &SignatureScope,
-) -> Option<Vec<MathArgument>> {
+) -> Option<Vec<(MathArgument, ArgumentDomain)>> {
     if !command
         .syntax()
         .children_with_tokens()
@@ -1843,11 +2310,9 @@ fn matched_math_arguments(
             MathArgument::Brace(_) => ArgKind::Brace,
             MathArgument::Bracket(_) => ArgKind::Bracket,
         };
-        let spec = match_arg_slot(&signature.arguments, &mut slot, kind)?;
-        if spec.domain != ArgumentDomain::Math {
-            return None;
-        }
-        matched.push(argument);
+        let domain = match_arg_slot(&signature.arguments, &mut slot, kind)
+            .map_or(ArgumentDomain::Unknown, |argument| argument.domain);
+        matched.push((argument, domain));
     }
 
     if signature.arguments[slot..]
@@ -1864,6 +2329,7 @@ struct Piece {
     delimiter: Option<DelimiterRole>,
     assignment: bool,
     definition: bool,
+    punctuation: bool,
     /// A `+`/`-` that TeX coerced to a unary sign. It binds to the operand
     /// beside it, so it strips the authored space on either side.
     unary: bool,
@@ -2493,7 +2959,6 @@ mod tests {
         for input in [
             "x^",
             "x^% argument comment\n2",
-            r"\text{ a+b }^2",
             r"x<=_iy",
             r"x>=_iy",
             r"a==_kb",
@@ -2527,15 +2992,20 @@ mod tests {
 
     #[test]
     fn rejects_commands_without_a_complete_math_signature_match() {
+        for input in [r"\frac{a}", r"\frac{a}{b", "\\frac% keep\n{a}{b}"] {
+            assert_eq!(lower(input), None, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn preserves_nonmath_and_unproven_argument_domains_opaquely() {
         for input in [
             r"\text{ a+b }",
+            r"\text{ a+b }^2",
             r"\unknown{ a+b }",
-            r"\frac{a}",
             r"\frac{a}{b}{c}",
-            r"\frac{a}{b",
-            "\\frac% keep\n{a}{b}",
         ] {
-            assert_eq!(lower(input), None, "{input:?}");
+            assert_eq!(lower(input).as_deref(), Some(input), "{input:?}");
         }
     }
 
