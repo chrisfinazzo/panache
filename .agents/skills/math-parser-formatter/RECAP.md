@@ -64,30 +64,27 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Brace-group-prefixed comment-bearing display environments.** The typed
-multiline-atom path now accepts a closed ordinary `{…}` group immediately before
-the single top-level environment.
+**Migration roadmap reset.** The implementation audit found that the Phase 4
+checkboxes understated behavioral progress while concealing how much legacy
+renderer code remained live.
 
-- Bare and scripted group operands remain tight to `\begin`; the environment
-  body and closing marker hang from that resulting source column.
-- The prefix gate now recognizes supported structured `Inner` operands: a
-  `MATH_GROUP` with its closing brace or a `MATH_DELIMITED`, directly or as the
-  base of a `MATH_SCRIPTED` node. Unclosed groups remain on the compatibility
-  path.
-- Mandatory Badness parity and idempotency cases cover bare and scripted group
-  prefixes. The host golden pins the experimental Markdown display shape, a
-  focused MathML check guards meaning preservation, and `STYLE.md` records the
-  rule.
-- The shared corpus and its parity classifications did not change, so the
-  committed report needs no update.
+- `TODO.md` now records the typed behaviors already delivered instead of
+  leaving their compound migration-and-deletion items unchecked.
+- The remaining work is ordered by deletion boundary: measure renderer routes,
+  classify every preserved case, unify environment composition, delete the
+  flattened formatter, and close the host-delimiter matrix.
+- The roadmap now forbids an unclassified catch-all compatibility bucket and
+  gives Phase 4 an observable exit condition: no well-formed supported input
+  may use the legacy route.
+- No formatter behavior changed in this documentation-only session.
 
 ### Suggested next sub-targets
 
-1. Probe signature-proven `Inner` command operands immediately before a
-   comment-bearing display environment; admit only commands with a stable
-   Badness composition rule and fully supported typed arguments.
-2. Revisit unpunctuated multiple environments only with a pinned structural
-   composition rule; keep the current fallback.
-3. Revisit non-colon scripted composite relations only after the pinned Badness
-   formatter defect is corrected; keep their compatibility path in the
-   meantime.
+1. Add the migration census described in `TODO.md`. Expose a test-visible route
+   classification (`Typed`, `Legacy`, or `Verbatim`) without changing formatter
+   output, run it over every shared-corpus context, and commit the report.
+2. Use the census—not ad hoc operand discovery—to choose the first legacy
+   environment subsystem whose complete removal eliminates a coherent group of
+   legacy entries.
+3. Keep non-colon scripted composite relations as a named intentional
+   difference until the pinned Badness formatter defect is corrected.

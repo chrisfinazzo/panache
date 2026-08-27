@@ -289,35 +289,71 @@ formatter-off output byte-identical.
      delimiters/environments, comments, and authored line breaks. Derive
      expectations through the pinned oracles.
 
-4. **Replace the legacy formatter in bounded parity slices.**
+4. **Finish the typed formatter migration.**
+
+   The behavioral slices below have landed. Do not keep expanding them one
+   operand shape at a time without first completing the migration census and
+   selecting a legacy subsystem for deletion.
 
    - [x] Complete the Panache-owned Badness-style document IR and printer, then
      lower words, trivia, groups, and signature-proven arguments into it.
-     Leave unsupported shapes on the existing conservative fallback.
-   - [ ] Lower commands, scripts, and paired delimiters through the shared
-     semantic atom stream. Remove the corresponding flattened-token logic,
-     string assembly, script sentinels, and formatter-local operator
-     semantics only after each slice reaches mandatory byte parity.
-   - [ ] Lower comments, authored breaks, display wrapping, nested environments,
-     and environment grids. Replace the separate embedded-environment path
-     once the shared cases pass in every controlled context.
-   - [ ] Reconnect the new formatter to Markdown delimiter spelling and the
-     existing experimental gate. Enabling the gate must produce the same TeX
-     style in every host delimiter form; disabling it must remain
-     byte-exact.
+   - [x] Lower supported commands, scripts, and paired delimiters through the
+     shared semantic atom stream, with mandatory Badness parity for each
+     shape.
+   - [x] Lower comments, authored breaks, and free-display wrapping through the
+     shared semantic atom stream.
+   - [x] Lower environment bodies, authored rows, nested environments, and
+     aligned grids into the document IR, including comment-bearing cells.
+   - [x] Connect the formatter to the existing experimental gate and the host's
+     inline, display, and raw-environment entry points. Gate-off continues
+     to select the pre-existing verbatim formatter behavior.
 
-5. **Remove the migration paths and enforce the final gates.**
+   Complete the remaining work in this order. Each deletion step must leave the
+   mandatory parity and idempotency suites green.
 
-   - [ ] Delete the old parser/renderer compatibility paths and obsolete math
-     token handling after the complete differential corpus passes. Run
-     parser losslessness, formatter idempotency, trivia-perturbation
+   - [ ] **Add a migration census.** Record, for every shared-corpus case and
+     controlled context, whether formatting used typed lowering, the legacy
+     renderer, or verbatim preservation. Commit a generated report and fail
+     the test if a case silently changes route without an intentional
+     update. This replaces the stale first-slice summary as the progress
+     measure.
+   - [ ] **Define the preservation boundary.** Give every remaining verbatim or
+     legacy census entry one explicit reason: malformed math, an unescaped
+     lone dollar, an unproven argument domain, a documented Panache/Badness
+     difference, or a still-missing supported shape. No catch-all
+     "unsupported" bucket may remain.
+   - [ ] **Unify environment composition.** Route supported inline, display,
+     delimited, mixed, and scripted environment compositions through typed
+     lowering. Then delete the separate embedded-environment string
+     assembly, row/grid renderer, and its environment-specific inline
+     helpers. The census must contain no well-formed environment on the
+     legacy route.
+   - [ ] **Delete the flattened formatter.** Replace the remaining callers of
+     `flatten_tokens`, script sentinels, the old line breaker, and
+     formatter-local operator semantics, then delete those implementations.
+     The census must contain no well-formed supported input on the legacy
+     route.
+   - [ ] **Close the host matrix.** For representative simple, scripted,
+     commented, wrapped, and environment content, assert identical TeX
+     bodies through `$…$`, `\(…\)`, `$$…$$`, `\[…\]`, and raw environments
+     as applicable. Assert the established gate-off output for every host
+     form.
+
+5. **Enforce the final gates and stabilize math formatting.**
+
+   - [ ] Regenerate the complete formatter report. Every applicable
+     corpus/context pair must have mandatory byte parity or a named
+     intentional difference; every preserved input must satisfy the boundary
+     above.
+   - [ ] Run parser losslessness, formatter idempotency, trivia-perturbation
      convergence, comment preservation, Badness parity, applicable MathML
      equivalence, and representative TeX/PDF checks.
-   - [ ] Run the workspace checks, compare parser/formatter performance, and
-     review WASM size before accepting the replacement.
-   - [ ] Document the resulting math style and supported semantic/configuration
-     model. Turn `format-math` into a stable gate and deprecate the
-     experimental setting.
+   - [ ] Run the workspace checks, compare parser and formatter performance with
+     the pre-migration baseline, and review WASM size.
+   - [ ] Document the resulting math style, intentional Badness differences,
+     preservation boundary, and supported semantic/configuration model.
+   - [ ] Turn `format-math` into a stable option and deprecate the experimental
+     setting.
 
 ## Parser
 
