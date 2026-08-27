@@ -11,12 +11,13 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use panache_formatter::MathMode;
 use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_math};
 use panache_parser::semantic::math::SignatureScope;
 
 fn options(context: MathContext) -> MathFormatOptions {
     MathFormatOptions {
-        enabled: true,
+        mode: MathMode::Reflow,
         math_indent: 2,
         line_width: 32,
         bookdown_equation_labels: false,

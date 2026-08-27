@@ -20,7 +20,7 @@
 
 *text $a * b$ end*
 
-**text $a ** b$ end**
+**text $a * *b$ end**
 
 ## Links in Emphasis
 

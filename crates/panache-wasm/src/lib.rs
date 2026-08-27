@@ -1,7 +1,8 @@
 use wasm_bindgen::prelude::*;
 
 use panache_formatter::config::{
-    BlankLines, Flavor, HorizontalRuleStyle, LineEnding, MathDelimiterStyle, TabStopMode, WrapMode,
+    BlankLines, Flavor, HorizontalRuleStyle, LineEnding, MathDelimiterStyle, MathMode, TabStopMode,
+    WrapMode,
 };
 
 fn parse_flavor(value: &str) -> Option<Flavor> {
@@ -53,6 +54,16 @@ fn parse_math_delimiter_style(value: &str) -> Option<MathDelimiterStyle> {
     }
 }
 
+fn parse_math_mode(value: &str) -> Option<MathMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "verbatim" => Some(MathMode::Verbatim),
+        "preserve" => Some(MathMode::Preserve),
+        "single-line" => Some(MathMode::SingleLine),
+        "reflow" => Some(MathMode::Reflow),
+        _ => None,
+    }
+}
+
 fn parse_horizontal_rule_style(value: &str) -> Option<HorizontalRuleStyle> {
     match value.to_ascii_lowercase().as_str() {
         "line-width" => Some(HorizontalRuleStyle::LineWidth),
@@ -87,6 +98,7 @@ pub fn format_qmd_with_options(
     blank_lines: Option<String>,
     line_ending: Option<String>,
     math_delimiter_style: Option<String>,
+    math: Option<String>,
     tab_stops: Option<String>,
     tab_width: Option<usize>,
     math_indent: Option<usize>,
@@ -133,6 +145,11 @@ pub fn format_qmd_with_options(
                     "Unsupported math delimiter style: {math_delimiter_style}"
                 ))
             })?;
+    }
+
+    if let Some(math) = math {
+        cfg.math = parse_math_mode(&math)
+            .ok_or_else(|| JsValue::from_str(&format!("Unsupported math mode: {math}")))?;
     }
 
     if let Some(tab_stops) = tab_stops {

@@ -1,8 +1,0 @@
-# Default
-
-$$
-  \begin{aligned}
-  x &= 1 \\
-  y &= 22
-  \end{aligned}
-$$

@@ -1,6 +1,6 @@
-use panache_formatter::Config;
 use panache_formatter::config::{Extensions, Flavor};
 use panache_formatter::format;
+use panache_formatter::{Config, MathMode};
 
 #[test]
 fn preserves_inline_code_whitespace() {
@@ -10,16 +10,19 @@ fn preserves_inline_code_whitespace() {
 }
 
 #[test]
-fn preserves_inline_math_whitespace() {
+fn default_reflow_normalizes_inline_math_whitespace() {
     let input = "Math: $x   +   y$";
     let output = format(input, None, None);
-    similar_asserts::assert_eq!(output, "Math: $x   +   y$\n");
+    similar_asserts::assert_eq!(output, "Math: $x + y$\n");
 }
 
 #[test]
 fn preserves_host_bookdown_label_when_math_formatting_is_disabled() {
     let input = "Math: $x   +   y (\\#eq:sum)$\n";
-    let mut config = Config::default();
+    let mut config = Config {
+        math: MathMode::Verbatim,
+        ..Default::default()
+    };
     config.parser_extensions.bookdown_equation_references = true;
 
     let output = format(input, Some(config), None);

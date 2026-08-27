@@ -120,7 +120,7 @@ fn test_deprecated_experimental_format_math_warns() {
         .stderr(predicate::str::contains(
             "`[experimental] format-math` is deprecated",
         ))
-        .stderr(predicate::str::contains("use `[format] format-math`"));
+        .stderr(predicate::str::contains("use `[format] math`"));
 }
 
 #[test]

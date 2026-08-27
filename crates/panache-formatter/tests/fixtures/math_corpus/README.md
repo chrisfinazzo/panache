@@ -11,8 +11,8 @@ Three harnesses walk this tree:
 
 - `tests/math_corpus_properties.rs` (**Tier 1**, always-on, no external dep):
   idempotency `format(format(x)) == format(x)`, parser losslessness
-  `parse(x).text() == x`, and gate-off verbatim `format(x, off) == x`. Covers
-  **every** case, including `macro_dependent/`.
+  `parse(x).text() == x`, and verbatim-mode preservation. Covers **every** case,
+  including `macro_dependent/`.
 - `tests/math_cross_validation.rs` (**Tier 2**, dev-only `pulldown-latex`
   oracle): semantic-equivalence invariance --- the formatter must not change the
   rendered meaning, asserted on normalized MathML

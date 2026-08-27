@@ -164,10 +164,11 @@ fn render_display(
     }
     if !top.iter().any(contains_environment)
         && let Some(document) = MathContent::cast(tree.clone()).and_then(|content| {
-            lower::try_lower_display_content(
+            lower::try_lower_display_content_with_mode(
                 &content,
                 &opts.signature_scope,
                 opts.line_width.saturating_sub(opts.math_indent),
+                opts.mode,
             )
         })
     {

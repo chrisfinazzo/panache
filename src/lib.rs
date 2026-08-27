@@ -27,6 +27,7 @@ mod yaml_regions;
 pub use config::BlankLines;
 pub use config::Config;
 pub use config::ConfigBuilder;
+pub use config::MathMode;
 #[cfg(not(target_arch = "wasm32"))]
 pub use external_tools_common::init_external_tool_budget;
 #[cfg(any(feature = "lsp", not(target_arch = "wasm32")))]

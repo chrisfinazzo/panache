@@ -3,4 +3,4 @@ line-width = 22
 
 [format]
 math-indent = 2
-format-math = true
+math = "reflow"

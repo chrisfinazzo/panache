@@ -2,4 +2,4 @@ flavor = "quarto"
 line-width = 20
 
 [format]
-format-math = true
+math = "reflow"

@@ -15,6 +15,7 @@ use crate::syntax::{
 use super::ir::Ir;
 use super::printer::Printer;
 use super::{MathFormatOptions, render};
+use crate::config::MathMode;
 
 const INDENT_WIDTH: usize = 2;
 
@@ -40,26 +41,39 @@ pub(super) fn try_lower_content(content: &MathContent, scope: &SignatureScope) -
 
 /// Lower a free display body, including Panache's implicit alignment for
 /// relation chains separated by authored `\\` row markers.
+#[cfg(test)]
 pub(super) fn try_lower_display_content(
     content: &MathContent,
     scope: &SignatureScope,
     line_width: usize,
 ) -> Option<Ir> {
-    let elements = content.elements().collect::<Vec<_>>();
-    try_lower_display_elements(elements, scope, line_width)
+    try_lower_display_content_with_mode(content, scope, line_width, MathMode::Reflow)
 }
 
-/// Lower a formatter-derived free-display segment without inventing a CST wrapper.
-pub(super) fn try_lower_display_elements(
+pub(super) fn try_lower_display_content_with_mode(
+    content: &MathContent,
+    scope: &SignatureScope,
+    line_width: usize,
+    mode: MathMode,
+) -> Option<Ir> {
+    let elements = content.elements().collect::<Vec<_>>();
+    try_lower_display_elements_with_mode(elements, scope, line_width, mode)
+}
+
+fn try_lower_display_elements_with_mode(
     elements: Vec<SyntaxElement>,
     scope: &SignatureScope,
     line_width: usize,
+    mode: MathMode,
 ) -> Option<Ir> {
     if elements
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
     {
-        return lower_display_equation_label(elements, scope, line_width);
+        return lower_display_equation_label(elements, scope, line_width, mode);
+    }
+    if mode == MathMode::Preserve {
+        return lower_preserved_display_lines(elements, scope);
     }
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
     if elements
@@ -75,7 +89,7 @@ pub(super) fn try_lower_display_elements(
                 preserve_comment_context: true,
                 environment_rows: false,
                 align_authored_relations: true,
-                display_width: Some(line_width),
+                display_width: (mode == MathMode::Reflow).then_some(line_width),
             },
         )
     } else if elements
@@ -99,7 +113,11 @@ pub(super) fn try_lower_display_elements(
             true,
             false,
         )?;
-        Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
+        Some(if mode == MathMode::Reflow {
+            layout_display_pieces(&pieces, line_width, Spacing::Normal)
+        } else {
+            document_from_pieces(&pieces, Spacing::Normal)
+        })
     }
 }
 
@@ -107,14 +125,70 @@ fn lower_display_equation_label(
     elements: Vec<SyntaxElement>,
     scope: &SignatureScope,
     line_width: usize,
+    mode: MathMode,
 ) -> Option<Ir> {
     let (body_elements, label) = split_trailing_equation_label(elements)?;
-    let body = try_lower_display_elements(
+    let body = try_lower_display_elements_with_mode(
         body_elements,
         scope,
         line_width.saturating_sub(label.chars().count() + 1),
+        mode,
     )?;
     Some(Ir::concat([body, Ir::text(" "), Ir::verbatim(label)]))
+}
+
+/// Normalize each authored display line independently while retaining the
+/// source's top-level soft line boundaries. Operator roles still come from the
+/// full semantic stream, so a binary operator that begins a continuation line
+/// does not become unary merely because the line is preserved.
+fn lower_preserved_display_lines(
+    elements: Vec<SyntaxElement>,
+    scope: &SignatureScope,
+) -> Option<Ir> {
+    let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    for element in elements {
+        if element.kind() == SyntaxKind::MATH_NEWLINE {
+            if row.iter().any(|element| !is_layout_trivia(element)) {
+                rows.push(std::mem::take(&mut row));
+            } else {
+                row.clear();
+            }
+        } else {
+            row.push(element);
+        }
+    }
+    if row.iter().any(|element| !is_layout_trivia(element)) {
+        rows.push(row);
+    }
+
+    let documents = rows
+        .into_iter()
+        .map(|row| {
+            let row_atoms = semantic_atoms_for(&row, &semantic_atoms);
+            if row
+                .iter()
+                .any(|element| element.kind() == SyntaxKind::MATH_LINE_BREAK)
+            {
+                lower_authored_breaks(
+                    row,
+                    row_atoms,
+                    scope,
+                    Spacing::Normal,
+                    AuthoredBreakOptions {
+                        preserve_comment_context: true,
+                        environment_rows: false,
+                        align_authored_relations: true,
+                        display_width: None,
+                    },
+                )
+            } else {
+                lower_body_with_atoms(row, row_atoms, scope, Spacing::Normal, true, false)
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Ir::join(Ir::HardLine, documents))
 }
 
 fn split_trailing_equation_label(

@@ -20,11 +20,11 @@
 //! Still out of scope: `\frac` canonicalization, auto-`&` insertion, and macro
 //! rewriting.
 //!
-//! The gate is [`crate::config::Config::format_math`]. Off (the
-//! default) callers emit math verbatim and never reach this module; on, they
-//! route content through [`format_math`].
+//! [`crate::config::Config::math`] selects the layout policy. `verbatim`
+//! callers emit preserved content; every other mode routes content through
+//! [`format_math`].
 
-use crate::config::MathDelimiterStyle;
+use crate::config::{MathDelimiterStyle, MathMode};
 use crate::formatter::Formatter;
 use crate::syntax::{
     DisplayMath, InlineMath, MathContent, MathSubscript, MathSuperscript, SyntaxKind, SyntaxNode,
@@ -193,15 +193,14 @@ pub enum MathContext {
 /// at each call site.
 #[derive(Debug, Clone)]
 pub struct MathFormatOptions {
-    /// Master gate. False ⇒ [`format_math`] returns `None`, so the caller emits
-    /// its original input and a mis-wired call site can never change bytes.
-    pub enabled: bool,
+    /// Content formatting and display line-breaking policy.
+    pub mode: MathMode,
     /// Flat per-line indent applied to non-environment `$$` content only
     /// (mirrors today's `math_indent`). Environment bodies ignore it.
     pub math_indent: usize,
-    /// Target line width (host `line-width`). Only typed display layout reads
-    /// it: a free row wider than this is broken at its highest-priority
-    /// top-level operators. Inline and environment layout ignore it.
+    /// Target line width (host `line-width`). In `reflow` mode, a free display
+    /// row wider than this is broken at its highest-priority top-level
+    /// operators. Other modes, inline math, and environment layout ignore it.
     pub line_width: usize,
     /// Recognize bookdown `(\#eq:label)` labels — must match the host's
     /// parse-time option so the re-parse reproduces the same token shape.
@@ -214,7 +213,7 @@ pub struct MathFormatOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VerbatimReason {
-    GateDisabled,
+    ModeVerbatim,
     MalformedMath,
     MissingSupportedShape,
     MissingNestedCommentLowering,
@@ -226,7 +225,7 @@ impl VerbatimReason {
     #[cfg(test)]
     fn label(self) -> &'static str {
         match self {
-            Self::GateDisabled => "gate-disabled",
+            Self::ModeVerbatim => "mode-verbatim",
             Self::MalformedMath => "malformed-math",
             Self::MissingSupportedShape => "missing-supported-shape",
             Self::MissingNestedCommentLowering => "missing-nested-comment-lowering",
@@ -263,7 +262,7 @@ impl MathFormatOptions {
     /// Derive options from the host config for a given span context.
     pub fn from_config(config: &crate::config::Config, context: MathContext) -> Self {
         Self {
-            enabled: config.format_math,
+            mode: config.math,
             math_indent: config.math_indent,
             line_width: config.line_width,
             bookdown_equation_labels: config.parser_extensions.bookdown_equation_references,
@@ -273,25 +272,25 @@ impl MathFormatOptions {
     }
 }
 
-/// Reflow clean math content (delimiters excluded, both in and out).
+/// Format clean math content (delimiters excluded, both in and out).
 ///
 /// Returns `None` — never panicking, never erroring — on any bail condition: the
-/// gate is off, the content has an unescaped lone `$` (a preservation guard
+/// mode is `verbatim`, the content has an unescaped lone `$` (a preservation guard
 /// against cross-pass drift), or the structural parse reports a diagnostic
-/// (malformed math is never reflowed). The caller then emits the content through
-/// its own verbatim path, so gate-off and malformed-gate-on stay byte-identical
+/// (malformed math is never formatted). The caller then emits the content through
+/// its own verbatim path, so verbatim mode and malformed math stay byte-identical
 /// and no fence-padding normalization is duplicated here. On success it returns
-/// the reflowed content per `STYLE.md`.
+/// the formatted content per `STYLE.md`.
 pub fn format_math(input: &str, opts: &MathFormatOptions) -> Option<String> {
     let FormatMathOutcome { output, route: _ } = format_math_outcome(input, opts);
     output
 }
 
 fn format_math_outcome(input: &str, opts: &MathFormatOptions) -> FormatMathOutcome {
-    if !opts.enabled {
+    if opts.mode == MathMode::Verbatim {
         return FormatMathOutcome {
             output: None,
-            route: FormatRoute::Verbatim(VerbatimReason::GateDisabled),
+            route: FormatRoute::Verbatim(VerbatimReason::ModeVerbatim),
         };
     }
     if has_unescaped_single_dollar(input) {
@@ -500,7 +499,7 @@ mod tests {
                 let outcome = format_math_outcome(
                     &input,
                     &MathFormatOptions {
-                        enabled: true,
+                        mode: MathMode::Reflow,
                         math_indent: 2,
                         line_width: 80,
                         bookdown_equation_labels: false,
@@ -568,7 +567,7 @@ mod tests {
 
     fn opts(context: MathContext) -> MathFormatOptions {
         MathFormatOptions {
-            enabled: true,
+            mode: MathMode::Reflow,
             math_indent: 0,
             line_width: 80,
             bookdown_equation_labels: false,
@@ -582,7 +581,7 @@ mod tests {
     }
 
     /// Reflow with explicit options; unwraps because these cases are well-formed
-    /// (`format_math` only returns `None` for gate-off / lone-`$` / malformed).
+    /// (`format_math` only returns `None` for verbatim / lone-`$` / malformed).
     fn fmt_with(input: &str, o: &MathFormatOptions) -> String {
         format_math(input, o).expect("expected reflowable math")
     }
@@ -595,9 +594,9 @@ mod tests {
     }
 
     #[test]
-    fn gate_off_returns_none() {
+    fn verbatim_mode_returns_none() {
         let off = MathFormatOptions {
-            enabled: false,
+            mode: MathMode::Verbatim,
             ..opts(MathContext::Display)
         };
         let input = "\\begin{aligned}\nx&=1\\\\\ny &= 22\n\\end{aligned}";

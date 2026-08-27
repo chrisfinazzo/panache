@@ -425,7 +425,7 @@ golden_test_cases!(
     math_relation_chain_long_lhs_experimental,
     math_relation_chain_hardbreak_experimental,
     math_malformed_delimiter_experimental,
-    math_format_off_default,
+    math_reflow_default,
     grid_table,
     grid_table_column_span,
     blockquote_grid_table_colspan,

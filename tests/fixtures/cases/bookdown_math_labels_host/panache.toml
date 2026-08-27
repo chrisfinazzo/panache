@@ -1,7 +1,7 @@
 flavor = "rmarkdown"
 
 [format]
-format-math = true
+math = "reflow"
 
 [extensions]
 tex-math-gfm = true

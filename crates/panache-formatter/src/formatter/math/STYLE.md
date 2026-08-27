@@ -1,15 +1,18 @@
 # Math content formatting --- canonical style rules
 
-The math formatter (`Config::format_math`, default off) reformats the
-**content** of math spans. It does structurally-safe layout (whitespace
-collapse, `&`-column alignment, environment indentation, `\\` normalization)
-plus **precedence-aware operator spacing** (see Rule 6) and **semantic
-line-breaking of over-width display rows** (see Rule 7). It stays conservative
-beyond that: never macro rewriting, `\frac`/`\dfrac` canonicalization, or
-auto-`&` insertion. There is no pandoc oracle for math *formatting* (pandoc
-passes math through). The pinned `badness-formatter` crate is the byte-layout
-oracle, while independent MathML and TeX/PDF checks validate meaning
-preservation. Both oracles are development-only dependencies.
+The math formatter (`Config::math`, default `reflow`) reformats the **content**
+of math spans. Every mode except `verbatim` applies structurally safe layout
+(whitespace collapse, `&`-column alignment, environment indentation, `\\`
+normalization) plus **precedence-aware operator spacing** (see Rule 6). The mode
+controls only the handling of soft line boundaries in free display math:
+`preserve` retains them, `single-line` removes them without width wrapping, and
+`reflow` removes them and **semantically breaks over-width display rows** (see
+Rule 7). The formatter stays conservative beyond that: never macro rewriting,
+`\frac`/`\dfrac` canonicalization, or auto-`&` insertion. There is no pandoc
+oracle for math *formatting* (pandoc passes math through). The pinned
+`badness-formatter` crate is the byte-layout oracle, while independent MathML
+and TeX/PDF checks validate meaning preservation. Both oracles are
+development-only dependencies.
 
 The formatter **re-parses the clean content string** (delimiters excluded) into
 a `MATH_CONTENT` CST and re-emits it. Re-parsing the already-prefix-stripped
@@ -20,7 +23,7 @@ a direct subtree walk would hit.
 
 Returned unchanged, never reflowed:
 
-1. The gate is off (`enabled == false`).
+1. The mode is `verbatim`.
 2. The content has an unescaped lone `$` (matches the existing
    `has_unescaped_single_dollar_in_content` preservation guard).
 3. The structural parse reports any diagnostic (unclosed/mismatched braces or
@@ -70,11 +73,14 @@ still be lowered safely; they do not automatically preserve the whole span.
    `\right` one further column out.
 
 2. **Display free rows.** Non-environment display content (`$$...$$`) is laid
-   out one row per line. Rows split on a top-level `\\` (hard break, kept) or a
-   top-level newline (soft, dropped); blank lines collapse. Each row's
-   whitespace is collapsed and trimmed, then indented by `math_indent` (default
-   0). Free content is **never** column-aligned --- a bare `&` outside an
-   environment is not a separator.
+   out according to `Config::math`. A top-level `\\` is a structural hard break
+   and remains a row boundary in every non-verbatim mode. In `preserve` mode,
+   each authored top-level newline is also retained as a soft row boundary. In
+   `single-line` and `reflow` modes, top-level soft newlines are insignificant
+   whitespace and are removed before layout; blank lines collapse. Each
+   resulting row's whitespace is collapsed and trimmed, then indented by
+   `math_indent` (default 2). Free content is **never** column-aligned---a bare
+   `&` outside an environment is not a separator.
 
 3. **Environment layout.** A standalone `\begin{name}` and `\end{name}` each go
    on their own line at the environment's indent. The body is indented **one
@@ -234,20 +240,20 @@ still be lowered safely; they do not automatically preserve the whole span.
    leading form fuses, so `=:` stays an `=` relation followed by an ordinary
    `:`.
 
-7. **Display line-breaking.** A free display row (`$$…$$`, non-environment)
-   wider than `line-width` is broken at its **top-level** operators in a
-   two-level hierarchy keyed on parser `MathBreakPriority` (**relations** >
-   **binary** > everything else). The first relation stays on the opening line;
-   every later relation starts a continuation aligned under the **first
-   relation**---the classic stacked-`=` layout for an equality/comparison chain.
-   Then any relation segment that is still over-width splits before each
-   top-level **binary** operator, with each `+ term` sitting **flush** under
-   that segment's own right-hand side. The relation/RHS offset alone supplies
-   the visual nesting; binary continuations never pick up an extra step. The
-   width budget charges the flat `math-indent` against `line-width`, so a broken
-   line plus its leading indent still stays within `line-width`. It is
-   source-cosmetic only --- math ignores whitespace, so the rendered equation is
-   unchanged:
+7. **Display line-breaking.** In `reflow` mode, a free display row (`$$…$$`,
+   non-environment) wider than `line-width` is broken at its **top-level**
+   operators in a two-level hierarchy keyed on parser `MathBreakPriority`
+   (**relations** > **binary** > everything else). The first relation stays on
+   the opening line; every later relation starts a continuation aligned under
+   the **first relation**---the classic stacked-`=` layout for an
+   equality/comparison chain. Then any relation segment that is still over-width
+   splits before each top-level **binary** operator, with each `+ term` sitting
+   **flush** under that segment's own right-hand side. The relation/RHS offset
+   alone supplies the visual nesting; binary continuations never pick up an
+   extra step. The width budget charges the flat `math-indent` against
+   `line-width`, so a broken line plus its leading indent still stays within
+   `line-width`. It is source-cosmetic only --- math ignores whitespace, so the
+   rendered equation is unchanged:
 
    ```
    A = aaaaaaaaaa
@@ -279,8 +285,8 @@ still be lowered safely; they do not automatically preserve the whole span.
      = cccccccccc
    ```
 
-   This is **fully deterministic**: the layout is a pure function of the
-   content, `line-width`, and `math-indent` --- the author's own line breaks and
+   This is **fully deterministic**: the reflow layout is a pure function of the
+   content, `line-width`, and `math-indent`---the author's own line breaks and
    indentation are never preserved, only recomputed.
 
    - **Top-level only.** An operator at delimiter depth > 0 --- inside the flat
@@ -328,7 +334,9 @@ still be lowered safely; they do not automatically preserve the whole span.
      internal alignment, so the equation's shape is identical at any indent. A
      row with **no** top-level relation or binary operator (e.g. a single wide
      `\frac{…}{…}`) is left on one over-width line --- like an unbreakable long
-     word in prose reflow. Inline and environment-body math are not line-broken.
+     word in prose reflow. `single-line` uses the same normalized flat row but
+     never applies these width breaks, and `preserve` retains the authored soft
+     row boundaries. Inline and environment-body math are not width-broken.
 
 8. **Tight scripts and group interiors.** Whitespace that TeX ignores is
    removed:
@@ -371,12 +379,13 @@ engine guarantees it by construction:
   re-parse has no adjacent whitespace to strip, so pass 2 emits the same bytes.
   The text-mode exemption keys on the command name, which round-trips, so the
   same groups are spared each pass.
-- **Line-breaking is a fixed point.** The breaker emits continuations on soft
-  newlines with leading alignment spaces. On pass 2 those soft newlines and
-  spaces are insignificant whitespace that re-joins into the single logical row
-  (Rule 7), and the continuation indent is recomputed from that row's structure
-  (never measured from the source), so the identical break points and alignment
-  column are reproduced.
+- **Display line policy is a fixed point.** In `preserve`, each retained soft
+  row is normalized independently and remains a row on the next pass. In
+  `single-line`, soft rows flatten once and no new width breaks are introduced.
+  In `reflow`, the breaker emits continuations on soft newlines with leading
+  alignment spaces; pass 2 rejoins those insignificant boundaries into one
+  logical row and recomputes the same break points and alignment column from
+  structure rather than source indentation.
 - **Embedded environments are a fixed point.** Their hanging column is the
   canonical flat width of the formatted segment prefix, never the source
   indentation. The delimiter group and environment hard lines therefore choose

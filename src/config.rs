@@ -16,6 +16,7 @@ pub use formatter_presets::formatter_preset_supported_languages;
 pub use formatter_presets::formatter_presets_for_language;
 pub use formatter_presets::get_formatter_preset;
 pub use panache_formatter::MathArgumentConfig;
+pub use panache_formatter::MathMode;
 pub use panache_formatter::config::FormatterExtensions;
 pub use panache_parser::Extensions;
 pub use panache_parser::Flavor;
@@ -2071,42 +2072,66 @@ mod tests {
     }
 
     #[test]
-    fn format_math_defaults_off() {
+    fn math_defaults_to_reflow() {
         let cfg = parse_config_str("flavor = \"quarto\"\n", Path::new("panache.toml"))
-            .expect("config without format-math must parse");
-        assert!(!cfg.format_math, "format-math must default to false");
+            .expect("config without math must parse");
+        assert_eq!(cfg.math, MathMode::Reflow);
     }
 
     #[test]
-    fn stable_format_math_opt_in_parses() {
-        let toml = "[format]\nformat-math = true\n";
-        let cfg = parse_config_str(toml, Path::new("panache.toml"))
-            .expect("[format] format-math must parse");
-        assert!(cfg.format_math, "stable opt-in must enable math formatting");
+    fn math_modes_parse() {
+        for (value, expected) in [
+            ("verbatim", MathMode::Verbatim),
+            ("preserve", MathMode::Preserve),
+            ("single-line", MathMode::SingleLine),
+            ("reflow", MathMode::Reflow),
+        ] {
+            let toml = format!("[format]\nmath = \"{value}\"\n");
+            let cfg = parse_config_str(&toml, Path::new("panache.toml"))
+                .expect("[format] math mode must parse");
+            assert_eq!(cfg.math, expected, "for {value}");
+        }
+    }
+
+    #[test]
+    fn invalid_math_mode_is_rejected() {
+        let err = parse_config_str("[format]\nmath = \"wrap\"\n", Path::new("panache.toml"))
+            .expect_err("an unknown math mode must not parse");
+        assert!(err.to_string().contains("math"));
+    }
+
+    #[test]
+    fn replaced_stable_format_math_boolean_is_rejected() {
+        let err = parse_config_str("[format]\nformat-math = true\n", Path::new("panache.toml"))
+            .expect_err("the replaced stable boolean must not parse");
+        assert!(err.to_string().contains("format-math"));
     }
 
     #[test]
     fn deprecated_experimental_format_math_alias_still_parses() {
-        let toml = "[experimental]\nformat-math = true\n";
-        let cfg = parse_config_str(toml, Path::new("panache.toml"))
-            .expect("deprecated [experimental] format-math must parse");
-        assert!(
-            cfg.format_math,
-            "deprecated opt-in must still enable math formatting"
-        );
+        for (enabled, expected) in [(false, MathMode::Verbatim), (true, MathMode::Reflow)] {
+            let toml = format!("[experimental]\nformat-math = {enabled}\n");
+            let cfg = parse_config_str(&toml, Path::new("panache.toml"))
+                .expect("deprecated [experimental] format-math must parse");
+            assert_eq!(cfg.math, expected);
+        }
     }
 
     #[test]
-    fn stable_format_math_wins_over_deprecated_alias() {
-        for (stable, deprecated) in [(false, true), (true, false)] {
+    fn math_mode_wins_over_deprecated_alias() {
+        for (mode, deprecated) in [("verbatim", true), ("reflow", false)] {
             let toml = format!(
-                "[format]\nformat-math = {stable}\n\n[experimental]\nformat-math = {deprecated}\n"
+                "[format]\nmath = \"{mode}\"\n\n[experimental]\nformat-math = {deprecated}\n"
             );
             let cfg = parse_config_str(&toml, Path::new("panache.toml"))
-                .expect("both format-math spellings must parse");
+                .expect("the stable mode and deprecated alias must parse together");
             assert_eq!(
-                cfg.format_math, stable,
-                "the stable [format] value must take precedence"
+                cfg.math,
+                if mode == "reflow" {
+                    MathMode::Reflow
+                } else {
+                    MathMode::Verbatim
+                }
             );
         }
     }

@@ -1,6 +1,6 @@
 use panache_formatter::config::{Extensions, Flavor};
 use panache_formatter::format;
-use panache_formatter::{Config, ConfigBuilder};
+use panache_formatter::{Config, ConfigBuilder, MathMode};
 use panache_parser::semantic::math::{ArgKind, ArgumentDomain};
 
 fn math_config(format_math: bool) -> Config {
@@ -8,8 +8,19 @@ fn math_config(format_math: bool) -> Config {
     Config {
         flavor,
         parser_extensions: Extensions::for_flavor(flavor),
-        format_math,
+        math: if format_math {
+            MathMode::Reflow
+        } else {
+            MathMode::Verbatim
+        },
         ..Default::default()
+    }
+}
+
+fn math_mode_config(math: MathMode) -> Config {
+    Config {
+        math,
+        ..math_config(true)
     }
 }
 
@@ -85,10 +96,10 @@ fn assert_math_host_body(
 }
 
 #[test]
-fn stable_format_math_defaults_off() {
+fn verbatim_mode_preserves_math_content() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";
-    let output = format(input, Some(math_config(false)), None);
+    let output = format(input, Some(math_mode_config(MathMode::Verbatim)), None);
     similar_asserts::assert_eq!(output, expected);
 }
 
@@ -177,6 +188,66 @@ fn stable_math_host_matrix_wraps_display_bodies_identically() {
 }
 
 #[test]
+fn math_modes_share_structural_formatting_but_choose_display_breaks() {
+    let input = "$$\nA   =   alpha\n+   beta   =   gamma\n$$\n";
+
+    let verbatim_config = math_mode_config(MathMode::Verbatim);
+    let verbatim = format(input, Some(verbatim_config.clone()), None);
+    assert!(verbatim.contains("A   =   alpha\n  +   beta   =   gamma"));
+    similar_asserts::assert_eq!(format(&verbatim, Some(verbatim_config), None), verbatim);
+
+    let preserve_config = math_mode_config(MathMode::Preserve);
+    let preserve = format(input, Some(preserve_config.clone()), None);
+    assert!(preserve.contains("A = alpha\n  + beta = gamma"));
+    similar_asserts::assert_eq!(format(&preserve, Some(preserve_config), None), preserve);
+
+    let single_line_config = math_mode_config(MathMode::SingleLine);
+    let single_line = format(input, Some(single_line_config.clone()), None);
+    assert!(single_line.contains("A = alpha + beta = gamma"));
+    similar_asserts::assert_eq!(
+        format(&single_line, Some(single_line_config), None),
+        single_line
+    );
+
+    let reflow_config = math_mode_config(MathMode::Reflow);
+    let reflow = format(input, Some(reflow_config.clone()), None);
+    assert!(reflow.contains("A = alpha + beta = gamma"));
+    similar_asserts::assert_eq!(format(&reflow, Some(reflow_config), None), reflow);
+}
+
+#[test]
+fn single_line_overflows_while_reflow_breaks_to_line_width() {
+    let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
+    let single_line = Config {
+        line_width: 30,
+        math_indent: 0,
+        ..math_mode_config(MathMode::SingleLine)
+    };
+    let reflow = Config {
+        math: MathMode::Reflow,
+        ..single_line.clone()
+    };
+
+    let single_line = format(input, Some(single_line), None);
+    assert!(single_line.contains("A = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd"));
+
+    let reflow = format(input, Some(reflow), None);
+    assert!(reflow.contains("A = aaaaaaaaaa + bbbbbbbbbb\n  = cccccccccc + dddddddddd"));
+}
+
+#[test]
+fn every_non_verbatim_mode_aligns_environment_columns() {
+    let input = "$$\n\\begin{aligned}\nx&=1 \\\\\nyy&=22\n\\end{aligned}\n$$\n";
+    for mode in [MathMode::Preserve, MathMode::SingleLine, MathMode::Reflow] {
+        let output = format(input, Some(math_mode_config(mode)), None);
+        assert!(
+            output.contains("x  & = 1  \\\\\n  yy & = 22"),
+            "mode {mode:?}: {output}"
+        );
+    }
+}
+
+#[test]
 fn stable_math_host_matrix_formats_environment_bodies_identically() {
     let config = math_host_matrix_config(true);
     let input_rows = "x &= 1 \\\\\ny &= 22";
@@ -227,7 +298,7 @@ fn stable_math_host_matrix_formats_environment_bodies_identically() {
 }
 
 #[test]
-fn math_host_matrix_gate_off_preserves_established_output() {
+fn math_host_matrix_verbatim_preserves_established_output() {
     let config = math_host_matrix_config(false);
     let input = "a   +   b";
 
@@ -333,6 +404,7 @@ fn stable_format_math_preserves_malformed() {
 #[test]
 fn math_no_wrap() {
     let cfg = ConfigBuilder::default()
+        .math(MathMode::Verbatim)
         .line_width(10)
         .math_indent(0)
         .build();
@@ -584,7 +656,7 @@ fn hardbreak_overwidth_continuation_nests_under_its_column() {
 }
 
 #[test]
-fn hardbreak_relation_chain_gate_off_is_not_aligned() {
+fn hardbreak_relation_chain_in_verbatim_mode_is_not_aligned() {
     let cfg = math_config(false);
     let input = "$$\nx = a \\\\\n= b \\\\\n= c\n$$\n";
     let expected = "$$\n  x = a \\\\\n  = b \\\\\n  = c\n$$\n";
@@ -689,7 +761,7 @@ fn configured_math_signature_controls_argument_recursion() {
 }
 
 #[test]
-fn configured_math_signature_is_inert_when_gate_is_off() {
+fn configured_math_signature_is_inert_in_verbatim_mode() {
     let mut cfg = math_config(false);
     cfg.math_signatures.insert(
         "custom".to_string(),

@@ -1,2 +1,2 @@
 [format]
-format-math = true
+math = "reflow"

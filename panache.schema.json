@@ -63,8 +63,7 @@
       "description": "Deprecated experimental configuration aliases.",
       "properties": {
         "format-math": {
-          "default": false,
-          "description": "Deprecated: use `[format] format-math` instead.",
+          "description": "Deprecated: use `[format] math` instead.",
           "type": "boolean"
         }
       },
@@ -245,6 +244,31 @@
         }
       ]
     },
+    "MathMode": {
+      "description": "How TeX math content is formatted.",
+      "oneOf": [
+        {
+          "const": "verbatim",
+          "description": "Keep math content on the formatter's verbatim preservation path.",
+          "type": "string"
+        },
+        {
+          "const": "preserve",
+          "description": "Normalize math while retaining authored top-level soft display lines.",
+          "type": "string"
+        },
+        {
+          "const": "single-line",
+          "description": "Normalize math and flatten free display rows without width wrapping.",
+          "type": "string"
+        },
+        {
+          "const": "reflow",
+          "description": "Normalize math and reflow over-width display formulas.",
+          "type": "string"
+        }
+      ]
+    },
     "NoBreakAbbreviations": {
       "anyOf": [
         {
@@ -296,11 +320,6 @@
           "description": "Use panache-native greedy wrapping instead of textwrap.",
           "type": "boolean"
         },
-        "format-math": {
-          "default": false,
-          "description": "Reformat TeX math content structurally. The default is false, which\npreserves math content verbatim.",
-          "type": "boolean"
-        },
         "horizontal-rule-style": {
           "$ref": "#/$defs/HorizontalRuleStyle",
           "description": "Horizontal rule rendering: expanded to the line width or compact `---`"
@@ -333,6 +352,11 @@
             "integer",
             "null"
           ]
+        },
+        "math": {
+          "$ref": "#/$defs/MathMode",
+          "default": "reflow",
+          "description": "Math content formatting and display line-breaking policy. Defaults to\n`reflow`."
         },
         "math-delimiter-style": {
           "$ref": "#/$defs/MathDelimiterStyle",

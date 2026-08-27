@@ -1022,8 +1022,9 @@ Output (`wrap = "sentence"`)
 
 ### Inline Math
 
-Inline math content is untouched when `format-math` is disabled. When it is
-enabled, Panache applies the single-line rules described below.
+Inline math uses the same canonical spacing and structural rules in `reflow`,
+`preserve`, and `single-line` modes. Use `math = "verbatim"` to leave its
+content untouched.
 
 ### Display Math
 
@@ -1048,16 +1049,23 @@ Set `math-indent = 0` to keep the content flush against the left margin.
 
 ### Content-Aware Math Formatting
 
-By default the *content* between math delimiters is emitted verbatim. Enabling
-the stable [`format-math`](configuration.qmd#format-math) option turns on
-structural reformatting of that content---inline whitespace collapse, tight
-sub/superscripts, math-mode group-interior trimming, environment-body
-indentation, `\\` normalization, and `&`-column alignment:
+By default, Panache uses [`math = "reflow"`](configuration.qmd#math) for the
+*content* between math delimiters. It applies structural formatting---including
+inline whitespace collapse, tight sub/superscripts, math-mode group-interior
+trimming, environment-body indentation, `\\` normalization, and `&`-column
+alignment:
 
 ```toml
 [format]
-format-math = true
+math = "reflow"
+math-indent = 2
 ```
+
+`preserve` keeps authored soft line breaks in free display math while applying
+all other formatting and alignment. `single-line` flattens those soft breaks
+without wrapping to `line-width`. `verbatim` is the only mode that disables
+structural math formatting. Explicit `\\` rows and math environments retain
+their structural lines in every non-verbatim mode.
 
 Input
 
@@ -1115,15 +1123,16 @@ positional information with
 argument proven to contain math is reformatted; text, unknown, unmatched, and
 redefined command arguments retain their authored bytes.
 
-A display equation (`$$…$$`) wider than `line-width` is broken at its top-level
-relations, with each continuation aligned under the first relation (the classic
-stacked-`=` layout for an equality chain). If a relation segment is itself too
-wide, its binary terms break one level deeper, each `+ term` sitting flush under
-the right-hand side they hang under---the relation/right-hand-side offset alone
-supplies the nesting. The `math-indent` shifts the whole block to the right but
-never changes this internal alignment, so the equation's shape is the same at
-any indent. The width budget accounts for `math-indent`, so a broken line plus
-its leading indent stays within `line-width`:
+In `reflow` mode, a display equation (`$$…$$`) wider than `line-width` is broken
+at its top-level relations, with each continuation aligned under the first
+relation (the classic stacked-`=` layout for an equality chain). If a relation
+segment is itself too wide, its binary terms break one level deeper, each
+`+ term` sitting flush under the right-hand side they hang under---the
+relation/right-hand-side offset alone supplies the nesting. The `math-indent`
+shifts the whole block to the right but never changes this internal alignment,
+so the equation's shape is the same at any indent. The width budget accounts for
+`math-indent`, so a broken line plus its leading indent stays within
+`line-width`:
 
 Input
 
@@ -1176,14 +1185,14 @@ is left on one line when it overflows.
 #### Preservation Boundary
 
 Panache rewrites math only when the lossless CST proves that the operation is
-safe. It preserves the content when math formatting is disabled; the body has a
-lone unescaped `$`; braces, scripts, `\left`/`\right`, or environments are
-malformed; or the formatter cannot lower a supported structure without losing
-comments or argument-domain information. In particular, text, unknown,
-unmatched, over-attached, and document-redefined command arguments remain
-opaque. A comment between a command and its first proven argument, multiple
-environments without a punctuation boundary, and mixed free segments that
-contain comments or authored `\\` breaks also remain verbatim.
+safe. It preserves the content in `verbatim` mode; when the body has a lone
+unescaped `$`; braces, scripts, `\left`/`\right`, or environments are malformed;
+or the formatter cannot lower a supported structure without losing comments or
+argument-domain information. In particular, text, unknown, unmatched,
+over-attached, and document-redefined command arguments remain opaque. A comment
+between a command and its first proven argument, multiple environments without a
+punctuation boundary, and mixed free segments that contain comments or authored
+`\\` breaks also remain verbatim.
 
 Preservation applies to the math content, not its Markdown host. Display
 delimiters and their configured outer indentation may still be normalized by the

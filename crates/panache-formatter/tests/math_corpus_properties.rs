@@ -9,9 +9,9 @@
 //!    byte-for-byte: `parse_math_content(x).text() == x`. (The corpus holds
 //!    bare content with no host container prefixes, so `tree.text()` is the right
 //!    surface — same shape as `debug format --checks losslessness`.)
-//! 3. **Gate-off returns `None`.** `format_math(x, { enabled: false, .. })` is
+//! 3. **Verbatim returns `None`.** `format_math(x, { mode: Verbatim, .. })` is
 //!    `None`, so the caller falls back to its verbatim path and a mis-wired call
-//!    site can never change bytes when the formatter gate is off.
+//!    site can never change bytes in verbatim mode.
 //! 4. **Comment preservation.** Formatting retains every TeX comment byte and
 //!    its source order, including comments nested inside groups, arguments, and
 //!    environments.
@@ -26,6 +26,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use panache_formatter::MathMode;
 use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_math};
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::syntax::{SyntaxKind, SyntaxNode};
@@ -49,12 +50,16 @@ fn context_for(id: &str) -> MathContext {
 }
 
 fn opts(
-    enabled: bool,
+    reflow: bool,
     context: MathContext,
     signature_scope: panache_parser::semantic::math::SignatureScope,
 ) -> MathFormatOptions {
     MathFormatOptions {
-        enabled,
+        mode: if reflow {
+            MathMode::Reflow
+        } else {
+            MathMode::Verbatim
+        },
         math_indent: 2,
         line_width: 80,
         bookdown_equation_labels: false,
@@ -116,7 +121,7 @@ fn corpus_satisfies_math_formatter_properties() {
 
         if format_math(&input, &opts(false, context, signature_scope.clone())).is_some() {
             failures.push(format!(
-                "[{id}] gate-off should return None (caller emits verbatim):\n  input:\n{}",
+                "[{id}] verbatim mode should return None (caller preserves content):\n  input:\n{}",
                 indent_block(&input),
             ));
             continue;

@@ -22,9 +22,9 @@ are relative to this `SKILL.md`.
   `crates/panache-parser/src/parser/inlines/math.rs`, and typed accessors live
   in `crates/panache-parser/src/syntax/{math,inlines}.rs`.
 - The formatter lives in `crates/panache-formatter/src/formatter/math/` and
-  `crates/panache-formatter/src/formatter/math.rs`. Its user-facing gate is the
-  stable `[format] format-math` option, which defaults to off. The
-  `[experimental] format-math` spelling is a deprecated compatibility alias.
+  `crates/panache-formatter/src/formatter/math.rs`. Its user-facing policy is
+  the stable `[format] math` mode, which defaults to `reflow`. The
+  `[experimental] format-math` boolean is a deprecated compatibility alias.
 - For changes to user-visible formatting behavior, read
   `crates/panache-formatter/src/formatter/math/STYLE.md`; it is the canonical
   style and preservation contract.
@@ -104,8 +104,8 @@ the repository's root `AGENTS.md` for every layer the change touches.
 
 7. Before landing a code change, run the workspace validation required by root
    `AGENTS.md`. Review every parser snapshot diff for losslessness, verify
-   formatter idempotency, and keep output byte-identical when `format-math` is
-   disabled. Do not rerun a focused suite after an equivalent workspace gate
+   formatter idempotency, and keep math content byte-identical in `verbatim`
+   mode. Do not rerun a focused suite after an equivalent workspace gate
    on the same tree state.
 8. Update `STYLE.md`, user documentation, configuration schema, oracle reports,
    or this skill only when the behavior or durable maintenance contract changes.

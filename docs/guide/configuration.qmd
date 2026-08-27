@@ -488,6 +488,7 @@ Formatting style preferences are organized under the `[format]` section:
 [format]
 wrap = "reflow"
 math-delimiter-style = "preserve"
+math = "reflow"
 math-indent = 2
 table-indent = 2
 tab-stops = "normalize"
@@ -568,13 +569,13 @@ Next sentence.
 
 ### Math Formatting
 
-Configure how math delimiters are formatted:
+Configure math content formatting, delimiters, and display indentation:
 
 ```toml
 [format]
 math-delimiter-style = "preserve"
+math = "reflow"
 math-indent = 2
-format-math = false
 ```
 
 Math delimiter styles:
@@ -591,14 +592,34 @@ Math delimiter styles:
 The `math-indent` field specifies indentation (in spaces) for display math
 blocks. Default is 2; set it to 0 to keep content flush against the left margin.
 
-#### `format-math` {#format-math}
+#### `math` {#math}
 
-Set `format-math = true` to reformat the **content** of math spans (`$...$`,
-`$$...$$`, `\(...\)`, and `\[...\]`) and recognized raw math environments. The
-formatter collapses inline whitespace, tightens scripts, trims math-mode group
-interiors, normalizes `\\` row breaks, indents environment bodies, aligns `&`
-columns, spaces operators according to their role, and wraps over-width display
-equations at top-level relations and binary operators.
+The `math` mode controls how Panache formats the **content** of math spans
+(`$...$`, `$$...$$`, `\(...\)`, and `\[...\]`) and recognized raw math
+environments:
+
+`reflow`
+:   Apply the canonical math style and wrap over-width free display equations at
+    top-level relations and binary operators. This is the default.
+
+`preserve`
+:   Apply the canonical math style, but retain authored top-level soft line
+    breaks in free display equations. Panache does not add width-based breaks.
+
+`single-line`
+:   Apply the canonical math style, flatten authored top-level soft line breaks
+    in free display equations, and never add width-based breaks. Structural rows
+    marked with `\\` and environment rows remain multiline.
+
+`verbatim`
+:   Do not structurally format math content. The Markdown host---including
+    delimiter style and display indentation---may still be normalized.
+
+Every non-verbatim mode collapses inline whitespace, tightens scripts, trims
+math-mode group interiors, normalizes `\\` row breaks, indents environment
+bodies, aligns `&` columns, and spaces operators according to their role. Math
+alignment is therefore on by default and remains on in `preserve` and
+`single-line`; it is not a separate option.
 
 Macros are never rewritten: Panache does not canonicalize `\frac`/`\dfrac`,
 insert alignment markers, or expand user definitions. Alignment measures source
@@ -607,9 +628,9 @@ Malformed math, a lone unescaped `$`, and structures whose semantics Panache
 cannot establish safely are preserved. See [Math](formatting.qmd#math) for the
 complete style and preservation boundary.
 
-The option is stable, defaults to `false`, and is independent of Markdown flavor
-and parser extensions. The parser always builds the lossless math CST; this
-option controls only whether the formatter rewrites its content.
+The option is stable and independent of Markdown flavor and parser extensions.
+The parser always builds the lossless math CST; this option controls only the
+formatter's content and soft-line policy.
 
 ### Math Command Signatures {#math-command-signatures}
 
@@ -635,7 +656,7 @@ complete built-in signature for that command. A `\newcommand`, `\def`, or other
 recognized raw-TeX definition in the document shadows both configured and
 built-in signatures because Panache does not expand replacement bodies.
 
-Signatures change output only while [`format-math`](#format-math) is enabled.
+Signatures change output in every [`math`](#math) mode except `verbatim`.
 
 ### Table Indentation
 
@@ -689,9 +710,10 @@ The former experimental spelling remains a compatibility alias:
 format-math = false
 ```
 
-Panache warns when it reads this spelling. Move the value to `[format]`; if a
-configuration contains both spellings, `[format] format-math` wins. The alias
-will be removed in a future major release.
+Panache warns when it reads this spelling. Replace `true` with
+`[format] math = "reflow"` and `false` with `[format] math = "verbatim"`. If a
+configuration contains both spellings, `[format] math` wins. The alias will be
+removed in a future major release.
 
 ## Extensions
 
@@ -1637,6 +1659,7 @@ flavor = "quarto"
 line-width = 80
 wrap = "reflow"
 math-delimiter-style = "preserve"
+math = "reflow"
 math-indent = 2
 
 [extensions]

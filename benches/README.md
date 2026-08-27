@@ -11,8 +11,9 @@ cd benches/documents && ./download.sh && cd ../..
 # Run benchmarks
 cargo bench --bench formatting
 
-# Isolate the stable math formatter on a selected corpus document
-PANACHE_BENCH_DOC=math.qmd PANACHE_BENCH_FORMAT_MATH=1 \
+# Isolate the stable math formatter on a selected corpus document (`reflow` is
+# the default; set `PANACHE_BENCH_FORMAT_MATH=0` for a verbatim comparison)
+PANACHE_BENCH_DOC=math.qmd \
   cargo bench --bench formatting
 
 # Run LSP incremental didChange benchmarks

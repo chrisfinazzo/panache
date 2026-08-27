@@ -34,6 +34,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use panache_formatter::MathMode;
 use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_math};
 use pulldown_latex::config::RenderConfig;
 use pulldown_latex::{Parser, Storage, push_mathml};
@@ -61,7 +62,7 @@ fn format_opts(
     signature_scope: panache_parser::semantic::math::SignatureScope,
 ) -> MathFormatOptions {
     MathFormatOptions {
-        enabled: true,
+        mode: MathMode::Reflow,
         math_indent: 2,
         line_width: 80,
         bookdown_equation_labels: false,

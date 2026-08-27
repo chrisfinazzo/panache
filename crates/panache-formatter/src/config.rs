@@ -31,6 +31,23 @@ pub enum MathDelimiterStyle {
     Backslash,
 }
 
+/// How TeX math content is formatted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "kebab-case"))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum MathMode {
+    /// Keep math content on the formatter's verbatim preservation path.
+    Verbatim,
+    /// Normalize math while retaining authored top-level soft display lines.
+    Preserve,
+    /// Normalize math and flatten free display rows without width wrapping.
+    SingleLine,
+    /// Normalize math and reflow over-width display formulas.
+    #[default]
+    Reflow,
+}
+
 /// Default indentation (in columns) for top-level tables.
 pub const DEFAULT_TABLE_INDENT: usize = 2;
 
@@ -248,9 +265,8 @@ pub struct Config {
     pub external_max_parallel: usize,
     /// Compatibility target for ambiguous Pandoc behavior.
     pub parser: PandocCompat,
-    /// Structurally reformat math content. When false, math is emitted
-    /// verbatim.
-    pub format_math: bool,
+    /// Math content formatting and display line-breaking policy.
+    pub math: MathMode,
 }
 
 impl Default for Config {
@@ -277,7 +293,7 @@ impl Default for Config {
             formatters: HashMap::new(), // Opt-in: empty by default
             external_max_parallel: default_external_max_parallel(),
             parser: PandocCompat::default(),
-            format_math: false,
+            math: MathMode::default(),
         }
     }
 }
@@ -306,6 +322,11 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    pub fn math(mut self, mode: MathMode) -> Self {
+        self.config.math = mode;
+        self
+    }
+
     pub fn math_indent(mut self, indent: usize) -> Self {
         self.config.math_indent = indent;
         self
@@ -368,6 +389,11 @@ mod schema_tests {
     #[test]
     fn math_delimiter_style_values_are_lowercase() {
         assert_wire_values::<MathDelimiterStyle>(&["preserve", "dollars", "backslash"]);
+    }
+
+    #[test]
+    fn math_mode_values_are_kebab_case() {
+        assert_wire_values::<MathMode>(&["verbatim", "preserve", "single-line", "reflow"]);
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub use config::HorizontalRuleStyle;
 pub use config::LineEnding;
 pub use config::MathArgumentConfig;
 pub use config::MathDelimiterStyle;
+pub use config::MathMode;
 pub use config::ParserOptions;
 pub use config::TabStopMode;
 pub use config::WrapMode;

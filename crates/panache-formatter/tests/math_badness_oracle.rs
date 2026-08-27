@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use badness_formatter::{FormatStyle, LineEnding, MathWrap, formatter::format_with_style};
+use panache_formatter::MathMode;
 use panache_formatter::formatter::math::{MathContext, MathFormatOptions, format_math};
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::syntax::{SyntaxKind, SyntaxNode};
@@ -195,7 +196,7 @@ fn panache_body_with_preamble_and_width(
     format_math(
         body,
         &MathFormatOptions {
-            enabled: true,
+            mode: MathMode::Reflow,
             math_indent: 2,
             line_width,
             bookdown_equation_labels: false,

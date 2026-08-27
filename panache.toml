@@ -19,7 +19,7 @@ extend-exclude = [
 ]
 
 [format]
-format-math = true
+math = "reflow"
 
 [flavor-overrides]
 "TODO.md" = "gfm"

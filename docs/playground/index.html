@@ -144,6 +144,15 @@
                         </div>
 
                         <div class="row g-3 align-items-end mb-1">
+                            <div class="col-12 col-sm-6 col-lg-2">
+                                <label class="form-label fw-semibold mb-1" for="math">Math</label>
+                                <select id="math" class="form-select">
+                                    <option value="reflow" selected>Reflow</option>
+                                    <option value="preserve">Preserve lines</option>
+                                    <option value="single-line">Single line</option>
+                                    <option value="verbatim">Verbatim</option>
+                                </select>
+                            </div>
                             <div class="col-12 col-sm-6 col-lg-3">
                                 <label class="form-label fw-semibold mb-1" for="math-delimiter-style">Math delimiters</label>
                                 <select id="math-delimiter-style" class="form-select">
@@ -212,6 +221,7 @@
           wrap: $("wrap").value,
           lineEnding: $("line-ending").value,
           mathDelimiterStyle: $("math-delimiter-style").value,
+          math: $("math").value,
           mathIndent: readInt("math-indent", 2),
           tabStops: $("tab-stops").value,
           tabWidth: readInt("tab-width", 4),
@@ -238,6 +248,7 @@
           wrap: options.wrap,
           lineEnding: options.lineEnding,
           mathDelimiterStyle: options.mathDelimiterStyle,
+          math: options.math,
           mathIndent: String(options.mathIndent),
           tabStops: options.tabStops,
           tabWidth: String(options.tabWidth),
@@ -253,6 +264,7 @@
           wrap: "wrap",
           lineEnding: "line-ending",
           mathDelimiterStyle: "math-delimiter-style",
+          math: "math",
           mathIndent: "math-indent",
           tabStops: "tab-stops",
           tabWidth: "tab-width",
@@ -287,6 +299,7 @@
             undefined,
             options.lineEnding,
             options.mathDelimiterStyle,
+            options.math,
             options.tabStops,
             options.tabWidth,
             options.mathIndent,
@@ -316,6 +329,7 @@
           "wrap",
           "line-ending",
           "math-delimiter-style",
+          "math",
           "math-indent",
           "tab-stops",
           "tab-width",
