@@ -159,13 +159,19 @@ fn wrap_words_with_widths(words: &[&str], first_width: usize, rest_width: usize)
 /// Reflow a multi-line table cell's lines to fit a fixed column width.
 ///
 /// Column widths in grid/multiline tables are load-bearing (pandoc maps them to
-/// relative output widths), so we never resize the column -- we only re-pack the
-/// cell's text to use the existing width more tightly. Leading/trailing blank
-/// lines are dropped (pandoc discards them); runs of blank lines split the cell
-/// into paragraphs (an internal blank line in a grid cell is a paragraph break),
-/// each reflowed independently and rejoined with a single blank line. Multiline
-/// table cells never contain internal blanks, so this reduces to one paragraph.
-fn reflow_cell_lines(lines: &[String], width: usize) -> Vec<String> {
+/// relative output widths), so multiline prose is re-packed to the existing
+/// width. A grid cell whose single source line grows during inline normalization
+/// may widen later rather than split inline syntax. Leading/trailing blank lines
+/// are dropped (pandoc discards them); runs of blank lines split the cell into
+/// paragraphs (an internal blank line in a grid cell is a paragraph break), each
+/// reflowed independently and rejoined with a single blank line. Multiline table
+/// cells never contain internal blanks, so this reduces to one paragraph.
+fn reflow_cell_lines(
+    lines: &[String],
+    width: usize,
+    allow_single_line_growth: bool,
+    normalize_paragraph: impl Fn(&str) -> String,
+) -> Vec<String> {
     let mut paragraphs: Vec<Vec<&str>> = Vec::new();
     let mut current: Vec<&str> = Vec::new();
     for line in lines {
@@ -186,14 +192,32 @@ fn reflow_cell_lines(lines: &[String], width: usize) -> Vec<String> {
         if !out.is_empty() {
             out.push(String::new());
         }
-        let joined = paragraph.join(" ");
-        if width == 0 {
+        let joined = normalize_paragraph(&paragraph.join(" "));
+        if width == 0 || (allow_single_line_growth && paragraph.len() == 1) {
             out.push(joined);
         } else {
             out.extend(wrap_text_first_fit(&joined, width));
         }
     }
     out
+}
+
+fn format_grid_cell_paragraph(text: &str, config: &Config) -> String {
+    let tree = crate::parser::parse(text, Some(config.parser_options()));
+    let mut blocks = tree.children();
+    let Some(paragraph) = blocks.next() else {
+        return text.to_string();
+    };
+    if paragraph.kind() != SyntaxKind::PARAGRAPH || blocks.next().is_some() {
+        return text.to_string();
+    }
+
+    let formatted = format_cell_content(&paragraph, config, false);
+    if formatted.contains('\n') {
+        text.to_string()
+    } else {
+        formatted
+    }
 }
 
 fn grid_cell_is_reflowable(lines: &[String]) -> bool {
@@ -245,11 +269,13 @@ fn is_ordered_list_marker(token: &str) -> bool {
 
 /// Reflow a single grid cell (its lines across one row group) to `width`, or --
 /// when the content carries block structure -- keep it verbatim after dropping
-/// leading/trailing blank lines. Column widths are load-bearing, so `width` is a
-/// fixed target, never a resize.
-fn reflow_or_trim_grid_cell(lines: &[String], width: usize) -> Vec<String> {
+/// leading/trailing blank lines. Column widths are load-bearing, so `width` is
+/// the target for multiline prose; normalized single lines may widen later.
+fn reflow_or_trim_grid_cell(lines: &[String], width: usize, config: &Config) -> Vec<String> {
     if width > 0 && grid_cell_is_reflowable(lines) {
-        reflow_cell_lines(lines, width)
+        reflow_cell_lines(lines, width, true, |text| {
+            format_grid_cell_paragraph(text, config)
+        })
     } else {
         let first = lines.iter().position(|l| !l.trim().is_empty());
         let last = lines.iter().rposition(|l| !l.trim().is_empty());
@@ -267,9 +293,10 @@ fn reflow_or_trim_grid_cell(lines: &[String], width: usize) -> Vec<String> {
 /// logical row, so a multi-line cell is spread across several rows sharing one
 /// `row_groups` id. Here we regroup those physical lines into per-column cells,
 /// reflow/trim each cell, then redistribute the result back into physical lines.
-/// Column widths are never resized (pandoc maps grid widths to relative output
-/// widths); cells with block content or hard line breaks stay verbatim.
-fn reflow_grid_table_cells(table_data: &mut GridTableData) {
+/// Column widths never shrink (pandoc maps grid widths to relative output
+/// widths), but inline normalization may grow them. Cells with block content or
+/// hard line breaks stay verbatim.
+fn reflow_grid_table_cells(table_data: &mut GridTableData, config: &Config) {
     let num_cols = table_data
         .column_widths
         .len()
@@ -311,7 +338,7 @@ fn reflow_grid_table_cells(table_data: &mut GridTableData) {
             let lines: Vec<String> = (start..end)
                 .map(|r| table_data.rows[r].get(col).cloned().unwrap_or_default())
                 .collect();
-            cols.push(reflow_or_trim_grid_cell(&lines, target));
+            cols.push(reflow_or_trim_grid_cell(&lines, target, config));
         }
 
         let line_count = cols.iter().map(Vec::len).max().unwrap_or(0).max(1);
@@ -1457,7 +1484,7 @@ pub fn format_grid_table(node: &SyntaxNode, config: &Config, indent: usize) -> S
 
     let wrap_mode = config.wrap.clone().unwrap_or(WrapMode::Reflow);
     if wrap_mode != WrapMode::Preserve {
-        reflow_grid_table_cells(&mut table_data);
+        reflow_grid_table_cells(&mut table_data, config);
     }
 
     let mut widths = calculate_grid_column_widths(&table_data.rows);
@@ -2155,7 +2182,7 @@ pub fn format_multiline_table(node: &SyntaxNode, config: &Config, indent: usize)
         for row in table_data.rows.iter_mut().skip(body_start) {
             for (col_idx, cell) in row.iter_mut().enumerate() {
                 let width = col_widths.get(col_idx).copied().unwrap_or(0);
-                *cell = reflow_cell_lines(cell, width);
+                *cell = reflow_cell_lines(cell, width, false, str::to_string);
             }
         }
     }
@@ -2354,13 +2381,15 @@ mod grid_reflow_tests {
 
     #[test]
     fn reflow_packs_prose_and_drops_trailing_blank() {
-        let out = reflow_or_trim_grid_cell(&lines("Lorem ipsum\ndolor sit\n"), 18);
+        let out =
+            reflow_or_trim_grid_cell(&lines("Lorem ipsum\ndolor sit\n"), 18, &Config::default());
         assert_eq!(out, vec!["Lorem ipsum dolor", "sit"]);
     }
 
     #[test]
     fn trim_only_keeps_block_content_but_drops_blank_edges() {
-        let out = reflow_or_trim_grid_cell(&lines("\n- item one\n- item two\n"), 18);
+        let out =
+            reflow_or_trim_grid_cell(&lines("\n- item one\n- item two\n"), 18, &Config::default());
         assert_eq!(out, vec!["- item one", "- item two"]);
     }
 }
