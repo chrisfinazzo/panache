@@ -9,7 +9,7 @@ use rowan::ast::AstNode;
 
 use crate::syntax::{
     MathArgument, MathCommand, MathContent, MathDelimited, MathEnvironment, MathGroup,
-    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxToken,
+    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
 };
 
 use super::ir::Ir;
@@ -204,7 +204,7 @@ fn display_environment_has_supported_prefix(
         return true;
     }
 
-    if last.class == MathClass::Inner && is_delimited_operand(elements, last.range) {
+    if last.class == MathClass::Inner && is_structured_inner_operand(elements, last.range) {
         return true;
     }
 
@@ -227,7 +227,7 @@ fn display_environment_has_supported_prefix(
         })
 }
 
-fn is_delimited_operand(elements: &[SyntaxElement], range: TextRange) -> bool {
+fn is_structured_inner_operand(elements: &[SyntaxElement], range: TextRange) -> bool {
     elements.iter().any(|element| {
         if element.text_range() != range {
             return false;
@@ -235,12 +235,15 @@ fn is_delimited_operand(elements: &[SyntaxElement], range: TextRange) -> bool {
         let Some(node) = element.as_node() else {
             return false;
         };
-        MathDelimited::cast(node.clone()).is_some()
+        let is_supported_base = |node: SyntaxNode| {
+            MathDelimited::cast(node.clone()).is_some()
+                || MathGroup::cast(node).is_some_and(|group| group.is_closed())
+        };
+        is_supported_base(node.clone())
             || MathScripted::cast(node.clone())
                 .and_then(|scripted| scripted.base())
                 .and_then(SyntaxElement::into_node)
-                .and_then(MathDelimited::cast)
-                .is_some()
+                .is_some_and(is_supported_base)
     })
 }
 

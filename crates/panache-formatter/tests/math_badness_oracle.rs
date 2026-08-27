@@ -1088,6 +1088,30 @@ fn delimited_operand_prefixed_comment_bearing_display_environment_matches_badnes
 }
 
 #[test]
+fn grouped_operand_prefixed_comment_bearing_display_environment_matches_badness() {
+    let environment = "\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}";
+    let representative = format!("{{x}}{environment}");
+    assert_eq!(
+        badness_body(&representative, OracleContext::Display).expect("Badness formatter"),
+        "  {x}\\begin{matrix}\n       a & = {b % inner\n              + c}\n     \\end{matrix}"
+    );
+
+    for prefix in ["{x}", "{x}_i"] {
+        let body = format!("{prefix}{environment}");
+        assert_formatter_parity(&body, OracleContext::Display);
+        let once = panache_body(&body, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "grouped-operand-prefixed display environment is not idempotent: {body:?}"
+        );
+    }
+
+    let unclosed = format!("{{x{environment}");
+    assert!(panache_body(&unclosed, OracleContext::Display).is_err());
+}
+
+#[test]
 fn comment_bearing_embedded_display_environment_with_trailing_content_matches_badness() {
     let environment = "\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
     let punctuation = format!("x+{environment},y");

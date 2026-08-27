@@ -64,17 +64,17 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Structured-delimiter-prefixed comment-bearing display environments.** The
-typed multiline-atom path now accepts a closed `\left…\right` operand
-immediately before the single top-level environment.
+**Brace-group-prefixed comment-bearing display environments.** The typed
+multiline-atom path now accepts a closed ordinary `{…}` group immediately before
+the single top-level environment.
 
-- Bare and scripted delimiter operands remain tight to `\begin`; the
-  environment body and closing marker hang from that resulting source column.
-- The prefix gate recognizes only a top-level `MATH_DELIMITED` atom or a
-  `MATH_SCRIPTED` atom with that base. Existing typed lowering still validates
-  the delimiter and scripts, so malformed and unrelated inner-class constructs
-  remain on the compatibility path.
-- Mandatory Badness parity and idempotency cases cover bare and scripted
+- Bare and scripted group operands remain tight to `\begin`; the environment
+  body and closing marker hang from that resulting source column.
+- The prefix gate now recognizes supported structured `Inner` operands: a
+  `MATH_GROUP` with its closing brace or a `MATH_DELIMITED`, directly or as the
+  base of a `MATH_SCRIPTED` node. Unclosed groups remain on the compatibility
+  path.
+- Mandatory Badness parity and idempotency cases cover bare and scripted group
   prefixes. The host golden pins the experimental Markdown display shape, a
   focused MathML check guards meaning preservation, and `STYLE.md` records the
   rule.
@@ -83,9 +83,9 @@ immediately before the single top-level environment.
 
 ### Suggested next sub-targets
 
-1. Test whether closed ordinary groups immediately before a comment-bearing
-   display environment have a stable Badness composition rule; if so, admit
-   that next `Inner`-class operand through the typed path.
+1. Probe signature-proven `Inner` command operands immediately before a
+   comment-bearing display environment; admit only commands with a stable
+   Badness composition rule and fully supported typed arguments.
 2. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 3. Revisit non-colon scripted composite relations only after the pinned Badness

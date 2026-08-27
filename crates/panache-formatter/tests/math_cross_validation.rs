@@ -243,3 +243,20 @@ fn delimited_operand_environment_preserves_mathml() {
         "formatting changed the rendered math structure"
     );
 }
+
+#[test]
+fn grouped_operand_environment_preserves_mathml() {
+    let input = "{x}_i\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}";
+    let formatted = format_math(
+        input,
+        &format_opts(MathContext::Display, signature_scope(None)),
+    )
+    .expect("typed display lowering accepts the grouped operand prefix");
+    let before = render_mathml(input).expect("input renders to MathML");
+    let after = render_mathml(&formatted).expect("formatted output renders to MathML");
+
+    assert_eq!(
+        before, after,
+        "formatting changed the rendered math structure"
+    );
+}
