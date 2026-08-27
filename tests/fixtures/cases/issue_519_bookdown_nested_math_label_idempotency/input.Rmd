@@ -1,0 +1,6 @@
+\begin{equation}
+\begin{split}
+x
+\end{split}
+(\#eq:x)
+\end{equation}

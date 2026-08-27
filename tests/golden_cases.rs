@@ -182,6 +182,7 @@ golden_test_cases!(
     bracketed_spans,
     bookdown,
     bookdown_equation_label_first,
+    issue_519_bookdown_nested_math_label_idempotency,
     bookdown_math_labels_host,
     gfm_bare_uri_trailing_delimiters,
     chunk_options_complex,
