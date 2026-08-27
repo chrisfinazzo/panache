@@ -355,6 +355,52 @@ formatter-off output byte-identical.
    - [x] Turn `format-math` into a stable option and deprecate the experimental
      setting.
 
+### RwR corpus follow-ups (2026-08-27)
+
+A manual formatter review of `nielsrhansen/RwR` at
+`2fd0219f562f5fa28b286a3c05065eee24f87f93`, using Panache
+`18f6cc63b3cb86e30a0653be3a74856e20fb511c` (`3.6.1`), found no token loss. All
+19 documents passed `debug format --checks all`; a second formatting pass was
+idempotent; all 3,816 math nodes retained their order and non-whitespace
+content; and 15 generated validation documents, containing 3,815 formulas,
+compiled with Pandoc and LuaLaTeX. The remaining problems concern source layout.
+Reproduce the formatter passes with:
+
+```bash
+git clone https://github.com/nielsrhansen/RwR.git
+git -C RwR checkout 2fd0219f562f5fa28b286a3c05065eee24f87f93
+panache debug format --checks all RwR
+panache format RwR
+panache format --check RwR
+```
+
+- [ ] Preserve postfix left-limit signs instead of spelling them as binary
+  operators before a closing delimiter. Eight expressions in
+  `11_survival.qmd`, including `N(t-)` and `S(T_i-)`, become `N(t - )` and
+  `S(T_i - )`. Add inline, display, and aligned-grid regressions.
+- [ ] Keep a required environment argument attached to `\begin{array}`. Three
+  arrays in `2_linear.qmd` and `5_generalized_linear.qmd` put the column
+  specification, such as `{cc}`, on the next line.
+- [ ] Keep signs attached to TeX dimensions. Two expressions in `2_linear.qmd`
+  and `11_survival.qmd` rewrite `\hskip -1cm` and `\hskip -30mm` as
+  `\hskip - 1cm` and `\hskip - 30mm`.
+- [ ] Improve free-display break selection so that it does not strand special
+  operators such as `\pm`, `\cdot`, and `\mid`, or split simple relations
+  into operator islands. The corpus has nine such continuation lines;
+  include the AUC definition from `8_assessment.qmd` and the
+  confidence-interval examples from `2_linear.qmd`,
+  `5_generalized_linear.qmd`, and `13_interval.qmd` in the regression
+  coverage.
+- [ ] Make alignment padding respect the configured line width. At the default
+  width of 80, formatting reduced math lines longer than 80 columns from 321
+  to 302, but increased lines longer than 100 columns from 142 to 159 and
+  the maximum from 177 to 206. Add a regression ceiling or layout-badness
+  assertion for long aligned displays from `13_interval.qmd`.
+- [ ] Remove trailing whitespace from formatted math bodies. Formatting adds or
+  retains it on eight math lines across `2_linear.qmd`,
+  `5_generalized_linear.qmd`, and `8_assessment.qmd`; `git diff --check`
+  rejects the result even though `panache format --check` passes.
+
 ## Parser
 
 ### Issues
