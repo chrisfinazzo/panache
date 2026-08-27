@@ -64,28 +64,26 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Unary-prefixed comment-bearing display environments.** The typed multiline-
-atom path now accepts a literal `+` or `-` that TeX has coerced to ordinary
-immediately before the single top-level environment.
+**Ordinary-operand-prefixed comment-bearing display environments.** The typed
+multiline-atom path now accepts an ordinary operand immediately before the
+single top-level environment.
 
-- The unary sign must follow an existing binary or relation break head. It
-  remains tight to `\begin`, while the environment body and closing marker hang
-  from the resulting source column.
-- The gate checks the shared semantic atom stream's `coerced_unary` flag and the
-  exact source slice. Scripted signs, command operators, other binary symbols,
-  and prefixes without a supported break head still decline to the compatibility
-  path.
-- Mandatory Badness parity and idempotency cases cover both signs after relation
-  and binary heads. The host golden pins the distinct hanging columns for
-  `x=-\begin{...}` and `x++\begin{...}`, and `STYLE.md` records the rule.
+- The operand remains tight to `\begin`; the environment body and closing
+  marker hang from that resulting source column. Scripted ordinary bases inherit
+  the same semantic class and use the same path.
+- Mandatory Badness parity and idempotency cases cover bare and scripted
+  ordinary prefixes. The host golden pins the experimental Markdown display
+  shape, and `STYLE.md` records the rule.
+- The superseded comment-specific prefix compositor and its duplicate preflight
+  branch are gone. Comment-bearing mixed displays now have one typed lowering
+  route and one acceptance predicate.
 - The shared corpus and its parity classifications did not change, so the
   committed report needs no update.
 
 ### Suggested next sub-targets
 
 1. Continue converging the separate structured-delimiter and mixed-environment
-   paths now that a typed environment atom composes in free displays; remove the
-   superseded prefix-only compositor only after its remaining shapes migrate.
+   paths now that typed environment atoms compose directly in free displays.
 2. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 3. Revisit non-colon scripted composite relations only after the pinned Badness

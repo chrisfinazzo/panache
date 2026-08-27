@@ -18,10 +18,7 @@ use crate::syntax::{
     SyntaxNode, SyntaxToken,
 };
 use panache_parser::parser::math::MathParseOptions;
-use panache_parser::semantic::math::{
-    ArgKind, ArgumentDomain, MathBreakPriority, MathClass, SignatureScope, match_arg_slot,
-    math_atoms, semantic_math_atoms_in,
-};
+use panache_parser::semantic::math::{ArgKind, ArgumentDomain, SignatureScope, match_arg_slot};
 
 const INDENT: &str = "  ";
 
@@ -175,7 +172,6 @@ fn render_display(tree: &SyntaxNode, top: &[SyntaxElement], opts: &MathFormatOpt
                     Printer::new(opts.line_width, INDENT.len()).print(&document, opts.math_indent)
                 })
             })
-            .or_else(|| render_top_level_commented_environment(top, opts))
             .or_else(|| render_top_level_mixed_environment(&semantic, opts))
             .unwrap_or_else(|| {
                 let content: String = top.iter().map(ToString::to_string).collect();
@@ -418,99 +414,6 @@ fn render_top_level_mixed_environment(
     Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
 }
 
-fn render_top_level_commented_environment(
-    elems: &[SyntaxElement],
-    opts: &MathFormatOptions,
-) -> Option<String> {
-    let doc = top_level_commented_environment_doc(elems, opts)?;
-    Some(Printer::new(opts.line_width, INDENT.len()).print(&doc, opts.math_indent))
-}
-
-fn top_level_commented_environment_doc(
-    elems: &[SyntaxElement],
-    opts: &MathFormatOptions,
-) -> Option<Ir> {
-    if !elems.iter().any(contains_comment)
-        || !ordinary_delimiters_balanced(&expand_word_elements(elems))
-    {
-        return None;
-    }
-    if elems.iter().any(contains_unsafe_mixed_trivia)
-        || elems
-            .iter()
-            .any(|element| environment_block(element).is_none() && contains_environment(element))
-    {
-        return None;
-    }
-
-    let environment_indices = elems
-        .iter()
-        .enumerate()
-        .filter_map(|(index, element)| environment_block(element).is_some().then_some(index))
-        .collect::<Vec<_>>();
-    let [environment_index] = environment_indices.as_slice() else {
-        return None;
-    };
-    let before = &elems[..*environment_index];
-    let after = &elems[*environment_index + 1..];
-    // Badness breaks a top-level operator after this forced multiline atom.
-    // That composition waits for environments to join typed display lowering.
-    if after
-        .iter()
-        .flat_map(math_atoms)
-        .any(|atom| matches!(atom.class, MathClass::Bin | MathClass::Rel))
-    {
-        return None;
-    }
-
-    let before_atoms = semantic_math_atoms_in(before.iter().cloned()).collect::<Vec<_>>();
-    let break_priority = before_atoms.last()?.break_priority;
-    if !matches!(
-        break_priority,
-        MathBreakPriority::Binary | MathBreakPriority::Relation
-    ) || before_atoms.len() < 2
-    {
-        return None;
-    }
-
-    let (environment, scripts) = environment_block(&elems[*environment_index])?;
-    if !scripts.is_empty() {
-        return None;
-    }
-    let environment_doc = environment_document(&environment, opts)?;
-    let mut suffix = render_inline_seeded(after, Some(AtomClass::Close), &opts.signature_scope)
-        .trim()
-        .to_string();
-    if !suffix.is_empty() && needs_space_after_environment(after) {
-        suffix.insert(0, ' ');
-    }
-
-    // A forced break inside the environment breaks Badness's surrounding
-    // display group at a preceding binary operator, while a relation head
-    // stays flat when it fits. The typed display layout reproduces both
-    // decisions without flattening the prefix or reinterpreting atom roles.
-    let prefix_width = match break_priority {
-        MathBreakPriority::Binary => 0,
-        MathBreakPriority::Relation => opts.line_width.saturating_sub(opts.math_indent),
-        MathBreakPriority::None => return None,
-    };
-    let prefix =
-        lower::try_lower_display_elements(before.to_vec(), &opts.signature_scope, prefix_width)?;
-    let prefix_last_width = Printer::new(opts.line_width, INDENT.len())
-        .print(&prefix, 0)
-        .lines()
-        .last()
-        .unwrap_or_default()
-        .chars()
-        .count();
-    Some(Ir::concat([
-        prefix,
-        Ir::text(" "),
-        Ir::align(prefix_last_width + 1, environment_doc),
-        Ir::text(suffix),
-    ]))
-}
-
 pub(super) fn can_render_mixed_environment_comments(
     tree: &SyntaxNode,
     opts: &MathFormatOptions,
@@ -523,15 +426,12 @@ pub(super) fn can_render_mixed_environment_comments(
         MathContext::Inline => {
             mixed_segment_doc(&expand_word_elements(&elements), opts, Some(1)).is_some()
         }
-        MathContext::Display => {
-            lower::try_lower_display_environment(
-                elements.clone(),
-                opts,
-                opts.line_width.saturating_sub(opts.math_indent),
-            )
-            .is_some()
-                || top_level_commented_environment_doc(&elements, opts).is_some()
-        }
+        MathContext::Display => lower::try_lower_display_environment(
+            elements,
+            opts,
+            opts.line_width.saturating_sub(opts.math_indent),
+        )
+        .is_some(),
         MathContext::EnvironmentBody => false,
     }
 }

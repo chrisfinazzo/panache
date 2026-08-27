@@ -200,6 +200,10 @@ fn display_environment_has_supported_prefix(
         return !prefix.is_empty();
     }
 
+    if !last.coerced_unary && last.class == MathClass::Ord {
+        return true;
+    }
+
     last.coerced_unary
         && prefix.last().is_some_and(|atom| {
             matches!(

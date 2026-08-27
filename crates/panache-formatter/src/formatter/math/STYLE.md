@@ -75,25 +75,27 @@ Returned unchanged, never reflowed:
    In display math, a single top-level environment with surrounding free content
    uses the same hanging layout. Its `\begin` stays after the preceding
    expression, and its body and `\end` align relative to the environment's
-   starting column. When a nested `%` comment pins the display breaks and the
-   preceding expression ends in a binary operator, the expression breaks before
-   that operator; the environment stays on the operator's continuation line and
-   hangs from its resulting `\begin` column. A preceding relation instead stays
-   in the flat head with the environment when it fits; the body hangs from that
-   later `\begin` column. A unary `+` or `-` after either break head remains
-   tight to the environment, and the body hangs from the resulting `\begin`
-   column. Safe trailing content with no top-level binary or relation stays on
-   the environment's `\end` line; punctuation remains tight when the oracle
-   keeps it tight. The environment participates as a typed multiline operand: a
-   following binary operator starts flush on a new display line, while a
-   following relation aligns with the leading relation. Scripts on that operand
-   stay attached to the closing marker (`\end{matrix}^T`); their width
-   determines where any same-line suffix begins, while a following operator
-   still takes its normal display break. Inline math follows Badness's distinct
-   layout: the environment's continuation lines return to the math body's base
-   column when the body prints flat. If a nested `%` comment pins the inline
-   breaks, the environment instead hangs from its actual `\begin` source column,
-   including the host `$` opener's column.
+   starting column. An ordinary operand immediately before the environment stays
+   tight to `\begin`; the body hangs from that resulting source column. When a
+   nested `%` comment pins the display breaks and the preceding expression ends
+   in a binary operator, the expression breaks before that operator; the
+   environment stays on the operator's continuation line and hangs from its
+   resulting `\begin` column. A preceding relation instead stays in the flat
+   head with the environment when it fits; the body hangs from that later
+   `\begin` column. A unary `+` or `-` after either break head remains tight to
+   the environment, and the body hangs from the resulting `\begin` column. Safe
+   trailing content with no top-level binary or relation stays on the
+   environment's `\end` line; punctuation remains tight when the oracle keeps it
+   tight. The environment participates as a typed multiline operand: a following
+   binary operator starts flush on a new display line, while a following
+   relation aligns with the leading relation. Scripts on that operand stay
+   attached to the closing marker (`\end{matrix}^T`); their width determines
+   where any same-line suffix begins, while a following operator still takes its
+   normal display break. Inline math follows Badness's distinct layout: the
+   environment's continuation lines return to the math body's base column when
+   the body prints flat. If a nested `%` comment pins the inline breaks, the
+   environment instead hangs from its actual `\begin` source column, including
+   the host `$` opener's column.
 
    A single environment inside a closed `\left`/`\right` body composes the same
    environment layout with the structured delimiter's hanging column, whether it

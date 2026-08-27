@@ -1043,6 +1043,30 @@ fn comment_bearing_embedded_display_environment_after_relation_matches_badness()
 }
 
 #[test]
+fn operand_prefixed_comment_bearing_display_environment_matches_badness() {
+    let body = "x\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}";
+    let badness = badness_body(body, OracleContext::Display).expect("Badness formatter");
+
+    assert_eq!(
+        badness,
+        "  x\\begin{matrix}\n     a & = {b % inner\n            + c}\n   \\end{matrix}"
+    );
+
+    for body in [
+        body,
+        "x_i\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}",
+    ] {
+        assert_formatter_parity(body, OracleContext::Display);
+        let once = panache_body(body, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "operand-prefixed display environment is not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn comment_bearing_embedded_display_environment_with_trailing_content_matches_badness() {
     let environment = "\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
     let punctuation = format!("x+{environment},y");

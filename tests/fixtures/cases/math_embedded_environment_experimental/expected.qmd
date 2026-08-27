@@ -74,3 +74,11 @@ $$
        d & = e
      \end{matrix}
 $$
+
+$$
+  x\begin{matrix}
+     a & = {b % inner
+            + c} \\
+     d & = e
+   \end{matrix}
+$$
