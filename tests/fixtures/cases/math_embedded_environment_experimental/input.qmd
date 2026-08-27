@@ -68,3 +68,19 @@ a&={b % inner
 d&=e
 \end{matrix}
 $$
+
+$$
+\left(x\right)\begin{matrix}
+a&={b % inner
++c}\\
+d&=e
+\end{matrix}
+$$
+
+$$
+\left(x\right)^2\begin{matrix}
+a&={b % inner
++c}\\
+d&=e
+\end{matrix}
+$$

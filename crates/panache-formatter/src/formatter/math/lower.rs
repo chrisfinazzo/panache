@@ -204,6 +204,10 @@ fn display_environment_has_supported_prefix(
         return true;
     }
 
+    if last.class == MathClass::Inner && is_delimited_operand(elements, last.range) {
+        return true;
+    }
+
     last.coerced_unary
         && prefix.last().is_some_and(|atom| {
             matches!(
@@ -221,6 +225,23 @@ fn display_environment_has_supported_prefix(
             };
             token_slice(last.range, token).is_some_and(|text| matches!(text.as_str(), "+" | "-"))
         })
+}
+
+fn is_delimited_operand(elements: &[SyntaxElement], range: TextRange) -> bool {
+    elements.iter().any(|element| {
+        if element.text_range() != range {
+            return false;
+        }
+        let Some(node) = element.as_node() else {
+            return false;
+        };
+        MathDelimited::cast(node.clone()).is_some()
+            || MathScripted::cast(node.clone())
+                .and_then(|scripted| scripted.base())
+                .and_then(SyntaxElement::into_node)
+                .and_then(MathDelimited::cast)
+                .is_some()
+    })
 }
 
 fn display_environment(element: &SyntaxElement) -> Option<(MathEnvironment, Option<MathScripted>)> {

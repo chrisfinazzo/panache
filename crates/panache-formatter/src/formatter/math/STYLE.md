@@ -75,13 +75,14 @@ Returned unchanged, never reflowed:
    In display math, a single top-level environment with surrounding free content
    uses the same hanging layout. Its `\begin` stays after the preceding
    expression, and its body and `\end` align relative to the environment's
-   starting column. An ordinary operand immediately before the environment stays
-   tight to `\begin`; the body hangs from that resulting source column. When a
-   nested `%` comment pins the display breaks and the preceding expression ends
-   in a binary operator, the expression breaks before that operator; the
-   environment stays on the operator's continuation line and hangs from its
-   resulting `\begin` column. A preceding relation instead stays in the flat
-   head with the environment when it fits; the body hangs from that later
+   starting column. An ordinary operand or a structured `\left…\right` operand
+   immediately before the environment stays tight to `\begin`; scripts remain
+   attached to either operand, and the body hangs from the resulting source
+   column. When a nested `%` comment pins the display breaks and the preceding
+   expression ends in a binary operator, the expression breaks before that
+   operator; the environment stays on the operator's continuation line and hangs
+   from its resulting `\begin` column. A preceding relation instead stays in the
+   flat head with the environment when it fits; the body hangs from that later
    `\begin` column. A unary `+` or `-` after either break head remains tight to
    the environment, and the body hangs from the resulting `\begin` column. Safe
    trailing content with no top-level binary or relation stays on the
