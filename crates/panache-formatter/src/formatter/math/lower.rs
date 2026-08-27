@@ -146,12 +146,7 @@ pub(super) fn try_lower_display_environment(
     let before = &elements[..*environment_index];
     let after = &elements[*environment_index + 1..];
     let before_atoms = semantic_atoms_for(before, &semantic_atoms);
-    if before_atoms.len() < 2
-        || !matches!(
-            before_atoms.last()?.break_priority,
-            MathBreakPriority::Binary | MathBreakPriority::Relation
-        )
-    {
+    if !display_environment_has_supported_prefix(before, &before_atoms) {
         return None;
     }
     let mut pieces = lower_pieces_with_atoms(
@@ -189,6 +184,39 @@ pub(super) fn try_lower_display_environment(
     pieces.extend(after_pieces);
 
     Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
+}
+
+fn display_environment_has_supported_prefix(
+    elements: &[SyntaxElement],
+    atoms: &[SemanticMathAtom],
+) -> bool {
+    let Some((last, prefix)) = atoms.split_last() else {
+        return false;
+    };
+    if matches!(
+        last.break_priority,
+        MathBreakPriority::Binary | MathBreakPriority::Relation
+    ) {
+        return !prefix.is_empty();
+    }
+
+    last.coerced_unary
+        && prefix.last().is_some_and(|atom| {
+            matches!(
+                atom.break_priority,
+                MathBreakPriority::Binary | MathBreakPriority::Relation
+            )
+        })
+        && elements.iter().any(|element| {
+            let Some(token) = element.as_token().filter(|token| {
+                token.kind() == SyntaxKind::MATH_WORD
+                    && token.text_range().start() <= last.range.start()
+                    && token.text_range().end() >= last.range.end()
+            }) else {
+                return false;
+            };
+            token_slice(last.range, token).is_some_and(|text| matches!(text.as_str(), "+" | "-"))
+        })
 }
 
 fn display_environment(element: &SyntaxElement) -> Option<(MathEnvironment, Option<MathScripted>)> {

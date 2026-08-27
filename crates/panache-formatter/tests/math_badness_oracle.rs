@@ -988,7 +988,27 @@ fn comment_bearing_embedded_display_environment_matches_badness() {
     );
 
     let unary = "x=+\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}";
-    assert!(panache_body(unary, OracleContext::Display).is_err());
+    let badness = badness_body(unary, OracleContext::Display).expect("Badness formatter");
+
+    assert_eq!(
+        badness,
+        "  x = +\\begin{matrix}\n         a & = {b % inner\n                + c}\n       \\end{matrix}"
+    );
+
+    for unary in [
+        unary,
+        "x=-\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}",
+        "x++\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}",
+        "x+-\\begin{matrix}\na&={b % inner\n+c}\n\\end{matrix}",
+    ] {
+        assert_formatter_parity(unary, OracleContext::Display);
+        let once = panache_body(unary, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "unary-prefixed embedded display environment is not idempotent: {unary:?}"
+        );
+    }
 }
 
 #[test]

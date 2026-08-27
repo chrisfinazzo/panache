@@ -44,3 +44,19 @@ a&={b % inner
 d&=e
 \end{matrix}_i=y
 $$
+
+$$
+x=-\begin{matrix}
+a&={b % inner
++c}\\
+d&=e
+\end{matrix}
+$$
+
+$$
+x++\begin{matrix}
+a&={b % inner
++c}\\
+d&=e
+\end{matrix}
+$$

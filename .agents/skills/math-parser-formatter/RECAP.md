@@ -64,23 +64,20 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Scripted comment-bearing display environments.** The typed multiline-atom
-path now accepts a `MATH_SCRIPTED` node whose base is the single top-level
-environment.
+**Unary-prefixed comment-bearing display environments.** The typed multiline-
+atom path now accepts a literal `+` or `-` that TeX has coerced to ordinary
+immediately before the single top-level environment.
 
-- A validated subscript or superscript document is appended directly to the
-  environment document, so it glues to the closing marker
-  (`\end{matrix}^T`) without flattening the forced lines.
-- The multiline atom's final-line width includes the script. Safe punctuation
-  remains on the closing line, while a following binary or relation keeps the
-  display break and alignment established for an unscripted environment.
-- The special gate checks the scripted wrapper and every script argument with
-  the existing conservative support contract. Unsupported or malformed script
-  shapes still decline to the compatibility path.
-- Mandatory oracle cases cover punctuation, binary, equality, and
-  assignment-arrow/relation suffixes byte for byte and verify idempotency. The
-  host golden covers subscript and superscript operator forms, and `STYLE.md`
-  records the attachment rule.
+- The unary sign must follow an existing binary or relation break head. It
+  remains tight to `\begin`, while the environment body and closing marker hang
+  from the resulting source column.
+- The gate checks the shared semantic atom stream's `coerced_unary` flag and the
+  exact source slice. Scripted signs, command operators, other binary symbols,
+  and prefixes without a supported break head still decline to the compatibility
+  path.
+- Mandatory Badness parity and idempotency cases cover both signs after relation
+  and binary heads. The host golden pins the distinct hanging columns for
+  `x=-\begin{...}` and `x++\begin{...}`, and `STYLE.md` records the rule.
 - The shared corpus and its parity classifications did not change, so the
   committed report needs no update.
 
@@ -89,10 +86,8 @@ environment.
 1. Continue converging the separate structured-delimiter and mixed-environment
    paths now that a typed environment atom composes in free displays; remove the
    superseded prefix-only compositor only after its remaining shapes migrate.
-2. Migrate the remaining safe unary-prefix shape only after pinning its semantic
-   role and forced-line layout against Badness.
-3. Revisit unpunctuated multiple environments only with a pinned structural
+2. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
-4. Revisit non-colon scripted composite relations only after the pinned Badness
+3. Revisit non-colon scripted composite relations only after the pinned Badness
    formatter defect is corrected; keep their compatibility path in the
    meantime.
