@@ -1,108 +1,113 @@
 ---
 name: math-parser-formatter
-description: Advance Panache's math parser and formatter one bounded phase at a
-  time. Use when implementing or debugging the TeX math CST, semantic model,
-  Badness parity, math formatting, or the next math-roadmap task.
+description: Maintain and debug Panache's TeX math parser, lossless CST,
+  semantic model, formatter, diagnostics, and Badness parity. Use for
+  math-specific regressions, behavior changes, or oracle updates; do not use
+  for ordinary Markdown syntax or generic formatter work.
 ---
 
-This is a multi-session effort. Project source paths below are relative to the
-repository root. Skill resources linked from this file are relative to this
-`SKILL.md` file.
+# Maintain the math parser and formatter
 
-## Scope boundaries
+Treat math formatting as a stable, issue-driven subsystem. The migration
+roadmap in `TODO.md` is complete; do not use it as a work queue.
 
-- Parser: `crates/panache-parser/src/parser/math.rs` (the TeX content parser),
-  embedded via `crates/panache-parser/src/parser/inlines/math.rs`, with AST
-  accessors in `crates/panache-parser/src/syntax/{math,inlines}.rs`.
-- Formatter: `crates/panache-formatter/src/formatter/math/`, gated behind an
-  experimental option.
-- Goal: make Panache's math-content CST structurally isomorphic to Badness's and
-  reproduce Badness's math formatting style, while retaining a wholly native
-  production parser, semantic model, CST, and formatter. The sole intentional
-  style extension is alignment of trailing `\\` markers in alignment-capable
-  environments. *Out of scope*: macro rewriting, `\frac`/`\dfrac`
-  canonicalization, and anything that needs macro expansion.
-- **There is no pandoc oracle for math *formatting*** — pandoc passes math
-  content through untouched. Use exact, pinned `badness-parser` and
-  `badness-formatter` development dependencies as the structural and output
-  oracles. Retain independent MathML and TeX/PDF checks for meaning preservation.
+Project source paths below are relative to the repository root. Skill resources
+are relative to this `SKILL.md`.
 
-## Locked-in design decisions (do not relitigate)
+## Scope and sources of truth
 
-- **Parser is unconditional + lossless**; the experimental gate lives on the
-  **formatter** side (default off = emit math verbatim, today's behavior). The
-  gate is a formatter-config option, NOT a Pandoc `Extensions` flag.
-- **Badness is the parser model.** Match its lossless, error-tolerant CST and
-  recovery through the pinned development-only oracle; do not substitute a
-  lossy or throwing math parser.
-- **Diagnostics ride a side-channel.** Derive `MathDiagnostic` values through
-  `math_diagnostics()` for the formatter, linter, and LSP; do not encode errors
-  as CST structure.
-- **Host-only constructs stay outside TeX math where possible.** Markdown
-  delimiters, Bookdown equation labels (`(\#eq:label)`), Pandoc attributes, and
-  container prefixes belong to the host layer. Equation labels are host tokens
-  between ordered `MATH_CONTENT` segments, never children of those segments.
-- **`MATH_SPACE`/`MATH_NEWLINE` stay distinct** from host `WHITESPACE`/`NEWLINE`
-  so `math_content_text()` can strip container prefixes the block machinery
-  interleaves into `MATH_CONTENT` (blockquote `>` etc.).
-- **The math CST follows Badness's lexical grain.** Ordinary characters live in
-  a Badness-equivalent `MATH_WORD` run; `MATH_OPERATOR`, `MATH_OPEN`,
-  `MATH_CLOSE`, and `MATH_PUNCT` are migration residue from the old formatter.
-  A Panache-owned semantic atom iterator slices Unicode scalars and derives
-  operator class, delimiter role, unary coercion, and break priority exactly as
-  Badness does.
-- **Badness is test-only.** Production code must not depend on Badness, retain a
-  Badness CST, delegate formatting, or project between runtime trees. Test-only
-  projectors may mechanically rename kinds, remove wrapper offsets, and discard
-  documented host trivia; they must never parse, infer attachment, or repair a
-  tree.
-- **Known pinned Badness formatter defect:** it still splits a non-colon
-  relation head from its CST-separated scripted tail (`<=_i` → `< =_i`, with
-  the same problem for `>=_i` and `==_i`). Panache preserves these composite
-  relations. Keep those cases on the compatibility path and outside mandatory
-  byte parity until the pinned oracle is corrected. Definition relations,
-  including `:=_i`, now have byte parity.
-- **Raise issues with Badness to the user:** if you see a Badness parser 
-  or formatter defect, record it and elevate it to the user so that
-  it can be fixed in the Badness repository.
+- The TeX content parser is
+  `crates/panache-parser/src/parser/math.rs`; host embedding lives in
+  `crates/panache-parser/src/parser/inlines/math.rs`, and typed accessors live
+  in `crates/panache-parser/src/syntax/{math,inlines}.rs`.
+- The formatter lives in `crates/panache-formatter/src/formatter/math/` and
+  `crates/panache-formatter/src/formatter/math.rs`. Its user-facing gate is the
+  stable `[format] format-math` option, which defaults to off. The
+  `[experimental] format-math` spelling is a deprecated compatibility alias.
+- For changes to user-visible formatting behavior, read
+  `crates/panache-formatter/src/formatter/math/STYLE.md`; it is the canonical
+  style and preservation contract.
+- For cross-layer parser, semantic, or formatter work, read
+  [REFERENCE.md](REFERENCE.md) before changing behavior. It records the
+  non-obvious implementation constraints, intentional oracle differences, and
+  stabilization baseline.
+- Pandoc is not an oracle for math formatting because it preserves math
+  content. Use the exact, pinned `badness-parser` and `badness-formatter`
+  development dependencies as structural and output oracles. Retain
+  independent MathML and TeX/PDF checks when meaning preservation is at risk.
 
-Follow the math-parser, parser, and formatter invariants in the repository's
-root `AGENTS.md`.
+Follow the parser, math, formatter, linter, and language-server invariants in
+the repository's root `AGENTS.md` for every layer the change touches.
 
-## Session workflow
+## Invariants
 
-1. Read the repository roadmap at `TODO.md` in the root. Follow its checkboxes
-   for the authoritative sequence, then read the skill-local
-   [RECAP.md](RECAP.md) for the latest completed slice and suggested next
-   sub-targets. Resolve that link relative to this `SKILL.md`, not the
-   repository root.
-2. Pick one bounded sub-task. If the roadmap, recap, and repository disagree,
-   verify the implementation and correct the stale document before proceeding.
-3. TDD: add the failing test first (parser golden / formatter golden / unit).
-4. Validate during development and before landing:
-   - During development, run the focused suite relevant to the changed layer:
-     - Parser CST: `cargo test -p panache-parser --test math_badness_parity`
-     - Semantic model:
-       `cargo test -p panache-parser --test math_semantic_parity`
-     - Formatter output:
-       `cargo test -p panache-formatter --test math_badness_oracle`
-   - If the formatter corpus or its parity classification changes, regenerate
-     and review the committed report with:
+- Keep parsing unconditional, single-pass, lossless, and error-tolerant. The
+  formatter option controls rewriting; it is not a Pandoc `Extensions` flag.
+- Derive `MathDiagnostic` values through `math_diagnostics()` as a side
+  channel. Do not encode diagnostics as CST structure.
+- Keep Markdown delimiters, Bookdown equation labels, Pandoc attributes, and
+  container prefixes at the host layer where possible. Equation labels remain
+  host tokens between ordered `MATH_CONTENT` segments.
+- Keep `MATH_SPACE` and `MATH_NEWLINE` distinct from host trivia, and read math
+  source through `syntax::math::math_content_text()` when container prefixes
+  may be interleaved.
+- Keep the lexical CST neutral. Derive operator class, delimiter role,
+  contextual unary coercion, and break priority through the shared semantic
+  atom model rather than formatter-local token interpretation.
+- Keep Badness test-only. Production code must not retain or project a Badness
+  tree, delegate parsing or formatting to Badness, or depend on Badness at
+  runtime. Test projectors may only perform mechanical kind and wrapper
+  normalization; they must not parse, infer attachment, or repair a tree.
+- Preserve source bytes when syntax is malformed or semantics cannot be proven.
+  Do not broaden the formatter's rewrite boundary merely to increase oracle
+  parity.
+- Do not rewrite macros, canonicalize `\frac` and `\dfrac`, or format constructs
+  whose meaning would require macro expansion.
+- If a pinned Badness defect explains a divergence, record the defect and tell
+  the user. Do not copy the defect into production code or silently reclassify
+  the case.
 
-     ```bash
-     cargo test -p panache-formatter --test math_badness_oracle \
-       math_badness_full_report -- --ignored --nocapture
-     ```
+## Workflow
 
-   - Before landing, run the workspace validation required by root `AGENTS.md`.
-     Its `cargo test --workspace` gate subsumes the focused suites; do not rerun
-     a focused suite afterward when both exercised the same tree state.
-   - For parser CST snapshot changes: review each diff (byte ranges must still
-     reconstruct the input losslessly).
-   - Flag-off regression: existing formatter goldens stay byte-identical.
-5. Rewrite `RECAP.md` with the latest result and suggested next sub-targets.
-   Update roadmap checkboxes when the completed work changes them.
-6. Commit the completed slice after validation and documentation updates. Stage
-   only files belonging to the slice, use a Conventional Commit message that
-   follows the repository guidance, and never skip hooks. If a hook modifies a
-   file, review and stage that change before retrying the commit. Do not push.
+1. Reproduce the smallest failing behavior and identify the owning layer:
+   host parsing, TeX CST, semantic atoms, formatter lowering/layout,
+   configuration, diagnostics, or position mapping. Inspect the CST before
+   adding a formatter workaround.
+2. Read the relevant source of truth above. Verify current implementation when
+   documentation, reports, and behavior disagree; correct only stale material
+   within the requested scope.
+3. Add the smallest focused failing test first. Use parser goldens for CST
+   shape, formatter goldens for user-visible output, and unit or differential
+   tests for semantic behavior.
+4. Compare against the pinned Badness oracle when the shared behavior applies.
+   Keep named intentional differences and preservation cases explicit. Use
+   MathML or representative TeX/PDF checks when byte parity does not establish
+   semantic equivalence.
+5. Run the focused suite for each changed layer:
+
+   - Parser CST:
+     `cargo test -p panache-parser --test math_badness_parity`
+   - Semantic model:
+     `cargo test -p panache-parser --test math_semantic_parity`
+   - Formatter output:
+     `cargo test -p panache-formatter --test math_badness_oracle`
+   - Formatter behavior and host integration: the smallest matching tests under
+     `crates/panache-formatter/tests/` and the root golden suite.
+6. If the formatter corpus, route census, or parity classification changes,
+   regenerate and review the tracked report with:
+
+   ```bash
+   cargo test -p panache-formatter --test math_badness_oracle \
+     math_badness_full_report -- --ignored --nocapture
+   ```
+
+7. Before landing a code change, run the workspace validation required by root
+   `AGENTS.md`. Review every parser snapshot diff for losslessness, verify
+   formatter idempotency, and keep output byte-identical when `format-math` is
+   disabled. Do not rerun a focused suite after an equivalent workspace gate
+   on the same tree state.
+8. Update `STYLE.md`, user documentation, configuration schema, oracle reports,
+   or this skill only when the behavior or durable maintenance contract changes.
+   Do not update the completed roadmap or historical baselines for an unrelated
+   fix. Commit only when the user has requested it, following repository
+   guidance.
