@@ -102,3 +102,7 @@ root `AGENTS.md`.
    - Flag-off regression: existing formatter goldens stay byte-identical.
 5. Rewrite `RECAP.md` with the latest result and suggested next sub-targets.
    Update roadmap checkboxes when the completed work changes them.
+6. Commit the completed slice after validation and documentation updates. Stage
+   only files belonging to the slice, use a Conventional Commit message that
+   follows the repository guidance, and never skip hooks. If a hook modifies a
+   file, review and stage that change before retrying the commit. Do not push.
