@@ -47,6 +47,7 @@ jobs:
         mlr-org/mlr3book
         moderndive/ModernDive_book
         nielsrhansen/CSwR
+        nielsrhansen/RwR
         quarto-dev/quarto-web
         r-causal/causal-inference-in-R
         rdpeng/rprogdatascience
