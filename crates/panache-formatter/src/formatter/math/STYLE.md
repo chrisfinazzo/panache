@@ -84,11 +84,14 @@ Returned unchanged, never reflowed:
    relation stays on the environment's `\end` line; punctuation remains tight
    when the oracle keeps it tight. The environment participates as a typed
    multiline operand: a following binary operator starts flush on a new display
-   line, while a following relation aligns with the leading relation. Inline
-   math follows Badness's distinct layout: the environment's continuation lines
-   return to the math body's base column when the body prints flat. If a nested
-   `%` comment pins the inline breaks, the environment instead hangs from its
-   actual `\begin` source column, including the host `$` opener's column.
+   line, while a following relation aligns with the leading relation. Scripts on
+   that operand stay attached to the closing marker (`\end{matrix}^T`); their
+   width determines where any same-line suffix begins, while a following
+   operator still takes its normal display break. Inline math follows Badness's
+   distinct layout: the environment's continuation lines return to the math
+   body's base column when the body prints flat. If a nested `%` comment pins
+   the inline breaks, the environment instead hangs from its actual `\begin`
+   source column, including the host `$` opener's column.
 
    A single environment inside a closed `\left`/`\right` body composes the same
    environment layout with the structured delimiter's hanging column, whether it

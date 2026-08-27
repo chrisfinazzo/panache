@@ -102,20 +102,13 @@ pub(super) fn try_lower_display_environment(
     let environment_indices = elements
         .iter()
         .enumerate()
-        .filter_map(|(index, element)| {
-            element
-                .as_node()
-                .and_then(|node| MathEnvironment::cast(node.clone()))
-                .map(|_| index)
-        })
+        .filter_map(|(index, element)| display_environment(element).map(|_| index))
         .collect::<Vec<_>>();
     let [environment_index] = environment_indices.as_slice() else {
         return None;
     };
-    let environment = elements[*environment_index]
-        .as_node()
-        .cloned()
-        .and_then(MathEnvironment::cast)?;
+    let environment_element = &elements[*environment_index];
+    let (environment, scripted) = display_environment(environment_element)?;
     if !environment
         .syntax()
         .descendants_with_tokens()
@@ -124,12 +117,30 @@ pub(super) fn try_lower_display_environment(
         return None;
     }
     let end = environment.end()?;
-    let end_width = end.syntax().text().to_string().chars().count();
-    let environment_document = render::environment_document(environment.syntax(), opts)?;
+    let script_document = match scripted.as_ref() {
+        Some(scripted) => {
+            if !environment_scripted_is_supported(scripted, &environment, &opts.signature_scope) {
+                return None;
+            }
+            Some(lower_script_suffix(
+                scripted,
+                &opts.signature_scope,
+                true,
+                false,
+            )?)
+        }
+        None => None,
+    };
+    let script_width = script_document.as_ref().map_or(Some(0), Ir::flat_width)?;
+    let end_width = end.syntax().text().to_string().chars().count() + script_width;
+    let environment_document = Ir::concat([
+        render::environment_document(environment.syntax(), opts)?,
+        script_document.unwrap_or(Ir::Nil),
+    ]);
     let semantic_atoms = semantic_math_atoms_in(elements.iter().cloned()).collect::<Vec<_>>();
     let environment_atom = semantic_atoms.iter().copied().find(|atom| {
-        atom.range.start() == environment.syntax().text_range().start()
-            && atom.range.end() == environment.syntax().text_range().end()
+        atom.range.start() == environment_element.text_range().start()
+            && atom.range.end() == environment_element.text_range().end()
     })?;
 
     let before = &elements[..*environment_index];
@@ -178,6 +189,35 @@ pub(super) fn try_lower_display_environment(
     pieces.extend(after_pieces);
 
     Some(layout_display_pieces(&pieces, line_width, Spacing::Normal))
+}
+
+fn display_environment(element: &SyntaxElement) -> Option<(MathEnvironment, Option<MathScripted>)> {
+    let node = element.as_node()?;
+    if let Some(environment) = MathEnvironment::cast(node.clone()) {
+        return Some((environment, None));
+    }
+    let scripted = MathScripted::cast(node.clone())?;
+    let environment = scripted
+        .base()?
+        .into_node()
+        .and_then(MathEnvironment::cast)?;
+    Some((environment, Some(scripted)))
+}
+
+fn environment_scripted_is_supported(
+    scripted: &MathScripted,
+    environment: &MathEnvironment,
+    scope: &SignatureScope,
+) -> bool {
+    let base_range = environment.syntax().text_range();
+    scripted.syntax().children_with_tokens().all(|element| {
+        element.text_range() == base_range
+            || is_layout_trivia(&element)
+            || element
+                .into_node()
+                .and_then(MathScript::cast)
+                .is_some_and(|script| script_is_supported(&script, scope))
+    })
 }
 
 /// Lower a closed paired delimiter whose body contains one well-formed environment.
@@ -1568,19 +1608,33 @@ fn lower_scripted(
     environment_rows: bool,
 ) -> Option<Ir> {
     let base = scripted.base()?;
-    let scripts = scripted.scripts().collect::<Vec<_>>();
-    if scripts.is_empty() || !scripted_is_supported(scripted, scope) {
+    if scripted.scripts().next().is_none() || !scripted_is_supported(scripted, scope) {
         return None;
     }
 
-    let mut documents = vec![lower_elements(
-        vec![base],
-        scope,
-        spacing,
-        preserve_comment_context,
-        environment_rows,
-    )?];
-    for script in scripts {
+    Some(Ir::concat([
+        lower_elements(
+            vec![base],
+            scope,
+            spacing,
+            preserve_comment_context,
+            environment_rows,
+        )?,
+        lower_script_suffix(scripted, scope, preserve_comment_context, environment_rows)?,
+    ]))
+}
+
+fn lower_script_suffix(
+    scripted: &MathScripted,
+    scope: &SignatureScope,
+    preserve_comment_context: bool,
+    environment_rows: bool,
+) -> Option<Ir> {
+    let mut documents = Vec::new();
+    for script in scripted.scripts() {
+        if !script_is_supported(&script, scope) {
+            return None;
+        }
         let marker = script.marker_token()?;
         let argument = script.argument()?;
         documents.push(Ir::verbatim(marker.text()));
@@ -1592,7 +1646,7 @@ fn lower_scripted(
             environment_rows,
         )?);
     }
-    Some(Ir::concat(documents))
+    (!documents.is_empty()).then(|| Ir::concat(documents))
 }
 
 fn scripted_is_supported(scripted: &MathScripted, scope: &SignatureScope) -> bool {

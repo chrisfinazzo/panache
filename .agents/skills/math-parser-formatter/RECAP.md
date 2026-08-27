@@ -64,34 +64,33 @@ rewrite those sections instead of accumulating history.
 
 ## Latest session
 
-**Operator-bearing suffixes after comment-bearing display environments.** A
-single top-level environment now participates in typed free-display layout as a
-multiline operand instead of forcing the mixed-environment compatibility path.
+**Scripted comment-bearing display environments.** The typed multiline-atom
+path now accepts a `MATH_SCRIPTED` node whose base is the single top-level
+environment.
 
-- `Piece` records the final-line width of a multiline atom. Typed document
-  composition uses that width to hang the environment body from the actual
-  `\begin` column and to place any same-line suffix relative to `\end` without
-  flattening the environment.
-- The shared relation/binary hierarchy now sees the environment as an opaque
-  semantic operand. A following binary operator starts flush on a new display
-  line; a following relation aligns with the leading relation, including after
-  an assignment-arrow head when the forced multiline operand separates them.
-- Mandatory oracle cases cover `+ environment +`, `= environment =`, and
-  `\gets environment \leq` byte for byte and verify idempotency. The host golden
-  covers the binary and relation forms, and `STYLE.md` records the rule.
-- The narrow gate still requires exactly one well-formed top-level environment,
-  a nested comment, and a binary- or relation-led prefix. The unary-prefix and
-  multiple-environment shapes remain on their existing compatibility paths.
+- A validated subscript or superscript document is appended directly to the
+  environment document, so it glues to the closing marker
+  (`\end{matrix}^T`) without flattening the forced lines.
+- The multiline atom's final-line width includes the script. Safe punctuation
+  remains on the closing line, while a following binary or relation keeps the
+  display break and alignment established for an unscripted environment.
+- The special gate checks the scripted wrapper and every script argument with
+  the existing conservative support contract. Unsupported or malformed script
+  shapes still decline to the compatibility path.
+- Mandatory oracle cases cover punctuation, binary, equality, and
+  assignment-arrow/relation suffixes byte for byte and verify idempotency. The
+  host golden covers subscript and superscript operator forms, and `STYLE.md`
+  records the attachment rule.
 - The shared corpus and its parity classifications did not change, so the
   committed report needs no update.
 
 ### Suggested next sub-targets
 
-1. Extend the typed multiline-atom path to scripted environment bases, pinning
-   how scripts glue to `\end` before any following operator.
-2. Continue converging the separate structured-delimiter and mixed-environment
+1. Continue converging the separate structured-delimiter and mixed-environment
    paths now that a typed environment atom composes in free displays; remove the
    superseded prefix-only compositor only after its remaining shapes migrate.
+2. Migrate the remaining safe unary-prefix shape only after pinning its semantic
+   role and forced-line layout against Badness.
 3. Revisit unpunctuated multiple environments only with a pinned structural
    composition rule; keep the current fallback.
 4. Revisit non-colon scripted composite relations only after the pinned Badness

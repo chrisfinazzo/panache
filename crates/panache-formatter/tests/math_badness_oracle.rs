@@ -1064,6 +1064,25 @@ fn comment_bearing_embedded_display_environment_with_trailing_content_matches_ba
 }
 
 #[test]
+fn scripted_comment_bearing_display_environment_matches_badness() {
+    let environment = "\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix}";
+    for body in [
+        format!("x+{environment}^T,y"),
+        format!("x+{environment}^T+y"),
+        format!("x={environment}_i=y"),
+        format!("x\\gets{environment}^T\\leq y"),
+    ] {
+        assert_formatter_parity(&body, OracleContext::Display);
+        let once = panache_body(&body, OracleContext::Display).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Display).expect("second Panache pass");
+        assert_eq!(
+            once, twice,
+            "scripted display environment is not idempotent: {body:?}"
+        );
+    }
+}
+
+#[test]
 fn delimited_environment_migration_slice_matches_badness() {
     let id = "environments/nested/delimited_matrix.tex";
     let body = fs::read_to_string(corpus_root().join(id))
