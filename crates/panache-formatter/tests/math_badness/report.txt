@@ -1,20 +1,20 @@
 Panache/Badness math formatter audit
 Oracle: badness-formatter =0.7.0
 Corpus: tests/fixtures/math_corpus
-Cases: 107
-Context runs: 321
-Mandatory byte parity: 256 / 321
-Named intentional difference: 35 / 321
-Preserved at named boundary: 30 / 321
-Unclassified: 0 / 321
+Cases: 108
+Context runs: 324
+Mandatory byte parity: 259 / 324
+Named intentional difference: 35 / 324
+Preserved at named boundary: 30 / 324
+Unclassified: 0 / 324
 
 Regenerate with:
   cargo test -p panache-formatter --test math_badness_oracle math_badness_full_report -- --ignored --nocapture
 
 === Counts by context ===
-inline: parity 79, intentional 18, preserved 10, unclassified 0
-display: parity 81, intentional 16, preserved 10, unclassified 0
-environment: parity 96, intentional 1, preserved 10, unclassified 0
+inline: parity 80, intentional 18, preserved 10, unclassified 0
+display: parity 82, intentional 16, preserved 10, unclassified 0
+environment: parity 97, intentional 1, preserved 10, unclassified 0
 
 === Mandatory byte parity ===
 commands/argument_after_space.tex [inline]
@@ -195,6 +195,9 @@ groups/nested_braces.tex [environment]
 inline/binomial_frac.tex [inline]
 inline/binomial_frac.tex [display]
 inline/binomial_frac.tex [environment]
+inline/control_space.tex [inline]
+inline/control_space.tex [display]
+inline/control_space.tex [environment]
 inline/greek_and_cdot.tex [inline]
 inline/greek_and_cdot.tex [display]
 inline/greek_and_cdot.tex [environment]

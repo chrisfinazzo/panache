@@ -361,6 +361,10 @@ impl Writer {
 
     /// Write opaque text with its newlines collapsed to single spaces.
     fn write_flattened_verbatim(&mut self, text: &str) {
+        if !text.contains('\n') {
+            self.write_text(text);
+            return;
+        }
         let mut first = true;
         for segment in text.split('\n') {
             if !first {
@@ -564,5 +568,11 @@ mod tests {
             Ir::HardLine,
         ]);
         assert_eq!(printer(4).print_flat(&document), "a b c ");
+    }
+
+    #[test]
+    fn flat_print_preserves_single_line_verbatim_bytes() {
+        let document = Ir::concat([Ir::verbatim(r"\ "), Ir::verbatim(r"\mathrm")]);
+        assert_eq!(printer(4).print_flat(&document), r"\ \mathrm");
     }
 }

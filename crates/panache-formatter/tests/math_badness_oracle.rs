@@ -726,7 +726,7 @@ fn flat_inline_migration_slice_matches_badness() {
 
 #[test]
 fn flat_inline_edge_cases_match_badness() {
-    for body in ["a/b", "a/ b", "a /b"] {
+    for body in ["a/b", "a/ b", "a /b", r"\int x \ \mathrm{d}x"] {
         assert_formatter_parity(body, OracleContext::Inline);
     }
 }

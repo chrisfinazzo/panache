@@ -415,6 +415,7 @@ golden_test_cases!(
     math_blockquote_experimental,
     math_delimited_body_trailing_break_experimental,
     math_embedded_environment_experimental,
+    issue_516_math_control_space_idempotency,
     math_inline_stays_flat_experimental,
     math_linebreak_binary_chain_experimental,
     math_linebreak_experimental,

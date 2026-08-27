@@ -1,0 +1,1 @@
+with $\sigma_K^2 = \int x^2 K(x) \ \mathrm{d}x.$

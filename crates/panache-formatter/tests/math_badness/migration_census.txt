@@ -1,8 +1,8 @@
 Panache math formatter migration census
 Corpus: tests/fixtures/math_corpus
-Cases: 107
-Context runs: 321
-Typed: 291
+Cases: 108
+Context runs: 324
+Typed: 294
 Legacy: 0
 Verbatim: 30
 
@@ -250,6 +250,9 @@ groups/unclosed.tex [environment]: verbatim (malformed-math)
 inline/binomial_frac.tex [inline]: typed
 inline/binomial_frac.tex [display]: typed
 inline/binomial_frac.tex [environment]: typed
+inline/control_space.tex [inline]: typed
+inline/control_space.tex [display]: typed
+inline/control_space.tex [environment]: typed
 inline/greek_and_cdot.tex [inline]: typed
 inline/greek_and_cdot.tex [display]: typed
 inline/greek_and_cdot.tex [environment]: typed
