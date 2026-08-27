@@ -12,6 +12,12 @@ use std::path::{Path, PathBuf};
 
 use panache_parser::semantic::math::SignatureScope;
 
+/// Return the corpus case's top-level directory for IDs rendered on any host.
+#[allow(dead_code)]
+pub fn case_category(id: &str) -> &str {
+    id.split(['/', '\\']).next().unwrap_or(id)
+}
+
 /// Every `.tex` case under `root`, sorted. Panics on an unreadable directory
 /// so a corpus reorganization can never silently shrink a suite's case set.
 pub fn discover_cases(root: &Path) -> Vec<PathBuf> {

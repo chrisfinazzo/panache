@@ -41,7 +41,7 @@ use pulldown_latex::{Parser, Storage, push_mathml};
 
 #[path = "common/math_corpus.rs"]
 mod math_corpus;
-use math_corpus::{discover_cases, read_preamble, signature_scope};
+use math_corpus::{case_category, discover_cases, read_preamble, signature_scope};
 
 const MAX_SKIP_FRACTION: f64 = 0.40;
 
@@ -50,7 +50,7 @@ fn corpus_root() -> PathBuf {
 }
 
 fn context_for(id: &str) -> MathContext {
-    if id.starts_with("inline/") {
+    if case_category(id) == "inline" {
         MathContext::Inline
     } else {
         MathContext::Display
@@ -123,7 +123,7 @@ fn corpus_cross_validates_against_pulldown_latex() {
             .display()
             .to_string();
 
-        if id.starts_with("macro_dependent/") {
+        if case_category(&id) == "macro_dependent" {
             continue;
         }
         considered += 1;

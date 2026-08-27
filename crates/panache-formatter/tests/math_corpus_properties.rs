@@ -33,7 +33,7 @@ use panache_parser::syntax::{SyntaxKind, SyntaxNode};
 
 #[path = "common/math_corpus.rs"]
 mod math_corpus;
-use math_corpus::{discover_cases, read_preamble, signature_scope};
+use math_corpus::{case_category, discover_cases, read_preamble, signature_scope};
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/math_corpus")
@@ -42,7 +42,7 @@ fn corpus_root() -> PathBuf {
 /// Subdirectory → layout context. `inline/` collapses whitespace on one line;
 /// everything else gets the multi-line display treatment.
 fn context_for(id: &str) -> MathContext {
-    if id.starts_with("inline/") {
+    if case_category(id) == "inline" {
         MathContext::Inline
     } else {
         MathContext::Display
@@ -331,16 +331,19 @@ fn corpus_layout_trivia_perturbations_converge() {
 }
 
 fn is_layout_trivia_candidate(id: &str) -> bool {
-    [
-        "display/",
-        "environments/",
-        "groups/",
-        "inline/",
-        "operators/",
-        "scripts/",
-    ]
-    .iter()
-    .any(|prefix| id.starts_with(prefix))
+    matches!(
+        case_category(id),
+        "display" | "environments" | "groups" | "inline" | "operators" | "scripts"
+    )
+}
+
+#[test]
+fn windows_case_ids_select_their_math_context_and_candidate_set() {
+    assert!(matches!(
+        context_for(r"inline\operators.tex"),
+        MathContext::Inline
+    ));
+    assert!(is_layout_trivia_candidate(r"display\operators.tex"));
 }
 
 fn perturb_layout_trivia(source: &str) -> String {
