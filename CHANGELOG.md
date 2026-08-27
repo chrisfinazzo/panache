@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+The experimental math formatting option has now been stable and is activated by default:
+
+```toml
+[format]
+math = "reflow" # or "preserve", "verbatim", "single-line"
+```
+
+This means that Panache will now take care of formatting of math content for you, including line breaks, indentation, spacing, and alignment. Please read the documentation for the various options.
+
 ## [3.6.1](https://github.com/jolars/panache/compare/v3.6.0...v3.6.1) (2026-08-20)
 
 ### Bug Fixes
