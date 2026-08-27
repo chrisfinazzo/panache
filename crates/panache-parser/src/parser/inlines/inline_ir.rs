@@ -106,6 +106,7 @@ use super::code_spans::try_parse_code_span;
 use super::escapes::{EscapeType, try_parse_escape};
 use super::inline_footnotes::{try_parse_footnote_reference, try_parse_inline_footnote};
 use super::inline_html::try_parse_inline_html;
+use super::latex::try_parse_raw_math_environment;
 use super::links::{
     LinkScanContext, try_parse_autolink, try_parse_inline_image, try_parse_inline_link,
     try_parse_reference_image, try_parse_reference_link,
@@ -224,7 +225,7 @@ pub enum ConstructKind {
     /// `<tag ...>` and friends (§6.6).
     InlineHtml,
     /// Pandoc opaque construct that doesn't have a dedicated kind yet
-    /// (currently: math spans). Pre-recognised in `build_ir` under
+    /// (currently: math spans and raw TeX math environments). Pre-recognised in `build_ir` under
     /// `Dialect::Pandoc` solely so the emphasis pass treats the entire
     /// construct as opaque and delim runs inside don't cross its
     /// boundary. Emission re-parses the construct via the dispatcher's
@@ -821,7 +822,8 @@ fn compute_flanking(
 }
 
 /// Pandoc-only: identify a math span starting at `pos` and return its
-/// byte length. Tries `$math$` and `$$display$$` (gated on
+/// byte length. Tries raw TeX math environments (gated on `raw_tex`),
+/// `$math$` and `$$display$$` (gated on
 /// `tex_math_dollars`), GFM `$math$` (gated on `tex_math_gfm`), and the
 /// `\(math\)` / `\[math\]` / `\\(math\\)` / `\\[math\\]` backslash
 /// forms (gated on `tex_math_single_backslash` / `_double_backslash`).
@@ -838,6 +840,13 @@ fn try_pandoc_math_opaque(
     let b = bytes[pos];
     let multiline = config.dialect == crate::options::Dialect::Pandoc;
 
+    if exts.raw_tex
+        && b == b'\\'
+        && let Some(len) = try_parse_raw_math_environment(&text[pos..])
+        && pos + len <= end
+    {
+        return Some(len);
+    }
     if exts.tex_math_dollars && b == b'$' {
         if let Some((len, _)) = try_parse_display_math(&text[pos..])
             && pos + len <= end
@@ -2784,6 +2793,22 @@ mod tests {
             crossref_prefixes: Vec::new(),
             refdef_labels: None,
         }
+    }
+
+    #[test]
+    fn scan_treats_raw_tex_math_environment_as_opaque() {
+        let opts = pandoc_opts();
+        let text = "\\begin{equation}\n*x*\n\\end{equation}";
+        let ir = build_ir(text, 0, text.len(), &opts);
+
+        assert!(matches!(
+            ir.as_slice(),
+            [IrEvent::Construct {
+                start: 0,
+                end,
+                kind: ConstructKind::PandocOpaque,
+            }] if *end == text.len()
+        ));
     }
 
     /// Bug #2 (a): unresolved Pandoc bracket-shape with unmatched delim

@@ -298,6 +298,18 @@ fn stable_math_host_matrix_formats_environment_bodies_identically() {
 }
 
 #[test]
+fn raw_math_environment_with_leading_bookdown_label_is_idempotent() {
+    let mut config = math_host_matrix_config(true);
+    config.parser_extensions.bookdown_equation_references = true;
+    assert_math_host_body(
+        MathHost::RawEnvironment("equation"),
+        "(\\#eq:oracle)\nh_N = x.",
+        "  (\\#eq:oracle)\n  h_N = x.",
+        &config,
+    );
+}
+
+#[test]
 fn math_host_matrix_verbatim_preserves_established_output() {
     let config = math_host_matrix_config(false);
     let input = "a   +   b";

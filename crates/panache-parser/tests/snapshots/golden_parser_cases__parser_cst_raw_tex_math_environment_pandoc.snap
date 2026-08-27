@@ -1,0 +1,9 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..55
+  PARAGRAPH@0..55
+    LATEX_COMMAND@0..54
+      TEXT@0..54 "\\begin{equation}\n(\\#e ..."
+    NEWLINE@54..55 "\n"

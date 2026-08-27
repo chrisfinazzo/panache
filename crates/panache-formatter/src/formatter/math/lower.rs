@@ -718,9 +718,10 @@ fn lower_environment_cell_elements(
     let mut segment = Vec::new();
     for element in elements {
         if element.kind() == SyntaxKind::MATH_EQUATION_LABEL {
-            let trailing_space = segment
-                .last()
-                .is_some_and(|element: &SyntaxElement| element.kind() == SyntaxKind::MATH_SPACE);
+            let trailing_space = segment.iter().any(|element| !is_layout_trivia(element))
+                && segment.last().is_some_and(|element: &SyntaxElement| {
+                    element.kind() == SyntaxKind::MATH_SPACE
+                });
             documents.push(try_lower_elements(
                 std::mem::take(&mut segment),
                 &opts.signature_scope,

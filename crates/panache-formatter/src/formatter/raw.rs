@@ -4,6 +4,7 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 
 use super::code_blocks;
+use super::math;
 
 impl Formatter {
     pub(super) fn format_html_block(&mut self, node: &SyntaxNode) {
@@ -44,7 +45,9 @@ impl Formatter {
     }
 
     pub(super) fn format_latex_command(&mut self, node: &SyntaxNode) {
-        self.output.push_str(&node.text().to_string());
+        let formatted = math::format_latex_math_environment(node, &self.config)
+            .unwrap_or_else(|| node.text().to_string());
+        self.output.push_str(&formatted);
     }
 
     pub(super) fn format_tex_block(&mut self, node: &SyntaxNode) {

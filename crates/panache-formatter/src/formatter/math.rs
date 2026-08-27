@@ -27,8 +27,8 @@
 use crate::config::{MathDelimiterStyle, MathMode};
 use crate::formatter::Formatter;
 use crate::syntax::{
-    DisplayMath, InlineMath, MathContent, MathSubscript, MathSuperscript, SyntaxKind, SyntaxNode,
-    math_diagnostics,
+    DisplayMath, InlineMath, LatexCommand, MathContent, MathSubscript, MathSuperscript, SyntaxKind,
+    SyntaxNode, math_diagnostics,
 };
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::semantic::math::SignatureScope;
@@ -39,6 +39,29 @@ mod ir;
 mod lower;
 mod printer;
 mod render;
+
+pub(super) fn format_latex_math_environment(
+    node: &SyntaxNode,
+    config: &crate::config::Config,
+) -> Option<String> {
+    let environment = LatexCommand::cast(node.clone())?.math_environment()?;
+    let opts = MathFormatOptions::from_config(config, MathContext::EnvironmentBody);
+    let Some(body) = format_math(environment.body(), &opts) else {
+        return Some(format!(
+            "{}{}{}",
+            environment.opening(),
+            environment.body(),
+            environment.closing()
+        ));
+    };
+
+    let mut result = String::new();
+    result.push_str(environment.opening());
+    result.push('\n');
+    push_body_with_trailing_newline(&mut result, &body);
+    result.push_str(environment.closing());
+    Some(result)
+}
 
 impl Formatter {
     pub(super) fn format_inline_math_marker(&mut self, node: &SyntaxNode) {

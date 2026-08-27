@@ -1,12 +1,27 @@
-//! LaTeX command and environment parsing.
+//! Raw inline LaTeX parsing.
 //!
-//! Supports the `raw_tex` extension which preserves LaTeX commands and environments.
+//! Supports the `raw_tex` extension, which preserves inline LaTeX commands and
+//! math environments.
 //!
 //! Inline LaTeX commands: \cite{ref}, \textbf{text}, etc.
-//! Block LaTeX environments: \begin{tabular}...\end{tabular}
+//! Inline math environments: \begin{equation}...\end{equation}
 
 use super::sink::InlineSink;
+use crate::parser::blocks::raw_blocks::{extract_environment_name, is_inline_math_environment};
 use crate::syntax::SyntaxKind;
+
+/// Return the byte length of a raw inline LaTeX math environment.
+pub(crate) fn try_parse_raw_math_environment(text: &str) -> Option<usize> {
+    let env_name = extract_environment_name(text)?;
+    if !is_inline_math_environment(env_name) {
+        return None;
+    }
+
+    let begin_marker_len = text.find('}')? + 1;
+    let end_marker = format!("\\end{{{env_name}}}");
+    let end_rel = text[begin_marker_len..].find(&end_marker)?;
+    Some(begin_marker_len + end_rel + end_marker.len())
+}
 
 /// Try to parse an inline LaTeX command starting at the given position.
 /// Returns the number of **bytes** consumed if successful, or None.
@@ -117,6 +132,14 @@ pub(crate) fn parse_latex_command(builder: &mut impl InlineSink, text: &str, len
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_math_environment_excludes_trailing_line_bytes() {
+        let input = "\\begin{equation}\nx = y\n\\end{equation} \n";
+        let len = try_parse_raw_math_environment(input).expect("raw math environment");
+
+        assert_eq!(&input[..len], "\\begin{equation}\nx = y\n\\end{equation}");
+    }
 
     #[test]
     fn test_simple_command() {

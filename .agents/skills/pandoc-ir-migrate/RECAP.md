@@ -11,7 +11,63 @@ what trap to avoid) are the load-bearing content here.
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-05-05 (xvii)
+## Latest session — 2026-08-27 (xviii)
+
+**Workspace test count: 0 failing → 0 failing.** **Post-migration
+regression #517: raw TeX math environments are opaque Pandoc
+constructs.** Pandoc-native represents a standalone
+`\\begin{equation}...\\end{equation}` as one `RawInline (Format
+"tex")`, but Panache emitted `DISPLAY_MATH`. The parser now matches
+that shape without changing the formatter's established policy of
+formatting standalone math-environment bodies.
+
+The Pandoc inline scanner recognizes the exact raw environment extent
+as `PandocOpaque`, while inline emission preserves the same bytes as
+one `LATEX_COMMAND`. A typed wrapper exposes its unprefixed markers and
+body to the math formatter. The idempotency root cause was formatter
+lowering: indentation before a row-leading Bookdown equation label was
+mistaken for meaningful label-separating whitespace and grew by one
+space on pass two. The lowerer now preserves a separator only when
+non-trivia math precedes the label.
+
+### Files in committable diff
+
+- `crates/panache-parser/src/parser/inlines/{core,inline_ir,latex,math}.rs`
+  and `src/syntax/raw_tex.rs` (raw-environment recognition, opaque IR
+  span, typed body access, and removal of the display-math emission path)
+- `crates/panache-formatter/src/formatter/{inline,inline_layout,math,raw}.rs`
+  and `math/lower.rs` (raw math-host routing and stable row-leading
+  label indentation)
+- Focused parser, Pandoc-conformance, formatter, and smoke-regression
+  fixtures and expectations
+- `crates/panache-formatter/src/formatter/math/STYLE.md` and math host
+  tests (document and pin formatted raw-environment behavior)
+- `.agents/skills/pandoc-ir-migrate/RECAP.md` (this entry)
+
+### Verification done
+
+- `cargo test --workspace --quiet`: all green.
+- Pandoc conformance: 546 / 546 cases passing.
+- CommonMark allowlist: all green.
+- Issue #517's five reported CSwR files: all debug-format checks pass.
+
+### Suggested next sub-targets, ranked
+
+1. **(Optional) Sweep `assets/` and `docs/` for stale IR-migration phase
+   references.** Spot-check only.
+
+### Don't redo / known traps (new this session)
+
+- **Do not parse standalone raw TeX math environments as
+  `DISPLAY_MATH` under Pandoc.** They are raw TeX inline content, but
+  that CST classification does not make their formatter policy
+  verbatim.
+- **Do not absorb bytes after the closing environment marker.** The
+  host newline and trailing trivia have independent CST ownership.
+
+--------------------------------------------------------------------------------
+
+## Earlier session — 2026-05-05 (xvii)
 
 **Workspace test count: 0 failing → 0 failing.** **Bug #2 fully
 resolved** (was partially-fixed after recap-(xvi)). Stage 6 of the

@@ -604,6 +604,8 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
             format!("^[{}]", normalized)
         }
         SyntaxKind::CITATION | SyntaxKind::CROSSREF => format_citation_like(node, config),
+        SyntaxKind::LATEX_COMMAND => math::format_latex_math_environment(node, config)
+            .unwrap_or_else(|| node.text().to_string()),
         _ => node.text().to_string(),
     }
 }

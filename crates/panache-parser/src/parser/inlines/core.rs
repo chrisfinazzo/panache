@@ -37,7 +37,7 @@ use super::inline_footnotes::{
     try_parse_inline_footnote,
 };
 use super::inline_html::{emit_inline_html, try_parse_inline_html};
-use super::latex::{parse_latex_command, try_parse_latex_command};
+use super::latex::{parse_latex_command, try_parse_latex_command, try_parse_raw_math_environment};
 use super::links::{
     LinkScanContext, emit_autolink, emit_bare_uri_link, emit_inline_image, emit_inline_link,
     emit_reference_image, emit_reference_link, emit_unresolved_reference, try_parse_autolink,
@@ -46,12 +46,11 @@ use super::links::{
 };
 use super::mark::{emit_mark, try_parse_mark};
 use super::math::{
-    emit_display_math, emit_display_math_environment, emit_double_backslash_display_math,
-    emit_double_backslash_inline_math, emit_gfm_inline_math, emit_inline_math,
-    emit_single_backslash_display_math, emit_single_backslash_inline_math, math_opts,
-    try_parse_display_math, try_parse_double_backslash_display_math,
-    try_parse_double_backslash_inline_math, try_parse_gfm_inline_math, try_parse_inline_math,
-    try_parse_math_environment, try_parse_single_backslash_display_math,
+    emit_display_math, emit_double_backslash_display_math, emit_double_backslash_inline_math,
+    emit_gfm_inline_math, emit_inline_math, emit_single_backslash_display_math,
+    emit_single_backslash_inline_math, math_opts, try_parse_display_math,
+    try_parse_double_backslash_display_math, try_parse_double_backslash_inline_math,
+    try_parse_gfm_inline_math, try_parse_inline_math, try_parse_single_backslash_display_math,
     try_parse_single_backslash_inline_math,
 };
 use super::myst_roles::{emit_role, try_parse_role};
@@ -785,20 +784,13 @@ fn parse_inline_range_impl(
             }
 
             if config.extensions.raw_tex
-                && let Some((len, begin_marker, content, end_marker)) =
-                    try_parse_math_environment(&text[pos..])
+                && let Some(len) = try_parse_raw_math_environment(&text[pos..])
             {
                 if pos > text_start {
                     builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos]);
                 }
-                log::trace!("Matched math environment at pos {}", pos);
-                emit_display_math_environment(
-                    builder,
-                    begin_marker,
-                    content,
-                    end_marker,
-                    math_opts(config),
-                );
+                log::trace!("Matched raw TeX math environment at pos {}", pos);
+                parse_latex_command(builder, &text[pos..], len);
                 pos += len;
                 text_start = pos;
                 continue;

@@ -12,7 +12,6 @@
 //! consumed and the math content, allowing calling contexts to emit appropriate nodes.
 
 use super::sink::InlineSink;
-use crate::parser::blocks::raw_blocks::{extract_environment_name, is_inline_math_environment};
 use crate::parser::inlines::bookdown::try_parse_bookdown_equation_definition;
 use crate::parser::math::{MathParseOptions, parse_math_content};
 use crate::parser::utils::tree_copy::copy_green_node;
@@ -378,45 +377,6 @@ pub fn try_parse_double_backslash_display_math(text: &str) -> Option<(usize, &st
     None
 }
 
-/// Try to parse a LaTeX math environment (\begin{equation}...\end{equation})
-/// as display math. Returns (total_len, begin_marker, content, end_marker).
-pub fn try_parse_math_environment(text: &str) -> Option<(usize, &str, &str, &str)> {
-    let env_name = extract_environment_name(text)?;
-    if !is_inline_math_environment(env_name) {
-        return None;
-    }
-
-    let begin_marker_len = text.find('}')? + 1;
-    let begin_marker = &text[..begin_marker_len];
-    let end_marker = format!("\\end{{{}}}", env_name);
-
-    let after_begin = &text[begin_marker_len..];
-    let end_rel = after_begin.find(&end_marker)?;
-    let end_start = begin_marker_len + end_rel;
-    let end_marker_end = end_start + end_marker.len();
-
-    let mut end_line_end = end_marker_end;
-    while end_line_end < text.len() {
-        let ch = text[end_line_end..].chars().next()?;
-        if ch == '\n' || ch == '\r' {
-            break;
-        }
-        end_line_end += ch.len_utf8();
-    }
-
-    if end_line_end < text.len() {
-        if text[end_line_end..].starts_with("\r\n") {
-            end_line_end += 2;
-        } else {
-            end_line_end += 1;
-        }
-    }
-
-    let content = &text[begin_marker_len..end_start];
-    let end_marker_text = &text[end_start..end_line_end];
-    Some((end_line_end, begin_marker, content, end_marker_text))
-}
-
 /// Emit an inline math node to the builder.
 pub fn emit_inline_math(builder: &mut impl InlineSink, content: &str, opts: MathParseOptions) {
     builder.start_node(SyntaxKind::INLINE_MATH.into());
@@ -483,21 +443,6 @@ pub fn emit_display_math(builder: &mut impl InlineSink, content: &str, opts: Mat
 
     builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), "$$");
 
-    builder.finish_node();
-}
-
-/// Emit a display math environment node using raw \begin...\end... markers.
-pub fn emit_display_math_environment(
-    builder: &mut impl InlineSink,
-    begin_marker: &str,
-    content: &str,
-    end_marker: &str,
-    opts: MathParseOptions,
-) {
-    builder.start_node(SyntaxKind::DISPLAY_MATH.into());
-    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), begin_marker);
-    emit_math_content(builder, content, opts);
-    builder.token(SyntaxKind::DISPLAY_MATH_MARKER.into(), end_marker);
     builder.finish_node();
 }
 

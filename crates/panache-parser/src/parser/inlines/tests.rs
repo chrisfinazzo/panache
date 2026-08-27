@@ -357,23 +357,31 @@ mod math_tests {
     }
 
     #[test]
-    fn test_math_environment_inline_display() {
+    fn test_math_environment_is_raw_tex_inline() {
         let input = "\\begin{equation}\n  x = y\n\\end{equation}\n";
         let inline_tree = parse_inline(input);
 
-        let math = find_display_math(&inline_tree);
-        assert_eq!(math.len(), 1);
-        assert_eq!(math[0], input);
+        let raw_tex = inline_tree
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::LATEX_COMMAND)
+            .expect("raw TeX inline");
+        assert_eq!(raw_tex.text().to_string(), input.trim_end());
+        assert_eq!(inline_tree.text().to_string(), input);
+        assert!(find_display_math(&inline_tree).is_empty());
     }
 
     #[test]
-    fn test_math_environment_with_indented_end_marker_stays_single_display_math() {
+    fn test_math_environment_with_indented_end_marker_stays_single_raw_tex_inline() {
         let input = "\\begin{align*}\n    x = y\n  \n  \\end{align*}\n";
         let inline_tree = parse_inline(input);
 
-        let math = find_display_math(&inline_tree);
-        assert_eq!(math.len(), 1);
-        assert_eq!(math[0], input);
+        let raw_tex = inline_tree
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::LATEX_COMMAND)
+            .expect("raw TeX inline");
+        assert_eq!(raw_tex.text().to_string(), input.trim_end());
+        assert_eq!(inline_tree.text().to_string(), input);
+        assert!(find_display_math(&inline_tree).is_empty());
     }
 }
 

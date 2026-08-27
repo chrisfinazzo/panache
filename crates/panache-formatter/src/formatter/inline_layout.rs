@@ -4,9 +4,10 @@ use crate::formatter::sentence_wrap::{
     is_sentence_boundary_segment, resolve_profile,
 };
 use crate::formatter::smart::normalize_smart_punctuation;
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::{LatexCommand, SyntaxKind, SyntaxNode};
 use panache_parser::parser::inlines::subscript::try_parse_subscript;
 use rowan::NodeOrToken;
+use rowan::ast::AstNode;
 use std::borrow::Cow;
 use std::fmt::Write;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -1322,6 +1323,21 @@ fn process_node_recursive(
                     }
                     let verbatim = text.trim_end_matches(['\r', '\n']);
                     if is_environment_math && in_list_item {
+                        sink.push_piece(verbatim);
+                    } else {
+                        sink.push_verbatim_block(verbatim);
+                    }
+                }
+                SyntaxKind::LATEX_COMMAND
+                    if LatexCommand::cast(n.clone())
+                        .and_then(|command| command.math_environment())
+                        .is_some() =>
+                {
+                    let text = format_inline_fn(&n);
+                    let verbatim = text.trim_end_matches(['\r', '\n']);
+                    if n.ancestors()
+                        .any(|ancestor| ancestor.kind() == SyntaxKind::LIST_ITEM)
+                    {
                         sink.push_piece(verbatim);
                     } else {
                         sink.push_verbatim_block(verbatim);

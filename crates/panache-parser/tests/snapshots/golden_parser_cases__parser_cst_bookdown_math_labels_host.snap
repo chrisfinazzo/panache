@@ -84,27 +84,18 @@ DOCUMENT@0..248
     BLOCK_QUOTE_MARKER@163..164 ">"
     WHITESPACE@164..165 " "
     PARAGRAPH@165..221
-      DISPLAY_MATH@165..221
-        DISPLAY_MATH_MARKER@165..178 "\\begin{align}"
-        MATH_CONTENT@178..185
-          MATH_NEWLINE@178..179 "\n"
-          LINE_PREFIX@179..180 ">"
-          LINE_PREFIX@180..181 " "
-          MATH_WORD@181..184 "k+l"
-          MATH_SPACE@184..185 " "
-        MATH_EQUATION_LABEL@185..197 "(\\#eq:quote)"
-        MATH_CONTENT@197..207
-          MATH_SPACE@197..198 " "
-          MATH_LINE_BREAK@198..200
-            MATH_CONTROL_SYMBOL@198..200 "\\\\"
-          MATH_NEWLINE@200..201 "\n"
-          LINE_PREFIX@201..202 ">"
-          LINE_PREFIX@202..203 " "
-          MATH_WORD@203..206 "m+n"
-          MATH_NEWLINE@206..207 "\n"
+      LATEX_COMMAND@165..220
+        TEXT@165..179 "\\begin{align}\n"
+        LINE_PREFIX@179..180 ">"
+        LINE_PREFIX@180..181 " "
+        TEXT@181..201 "k+l (\\#eq:quote) \\\\\n"
+        LINE_PREFIX@201..202 ">"
+        LINE_PREFIX@202..203 " "
+        TEXT@203..207 "m+n\n"
         LINE_PREFIX@207..208 ">"
         LINE_PREFIX@208..209 " "
-        DISPLAY_MATH_MARKER@209..221 "\\end{align}\n"
+        TEXT@209..220 "\\end{align}"
+      NEWLINE@220..221 "\n"
   BLANK_LINE@221..222
     BLANK_LINE@221..222 "\n"
   PARAGRAPH@222..248

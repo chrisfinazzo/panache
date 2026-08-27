@@ -1151,16 +1151,9 @@ mod tests {
     }
 
     #[test]
-    fn display_math_environment_form_detection() {
+    fn raw_tex_math_environment_is_not_display_math() {
         let tree = parse("\\begin{align}\na &= b\\\\\n\\end{align}\n", None);
-        let math = tree
-            .descendants()
-            .find_map(DisplayMath::cast)
-            .expect("display math");
-
-        assert!(math.is_environment_form());
-        assert_eq!(math.opening_marker().as_deref(), Some("\\begin{align}"));
-        assert_eq!(math.closing_marker().as_deref(), Some("\\end{align}\n"));
+        assert!(tree.descendants().find_map(DisplayMath::cast).is_none());
     }
 
     #[test]

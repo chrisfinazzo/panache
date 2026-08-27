@@ -1,0 +1,6 @@
+[ Para
+    [ RawInline
+        (Format "tex")
+        "\\begin{equation}\n(\\#eq:oracle)\nh_N = x.\n\\end{equation}"
+    ]
+]

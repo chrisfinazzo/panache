@@ -14,6 +14,12 @@ oracle for math *formatting* (pandoc passes math through). The pinned
 and TeX/PDF checks validate meaning preservation. Both oracles are
 development-only dependencies.
 
+Pandoc represents standalone TeX math environments as raw TeX rather than
+Markdown display-math nodes. Panache retains that parser shape, but treats the
+typed raw environment as a math-formatting host in every non-`verbatim` mode.
+The same environment-body rules therefore apply both to standalone environments
+and to TeX environments nested inside `$$...$$` or `\[...\]`.
+
 The formatter **re-parses the clean content string** (delimiters excluded) into
 a `MATH_CONTENT` CST and re-emits it. Re-parsing the already-prefix-stripped
 string (from `math_content_text`) avoids the host container-prefix problem that

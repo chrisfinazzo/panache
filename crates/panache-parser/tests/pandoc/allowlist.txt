@@ -836,3 +836,9 @@
 # `split_atx_tail` now peels the tail in that order instead of splitting the
 # run off first and running attribute detection on what was left.
 545
+
+# Pandoc keeps a raw LaTeX math environment as one RawInline and leaves its
+# terminating newline to the paragraph. Panache mirrors that shape instead of
+# promoting the environment to DISPLAY_MATH, so Bookdown labels inside remain
+# raw TeX bytes and cannot acquire formatter indentation across passes.
+546
