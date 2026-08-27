@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-The experimental math formatting option has now been stable and is activated by default:
+The experimental math formatting option has now been made stable and is activated by default:
 
 ```toml
 [format]
