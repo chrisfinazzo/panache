@@ -183,6 +183,8 @@ golden_test_cases!(
     bookdown,
     bookdown_equation_label_first,
     issue_519_bookdown_nested_math_label_idempotency,
+    issue_520_heading_blockquote,
+    issue_520_leading_blank_yaml,
     bookdown_math_labels_host,
     gfm_bare_uri_trailing_delimiters,
     chunk_options_complex,

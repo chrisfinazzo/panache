@@ -302,6 +302,14 @@ fn blockquote_can_interrupt_when_blank_before_blockquote_disabled() {
 }
 
 #[test]
+fn blockquote_can_follow_empty_atx_heading_without_blank() {
+    let tree = parse_blocks("###\n> quote\n");
+
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::HEADING), 1);
+    assert_eq!(count_nodes_of_type(&tree, SyntaxKind::BLOCK_QUOTE), 1);
+}
+
+#[test]
 fn list_item_lazy_blockquote_line_stays_item_text() {
     for input in [
         "- a\n  > q\n",

@@ -1,0 +1,62 @@
+[ Header 3 ( "section" , [] , [] ) []
+, BlockQuote
+    [ Para
+        [ Str "To"
+        , Space
+        , Str "understand"
+        , Space
+        , Str "computations"
+        , Space
+        , Str "in"
+        , Space
+        , Str "R,"
+        , Space
+        , Str "two"
+        , Space
+        , Str "slogans"
+        , Space
+        , Str "are"
+        , Space
+        , Str "helpful:"
+        ]
+    , BulletList
+        [ [ Plain
+              [ Str "Everything"
+              , Space
+              , Str "that"
+              , Space
+              , Str "exists"
+              , Space
+              , Str "is"
+              , Space
+              , Str "an"
+              , Space
+              , Str "object."
+              ]
+          ]
+        , [ Plain
+              [ Str "Everything"
+              , Space
+              , Str "that"
+              , Space
+              , Str "happens"
+              , Space
+              , Str "is"
+              , Space
+              , Str "a"
+              , Space
+              , Str "function"
+              , Space
+              , Str "call."
+              ]
+          ]
+        ]
+    , Para
+        [ Str "\8212"
+        , Space
+        , Str "John"
+        , Space
+        , Str "Chambers"
+        ]
+    ]
+]

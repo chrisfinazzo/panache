@@ -796,6 +796,7 @@ impl BlockParser for BlockQuoteParser {
         let at_document_start = ctx.at_document_start;
         let require_blank_before = ctx.config.extensions.blank_before_blockquote;
         let can_start = !require_blank_before
+            || ctx.has_blank_before
             || can_start_blockquote(line_pos, lines, ctx.config.extensions.fenced_divs);
 
         let prev_line = lines.get(line_pos.wrapping_sub(1)).unwrap_or(&"");

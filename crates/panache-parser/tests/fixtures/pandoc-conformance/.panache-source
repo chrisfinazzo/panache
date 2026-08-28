@@ -2,4 +2,4 @@
 # Bumping this is an intentional act: re-run scripts/update-pandoc-conformance-corpus.sh
 # and review the diff before committing.
 pandoc_version=3.10.2
-generated=2026-08-14
+generated=2026-08-28

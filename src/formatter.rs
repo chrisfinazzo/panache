@@ -236,17 +236,24 @@ fn apply_formatted_yaml_at_range(
     region: &YamlFrontmatterRegion,
     formatted_yaml_with_trailing_newline: &str,
 ) -> Option<String> {
-    if region.content_range.end > output.len()
-        || region.content_range.start > region.content_range.end
-    {
-        return None;
-    }
+    let content_range = formatted_yaml_content_range(output, region)?;
     let mut out = String::with_capacity(
-        output.len() - (region.content_range.end - region.content_range.start)
-            + formatted_yaml_with_trailing_newline.len(),
+        output.len() - content_range.len() + formatted_yaml_with_trailing_newline.len(),
     );
-    out.push_str(&output[..region.content_range.start]);
+    out.push_str(&output[..content_range.start]);
     out.push_str(formatted_yaml_with_trailing_newline);
-    out.push_str(&output[region.content_range.end..]);
+    out.push_str(&output[content_range.end..]);
     Some(out)
+}
+
+fn formatted_yaml_content_range(
+    output: &str,
+    region: &YamlFrontmatterRegion,
+) -> Option<std::ops::Range<usize>> {
+    if output.get(region.content_range.clone()) == Some(region.content.as_str()) {
+        return Some(region.content_range.clone());
+    }
+
+    let start = output.find(&region.content)?;
+    Some(start..start + region.content.len())
 }

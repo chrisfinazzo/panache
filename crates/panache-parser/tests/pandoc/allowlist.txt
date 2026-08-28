@@ -842,3 +842,8 @@
 # promoting the environment to DISPLAY_MATH, so Bookdown labels inside remain
 # raw TeX bytes and cannot acquire formatter indentation across passes.
 546
+
+# With `blank_before_blockquote` enabled, a block quote cannot interrupt a
+# paragraph, but it can begin immediately after a completed ATX heading. The
+# initial block probe now carries that semantic boundary into quote detection.
+547

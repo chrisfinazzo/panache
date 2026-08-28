@@ -340,7 +340,7 @@ impl<'a> Parser<'a> {
     ///
     /// Must use `Parser::close_containers_to` (not `ContainerStack::close_to`) so list/paragraph
     /// buffers are emitted for losslessness.
-    fn previous_block_requires_blank_before_heading(&self) -> bool {
+    fn previous_block_requires_blank_before_new_block(&self) -> bool {
         matches!(
             self.containers.last(),
             Some(Container::Paragraph { .. })
@@ -696,7 +696,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let has_blank_before = self.pos == 0 || is_blank_line(self.lines[self.pos - 1]);
+        let has_blank_before = self.pos == 0
+            || is_blank_line(self.lines[self.pos - 1])
+            || (bq_depth > current_bq_depth
+                && !self.previous_block_requires_blank_before_new_block());
         let mut blockquote_match: Option<PreparedBlockMatch> = None;
         let dispatcher_ctx = if current_bq_depth == 0 {
             Some(BlockContext {
@@ -2178,7 +2181,7 @@ impl<'a> Parser<'a> {
             prev_line_blank
                 || prev_is_fenced_div_open
                 || matches!(self.containers.last(), Some(Container::BlockQuote { .. }))
-                || !self.previous_block_requires_blank_before_heading()
+                || !self.previous_block_requires_blank_before_new_block()
         };
 
         let at_line_zero = self.pos == 0 && current_bq_depth == 0;

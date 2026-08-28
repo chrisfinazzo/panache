@@ -172,7 +172,7 @@ impl<'a> Parser<'a> {
                 || prev_is_fenced_div_open
                 || bq_depth > current_bq_depth
                 || matches!(self.containers.last(), Some(Container::BlockQuote { .. }))
-                || !self.previous_block_requires_blank_before_heading()
+                || !self.previous_block_requires_blank_before_new_block()
         };
 
         let at_line_zero = self.pos == 0 && bq_depth == 0;
