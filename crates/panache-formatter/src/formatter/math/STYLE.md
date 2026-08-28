@@ -96,6 +96,12 @@ still be lowered safely; they do not automatically preserve the whole span.
    `math_indent` does **not** apply inside standalone environments; their
    two-space body indent is a fixed part of the stable style.
 
+   Signature-declared environment arguments remain attached to the opening
+   marker. In particular, `array`'s optional position and required column
+   specification form one header (`\begin{array}[t]{cc}`); insignificant
+   whitespace before the required specification is removed rather than turning
+   the specification into the first body row.
+
    A free comment-bearing body without `&`, an authored `\\`, or a nested
    environment follows the typed comment rules from Rule 1 at the environment's
    one-level indent. Its operator context survives comment newlines, and nested

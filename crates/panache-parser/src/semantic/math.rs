@@ -458,6 +458,12 @@ pub struct CommandSignature {
     pub arguments: Vec<ArgSpec>,
 }
 
+/// The positional argument signature of a built-in math environment opener.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvironmentSignature {
+    pub arguments: Vec<ArgSpec>,
+}
+
 /// Document-provided command definitions layered over built-in signatures.
 ///
 /// Panache does not expand replacement bodies. A recognized definition therefore
@@ -523,6 +529,11 @@ impl SignatureScope {
                 .or_else(|| builtin_command_signature(name))
         }
     }
+
+    /// Resolve a built-in math-environment signature.
+    pub fn environment_signature(&self, name: &str) -> Option<&EnvironmentSignature> {
+        builtin_environment_signature(name)
+    }
 }
 
 const fn argument(required: bool, kind: ArgKind, domain: ArgumentDomain) -> ArgSpec {
@@ -550,6 +561,12 @@ static OPTIONAL_AND_REQUIRED_MATH: LazyLock<CommandSignature> =
 static ONE_TEXT: LazyLock<CommandSignature> = LazyLock::new(|| CommandSignature {
     arguments: vec![REQUIRED_TEXT],
 });
+static ARRAY_ENVIRONMENT: LazyLock<EnvironmentSignature> = LazyLock::new(|| EnvironmentSignature {
+    arguments: vec![
+        argument(false, ArgKind::Bracket, ArgumentDomain::Unknown),
+        argument(true, ArgKind::Brace, ArgumentDomain::Unknown),
+    ],
+});
 
 /// Return the curated signature for a built-in command in the initial
 /// math-domain slice.
@@ -564,6 +581,14 @@ pub fn builtin_command_signature(name: &str) -> Option<&'static CommandSignature
         "ensuremath" | "mathrm" | "mathsf" | "mathbf" | "mathit" | "mathtt" | "mathnormal"
         | "mathcal" | "mathbb" | "mathfrak" | "mathscr" | "operatorname" => Some(&ONE_MATH),
         "text" | "mbox" | "intertext" => Some(&ONE_TEXT),
+        _ => None,
+    }
+}
+
+/// Return the curated positional signature for a built-in math environment.
+pub fn builtin_environment_signature(name: &str) -> Option<&'static EnvironmentSignature> {
+    match name {
+        "array" => Some(&ARRAY_ENVIRONMENT),
         _ => None,
     }
 }

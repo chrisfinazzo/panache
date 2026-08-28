@@ -298,6 +298,24 @@ fn stable_math_host_matrix_formats_environment_bodies_identically() {
 }
 
 #[test]
+fn array_column_specification_stays_on_the_begin_line() {
+    let input = concat!(
+        "$$\n",
+        "\\left(\\begin{array}{cc} a & b \\\\ c & d \\end{array}\\right)\n",
+        "$$\n",
+    );
+    let config = math_config(true);
+    let output = format(input, Some(config.clone()), None);
+
+    assert!(
+        output.contains("\\begin{array}{cc}\n"),
+        "the required column specification was detached:\n{output}",
+    );
+    assert!(!output.contains("\\begin{array}\n"), "{output}");
+    similar_asserts::assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
 fn raw_math_environment_with_leading_bookdown_label_is_idempotent() {
     let mut config = math_host_matrix_config(true);
     config.parser_extensions.bookdown_equation_references = true;

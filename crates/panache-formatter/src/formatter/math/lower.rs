@@ -8,8 +8,9 @@ use rowan::TextRange;
 use rowan::ast::AstNode;
 
 use crate::syntax::{
-    MathArgument, MathCommand, MathContent, MathDelimited, MathEnvironment, MathGroup,
-    MathLineBreak, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken,
+    MathArgument, MathBegin, MathCommand, MathContent, MathDelimited, MathEnvironment, MathGroup,
+    MathLineBreak, MathNameGroup, MathScript, MathScripted, SyntaxElement, SyntaxKind, SyntaxNode,
+    SyntaxToken,
 };
 
 use super::ir::Ir;
@@ -500,12 +501,10 @@ pub(super) fn try_lower_environment_document(
     let end = environment.end()?;
     let begin_name = begin.name()?;
     let end_name = end.name()?;
-    if begin_name != end_name
-        || begin.syntax().text().to_string() != format!(r"\begin{{{begin_name}}}")
-        || end.syntax().text().to_string() != format!(r"\end{{{end_name}}}")
-    {
+    if begin_name != end_name || end.syntax().text().to_string() != format!(r"\end{{{end_name}}}") {
         return None;
     }
+    let begin = lower_environment_begin(&begin, &opts.signature_scope)?;
 
     let body = environment.body()?;
     let body = lower_environment_rows(
@@ -513,11 +512,64 @@ pub(super) fn try_lower_environment_document(
         opts,
     )?;
     Some(Ir::concat([
-        Ir::verbatim(begin.syntax().text().to_string()),
+        begin,
         Ir::indent(Ir::concat([Ir::HardLine, body])),
         Ir::HardLine,
         Ir::verbatim(end.syntax().text().to_string()),
     ]))
+}
+
+fn lower_environment_begin(begin: &MathBegin, scope: &SignatureScope) -> Option<Ir> {
+    let command = begin.command_token()?;
+    let name_group = begin.name_group()?;
+    let name = name_group.name()?;
+    let shell = format!(r"\begin{{{name}}}");
+    if command.text() != r"\begin"
+        || name_group.syntax().text().to_string() != format!("{{{name}}}")
+    {
+        return None;
+    }
+
+    if !begin
+        .syntax()
+        .children_with_tokens()
+        .all(|element| match element {
+            SyntaxElement::Token(token) => matches!(
+                token.kind(),
+                SyntaxKind::MATH_CONTROL_WORD | SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE
+            ),
+            SyntaxElement::Node(node) => {
+                MathNameGroup::cast(node.clone()).is_some() || MathArgument::cast(node).is_some()
+            }
+        })
+    {
+        return None;
+    }
+
+    let arguments = begin.attached_arguments().collect::<Vec<_>>();
+    let Some(signature) = scope.environment_signature(&name) else {
+        return arguments.is_empty().then(|| Ir::verbatim(shell));
+    };
+    let mut slot = 0;
+    let mut header = shell;
+    for argument in arguments {
+        if !argument.is_closed() {
+            return None;
+        }
+        let kind = match argument {
+            MathArgument::Brace(_) => ArgKind::Brace,
+            MathArgument::Bracket(_) => ArgKind::Bracket,
+        };
+        match_arg_slot(&signature.arguments, &mut slot, kind)?;
+        header.push_str(&argument.syntax().text().to_string());
+    }
+    if signature.arguments[slot..]
+        .iter()
+        .any(|argument| argument.required)
+    {
+        return None;
+    }
+    Some(Ir::verbatim(header))
 }
 
 pub(super) fn contains_malformed_environment(tree: &SyntaxNode) -> bool {
@@ -530,8 +582,14 @@ pub(super) fn contains_malformed_environment(tree: &SyntaxNode) -> bool {
             let (Some(begin_name), Some(end_name)) = (begin.name(), end.name()) else {
                 return true;
             };
+            let begin_shell_is_valid = begin
+                .command_token()
+                .is_some_and(|token| token.text() == r"\begin")
+                && begin.name_group().is_some_and(|group| {
+                    group.syntax().text().to_string() == format!("{{{begin_name}}}")
+                });
             begin_name != end_name
-                || begin.syntax().text().to_string() != format!(r"\begin{{{begin_name}}}")
+                || !begin_shell_is_valid
                 || end.syntax().text().to_string() != format!(r"\end{{{end_name}}}")
         })
 }

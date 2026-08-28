@@ -1091,7 +1091,9 @@ Output
     $$
     ```
 
-The `&` columns and the trailing `\\` are both aligned.
+The `&` columns and the trailing `\\` are both aligned. Required environment
+arguments stay on the opening line, so an `array` column specification remains
+attached as `\begin{array}{cc}` instead of becoming its first body row.
 
 Operators are spaced precedence-aware: a binary or relational operator gets one
 space on each side (`a+b` → `a + b`, `a<=b` → `a <= b`), while a unary minus or

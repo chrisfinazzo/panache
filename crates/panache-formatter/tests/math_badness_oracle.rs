@@ -1181,6 +1181,20 @@ fn embedded_environment_migration_slice_matches_badness() {
 }
 
 #[test]
+fn array_environment_argument_migration_slice_matches_badness() {
+    for body in [
+        "\\begin{array}{cc}a&b\\\\c&d\\end{array}",
+        "\\begin{array}[t]{cc}a&b\\\\c&d\\end{array}",
+        "\\begin{array}\n{cc}a&b\\\\c&d\\end{array}",
+    ] {
+        assert_formatter_parity(body, OracleContext::Inline);
+        let once = panache_body(body, OracleContext::Inline).expect("first Panache pass");
+        let twice = panache_body(&once, OracleContext::Inline).expect("second Panache pass");
+        assert_eq!(once, twice, "array environment is not idempotent: {body:?}");
+    }
+}
+
+#[test]
 fn comment_bearing_embedded_environment_matches_badness() {
     for body in [
         "x+\\begin{matrix}\na&={b % inner\n+c}\\\\\nd&=e\n\\end{matrix},y",

@@ -12,8 +12,9 @@ use badness_parser::syntax::SyntaxKind as BadnessKind;
 use panache_parser::parser::math::{MathParseOptions, parse_math_content};
 use panache_parser::semantic::math::{
     ArgKind, ArgSpec, ArgumentDomain, CommandSignature, DelimiterRole, MathBreakPriority,
-    MathClass, SignatureScope, argument_domain_with_scope, builtin_command_signature, math_atoms,
-    math_char_info, math_command_info, semantic_math_atoms,
+    MathClass, SignatureScope, argument_domain_with_scope, builtin_command_signature,
+    builtin_environment_signature, math_atoms, math_char_info, math_command_info,
+    semantic_math_atoms,
 };
 use panache_parser::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 use panache_parser::{ParserOptions, parse};
@@ -135,6 +136,34 @@ fn builtin_math_signature_slice_matches_badness() {
                 "\\{name}",
             );
         }
+    }
+}
+
+#[test]
+fn builtin_array_environment_signature_matches_badness() {
+    let panache = builtin_environment_signature("array").expect("Panache array signature");
+    let badness = badness_builtin()
+        .environment("array")
+        .expect("Badness array signature");
+
+    assert_eq!(panache.arguments.len(), badness.args.len());
+    for (panache, badness) in panache.arguments.iter().zip(badness.args.iter()) {
+        assert_eq!(panache.required, badness.required);
+        assert_eq!(
+            panache.kind,
+            match badness.kind {
+                BadnessArgKind::Brace => ArgKind::Brace,
+                BadnessArgKind::Bracket => ArgKind::Bracket,
+            },
+        );
+        assert_eq!(
+            panache.domain,
+            match badness.domain {
+                BadnessDomain::Unknown => ArgumentDomain::Unknown,
+                BadnessDomain::Math => ArgumentDomain::Math,
+                BadnessDomain::Text => ArgumentDomain::Text,
+            },
+        );
     }
 }
 

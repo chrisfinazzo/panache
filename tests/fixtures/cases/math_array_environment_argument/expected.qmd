@@ -1,0 +1,15 @@
+# Array environment arguments
+
+$$
+  \left( \begin{array}{cc}
+           a & b \\
+           c & d
+         \end{array} \right)
+$$
+
+$$
+\begin{array}[t]{ll}
+  x & = 1  \\
+  y & = 22
+\end{array}
+$$

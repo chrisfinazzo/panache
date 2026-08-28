@@ -378,7 +378,7 @@ panache format --check RwR
   operators before a closing delimiter. Eight expressions in
   `11_survival.qmd`, including `N(t-)` and `S(T_i-)`, become `N(t - )` and
   `S(T_i - )`. Add inline, display, and aligned-grid regressions.
-- [ ] Keep a required environment argument attached to `\begin{array}`. Three
+- [x] Keep a required environment argument attached to `\begin{array}`. Three
   arrays in `2_linear.qmd` and `5_generalized_linear.qmd` put the column
   specification, such as `{cc}`, on the next line.
 - [ ] Keep signs attached to TeX dimensions. Two expressions in `2_linear.qmd`

@@ -24,6 +24,7 @@
 //! [`MATH_WORD`]: SyntaxKind::MATH_WORD
 
 use crate::parser::inlines::bookdown::try_parse_bookdown_equation_definition;
+use crate::semantic::math::{ArgKind, builtin_environment_signature};
 use crate::syntax::SyntaxKind;
 use rowan::{GreenNode, GreenNodeBuilder};
 
@@ -320,6 +321,7 @@ impl MathParser<'_> {
         self.builder.start_node(SyntaxKind::MATH_BEGIN.into());
         self.parse_control_word(); // \begin
         self.parse_environment_name(begin_group_start);
+        self.parse_environment_arguments(&begin_name);
         self.builder.finish_node(); // MATH_BEGIN
 
         self.builder.start_node(SyntaxKind::MATH_CONTENT.into());
@@ -334,6 +336,39 @@ impl MathParser<'_> {
             self.parse_environment_end();
         }
         self.builder.finish_node();
+    }
+
+    /// Attach the arguments whose positions are part of a known environment
+    /// opener. Optional arguments remain adjacency-sensitive; a required brace
+    /// argument may cross ordinary TeX trivia, as command arguments do.
+    fn parse_environment_arguments(&mut self, name: &str) {
+        let Some(signature) = builtin_environment_signature(name) else {
+            return;
+        };
+
+        for argument in &signature.arguments {
+            match argument.kind {
+                ArgKind::Bracket
+                    if self.peek_char() == Some('[')
+                        && self.optional_close_from(self.pos).is_some() =>
+                {
+                    self.parse_optional();
+                }
+                ArgKind::Bracket if !argument.required => {}
+                ArgKind::Brace => {
+                    let Some((argument_start, '{')) = self.argument_opener_after_trivia(self.pos)
+                    else {
+                        if argument.required {
+                            break;
+                        }
+                        continue;
+                    };
+                    self.parse_attachment_trivia_until(argument_start);
+                    self.parse_group();
+                }
+                _ => break,
+            }
+        }
     }
 
     fn parse_environment_name(&mut self, group_start: usize) {
@@ -1514,6 +1549,28 @@ mod tests {
                 SyntaxKind::MATH_END,
             ]
         );
+        assert_lossless(content);
+    }
+
+    #[test]
+    fn array_environment_begin_owns_its_column_specification() {
+        let content = "\\begin{array}[t]\n{cc} a & b\\end{array}";
+        let tree = node(content);
+        let environment = tree
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::MATH_ENVIRONMENT)
+            .expect("array environment");
+        let begin = environment
+            .children()
+            .find(|node| node.kind() == SyntaxKind::MATH_BEGIN)
+            .expect("array begin");
+        let body = environment
+            .children()
+            .find(|node| node.kind() == SyntaxKind::MATH_CONTENT)
+            .expect("array body");
+
+        assert_eq!(begin.text().to_string(), "\\begin{array}[t]\n{cc}");
+        assert_eq!(body.text().to_string(), " a & b");
         assert_lossless(content);
     }
 

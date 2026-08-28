@@ -728,6 +728,11 @@ impl MathBegin {
     pub fn name(&self) -> Option<String> {
         self.name_group()?.name()
     }
+
+    /// The environment arguments attached after the `{name}` group.
+    pub fn attached_arguments(&self) -> impl Iterator<Item = MathArgument> + '_ {
+        self.0.children().filter_map(MathArgument::cast)
+    }
 }
 
 /// A `\end{name}` environment closer.

@@ -348,6 +348,19 @@ fn malformed_wrapper_boundaries_are_reportable() {
 }
 
 #[test]
+fn array_environment_arguments_have_structural_parity() {
+    let body = "\\begin{array}[t]\n{cc}a&b\\\\c&d\\end{array}";
+    let (badness, panache) = projections(body);
+    assert_eq!(
+        panache,
+        badness,
+        "array structural parity failed\n\nBadness:\n{}\nPanache:\n{}",
+        rendered(&badness),
+        rendered(&panache),
+    );
+}
+
+#[test]
 fn passing_corpus_has_structural_parity() {
     let root = corpus_root();
     let available = discover_cases(&root)
