@@ -81,6 +81,10 @@ pub struct SemanticMathAtom {
     /// closing atom, or punctuation atom follows it. A postfix sign binds to
     /// the preceding operand and stays tight.
     pub coerced_postfix: bool,
+    /// Whether this is a leading sign scanned as part of an unbraced TeX
+    /// dimension. The command-to-sign gap remains significant source layout,
+    /// while the sign binds tightly to the dimension on its right.
+    pub attached_dimension_sign: bool,
 }
 
 const fn atom_info(class: MathClass, delimiter: Option<DelimiterRole>) -> MathAtomInfo {
@@ -244,20 +248,30 @@ pub fn semantic_math_atoms_in(
             }
             element_atoms.push(raw);
         }
-        raw_atoms.extend(element_atoms);
+        let starts_unbraced_dimension = starts_unbraced_dimension(&element);
+        raw_atoms.extend(element_atoms.into_iter().map(|atom| RawSemanticMathAtom {
+            is_ascii_sign: is_ascii_sign(&element, atom.range),
+            starts_unbraced_dimension,
+            atom,
+        }));
     }
 
     let mut interpreted = Vec::with_capacity(raw_atoms.len());
     let mut previous_class: Option<MathClass> = None;
     let mut previous_opener = false;
-    for (index, atom) in raw_atoms.iter().copied().enumerate() {
+    let mut scans_dimension_sign = false;
+    for (index, raw) in raw_atoms.iter().copied().enumerate() {
+        let atom = raw.atom;
+        let attached_dimension_sign = scans_dimension_sign && raw.is_ascii_sign;
         let coerced_unary = atom.class == MathClass::Bin
             && (previous_opener || coerces_binary_to_ordinary(previous_class));
         let coerced_postfix = atom.class == MathClass::Bin
             && following_coerces_binary_to_ordinary(
-                raw_atoms.get(index + 1).map(|following| following.class),
+                raw_atoms
+                    .get(index + 1)
+                    .map(|following| following.atom.class),
             );
-        let class = if coerced_unary || coerced_postfix {
+        let class = if coerced_unary || coerced_postfix || attached_dimension_sign {
             MathClass::Ord
         } else {
             atom.class
@@ -269,6 +283,7 @@ pub fn semantic_math_atoms_in(
         };
         previous_class = Some(class);
         previous_opener = atom.delimiter == Some(DelimiterRole::Open);
+        scans_dimension_sign = raw.starts_unbraced_dimension || attached_dimension_sign;
         interpreted.push(SemanticMathAtom {
             range: atom.range,
             class,
@@ -276,12 +291,50 @@ pub fn semantic_math_atoms_in(
             break_priority,
             coerced_unary,
             coerced_postfix,
+            attached_dimension_sign,
         });
     }
 
     SemanticMathAtoms {
         inner: interpreted.into_iter(),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RawSemanticMathAtom {
+    atom: MathAtom,
+    starts_unbraced_dimension: bool,
+    is_ascii_sign: bool,
+}
+
+fn starts_unbraced_dimension(element: &SyntaxElement) -> bool {
+    let SyntaxElement::Node(node) = element else {
+        return false;
+    };
+    let Some(command) = MathCommand::cast(node.clone()) else {
+        return false;
+    };
+    if command.attached_arguments().next().is_some() {
+        return false;
+    }
+    command.name_token().is_some_and(|name| {
+        matches!(
+            name.text().strip_prefix('\\'),
+            Some("hskip" | "vskip" | "kern" | "mkern" | "mskip")
+        )
+    })
+}
+
+fn is_ascii_sign(element: &SyntaxElement, range: TextRange) -> bool {
+    let SyntaxElement::Token(token) = element else {
+        return false;
+    };
+    if token.kind() != SyntaxKind::MATH_WORD {
+        return false;
+    }
+    let start = usize::from(range.start() - token.text_range().start());
+    let end = usize::from(range.end() - token.text_range().start());
+    matches!(token.text().get(start..end), Some("+" | "-"))
 }
 
 /// Iterator returned by [`semantic_math_atoms`].

@@ -779,6 +779,26 @@ fn panache_tightens_postfix_signs_where_badness_treats_them_as_binary() {
     }
 }
 
+/// Badness treats a sign scanned as part of an unbraced TeX dimension as a
+/// binary math operator. Panache keeps the command gap but attaches the sign
+/// to the numeric dimension.
+#[test]
+fn panache_attaches_dimension_signs_where_badness_treats_them_as_binary() {
+    for (body, expected) in [
+        (r"\hskip -1cm", r"\hskip -1cm"),
+        (r"\hskip -30mm", r"\hskip -30mm"),
+        (r"\vskip -2pt", r"\vskip -2pt"),
+        (r"\kern -3em", r"\kern -3em"),
+        (r"\mkern -4mu", r"\mkern -4mu"),
+        (r"\mskip -5mu", r"\mskip -5mu"),
+    ] {
+        let panache = panache_body(body, OracleContext::Inline).expect("Panache formatter");
+        let badness = badness_body(body, OracleContext::Inline).expect("Badness formatter");
+        assert_eq!(panache, expected, "{body:?}");
+        assert_ne!(panache, badness, "known Badness defect: {body:?}");
+    }
+}
+
 #[test]
 fn panache_preserves_scripted_composite_relations_where_badness_splits_them() {
     for (body, expected) in [

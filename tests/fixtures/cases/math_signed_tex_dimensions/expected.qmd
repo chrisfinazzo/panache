@@ -1,0 +1,14 @@
+# Signed TeX dimensions
+
+Inline dimensions stay attached: $\hskip -1cm x$ and $\hskip -30mm y$.
+
+$$
+  a\hskip -1cm + b
+$$
+
+$$
+\begin{aligned}
+  x & = y\hskip -1cm  \\
+  z & = w\hskip -30mm
+\end{aligned}
+$$

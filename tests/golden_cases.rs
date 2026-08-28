@@ -429,6 +429,7 @@ golden_test_cases!(
     math_operator_spacing_experimental,
     math_postfix_left_limit_sign,
     math_array_environment_argument,
+    math_signed_tex_dimensions,
     math_scripts_experimental,
     math_relation_chain_long_lhs_experimental,
     math_relation_chain_hardbreak_experimental,

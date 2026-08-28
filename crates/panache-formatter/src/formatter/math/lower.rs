@@ -362,6 +362,7 @@ fn try_lower_environment_pieces(
         definition: false,
         punctuation: false,
         unary: environment_atom.coerced_unary || environment_atom.coerced_postfix,
+        dimension_sign: environment_atom.attached_dimension_sign,
         authored_space_before: before_atoms
             .last()
             .is_some_and(|atom| atom.range.end() < environment_atom.range.start()),
@@ -1568,6 +1569,7 @@ fn lower_pieces_with_atoms(
                 && is_definition_relation(atom, elements),
             punctuation: atom.class == MathClass::Punct,
             unary: atom.coerced_unary || atom.coerced_postfix,
+            dimension_sign: atom.attached_dimension_sign,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
             slash: atom_document.slash,
             control_word_operator: atom_document.control_word_operator,
@@ -1646,6 +1648,7 @@ fn coalesce_scripted_relations(
             break_priority: MathBreakPriority::Relation,
             coerced_unary: false,
             coerced_postfix: false,
+            attached_dimension_sign: false,
         });
         index = relation_index + 1;
     }
@@ -2526,6 +2529,9 @@ struct Piece {
     /// A `+`/`-` that TeX coerced to a unary sign. It binds to the operand
     /// beside it, so it strips the authored space on either side.
     unary: bool,
+    /// A sign scanned as part of an unbraced TeX dimension. It binds to the
+    /// dimension on its right without stripping the command-to-argument gap.
+    dimension_sign: bool,
     authored_space_before: bool,
     slash: bool,
     control_word_operator: bool,
@@ -2556,7 +2562,7 @@ fn gap_before(pieces: &[Piece], index: usize, spacing: Spacing) -> bool {
     // A binary operator or relation always wins its space, even next to a
     // unary sign (`a - -b`); otherwise a unary sign strips the authored space
     // it would have kept as an ordinary atom (`f( - x)` -> `f(-x)`).
-    let tight = previous.unary || current.unary;
+    let tight = previous.unary || current.unary || previous.dimension_sign;
 
     match spacing {
         Spacing::Normal => {

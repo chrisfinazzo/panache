@@ -381,7 +381,7 @@ panache format --check RwR
 - [x] Keep a required environment argument attached to `\begin{array}`. Three
   arrays in `2_linear.qmd` and `5_generalized_linear.qmd` put the column
   specification, such as `{cc}`, on the next line.
-- [ ] Keep signs attached to TeX dimensions. Two expressions in `2_linear.qmd`
+- [x] Keep signs attached to TeX dimensions. Two expressions in `2_linear.qmd`
   and `11_survival.qmd` rewrite `\hskip -1cm` and `\hskip -30mm` as
   `\hskip - 1cm` and `\hskip - 30mm`.
 - [ ] Improve free-display break selection so that it does not strand special

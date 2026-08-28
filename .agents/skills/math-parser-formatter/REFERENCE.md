@@ -37,6 +37,12 @@ formatter. User-visible formatting behavior belongs in
   differentials pinned by
   `panache_coerces_after_punctuation_where_badness_does_not` and
   `panache_coerces_binary_before_closing_delimiter_where_badness_does_not`.
+- An ASCII sign immediately following an unbraced TeX dimension-scanning
+  command is an ordinary, non-breakable atom with asymmetric attachment: keep
+  the authored command-to-sign gap, but bind the sign to the dimension on its
+  right. The pinned Badness formatter instead treats this sign as a binary
+  operator; keep the intentional differential pinned by
+  `panache_attaches_dimension_signs_where_badness_treats_them_as_binary`.
 - Authored `\\` separates layout rows but not the semantic atom stream. Derive
   atoms in source order, then lower rows separately; otherwise, a sign after a
   row break is incorrectly coerced as though it began a new math list.

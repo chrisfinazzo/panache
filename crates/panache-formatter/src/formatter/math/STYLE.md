@@ -59,6 +59,8 @@ still be lowered safely; they do not automatically preserve the whole span.
   authored whitespace after unary signs and keeps postfix signs tight before
   relations, closing atoms, and punctuation. The pinned formatter omits the
   punctuation and right-context cases.
+- Panache keeps signs attached to unbraced TeX dimensions; the pinned formatter
+  incorrectly spells them as binary operators.
 - Panache preserves scripted composite relations such as `<=_i`, `>=_i`, and
   `==_i`; the pinned formatter incorrectly separates the relation head from its
   CST-separated script.
@@ -243,6 +245,12 @@ still be lowered safely; they do not automatically preserve the whole span.
    unary-position command op, a large operator (`\sum`), and ordinary commands
    all keep their author space verbatim. The structural `MATH_DELIMITED` node,
    rather than the command table, identifies `\left`/`\right` framing.
+
+   A leading ASCII sign scanned by an unbraced TeX dimension command (`\hskip`,
+   `\vskip`, `\kern`, `\mkern`, or `\mskip`) is not a binary operator. Its
+   authored gap after the command is collapsed normally, while the sign stays
+   tight to the dimension (`\hskip - 1cm` → `\hskip -1cm`). This asymmetric
+   attachment also prevents the sign from becoming a display break point.
 
    **The definition `:=`.** A `:` is an ordinary atom whose spacing is the
    author's (`x:y` and `f: A` are left alone), *except* when an `=` follows it

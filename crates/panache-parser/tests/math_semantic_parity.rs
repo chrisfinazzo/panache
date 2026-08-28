@@ -715,6 +715,35 @@ fn panache_coerces_binary_before_closing_delimiter_where_badness_does_not() {
 }
 
 #[test]
+fn signs_scanned_as_unbraced_dimensions_are_not_binary_operators() {
+    use MathBreakPriority::{Binary, None as NoBreak};
+    use MathClass::{Bin, Ord};
+
+    for body in [
+        r"\hskip -1cm",
+        r"\vskip -2pt",
+        r"\kern -3em",
+        r"\mkern -4mu",
+        r"\mskip -5mu",
+    ] {
+        let sign = body.find('-').expect("signed dimension") as u32;
+        let atom = panache_semantic_atoms(body)
+            .into_iter()
+            .find(|atom| atom.0 == sign)
+            .expect("dimension sign atom");
+        assert_eq!(atom, (sign, sign + 1, Ord, None, NoBreak), "{body}");
+    }
+
+    let body = r"\hskip{1cm} - x";
+    let sign = body.find('-').expect("binary sign") as u32;
+    let atom = panache_semantic_atoms(body)
+        .into_iter()
+        .find(|atom| atom.0 == sign)
+        .expect("binary sign atom");
+    assert_eq!(atom, (sign, sign + 1, Bin, None, Binary));
+}
+
+#[test]
 fn semantic_atom_stream_matches_badness_contextual_roles() {
     use MathBreakPriority::{Binary, None as NoBreak, Relation};
     use MathClass::{Bin, Close, Inner, Open, Ord, Punct, Rel};
