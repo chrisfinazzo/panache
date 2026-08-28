@@ -50,7 +50,7 @@ pub(super) fn format_latex_math_environment(
         return Some(format!(
             "{}{}{}",
             environment.opening(),
-            environment.body(),
+            trim_trailing_whitespace_per_line(environment.body()),
             environment.closing()
         ));
     };
@@ -135,7 +135,8 @@ impl Formatter {
                     push_body_with_trailing_newline(&mut self.output, &body);
                 }
                 None => {
-                    self.output.push_str(&content);
+                    self.output
+                        .push_str(&trim_trailing_whitespace_per_line(&content));
                     if !content.ends_with('\n') {
                         self.output.push('\n');
                     }
@@ -170,10 +171,30 @@ impl Formatter {
 /// Renderers may retain an authored final newline for TeX parity, while the
 /// host still needs exactly one separator before its closing delimiter.
 pub(super) fn push_body_with_trailing_newline(output: &mut String, body: &str) {
-    output.push_str(body);
+    output.push_str(&trim_trailing_whitespace_per_line(body));
     if !body.ends_with('\n') {
         output.push('\n');
     }
+}
+
+/// Drop ASCII line-end padding without otherwise normalizing preserved math.
+pub(super) fn trim_trailing_whitespace_per_line(body: &str) -> String {
+    let mut output = String::with_capacity(body.len());
+    for segment in body.split_inclusive('\n') {
+        if let Some(line) = segment.strip_suffix('\n') {
+            let (line, carriage_return) = line
+                .strip_suffix('\r')
+                .map_or((line, false), |line| (line, true));
+            output.push_str(line.trim_end_matches([' ', '\t']));
+            if carriage_return {
+                output.push('\r');
+            }
+            output.push('\n');
+        } else {
+            output.push_str(segment.trim_end_matches([' ', '\t']));
+        }
+    }
+    output
 }
 
 fn inline_delimiters(

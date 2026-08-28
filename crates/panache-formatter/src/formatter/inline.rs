@@ -453,7 +453,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 let clean = content.clone();
                 match math::format_math(&clean, &opts) {
                     Some(body) => format!("{}\n{}\n{}", open, body, close),
-                    None => format!("{}\n{}\n{}", open, content.trim(), close),
+                    None => format!(
+                        "{}\n{}\n{}",
+                        open,
+                        math::trim_trailing_whitespace_per_line(content.trim()),
+                        close,
+                    ),
                 }
             } else {
                 let opts = MathFormatOptions::from_config(config, MathContext::Inline);
@@ -509,7 +514,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                         math::push_body_with_trailing_newline(&mut result, &body);
                     }
                     None => {
-                        result.push_str(&content);
+                        result.push_str(&math::trim_trailing_whitespace_per_line(&content));
                         if !content.ends_with('\n') {
                             result.push('\n');
                         }
@@ -553,7 +558,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                             };
                             if !stripped.is_empty() {
                                 result.push_str(&pad);
-                                result.push_str(stripped);
+                                result.push_str(stripped.trim_end_matches([' ', '\t']));
                             }
                             result.push('\n');
                         }

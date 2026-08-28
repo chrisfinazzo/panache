@@ -164,7 +164,7 @@ impl Printer {
             }
         }
 
-        writer.output
+        writer.finish()
     }
 
     fn group_fits(&self, start_column: usize, inner: &Ir, rest: &[Command<'_>]) -> bool {
@@ -327,6 +327,18 @@ impl Writer {
             }
     }
 
+    fn finish(mut self) -> String {
+        if !self.flatten {
+            self.trim_trailing_whitespace();
+        }
+        self.output
+    }
+
+    fn trim_trailing_whitespace(&mut self) {
+        self.output
+            .truncate(self.output.trim_end_matches([' ', '\t']).len());
+    }
+
     fn flush_indent(&mut self) {
         if self.needs_indent {
             self.output.push_str(&" ".repeat(self.pending_indent));
@@ -382,6 +394,7 @@ impl Writer {
                 self.flush_indent();
                 first = false;
             } else {
+                self.trim_trailing_whitespace();
                 self.output.push('\n');
                 self.column = 0;
                 self.needs_indent = false;
@@ -392,6 +405,7 @@ impl Writer {
     }
 
     fn newline(&mut self, indent: usize) {
+        self.trim_trailing_whitespace();
         self.output.push('\n');
         self.column = 0;
         self.pending_indent = indent;
@@ -399,6 +413,7 @@ impl Writer {
     }
 
     fn empty_line(&mut self, indent: usize) {
+        self.trim_trailing_whitespace();
         self.output.push_str("\n\n");
         self.column = 0;
         self.pending_indent = indent;
@@ -514,6 +529,19 @@ mod tests {
     fn empty_line_never_carries_indentation() {
         let document = Ir::indent(Ir::concat([Ir::text("a"), Ir::EmptyLine, Ir::text("b")]));
         assert_eq!(printer(80).print(&document, 0), "a\n\n  b");
+    }
+
+    #[test]
+    fn line_boundaries_drop_trailing_ascii_whitespace() {
+        let document = Ir::concat([
+            Ir::text("a "),
+            Ir::HardLine,
+            Ir::verbatim("b \nc\t"),
+            Ir::EmptyLine,
+            Ir::text("d\t"),
+        ]);
+
+        assert_eq!(printer(80).print(&document, 0), "a\nb\nc\n\nd");
     }
 
     #[test]

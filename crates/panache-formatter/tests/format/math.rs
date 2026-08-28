@@ -316,6 +316,109 @@ fn array_column_specification_stays_on_the_begin_line() {
 }
 
 #[test]
+fn rwr_math_bodies_drop_trailing_whitespace_per_line() {
+    let cases = [
+        (
+            "2_linear.qmd separated matrices",
+            concat!(
+                r"\mathbf{Y} = \left(\begin{array}{c} Y_1 \\ Y_2 \end{array}\right)",
+                "\n",
+                r"\qquad ",
+                "\n",
+                r"\mathbf{X} = \left(\begin{array}{c} X_1^T \\ X_2^T \end{array}\right)",
+            ),
+        ),
+        (
+            "2_linear.qmd weight matrix",
+            concat!(
+                r"\mathbf{W} = \left(\begin{array}{cc} ",
+                "\n",
+                r"w_1 & 0 \\ 0 & w_2 \end{array}\right)",
+            ),
+        ),
+        (
+            "2_linear.qmd augmented normal equation",
+            concat!(
+                r"\left(\begin{array}{cc} \mathbf{X}^T \mathbf{L} & \mathbf{D} \end{array}\right) ",
+                r"\left(\begin{array}{c} \mathbf{L}^T \mathbf{X} \\ \mathbf{D}^T \end{array}\right) \beta = ",
+                "\n",
+                r"\left(\begin{array}{cc} \mathbf{X}^T \mathbf{L} & \mathbf{D} \end{array}\right)",
+                r"\left(\begin{array}{c} \mathbf{L}^T \mathbf{Y} \\ 0 \end{array}\right).",
+            ),
+        ),
+        (
+            "2_linear.qmd block inverse",
+            concat!(
+                r"\Big((\mathbf{1} \ \ \mathbf{X})^T (\mathbf{1} \ \ \mathbf{X})\Big)^{-1} = ",
+                "\n",
+                r"\left(\begin{array}{cc} * & * \\ * & \frac{1}{n} \hat{\Sigma}^{-1} \end{array}\right).",
+            ),
+        ),
+        (
+            "2_linear.qmd covariance matrix",
+            concat!(
+                r"\hat{\Sigma} = \left(\begin{array}{cc} ",
+                "\n",
+                r"\hat{\sigma}_1^2 & \hat{\gamma}^T \\ \hat{\gamma} & \hat{\Sigma}_{-1} \end{array}\right).",
+            ),
+        ),
+        (
+            "5_generalized_linear.qmd score derivative",
+            concat!(
+                r"\partial_{\eta_i} U(\boldsymbol{\eta})_j = ",
+                "\n",
+                r"\left\{\begin{array}{ll} U'(\eta_j) & \text{if } i=j \\ 0 & \text{if } i \neq j \end{array}\right.",
+            ),
+        ),
+        (
+            "8_assessment.qmd diagonal penalty",
+            concat!(
+                r"\boldsymbol{\Omega} = \lambda \left( ",
+                "\n",
+                r"\begin{array}{cc} ",
+                "\n",
+                r"\omega_1 & 0 \\ 0 & \omega_2 \end{array}",
+                "\n",
+                r"\right)",
+            ),
+        ),
+    ];
+    let config = math_config(true);
+
+    for (name, body) in cases {
+        let display = MathHost::DollarDisplay.document(body);
+        let input = if name == "2_linear.qmd separated matrices"
+            || name == "5_generalized_linear.qmd score derivative"
+        {
+            format!("A preceding paragraph line.\n[Corpus aside:\n{display}]{{.aside}}\n")
+        } else if name == "2_linear.qmd block inverse" {
+            display
+                .lines()
+                .map(|line| format!("   {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        } else {
+            display
+        };
+        let output = format(&input, Some(config.clone()), None);
+        let trailing_lines = output
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.trim_end_matches([' ', '\t']).len() != line.len())
+            .map(|(index, line)| format!("{}: {line:?}", index + 1))
+            .collect::<Vec<_>>();
+
+        assert!(
+            trailing_lines.is_empty(),
+            "{name} retained trailing whitespace:\n{}\noutput:\n{output:?}",
+            trailing_lines.join("\n"),
+        );
+        similar_asserts::assert_eq!(format(&output, Some(config.clone()), None), output);
+    }
+}
+
+#[test]
 fn raw_math_environment_with_leading_bookdown_label_is_idempotent() {
     let mut config = math_host_matrix_config(true);
     config.parser_extensions.bookdown_equation_references = true;

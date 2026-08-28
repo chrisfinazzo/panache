@@ -396,7 +396,7 @@ panache format --check RwR
   to 302, but increased lines longer than 100 columns from 142 to 159 and
   the maximum from 177 to 206. Add a regression ceiling or layout-badness
   assertion for long aligned displays from `13_interval.qmd`.
-- [ ] Remove trailing whitespace from formatted math bodies. Formatting adds or
+- [x] Remove trailing whitespace from formatted math bodies. Formatting adds or
   retains it on eight math lines across `2_linear.qmd`,
   `5_generalized_linear.qmd`, and `8_assessment.qmd`; `git diff --check`
   rejects the result even though `panache format --check` passes.

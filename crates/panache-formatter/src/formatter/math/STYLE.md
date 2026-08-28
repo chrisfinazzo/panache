@@ -27,7 +27,7 @@ a direct subtree walk would hit.
 
 ## Bail-to-verbatim guards
 
-Returned unchanged, never reflowed:
+Returned without a math-content rewrite, never reflowed:
 
 1. The mode is `verbatim`.
 2. The content has an unescaped lone `$` (matches the existing
@@ -46,7 +46,10 @@ Returned unchanged, never reflowed:
 
 Text-domain, unknown, unmatched, over-attached, and document-redefined command
 arguments are opaque preservation islands when the surrounding expression can
-still be lowered safely; they do not automatically preserve the whole span.
+still be lowered safely; they do not automatically preserve the whole span. The
+host's preserved-body path removes ASCII spaces and tabs immediately before a
+line ending. This line hygiene does not otherwise normalize or reflow the
+preserved content.
 
 ## Intentional Badness differences
 
@@ -166,9 +169,9 @@ still be lowered safely; they do not automatically preserve the whole span.
    comment or explicit `\\` --- stay verbatim. The surrounding display-math
    formatter owns delimiter-adjacent line breaks, so the verbatim fallback
    removes only leading and trailing newline characters. It preserves
-   indentation and all internal whitespace. The math-local Wadler-style document
-   model (`ir.rs`) preserves multiline fragments compositionally; it never uses
-   string sentinels.
+   indentation and all internal whitespace except ASCII line-end padding. The
+   math-local Wadler-style document model (`ir.rs`) preserves multiline
+   fragments compositionally; it never uses string sentinels.
 
 4. **`\\` normalization.** Display and environment row layout emits a trailing
    hard break as `\\` with one preceding space. Typed inline lowering follows
@@ -187,6 +190,10 @@ still be lowered safely; they do not automatically preserve the whole span.
    to avoid trailing whitespace. Single-cell rows never participate. Widths are
    **source character counts**, so alignment is cosmetic source-tidiness, not
    rendered-glyph alignment (`\alpha` counts as 6).
+
+   Every math-body line ends without trailing ASCII spaces or tabs. The printer
+   and preserved-body host paths enforce this invariant; alignment padding may
+   appear before a `\\` marker, but never at the physical line end.
 
    A grid cell containing one comment-bearing group, signature-proven argument,
    braced script, or `\left`/`\right` body uses the typed comment layout from
