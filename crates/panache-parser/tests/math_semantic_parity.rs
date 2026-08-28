@@ -655,6 +655,36 @@ fn panache_coerces_after_punctuation_where_badness_does_not() {
     );
 }
 
+/// Badness omits the right-context half of TeX's Bin-to-Ord rule. Panache
+/// treats a sign before a closing delimiter as an ordinary postfix atom, so a
+/// one-sided limit such as `N(t-)` remains tight and is not a binary break site.
+#[test]
+fn panache_coerces_binary_before_closing_delimiter_where_badness_does_not() {
+    use MathBreakPriority::{Binary, None as NoBreak};
+    use MathClass::{Bin, Close, Open, Ord};
+
+    assert_eq!(
+        panache_semantic_atoms("N(t-)"),
+        vec![
+            (0, 1, Ord, None, NoBreak),
+            (1, 2, Open, Some(DelimiterRole::Open), NoBreak),
+            (2, 3, Ord, None, NoBreak),
+            (3, 4, Ord, None, NoBreak),
+            (4, 5, Close, Some(DelimiterRole::Close), NoBreak),
+        ],
+    );
+    assert_eq!(
+        badness_semantic_atoms("N(t-)"),
+        vec![
+            (0, 1, Ord, None, NoBreak),
+            (1, 2, Open, Some(DelimiterRole::Open), NoBreak),
+            (2, 3, Ord, None, NoBreak),
+            (3, 4, Bin, None, Binary),
+            (4, 5, Close, Some(DelimiterRole::Close), NoBreak),
+        ],
+    );
+}
+
 #[test]
 fn semantic_atom_stream_matches_badness_contextual_roles() {
     use MathBreakPriority::{Binary, None as NoBreak, Relation};

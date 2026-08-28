@@ -374,7 +374,7 @@ panache format RwR
 panache format --check RwR
 ```
 
-- [ ] Preserve postfix left-limit signs instead of spelling them as binary
+- [x] Preserve postfix left-limit signs instead of spelling them as binary
   operators before a closing delimiter. Eight expressions in
   `11_survival.qmd`, including `N(t-)` and `S(T_i-)`, become `N(t - )` and
   `S(T_i - )`. Add inline, display, and aligned-grid regressions.

@@ -29,11 +29,14 @@ formatter. User-visible formatting behavior belongs in
   consumers.
 - Formatter interpretation inherits a scripted base atom's class across its
   script. This is required for scripted relation and assignment breaks.
-- Panache retains the full TeXbook contextual coercion rule: a `Bin` becomes
-  `Ord` at list start and after `Bin`, `Rel`, `Open`, `Punct`, or `Op`. The
-  pinned Badness version leaves a binary atom binary after punctuation; keep
-  the intentional differential pinned by
-  `panache_coerces_after_punctuation_where_badness_does_not`.
+- Panache retains both sides of the full TeXbook contextual coercion rule: a
+  `Bin` becomes `Ord` at list start and after `Bin`, `Rel`, `Open`, `Punct`, or
+  `Op`, and also before `Rel`, `Close`, or `Punct`. A binary at list end stays
+  unchanged because it may be malformed dangling input. The pinned Badness
+  version omits the punctuation and right-context cases; keep the intentional
+  differentials pinned by
+  `panache_coerces_after_punctuation_where_badness_does_not` and
+  `panache_coerces_binary_before_closing_delimiter_where_badness_does_not`.
 - Authored `\\` separates layout rows but not the semantic atom stream. Derive
   atoms in source order, then lower rows separately; otherwise, a sign after a
   row break is incorrectly coerced as though it began a new math list.

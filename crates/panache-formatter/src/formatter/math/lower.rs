@@ -360,7 +360,7 @@ fn try_lower_environment_pieces(
         assignment: false,
         definition: false,
         punctuation: false,
-        unary: environment_atom.coerced_unary,
+        unary: environment_atom.coerced_unary || environment_atom.coerced_postfix,
         authored_space_before: before_atoms
             .last()
             .is_some_and(|atom| atom.range.end() < environment_atom.range.start()),
@@ -1509,7 +1509,7 @@ fn lower_pieces_with_atoms(
             definition: atom.break_priority == MathBreakPriority::Relation
                 && is_definition_relation(atom, elements),
             punctuation: atom.class == MathClass::Punct,
-            unary: atom.coerced_unary,
+            unary: atom.coerced_unary || atom.coerced_postfix,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
             slash: atom_document.slash,
             control_word_operator: atom_document.control_word_operator,
@@ -1587,6 +1587,7 @@ fn coalesce_scripted_relations(
             delimiter: None,
             break_priority: MathBreakPriority::Relation,
             coerced_unary: false,
+            coerced_postfix: false,
         });
         index = relation_index + 1;
     }

@@ -55,8 +55,10 @@ still be lowered safely; they do not automatically preserve the whole span.
   applied around their markers.
 - A soft newline before a signature-proven argument collapses as insignificant
   whitespace.
-- Panache tightens authored whitespace after unary signs and applies the full
-  TeXbook Bin-to-Ord rule after punctuation.
+- Panache applies both sides of the TeXbook Bin-to-Ord rule: it tightens
+  authored whitespace after unary signs and keeps postfix signs tight before
+  relations, closing atoms, and punctuation. The pinned formatter omits the
+  punctuation and right-context cases.
 - Panache preserves scripted composite relations such as `<=_i`, `>=_i`, and
   `==_i`; the pinned formatter incorrectly separates the relation head from its
   CST-separated script.
@@ -215,25 +217,26 @@ still be lowered safely; they do not automatically preserve the whole span.
    (`+ - *`) is its own atom---so `=-` is a relation `=` then a sign `-`, giving
    `x = -y`, and `a--b` is binary-then-unary `a - -b`. A sign atom in a *unary*
    position --- list start, or after another Bin/Rel/Open/Punct/large-op --- is
-   coerced to ordinary (TeX's unary-minus rule). Binary/relation atoms get one
-   space on each side; unary atoms are **tight**, *stripping* adjacent author
-   spaces (`- x` → `-x`, `f( - x)` → `f(-x)`), except a space demanded by a
-   neighboring spaced operator still wins (`x = - y` → `x = -y`). The preceding
-   atom's class comes from the last significant token: a `MATH_WORD` run by its
-   last char (`(`/`[` → open, `)`/`]` → close, `,`/`;` → punct), a command via
-   the parser semantic table (`\leq` → Rel, `\cdot` → Bin, `\sum` → large op,
-   else ordinary), `{`/`^`/`_`/`&` as unary-inducing, `\\` preserving context
-   across authored rows. Author whitespace between two ordinary atoms is
-   preserved, so a command-terminating space (`\alpha x`) and a `\text{ a }`
-   interior survive. Command operators (`\leq`, `\cdot`) are re-spaced the same
-   way: a binary or relation command gets one space on each side (`a\cdot b` →
-   `a \cdot b`, `a\leq b` → `a \leq b`), classed by the parser semantic table.
-   They are **never** made tight, though --- a command's terminating space is
-   mandatory (stripping `\leq b` to `\leqb` would name a different control
-   word), so a unary-position command op, a large operator (`\sum`), and
-   ordinary commands all keep their author space verbatim. The structural
-   `MATH_DELIMITED` node, rather than the command table, identifies
-   `\left`/`\right` framing.
+   coerced to ordinary (TeX's unary-minus rule). A binary atom is likewise
+   ordinary before a Rel/Close/Punct atom, so a postfix left-limit sign stays
+   tight (`N(t - )` → `N(t-)`). Binary/relation atoms get one space on each
+   side; coerced atoms are **tight**, *stripping* adjacent author spaces (`- x`
+   → `-x`, `f( - x)` → `f(-x)`), except a space demanded by a neighboring spaced
+   operator still wins (`x = - y` → `x = -y`). The preceding atom's class comes
+   from the last significant token: a `MATH_WORD` run by its last char (`(`/`[`
+   → open, `)`/`]` → close, `,`/`;` → punct), a command via the parser semantic
+   table (`\leq` → Rel, `\cdot` → Bin, `\sum` → large op, else ordinary),
+   `{`/`^`/`_`/`&` as unary-inducing, `\\` preserving context across authored
+   rows. Author whitespace between two ordinary atoms is preserved, so a
+   command-terminating space (`\alpha x`) and a `\text{ a }` interior survive.
+   Command operators (`\leq`, `\cdot`) are re-spaced the same way: a binary or
+   relation command gets one space on each side (`a\cdot b` → `a \cdot b`,
+   `a\leq b` → `a \leq b`), classed by the parser semantic table. They are
+   **never** made tight, though --- a command's terminating space is mandatory
+   (stripping `\leq b` to `\leqb` would name a different control word), so a
+   unary-position command op, a large operator (`\sum`), and ordinary commands
+   all keep their author space verbatim. The structural `MATH_DELIMITED` node,
+   rather than the command table, identifies `\left`/`\right` framing.
 
    **The definition `:=`.** A `:` is an ordinary atom whose spacing is the
    author's (`x:y` and `f: A` are left alone), *except* when an `=` follows it

@@ -766,6 +766,19 @@ fn panache_tightens_unary_signs_where_badness_keeps_author_space() {
     }
 }
 
+/// Badness omits the right-context half of TeX's Bin-to-Ord rule and formats a
+/// postfix left-limit sign as a binary operator. Panache keeps the sign tight
+/// to the preceding operand.
+#[test]
+fn panache_tightens_postfix_signs_where_badness_treats_them_as_binary() {
+    for (body, expected) in [("N(t-)", "N(t-)"), ("S(T_i - )", "S(T_i-)")] {
+        let panache = panache_body(body, OracleContext::Inline).expect("Panache formatter");
+        let badness = badness_body(body, OracleContext::Inline).expect("Badness formatter");
+        assert_eq!(panache, expected, "{body:?}");
+        assert_ne!(panache, badness, "known Badness defect: {body:?}");
+    }
+}
+
 #[test]
 fn panache_preserves_scripted_composite_relations_where_badness_splits_them() {
     for (body, expected) in [

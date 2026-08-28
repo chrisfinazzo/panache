@@ -1,0 +1,14 @@
+# Postfix left-limit signs
+
+Inline signs stay postfix: $N(t-)$ and $S(T_i-)$.
+
+$$
+  N(t-) + S(T_i-)
+$$
+
+$$
+\begin{aligned}
+  N(t-)   & = n \\
+  S(T_i-) & = s
+\end{aligned}
+$$

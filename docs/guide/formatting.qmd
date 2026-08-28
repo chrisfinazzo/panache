@@ -1095,15 +1095,16 @@ The `&` columns and the trailing `\\` are both aligned.
 
 Operators are spaced precedence-aware: a binary or relational operator gets one
 space on each side (`a+b` → `a + b`, `a<=b` → `a <= b`), while a unary minus or
-plus stays tight (`x = -y`, `f(-x)`). Command operators are spaced the same way
-(`a\cdot b` → `a \cdot b`, `x\leq y` → `x \leq y`). A definition `:=` is spaced
-as one symbol (`x:=y` → `x := y`), never split into `x : = y`; a colon that is
-not followed directly by `=` keeps the spacing you wrote (`x:y`, `f: A`). Macro
-contents are not rewritten (no `\frac` canonicalization, no auto-`&` insertion).
-Alignment uses **source character widths** (it tidies the source, it does not
-align rendered glyphs), and malformed math is left untouched. A leading
-top-level `%` comment stays on its own line, and a same-line trailing comment
-retains its terminating newline.
+plus stays tight (`x = -y`, `f(-x)`). A postfix sign before a closing delimiter
+also stays tight (`N(t - )` → `N(t-)`). Command operators are spaced the same
+way (`a\cdot b` → `a \cdot b`, `x\leq y` → `x \leq y`). A definition `:=` is
+spaced as one symbol (`x:=y` → `x := y`), never split into `x : = y`; a colon
+that is not followed directly by `=` keeps the spacing you wrote (`x:y`,
+`f: A`). Macro contents are not rewritten (no `\frac` canonicalization, no
+auto-`&` insertion). Alignment uses **source character widths** (it tidies the
+source, it does not align rendered glyphs), and malformed math is left
+untouched. A leading top-level `%` comment stays on its own line, and a
+same-line trailing comment retains its terminating newline.
 
 Inline math is kept on a single line: an environment or a `\\` row break inside
 `$…$` is flattened, because a newline there would end the surrounding paragraph

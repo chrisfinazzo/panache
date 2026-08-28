@@ -77,6 +77,10 @@ pub struct SemanticMathAtom {
     /// (`-x`, `f(-x)`, `x = -y`). A coerced sign binds to the operand that
     /// follows it, so it takes no surrounding space of its own.
     pub coerced_unary: bool,
+    /// Whether TeX's Bin-to-Ord rule coerced a binary atom because a relation,
+    /// closing atom, or punctuation atom follows it. A postfix sign binds to
+    /// the preceding operand and stays tight.
+    pub coerced_postfix: bool,
 }
 
 const fn atom_info(class: MathClass, delimiter: Option<DelimiterRole>) -> MathAtomInfo {
@@ -129,6 +133,14 @@ pub fn coerces_binary_to_ordinary(previous: Option<MathClass>) -> bool {
             MathClass::Bin | MathClass::Rel | MathClass::Open | MathClass::Punct | MathClass::Op
         )
     })
+}
+
+/// Whether a binary atom is coerced to ordinary by the atom that follows it.
+/// A missing following atom is left unchanged because it can be malformed
+/// dangling input, which the formatter preserves.
+pub fn following_coerces_binary_to_ordinary(following: Option<MathClass>) -> bool {
+    following
+        .is_some_and(|class| matches!(class, MathClass::Rel | MathClass::Close | MathClass::Punct))
 }
 
 /// Virtual atoms for one CST element. A coalesced `MATH_WORD` yields one atom
@@ -212,9 +224,7 @@ pub fn semantic_math_atoms(content: &SyntaxNode) -> SemanticMathAtoms {
 pub fn semantic_math_atoms_in(
     elements: impl IntoIterator<Item = SyntaxElement>,
 ) -> SemanticMathAtoms {
-    let mut interpreted = Vec::new();
-    let mut previous_class: Option<MathClass> = None;
-    let mut previous_opener = false;
+    let mut raw_atoms = Vec::new();
     for element in elements {
         if !is_semantic_math_element(&element) {
             continue;
@@ -234,29 +244,39 @@ pub fn semantic_math_atoms_in(
             }
             element_atoms.push(raw);
         }
-        for atom in element_atoms {
-            let coerced_unary = atom.class == MathClass::Bin
-                && (previous_opener || coerces_binary_to_ordinary(previous_class));
-            let class = if coerced_unary {
-                MathClass::Ord
-            } else {
-                atom.class
-            };
-            let break_priority = match MathRole::from_class(class) {
-                MathRole::Operand => MathBreakPriority::None,
-                MathRole::Binary => MathBreakPriority::Binary,
-                MathRole::Relation => MathBreakPriority::Relation,
-            };
-            previous_class = Some(class);
-            previous_opener = atom.delimiter == Some(DelimiterRole::Open);
-            interpreted.push(SemanticMathAtom {
-                range: atom.range,
-                class,
-                delimiter: atom.delimiter,
-                break_priority,
-                coerced_unary,
-            });
-        }
+        raw_atoms.extend(element_atoms);
+    }
+
+    let mut interpreted = Vec::with_capacity(raw_atoms.len());
+    let mut previous_class: Option<MathClass> = None;
+    let mut previous_opener = false;
+    for (index, atom) in raw_atoms.iter().copied().enumerate() {
+        let coerced_unary = atom.class == MathClass::Bin
+            && (previous_opener || coerces_binary_to_ordinary(previous_class));
+        let coerced_postfix = atom.class == MathClass::Bin
+            && following_coerces_binary_to_ordinary(
+                raw_atoms.get(index + 1).map(|following| following.class),
+            );
+        let class = if coerced_unary || coerced_postfix {
+            MathClass::Ord
+        } else {
+            atom.class
+        };
+        let break_priority = match MathRole::from_class(class) {
+            MathRole::Operand => MathBreakPriority::None,
+            MathRole::Binary => MathBreakPriority::Binary,
+            MathRole::Relation => MathBreakPriority::Relation,
+        };
+        previous_class = Some(class);
+        previous_opener = atom.delimiter == Some(DelimiterRole::Open);
+        interpreted.push(SemanticMathAtom {
+            range: atom.range,
+            class,
+            delimiter: atom.delimiter,
+            break_priority,
+            coerced_unary,
+            coerced_postfix,
+        });
     }
 
     SemanticMathAtoms {
