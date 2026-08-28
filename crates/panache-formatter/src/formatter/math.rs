@@ -1134,13 +1134,13 @@ mod tests {
     }
 
     #[test]
-    fn display_binary_on_relation_lhs_hangs_flush() {
+    fn display_packs_binary_lhs_before_relation_break() {
         let narrow = MathFormatOptions {
             line_width: 20,
             ..opts(MathContext::Display)
         };
         let input = "H(a) - H(b) \\leq \\frac{L}{2n}";
-        let expected = "H(a)\n- H(b) \\leq \\frac{L}{2n}";
+        let expected = "H(a) - H(b)\n\\leq \\frac{L}{2n}";
         assert_eq!(fmt_with(input, &narrow), expected);
         let once = fmt_with(input, &narrow);
         assert_eq!(fmt_with(&once, &narrow), once);

@@ -360,6 +360,7 @@ fn try_lower_environment_pieces(
         delimiter: environment_atom.delimiter,
         assignment: false,
         definition: false,
+        conditioning_relation: false,
         punctuation: false,
         unary: environment_atom.coerced_unary || environment_atom.coerced_postfix,
         dimension_sign: environment_atom.attached_dimension_sign,
@@ -1567,6 +1568,8 @@ fn lower_pieces_with_atoms(
                 && relation_is_assignment(atom, elements),
             definition: atom.break_priority == MathBreakPriority::Relation
                 && is_definition_relation(atom, elements),
+            conditioning_relation: atom.break_priority == MathBreakPriority::Relation
+                && atom_source_text(atom, elements).as_deref() == Some(r"\mid"),
             punctuation: atom.class == MathClass::Punct,
             unary: atom.coerced_unary || atom.coerced_postfix,
             dimension_sign: atom.attached_dimension_sign,
@@ -1677,6 +1680,16 @@ fn atom_starts_with_equals(atom: SemanticMathAtom, elements: &[SyntaxElement]) -
     })
 }
 
+fn atom_source_text(atom: SemanticMathAtom, elements: &[SyntaxElement]) -> Option<String> {
+    let element = elements.iter().find(|element| {
+        element.text_range().start() <= atom.range.start()
+            && element.text_range().end() >= atom.range.end()
+    })?;
+    let start = usize::from(atom.range.start() - element.text_range().start());
+    let end = usize::from(atom.range.end() - element.text_range().start());
+    element.to_string().get(start..end).map(str::to_owned)
+}
+
 fn document_from_pieces(pieces: &[Piece], spacing: Spacing) -> Ir {
     let mut documents = Vec::new();
     let mut column = 0usize;
@@ -1754,6 +1767,12 @@ fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) 
     if flat.flat_width().is_some_and(|width| width <= line_width) {
         return flat;
     }
+    if pieces
+        .iter()
+        .all(|piece| piece.multiline_tail_width.is_none() && piece.document.flat_width().is_some())
+    {
+        return layout_flat_display_pieces(pieces, line_width, spacing);
+    }
     if !pieces
         .iter()
         .any(|piece| piece.multiline_tail_width.is_some())
@@ -1807,6 +1826,181 @@ fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) 
     }
 
     lines_document(lines)
+}
+
+/// Choose only the operator breaks that materially improve a flat display.
+///
+/// Overflow is more expensive than an ordinary continuation. Conditioning
+/// relations are the exception: their stronger break penalty can keep a tiny
+/// overflow intact instead of turning every predicate into its own line. Once
+/// a break is worthwhile, the secondary score favors balanced segments.
+fn layout_flat_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) -> Ir {
+    // These weights make any ordinary break preferable to one column of
+    // overflow. A conditioning row alone may keep that single column because
+    // splitting its predicates is more disruptive than the cosmetic excess.
+    const OVERFLOW_COST: u128 = 16;
+    const RELATION_BREAK_COST: u128 = 1;
+    const FIRST_RELATION_BREAK_COST: u128 = 8;
+    const BINARY_BREAK_COST: u128 = 4;
+    const CONDITIONING_RELATION_BREAK_COST: u128 = 64;
+
+    #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+    struct Score {
+        penalty: u128,
+        max_width: usize,
+        squared_widths: u128,
+        lines: usize,
+    }
+
+    impl Score {
+        fn with_line(self, width: usize, line_width: usize, break_cost: u128) -> Self {
+            let overflow = width.saturating_sub(line_width) as u128;
+            let width = width as u128;
+            Self {
+                penalty: self
+                    .penalty
+                    .saturating_add(
+                        overflow
+                            .saturating_mul(overflow)
+                            .saturating_mul(OVERFLOW_COST),
+                    )
+                    .saturating_add(break_cost),
+                max_width: self.max_width.max(width as usize),
+                squared_widths: self
+                    .squared_widths
+                    .saturating_add(width.saturating_mul(width)),
+                lines: self.lines + 1,
+            }
+        }
+    }
+
+    let operators = top_level_operators(pieces);
+    let mut bounds = Vec::with_capacity(operators.len() + 2);
+    bounds.push(0);
+    bounds.extend(
+        operators
+            .iter()
+            .map(|&(index, _)| index)
+            .filter(|&index| index > 0),
+    );
+    bounds.push(pieces.len());
+    bounds.dedup();
+
+    if bounds.len() == 2 {
+        return document_from_pieces(pieces, spacing);
+    }
+
+    let Some(columns) = piece_columns(pieces, spacing) else {
+        return document_from_pieces(pieces, spacing);
+    };
+    let relations = operators
+        .iter()
+        .filter_map(|&(index, role)| (role == Role::Relation).then_some(index))
+        .collect::<Vec<_>>();
+    let has_conditioning_relation = pieces.iter().any(|piece| piece.conditioning_relation);
+    let indents = bounds
+        .iter()
+        .map(|&start| operator_break_indent(pieces, &columns, &relations, start))
+        .collect::<Vec<_>>();
+
+    let mut best = vec![None::<(Score, usize)>; bounds.len()];
+    best[0] = Some((Score::default(), 0));
+    for end in 1..bounds.len() {
+        for start in 0..end {
+            let Some((score, _)) = best[start] else {
+                continue;
+            };
+            let segment_start = bounds[start];
+            let segment_end = bounds[end];
+            let width = indents[start].saturating_add(
+                columns[segment_end - 1]
+                    .1
+                    .saturating_sub(columns[segment_start].0),
+            );
+            let break_cost = if start == 0 {
+                0
+            } else if has_conditioning_relation && pieces[bounds[start]].role == Role::Relation {
+                CONDITIONING_RELATION_BREAK_COST
+            } else if pieces[bounds[start]].role == Role::Relation {
+                if relations.first().copied() == Some(bounds[start]) {
+                    FIRST_RELATION_BREAK_COST
+                } else {
+                    RELATION_BREAK_COST
+                }
+            } else {
+                BINARY_BREAK_COST
+            };
+            let candidate = score.with_line(width, line_width, break_cost);
+            if best[end].is_none_or(|(current, _)| candidate < current) {
+                best[end] = Some((candidate, start));
+            }
+        }
+    }
+
+    let mut ranges = Vec::new();
+    let mut end = bounds.len() - 1;
+    while end > 0 {
+        let Some((_, start)) = best[end] else {
+            return document_from_pieces(pieces, spacing);
+        };
+        ranges.push((start, end));
+        end = start;
+    }
+    ranges.reverse();
+
+    lines_document(
+        ranges
+            .into_iter()
+            .map(|(start, end)| {
+                (
+                    indents[start],
+                    document_from_pieces(&pieces[bounds[start]..bounds[end]], spacing),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn operator_break_indent(
+    pieces: &[Piece],
+    columns: &[(usize, usize)],
+    relations: &[usize],
+    start: usize,
+) -> usize {
+    let Some(piece) = pieces.get(start) else {
+        return 0;
+    };
+    let Some(&first_relation) = relations.first() else {
+        return 0;
+    };
+    let relation_column = columns[first_relation].0;
+    let relation_rhs = columns[first_relation].1.saturating_add(1);
+    let relation_indent = |relation: usize| {
+        if relation == first_relation {
+            0
+        } else if !pieces[first_relation].assignment || pieces[relation].assignment {
+            relation_column
+        } else {
+            relation_rhs
+        }
+    };
+
+    match piece.role {
+        Role::Operand => 0,
+        Role::Relation => relation_indent(start),
+        Role::Binary => {
+            let Some(&relation) = relations.iter().rev().find(|&&relation| relation < start) else {
+                return 0;
+            };
+            if relation == first_relation {
+                relation_rhs
+            } else {
+                relation_indent(relation)
+                    .saturating_add(columns[relation].1.saturating_sub(columns[relation].0))
+                    .saturating_add(1)
+            }
+        }
+    }
 }
 
 fn layout_display_segment(
@@ -2525,6 +2719,9 @@ struct Piece {
     delimiter: Option<DelimiterRole>,
     assignment: bool,
     definition: bool,
+    /// A conditioning bar such as `\mid` makes neighboring relations separate
+    /// predicates rather than one relation chain.
+    conditioning_relation: bool,
     punctuation: bool,
     /// A `+`/`-` that TeX coerced to a unary sign. It binds to the operand
     /// beside it, so it strips the authored space on either side.

@@ -384,7 +384,7 @@ panache format --check RwR
 - [x] Keep signs attached to TeX dimensions. Two expressions in `2_linear.qmd`
   and `11_survival.qmd` rewrite `\hskip -1cm` and `\hskip -30mm` as
   `\hskip - 1cm` and `\hskip - 30mm`.
-- [ ] Improve free-display break selection so that it does not strand special
+- [x] Improve free-display break selection so that it does not strand special
   operators such as `\pm`, `\cdot`, and `\mid`, or split simple relations
   into operator islands. The corpus has nine such continuation lines;
   include the AUC definition from `8_assessment.qmd` and the

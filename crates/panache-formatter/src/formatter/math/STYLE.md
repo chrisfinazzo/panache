@@ -265,17 +265,27 @@ still be lowered safely; they do not automatically preserve the whole span.
 
 7. **Display line-breaking.** In `reflow` mode, a free display row (`$$…$$`,
    non-environment) wider than `line-width` is broken at its **top-level**
-   operators in a two-level hierarchy keyed on parser `MathBreakPriority`
-   (**relations** > **binary** > everything else). The first relation stays on
-   the opening line; every later relation starts a continuation aligned under
-   the **first relation**---the classic stacked-`=` layout for an
-   equality/comparison chain. Then any relation segment that is still over-width
-   splits before each top-level **binary** operator, with each `+ term` sitting
-   **flush** under that segment's own right-hand side. The relation/RHS offset
-   alone supplies the visual nesting; binary continuations never pick up an
-   extra step. The width budget charges the flat `math-indent` against
-   `line-width`, so a broken line plus its leading indent still stays within
-   `line-width`. It is source-cosmetic only --- math ignores whitespace, so the
+   operators in a hierarchy keyed on parser `MathBreakPriority` (**relations** >
+   **binary** > everything else). It chooses a subset of those candidates
+   instead of breaking at every operator. The deterministic layout score charges
+   squared overflow more heavily than a continuation, prefers a later relation
+   break to a binary break, and prefers a binary break to separating the first
+   relation from its left-hand side. Ties favor the smaller maximum line width,
+   then the smaller sum of squared line widths. This packs complete operator
+   segments together when they fit instead of stranding `\pm`, `\cdot`, or a
+   short relation on its own line.
+
+   A selected later relation starts a continuation aligned under the **first
+   relation**---the classic stacked-`=` layout for an equality/comparison chain.
+   A selected binary continuation sits **flush** under that relation segment's
+   right-hand side. The relation/RHS offset alone supplies the visual nesting;
+   binary continuations never pick up an extra step. A top-level conditioning
+   bar (`\mid`) identifies neighboring relations as separate predicates rather
+   than one relation chain, so relation breaks in that row receive a strong
+   penalty. A row that exceeds the budget by only a source column can therefore
+   stay intact when every available relation break would create operator
+   islands. The width budget otherwise charges the flat `math-indent` against
+   `line-width`. This is source-cosmetic only---math ignores whitespace, so the
    rendered equation is unchanged:
 
    ```
@@ -285,8 +295,8 @@ still be lowered safely; they do not automatically preserve the whole span.
        + dddddddddd
    ```
 
-   (At a width where each relation segment fits, no binary breaking happens and
-   only the relation split shows: `A = aaaa + bbbb` / `= cccc + dddd`.)
+   (At a width where more terms fit, the selector may keep several binary or
+   relation segments on one line.)
 
    **Assignment exception.** When the leading relation is an *assignment* arrow
    (`\gets`, `\leftarrow`, `\mapsto`, or `\coloneqq`), the arrow defines its LHS
@@ -345,18 +355,18 @@ still be lowered safely; they do not automatically preserve the whole span.
      rows beginning with `:=`, `:=_i`, or a later ordinary relation remain flush
      at `math-indent`.
    - **Scope:** every over-width free row with a top-level relation **or**
-     binary operator is broken. A **relation chain** (≥ 2 relations) splits at
-     its relations, then nests binary terms inside each over-width segment (as
-     above). A **single-relation** row splits its over-width binary RHS, each
-     `+ term` flush under the right-hand side. A **standalone binary chain** (no
-     relation) splits with the first term as the head and each `+ term` flush
-     under it. The unifying rule: a binary continuation aligns flush under the
-     **first term of its operand sequence** (for a relation segment that is its
-     RHS; for a bare chain it is the chain itself). The relation/RHS offset is
-     the only nesting; `math-indent` shifts the whole block but never the
-     internal alignment, so the equation's shape is identical at any indent. A
+     binary operator enters break selection. A **relation chain** can split at
+     later relations and nest selected binary continuations inside those
+     segments. A **single-relation** row can split its over-width binary RHS or,
+     when that produces a materially better layout, break before the relation. A
+     **standalone binary chain** (no relation) packs as many complete terms as
+     fit and aligns each selected continuation under the first term. The
+     unifying rule: a binary continuation aligns flush under the **first term of
+     its operand sequence** (for a relation segment that is its RHS; for a bare
+     chain it is the chain itself). The relation/RHS offset is the only nesting;
+     `math-indent` shifts the whole block but never the internal alignment. A
      row with **no** top-level relation or binary operator (e.g. a single wide
-     `\frac{…}{…}`) is left on one over-width line --- like an unbreakable long
+     `\frac{…}{…}`) is left on one over-width line---like an unbreakable long
      word in prose reflow. `single-line` uses the same normalized flat row but
      never applies these width breaks, and `preserve` retains the authored soft
      row boundaries. Inline and environment-body math are not width-broken.

@@ -562,11 +562,63 @@ fn stable_format_math_does_not_break_overwidth_fraction() {
 fn stable_format_math_breaks_standalone_binary_chain() {
     let cfg = math_config_width(true, 12);
     let input = "$$\naaaa + bbbb + cccc + dddd\n$$\n";
-    let expected = "$$\naaaa\n+ bbbb\n+ cccc\n+ dddd\n$$\n";
+    let expected = "$$\naaaa + bbbb\n+ cccc\n+ dddd\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
     let twice = format(&output, Some(cfg), None);
     similar_asserts::assert_eq!(twice, output);
+}
+
+#[test]
+fn rwr_free_displays_choose_complete_operator_segments() {
+    let config = math_config(true);
+    let cases = [
+        (
+            "8_assessment.qmd AUC definition",
+            r"\mathrm{AUC} = \mathbf{P}(\eta_0 < \eta_1) + \frac{1}{2} \mathbf{P}(\eta_0 = \eta_1).",
+            r"\mathrm{AUC} = \mathbf{P}(\eta_0 < \eta_1)
+               + \frac{1}{2} \mathbf{P}(\eta_0 = \eta_1).",
+        ),
+        (
+            r"8_assessment.qmd conditional AUC variables",
+            r"\eta_0 = \eta(X) \mid Y = 0 \quad \text{and} \quad \eta_1 = \eta(X) \mid Y = 1.",
+            r"\eta_0 = \eta(X) \mid Y = 0 \quad \text{and} \quad \eta_1 = \eta(X) \mid Y = 1.",
+        ),
+        (
+            "2_linear.qmd confidence interval",
+            r"a^T\hat{\beta} \pm z_{n-p} \cdot \hat{\sigma} \sqrt{a^T(\mathbf{X}^T\mathbf{X})^{-1}a}",
+            r"a^T\hat{\beta} \pm z_{n-p}
+\cdot \hat{\sigma} \sqrt{a^T(\mathbf{X}^T\mathbf{X})^{-1}a}",
+        ),
+        (
+            "5_generalized_linear.qmd confidence interval",
+            r"a^T\hat{\beta} \pm z \cdot \sqrt{\hat{\varphi} a^T(\mathbf{X}^T\hat{\mathbf{W}}\mathbf{X})^{-1}a}",
+            r"a^T\hat{\beta} \pm z
+\cdot \sqrt{\hat{\varphi} a^T(\mathbf{X}^T\hat{\mathbf{W}}\mathbf{X})^{-1}a}",
+        ),
+        (
+            "13_interval.qmd standard confidence interval",
+            r"\hat{\gamma} \pm z \cdot \hat{\mathrm{se}} = (\hat{\gamma} - z \cdot \hat{\mathrm{se}}, \hat{\gamma} + z \cdot \hat{\mathrm{se}}).",
+            r"\hat{\gamma} \pm z \cdot \hat{\mathrm{se}}
+= (\hat{\gamma} - z \cdot \hat{\mathrm{se}}, \hat{\gamma} + z \cdot \hat{\mathrm{se}}).",
+        ),
+        (
+            "13_interval.qmd bootstrap confidence interval",
+            r"\{ \gamma \mid (\hat{\gamma} - \gamma)^2 < \hat{c}_{\alpha} {\hat{\mathrm{se}}^2}\} = \hat{\gamma} \pm \sqrt{\hat{c}_{\alpha}} \cdot \hat{\mathrm{se}}.",
+            r"\{ \gamma \mid (\hat{\gamma} - \gamma)^2 < \hat{c}_{\alpha} {\hat{\mathrm{se}}^2}\}
+= \hat{\gamma} \pm \sqrt{\hat{c}_{\alpha}}\cdot\hat{\mathrm{se}}.",
+        ),
+    ];
+
+    for (name, input, expected) in cases {
+        let output = assert_math_host_body(
+            MathHost::DollarDisplay,
+            input,
+            &indent_math_body(expected),
+            &config,
+        );
+        assert_eq!(output, indent_math_body(expected), "{name}");
+    }
 }
 
 #[test]
@@ -584,7 +636,7 @@ fn stable_format_math_nests_binary_under_single_relation() {
 fn relation_chain_long_lhs_anchors_under_rhs() {
     let cfg = math_config(true); // default line-width 80, math-indent 2
     let input = "$$\n  \\beta_0 \\gets \\beta_0 + \\frac{4}{n} \\sum_{i = 1}^n (y_i - p_i)\n          = \\beta_0 - \\frac{1}{L_0} \\partial_0 F, \\qquad L_0\n          = 1/4,\n$$\n";
-    let expected = "$$\n  \\beta_0 \\gets \\beta_0 + \\frac{4}{n} \\sum_{i=1}^n (y_i - p_i)\n                = \\beta_0 - \\frac{1}{L_0} \\partial_0 F, \\qquad L_0\n                = 1/4,\n$$\n";
+    let expected = "$$\n  \\beta_0 \\gets \\beta_0 + \\frac{4}{n} \\sum_{i=1}^n (y_i - p_i)\n                = \\beta_0 - \\frac{1}{L_0} \\partial_0 F, \\qquad L_0 = 1/4,\n$$\n";
     let output = format(input, Some(cfg.clone()), None);
     similar_asserts::assert_eq!(output, expected);
     let twice = format(&output, Some(cfg), None);
