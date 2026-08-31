@@ -18,6 +18,11 @@ crates/panache-formatter/tests/fixtures/yaml_corpus/**/*.yaml eol=lf
 crates/panache-formatter/tests/fixtures/math_corpus/**/*.tex eol=lf
 crates/panache-formatter/tests/fixtures/math_corpus/**/*.preamble eol=lf
 
+# These regressions contain the semantic ASCII byte of a TeX `\ ` control
+# symbol at a physical line end; it is content, not whitespace damage.
+tests/fixtures/cases/issue_521_math_control_space_after_line_break/expected.qmd whitespace=-blank-at-eol
+tests/fixtures/cases/issue_522_math_control_space_before_display_break/expected.qmd whitespace=-blank-at-eol
+
 # Preserve CRLF in test cases that specifically test CRLF handling (must have CRLF line endings)
 tests/fixtures/cases/crlf_*/* -text
 tests/fixtures/cases/line_ending_crlf/* -text

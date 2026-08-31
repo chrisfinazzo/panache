@@ -116,7 +116,7 @@ fn render_inline_content(
         if keeps_breaks {
             printer.print(document, 0)
         } else {
-            printer.print_flat(document).trim().to_string()
+            printer.print_flat(document)
         }
     };
 
@@ -144,7 +144,10 @@ fn render_inline_content(
 /// on that line; the caller already puts the closing delimiter on a line of its
 /// own, so keeping the break would leave a blank line between them.
 fn trimmed_body(printer: &Printer, document: &Ir, indent: usize) -> String {
-    printer.print(document, indent).trim_end().to_string()
+    printer
+        .print(document, indent)
+        .trim_end_matches(['\r', '\n'])
+        .to_string()
 }
 
 fn render_display(

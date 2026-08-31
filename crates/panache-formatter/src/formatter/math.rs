@@ -156,9 +156,10 @@ impl Formatter {
                 push_body_with_trailing_newline(&mut self.output, &body);
             }
             None => {
-                for line in content.trim().lines() {
+                let content = trim_preserved_math_body(&content);
+                for line in content.lines() {
                     self.output.push_str(&" ".repeat(self.config.math_indent));
-                    self.output.push_str(line.trim_end());
+                    self.output.push_str(line);
                     self.output.push('\n');
                 }
             }
@@ -178,6 +179,10 @@ pub(super) fn push_body_with_trailing_newline(output: &mut String, body: &str) {
 }
 
 /// Drop ASCII line-end padding without otherwise normalizing preserved math.
+///
+/// A space immediately controlled by an odd-length backslash run is the TeX
+/// control symbol `\ `, not padding. Keep that byte while removing any layout
+/// whitespace after it.
 pub(super) fn trim_trailing_whitespace_per_line(body: &str) -> String {
     let mut output = String::with_capacity(body.len());
     for segment in body.split_inclusive('\n') {
@@ -185,16 +190,42 @@ pub(super) fn trim_trailing_whitespace_per_line(body: &str) -> String {
             let (line, carriage_return) = line
                 .strip_suffix('\r')
                 .map_or((line, false), |line| (line, true));
-            output.push_str(line.trim_end_matches([' ', '\t']));
+            output.push_str(trim_math_line_end(line));
             if carriage_return {
                 output.push('\r');
             }
             output.push('\n');
         } else {
-            output.push_str(segment.trim_end_matches([' ', '\t']));
+            output.push_str(trim_math_line_end(segment));
         }
     }
     output
+}
+
+pub(super) fn trim_preserved_math_body(body: &str) -> String {
+    trim_trailing_whitespace_per_line(body)
+        .trim_start()
+        .trim_end_matches(['\r', '\n'])
+        .to_string()
+}
+
+fn trim_math_line_end(line: &str) -> &str {
+    let trimmed = line.trim_end_matches([' ', '\t']);
+    let trailing = &line[trimmed.len()..];
+    if !trailing.starts_with(' ') {
+        return trimmed;
+    }
+    let backslashes = trimmed
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'\\')
+        .count();
+    if backslashes % 2 == 1 {
+        &line[..trimmed.len() + 1]
+    } else {
+        trimmed
+    }
 }
 
 fn inline_delimiters(
@@ -658,6 +689,20 @@ mod tests {
     fn inline_preserves_command_terminating_space() {
         assert_eq!(fmt("\\alpha   x", MathContext::Inline), "\\alpha x");
         assert_idempotent("\\alpha x", MathContext::Inline);
+    }
+
+    #[test]
+    fn inline_preserves_trailing_control_space() {
+        assert_eq!(fmt(r"x\ ", MathContext::Inline), r"x\ ");
+        assert_idempotent(r"x\ ", MathContext::Inline);
+    }
+
+    #[test]
+    fn preserved_line_cleanup_keeps_only_semantic_control_space() {
+        assert_eq!(
+            trim_trailing_whitespace_per_line("a\\ \t  \nb\\\\   \nc \t\n"),
+            "a\\ \nb\\\\\nc\n"
+        );
     }
 
     #[test]

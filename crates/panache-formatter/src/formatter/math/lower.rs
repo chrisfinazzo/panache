@@ -367,7 +367,6 @@ fn try_lower_environment_pieces(
         authored_space_before: before_atoms
             .last()
             .is_some_and(|atom| atom.range.end() < environment_atom.range.start()),
-        control_space: false,
         slash: false,
         control_word_operator: false,
         starts_control_word_letter: false,
@@ -629,21 +628,17 @@ impl EnvironmentRow {
 struct EnvironmentCell {
     document: Ir,
     atom_offset: usize,
-    trailing_control_space: bool,
 }
 
 impl EnvironmentCell {
     fn first_line_width(&self, printer: &Printer) -> usize {
-        let rendered_width = printer
+        printer
             .print(&self.document, 0)
             .lines()
             .next()
             .unwrap_or_default()
             .chars()
-            .count();
-        // The printer trims line endings, but this space belongs to the TeX
-        // control symbol and must still count toward grid alignment.
-        rendered_width + usize::from(self.trailing_control_space)
+            .count()
     }
 
     fn starts_relation(&self) -> bool {
@@ -732,11 +727,6 @@ fn lower_environment_cell(
     elements: Vec<SyntaxElement>,
     opts: &MathFormatOptions,
 ) -> Option<EnvironmentCell> {
-    let trailing_control_space = elements
-        .iter()
-        .rev()
-        .find(|element| !is_layout_trivia(element))
-        .is_some_and(is_control_space);
     let comment_elements = elements
         .iter()
         .filter(|element| contains_nested_comment(element))
@@ -764,7 +754,6 @@ fn lower_environment_cell(
     Some(EnvironmentCell {
         document,
         atom_offset,
-        trailing_control_space,
     })
 }
 
@@ -825,9 +814,6 @@ fn split_environment_rows(elements: &[SyntaxElement]) -> Vec<EnvironmentRow> {
                 elements: std::mem::take(&mut current),
                 break_text: Some(element.to_string()),
             }),
-            // Keep the control-space byte away from a physical line ending,
-            // where the printer's line hygiene would change its TeX meaning.
-            SyntaxKind::MATH_NEWLINE if row_is_control_space(&current) => {}
             SyntaxKind::MATH_NEWLINE => rows.push(EnvironmentRow {
                 elements: std::mem::take(&mut current),
                 break_text: None,
@@ -842,17 +828,6 @@ fn split_environment_rows(elements: &[SyntaxElement]) -> Vec<EnvironmentRow> {
         });
     }
     rows
-}
-
-fn row_is_control_space(elements: &[SyntaxElement]) -> bool {
-    elements.iter().any(is_control_space)
-        && elements
-            .iter()
-            .all(|element| is_layout_trivia(element) || is_control_space(element))
-}
-
-fn is_control_space(element: &SyntaxElement) -> bool {
-    element.kind() == SyntaxKind::MATH_CONTROL_SYMBOL && element.to_string() == r"\ "
 }
 
 fn split_environment_cells(elements: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
@@ -1599,7 +1574,6 @@ fn lower_pieces_with_atoms(
             unary: atom.coerced_unary || atom.coerced_postfix,
             dimension_sign: atom.attached_dimension_sign,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
-            control_space: atom_source_text(atom, elements).as_deref() == Some(r"\ "),
             slash: atom_document.slash,
             control_word_operator: atom_document.control_word_operator,
             starts_control_word_letter: atom_document.starts_control_word_letter,
@@ -1826,13 +1800,7 @@ fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) 
             .map_or(relation_column, |&(_, end)| end.saturating_add(1));
         let first_assignment = pieces[first].assignment;
         let bounds = std::iter::once(0)
-            .chain(
-                relations
-                    .iter()
-                    .skip(1)
-                    .copied()
-                    .filter(|&index| can_break_before(pieces, index)),
-            )
+            .chain(relations.iter().skip(1).copied())
             .chain(std::iter::once(pieces.len()))
             .collect::<Vec<_>>();
         for segment in 0..bounds.len() - 1 {
@@ -1913,7 +1881,7 @@ fn layout_flat_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spac
         operators
             .iter()
             .map(|&(index, _)| index)
-            .filter(|&index| index > 0 && can_break_before(pieces, index)),
+            .filter(|&index| index > 0),
     );
     bounds.push(pieces.len());
     bounds.dedup();
@@ -1993,12 +1961,6 @@ fn layout_flat_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spac
     )
 }
 
-/// A TeX control space cannot safely end a physical line: line-end hygiene
-/// would trim its space and change the token on the next parse.
-fn can_break_before(pieces: &[Piece], index: usize) -> bool {
-    index == 0 || !pieces[index - 1].control_space
-}
-
 fn operator_break_indent(
     pieces: &[Piece],
     columns: &[(usize, usize)],
@@ -2065,9 +2027,7 @@ fn layout_display_segment(
     let operators = top_level_operators(pieces);
     let binaries = operators
         .iter()
-        .filter_map(|&(index, role)| {
-            (role == Role::Binary && can_break_before(pieces, index)).then_some(index)
-        })
+        .filter_map(|&(index, role)| (role == Role::Binary).then_some(index))
         .collect::<Vec<_>>();
     let Some(&first_binary) = binaries.first() else {
         return vec![(base_indent, flat)];
@@ -2315,7 +2275,12 @@ fn atom_document(
         {
             let text = token_slice(range, token)?;
             let slash = text == "/";
-            (Ir::verbatim(text), slash)
+            let document = if text == r"\ " {
+                Ir::control_space()
+            } else {
+                Ir::verbatim(text)
+            };
+            (document, slash)
         }
         SyntaxElement::Node(node) => {
             if let Some(group) = MathGroup::cast(node.clone()) {
@@ -2770,8 +2735,6 @@ struct Piece {
     /// dimension on its right without stripping the command-to-argument gap.
     dimension_sign: bool,
     authored_space_before: bool,
-    /// A TeX control space must not end a physical output line.
-    control_space: bool,
     slash: bool,
     control_word_operator: bool,
     starts_control_word_letter: bool,

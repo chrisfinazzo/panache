@@ -15,6 +15,8 @@ use std::rc::Rc;
 pub(super) enum Ir {
     /// Literal single-line text.
     Text(Rc<str>),
+    /// The TeX control symbol `\ `, whose ASCII space is semantic.
+    ControlSpace,
     /// Documents printed back-to-back.
     Concat(Rc<[Ir]>),
     /// A space when flat, or a newline when broken.
@@ -57,6 +59,10 @@ impl Ir {
         } else {
             Self::Verbatim(text)
         }
+    }
+
+    pub(super) fn control_space() -> Self {
+        Self::ControlSpace
     }
 
     pub(super) fn concat(documents: impl IntoIterator<Item = Ir>) -> Self {
@@ -117,7 +123,7 @@ impl Ir {
                 inner.contains_forced_break()
             }
             Self::BoundedAlign { aligned, .. } => aligned.contains_forced_break(),
-            Self::Text(_) | Self::Line | Self::SoftLine | Self::Nil => false,
+            Self::Text(_) | Self::ControlSpace | Self::Line | Self::SoftLine | Self::Nil => false,
         }
     }
 
@@ -126,6 +132,7 @@ impl Ir {
     pub(super) fn flat_width(&self) -> Option<usize> {
         match self {
             Self::Text(text) => Some(text.chars().count()),
+            Self::ControlSpace => Some(2),
             Self::Verbatim(text) => (!text.contains('\n')).then(|| text.chars().count()),
             Self::Concat(documents) => documents.iter().try_fold(0usize, |width, document| {
                 width.checked_add(document.flat_width()?)

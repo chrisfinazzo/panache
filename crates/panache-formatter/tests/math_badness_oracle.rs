@@ -1528,12 +1528,12 @@ fn authored_line_break_migration_slice_matches_badness() {
 }
 
 #[test]
-fn control_space_after_authored_line_break_matches_badness() {
+fn control_space_after_authored_line_break_preserves_forced_line_end() {
     let body = "df & = a \\\\\\ \n& = b";
     let context = OracleContext::Environment;
 
-    assert_formatter_parity(body, context);
     let once = panache_body(body, context).expect("first Panache pass");
+    assert_eq!(once, "  df & = a \\\\\n  \\ \n     & = b");
     let twice = panache_body(&once, context).expect("second Panache pass");
     assert_eq!(
         once, twice,
@@ -1551,7 +1551,7 @@ fn control_space_before_display_break_is_idempotent() {
         .expect("first Panache pass");
     assert_eq!(
         once,
-        "  \\frac{\\partial \\mathrm C}{\\partial \\mathrm t}\n  + \\frac{1}{2}\\sigma^{2} \\mathrm S^{2} \\frac{\\partial^{2} \\mathrm C}{\\partial \\mathrm S^2}\n  + \\mathrm r \\mathrm S \\frac{\\partial \\mathrm C}{\\partial \\mathrm S}\\  = \\mathrm r \\mathrm C"
+        "  \\frac{\\partial \\mathrm C}{\\partial \\mathrm t}\n  + \\frac{1}{2}\\sigma^{2} \\mathrm S^{2} \\frac{\\partial^{2} \\mathrm C}{\\partial \\mathrm S^2}\n  + \\mathrm r \\mathrm S \\frac{\\partial \\mathrm C}{\\partial \\mathrm S}\\ \n  = \\mathrm r \\mathrm C"
     );
     let twice = panache_body_with_preamble_and_width(&once, None, context, width)
         .expect("second Panache pass");

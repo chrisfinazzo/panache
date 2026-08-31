@@ -456,7 +456,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     None => format!(
                         "{}\n{}\n{}",
                         open,
-                        math::trim_trailing_whitespace_per_line(content.trim()),
+                        math::trim_preserved_math_body(&content),
                         close,
                     ),
                 }
@@ -533,7 +533,8 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                     math::push_body_with_trailing_newline(&mut result, &body);
                 }
                 None => {
-                    let mut trimmed_content = content.trim_end();
+                    let cleaned_content = math::trim_trailing_whitespace_per_line(&content);
+                    let mut trimmed_content = cleaned_content.trim_end_matches(['\r', '\n']);
                     while let Some((first, rest)) = trimmed_content.split_once('\n') {
                         if first.trim().is_empty() {
                             trimmed_content = rest;
@@ -558,7 +559,7 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                             };
                             if !stripped.is_empty() {
                                 result.push_str(&pad);
-                                result.push_str(stripped.trim_end_matches([' ', '\t']));
+                                result.push_str(stripped);
                             }
                             result.push('\n');
                         }

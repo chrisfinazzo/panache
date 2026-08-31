@@ -98,6 +98,7 @@ impl Printer {
             match command.document {
                 Ir::Nil => {}
                 Ir::Text(text) => writer.write_text(text),
+                Ir::ControlSpace => writer.write_control_space(),
                 Ir::Verbatim(text) if self.flatten_forced_breaks => {
                     writer.write_flattened_verbatim(text)
                 }
@@ -181,6 +182,7 @@ impl Printer {
                 Ir::Text(text) => {
                     column = column.saturating_add(text.chars().count());
                 }
+                Ir::ControlSpace => column = column.saturating_add(2),
                 Ir::Verbatim(text) if !text.contains('\n') => {
                     column = column.saturating_add(text.chars().count());
                 }
@@ -219,6 +221,7 @@ impl Printer {
                 Ir::SoftLine if command.mode == Mode::Flat => {}
                 Ir::SoftLine | Ir::HardLine | Ir::EmptyLine => return true,
                 Ir::Text(text) => column = column.saturating_add(text.chars().count()),
+                Ir::ControlSpace => column = column.saturating_add(2),
                 Ir::Verbatim(text) => {
                     let first = text
                         .split_once('\n')
@@ -304,6 +307,8 @@ struct Writer {
     /// that indentation is dropped at every join.
     flatten: bool,
     drop_leading_space: bool,
+    /// ASCII whitespace emitted for layout at the physical line end.
+    trailing_layout_whitespace: usize,
 }
 
 impl Writer {
@@ -315,6 +320,7 @@ impl Writer {
             needs_indent,
             flatten,
             drop_leading_space: false,
+            trailing_layout_whitespace: 0,
         }
     }
 
@@ -328,21 +334,36 @@ impl Writer {
     }
 
     fn finish(mut self) -> String {
-        if !self.flatten {
-            self.trim_trailing_whitespace();
-        }
+        self.trim_trailing_whitespace();
         self.output
     }
 
     fn trim_trailing_whitespace(&mut self) {
         self.output
-            .truncate(self.output.trim_end_matches([' ', '\t']).len());
+            .truncate(self.output.len() - self.trailing_layout_whitespace);
+        self.column = self.column.saturating_sub(self.trailing_layout_whitespace);
+        self.trailing_layout_whitespace = 0;
+    }
+
+    fn push_layout_text(&mut self, text: &str) {
+        self.output.push_str(text);
+        self.column += text.chars().count();
+        let trailing_whitespace = text
+            .as_bytes()
+            .iter()
+            .rev()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        if trailing_whitespace == text.len() {
+            self.trailing_layout_whitespace += trailing_whitespace;
+        } else {
+            self.trailing_layout_whitespace = trailing_whitespace;
+        }
     }
 
     fn flush_indent(&mut self) {
         if self.needs_indent {
-            self.output.push_str(&" ".repeat(self.pending_indent));
-            self.column += self.pending_indent;
+            self.push_layout_text(&" ".repeat(self.pending_indent));
             self.needs_indent = false;
         }
     }
@@ -358,8 +379,15 @@ impl Writer {
         }
         self.drop_leading_space = false;
         self.flush_indent();
-        self.output.push_str(text);
-        self.column += text.chars().count();
+        self.push_layout_text(text);
+    }
+
+    fn write_control_space(&mut self) {
+        self.drop_leading_space = false;
+        self.flush_indent();
+        self.output.push_str(r"\ ");
+        self.column += 2;
+        self.trailing_layout_whitespace = 0;
     }
 
     /// Write one space, unless the line is still empty or already ends in one.
@@ -398,9 +426,9 @@ impl Writer {
                 self.output.push('\n');
                 self.column = 0;
                 self.needs_indent = false;
+                self.trailing_layout_whitespace = 0;
             }
-            self.output.push_str(segment);
-            self.column += segment.chars().count();
+            self.push_layout_text(segment);
         }
     }
 
@@ -410,6 +438,7 @@ impl Writer {
         self.column = 0;
         self.pending_indent = indent;
         self.needs_indent = indent > 0;
+        self.trailing_layout_whitespace = 0;
     }
 
     fn empty_line(&mut self, indent: usize) {
@@ -418,6 +447,7 @@ impl Writer {
         self.column = 0;
         self.pending_indent = indent;
         self.needs_indent = indent > 0;
+        self.trailing_layout_whitespace = 0;
     }
 }
 
@@ -545,6 +575,20 @@ mod tests {
     }
 
     #[test]
+    fn line_boundaries_preserve_control_spaces_but_drop_later_padding() {
+        let document = Ir::concat([
+            Ir::text("a"),
+            Ir::control_space(),
+            Ir::text("  "),
+            Ir::HardLine,
+            Ir::text("b"),
+            Ir::control_space(),
+        ]);
+
+        assert_eq!(printer(80).print(&document, 0), "a\\ \nb\\ ");
+    }
+
+    #[test]
     fn multiline_verbatim_forces_an_enclosing_group_open() {
         let document = Ir::group(Ir::concat([
             Ir::text("{"),
@@ -595,7 +639,7 @@ mod tests {
             Ir::verbatim("b\nc"),
             Ir::HardLine,
         ]);
-        assert_eq!(printer(4).print_flat(&document), "a b c ");
+        assert_eq!(printer(4).print_flat(&document), "a b c");
     }
 
     #[test]

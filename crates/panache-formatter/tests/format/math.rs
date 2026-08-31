@@ -216,6 +216,28 @@ fn math_modes_share_structural_formatting_but_choose_display_breaks() {
 }
 
 #[test]
+fn control_space_survives_math_body_end_and_preserved_line_end() {
+    let inline_config = math_mode_config(MathMode::Reflow);
+    assert_math_host_body(MathHost::DollarInline, r"x\ ", r"x\ ", &inline_config);
+
+    let preserve_config = math_mode_config(MathMode::Preserve);
+    assert_math_host_body(
+        MathHost::DollarDisplay,
+        "x\\ \ny",
+        "  x\\ \n  y",
+        &preserve_config,
+    );
+
+    let verbatim_config = math_mode_config(MathMode::Verbatim);
+    assert_math_host_body(
+        MathHost::DollarDisplay,
+        "x\\ \ny",
+        "  x\\ \n  y",
+        &verbatim_config,
+    );
+}
+
+#[test]
 fn single_line_overflows_while_reflow_breaks_to_line_width() {
     let input = "$$\nA = aaaaaaaaaa + bbbbbbbbbb = cccccccccc + dddddddddd\n$$\n";
     let single_line = Config {

@@ -48,8 +48,8 @@ Text-domain, unknown, unmatched, over-attached, and document-redefined command
 arguments are opaque preservation islands when the surrounding expression can
 still be lowered safely; they do not automatically preserve the whole span. The
 host's preserved-body path removes ASCII spaces and tabs immediately before a
-line ending. This line hygiene does not otherwise normalize or reflow the
-preserved content.
+line ending, except for the semantic ASCII space in the TeX control symbol `\ `.
+This line hygiene does not otherwise normalize or reflow the preserved content.
 
 ## Intentional Badness differences
 
@@ -67,6 +67,9 @@ preserved content.
 - Panache preserves scripted composite relations such as `<=_i`, `>=_i`, and
   `==_i`; the pinned formatter incorrectly separates the relation head from its
   CST-separated script.
+- Panache retains an authored environment-row boundary after a standalone TeX
+  control space. The pinned formatter moves the control space onto the next row;
+  Panache keeps the semantic space at the physical line end.
 
 ## Rules
 
@@ -191,9 +194,11 @@ preserved content.
    **source character counts**, so alignment is cosmetic source-tidiness, not
    rendered-glyph alignment (`\alpha` counts as 6).
 
-   Every math-body line ends without trailing ASCII spaces or tabs. The printer
-   and preserved-body host paths enforce this invariant; alignment padding may
-   appear before a `\\` marker, but never at the physical line end.
+   Every math-body line ends without layout-generated ASCII spaces or tabs. The
+   printer and preserved-body host paths enforce this invariant; alignment
+   padding may appear before a `\\` marker, but never at the physical line end.
+   The semantic ASCII space in the TeX control symbol `\ ` is the sole exception
+   and survives even when that token ends a physical line.
 
    A grid cell containing one comment-bearing group, signature-proven argument,
    braced script, or `\left`/`\right` body uses the typed comment layout from
@@ -339,6 +344,10 @@ preserved content.
      `+`/`-` is `Ord` and never a break site. Typed lowering keeps the semantic
      atom stream intact across continuation segments, so a leading binary
      operator stays binary instead of coercing to a sign.
+   - **Semantic control spaces survive breaks.** The math IR represents `\ `
+     separately from layout padding. An authored or selected line ending after
+     that token retains its ASCII space, while any formatter-generated padding
+     after it is removed.
    - **A logical row is one equation.** Free rows split into logical rows only
      on a top-level hard `\\`; a soft newline is insignificant whitespace and
      does **not** start a new row, so a multi-line authored equation (and the
