@@ -26,6 +26,7 @@ pub mod heading_eaten_attrs;
 pub mod heading_hierarchy;
 pub mod heading_strip_comments_residue;
 pub mod html_entities;
+pub mod inline_math_line_break;
 pub mod link_text_is_url;
 pub mod math_content;
 pub mod missing_chunk_labels;

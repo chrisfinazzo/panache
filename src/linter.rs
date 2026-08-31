@@ -92,6 +92,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::empty_values::EmptyValuesRule),
         Box::new(rules::consumer_divergence::ConsumerDivergenceRule),
         Box::new(rules::math_content::MathContentRule),
+        Box::new(rules::inline_math_line_break::InlineMathLineBreakRule),
         Box::new(rules::heading_eaten_attrs::HeadingEatenAttrsRule),
         Box::new(rules::heading_strip_comments_residue::HeadingStripCommentsResidueRule),
         Box::new(rules::adjacent_footnote_refs::AdjacentFootnoteRefsRule),

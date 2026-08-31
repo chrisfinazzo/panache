@@ -1,0 +1,14 @@
+# Inline math line breaks
+
+This is suspicious: $\int f(x) \\mathrm{d}x$.
+
+This matrix is valid: $\begin{matrix} a & b \\ c & d \end{matrix}$.
+
+This stack is valid: $\substack{a \\ b}$.
+
+This display break is out of scope:
+
+$$
+a \\
+b
+$$

@@ -422,6 +422,26 @@ tex-math-single-backslash = true
 }
 
 #[test]
+fn test_inline_math_line_break() {
+    let diagnostics = lint_file_with_config("inline_math_line_break.qmd", "flavor = \"quarto\"\n");
+    let hits: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "inline-math-line-break")
+        .collect();
+
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected one top-level inline break: {hits:#?}"
+    );
+    assert_eq!(hits[0].location.line, 3);
+    assert_eq!(hits[0].location.column, 32);
+    assert_eq!(u32::from(hits[0].location.range.len()), 2);
+    assert!(hits[0].notes[0].message.contains(r"use `\mathrm`"));
+    assert!(hits[0].fix.is_none());
+}
+
+#[test]
 fn test_unused_definitions() {
     let diagnostics = lint_file("unused_definitions.md");
     let unused_labels: Vec<_> = diagnostics

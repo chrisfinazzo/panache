@@ -1814,6 +1814,47 @@ cells. The formatter leaves such a table byte-for-byte as written for the same
 reason: normalizing it would either discard the author's text or widen the
 delimiter row and change what pandoc renders.
 
+### `inline-math-line-break` {#inline-math-line-break}
+
+Detects a top-level TeX row break (`\\`) in inline math.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No (removing one backslash or moving the expression into a multiline
+    construct requires knowing the author's intent)
+
+Requirements
+:   Requires a `tex-math-*` extension (e.g. `extensions.tex-math-dollars`,
+    default for Pandoc, Quarto, and R Markdown flavors).
+
+Diagnostic codes
+:   [`inline-math-line-break`](#inline-math-line-break)
+
+Description
+
+:   At the top level of inline math, `\\` is a row-break control symbol. It does
+    not escape the following backslash: `\\mathrm` is parsed as a row break
+    followed by the ordinary letters `mathrm`, not as the command `\mathrm`.
+    Some TeX engines accept a row break there, while other Markdown math
+    renderers reject it, so the construct is not portable and is usually a
+    doubled-backslash typo.
+
+    The rule does not report row breaks nested inside multiline constructs such as
+    `matrix`, `array`, or `\substack`, and it does not report display math.
+
+**Example violation:**
+
+```markdown
+The differential is $\int f(x) \\mathrm{d}x$.
+```
+
+**Resolution:** If a command was intended, remove the extra backslash
+(`\mathrm`). If the break was intentional, use a display-math environment
+appropriate for multiple rows. No auto-fix is offered because those changes have
+different meanings.
+
 ### `math-syntax` {#math-syntax}
 
 Detects structural problems in the TeX content of inline (`$...$`) and display

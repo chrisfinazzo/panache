@@ -319,6 +319,7 @@ chunk-label-spaces = true
 missing-chunk-labels = true
 figure-crossref-captions = true
 unknown-emoji-alias = true
+inline-math-line-break = true
 ```
 
 All rules are enabled by default when omitted. You can disable a specific rule:
