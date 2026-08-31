@@ -400,6 +400,12 @@ panache format --check RwR
   retains it on eight math lines across `2_linear.qmd`,
   `5_generalized_linear.qmd`, and `8_assessment.qmd`; `git diff --check`
   rejects the result even though `panache format --check` passes.
+- [ ] Make math line-end cleanup token-aware. The ASCII space in the TeX control
+  symbol `\ ` is semantic content, not layout trivia, and must never be
+  trimmed by the printer. Keep the conservative automatic-break restriction
+  before an operator following `\ ` until the printer can distinguish
+  formatter-generated padding from semantic whitespace; cover preservation,
+  forced line endings, and idempotency.
 
 ## Parser
 

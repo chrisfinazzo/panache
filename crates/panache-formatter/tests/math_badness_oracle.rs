@@ -1541,6 +1541,26 @@ fn control_space_after_authored_line_break_matches_badness() {
     );
 }
 
+#[test]
+fn control_space_before_display_break_is_idempotent() {
+    let body = r"\frac{\partial \mathrm C}{\partial \mathrm t} + \frac{1}{2}\sigma^{2} \mathrm S^{2} \frac{\partial^{2} \mathrm C}{\partial \mathrm S^2} + \mathrm r \mathrm S \frac{\partial \mathrm C}{\partial \mathrm S}\ = \mathrm r \mathrm C";
+    let context = OracleContext::Display;
+    let width = 80;
+
+    let once = panache_body_with_preamble_and_width(body, None, context, width)
+        .expect("first Panache pass");
+    assert_eq!(
+        once,
+        "  \\frac{\\partial \\mathrm C}{\\partial \\mathrm t}\n  + \\frac{1}{2}\\sigma^{2} \\mathrm S^{2} \\frac{\\partial^{2} \\mathrm C}{\\partial \\mathrm S^2}\n  + \\mathrm r \\mathrm S \\frac{\\partial \\mathrm C}{\\partial \\mathrm S}\\  = \\mathrm r \\mathrm C"
+    );
+    let twice = panache_body_with_preamble_and_width(&once, None, context, width)
+        .expect("second Panache pass");
+    assert_eq!(
+        once, twice,
+        "control space before display break is not idempotent"
+    );
+}
+
 /// The hanging indent this slice emits re-enters the parser as `MATH_SPACE` on
 /// the next pass, so guard the round trip explicitly.
 #[test]

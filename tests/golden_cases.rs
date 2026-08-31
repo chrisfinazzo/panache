@@ -576,6 +576,7 @@ golden_test_cases!(
     issue_510_math_mixed_environment_idempotency,
     issue_511_math_multiple_environments_idempotency,
     issue_521_math_control_space_after_line_break,
+    issue_522_math_control_space_before_display_break,
     issue_187_list_plus_wrap_idempotency,
     issue_181_hashpipe_fig_subcap_idempotency,
     issue_189_hashpipe_figcap_idempotency,

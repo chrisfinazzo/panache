@@ -367,6 +367,7 @@ fn try_lower_environment_pieces(
         authored_space_before: before_atoms
             .last()
             .is_some_and(|atom| atom.range.end() < environment_atom.range.start()),
+        control_space: false,
         slash: false,
         control_word_operator: false,
         starts_control_word_letter: false,
@@ -1598,6 +1599,7 @@ fn lower_pieces_with_atoms(
             unary: atom.coerced_unary || atom.coerced_postfix,
             dimension_sign: atom.attached_dimension_sign,
             authored_space_before: previous_end.is_some_and(|end| end < atom.range.start()),
+            control_space: atom_source_text(atom, elements).as_deref() == Some(r"\ "),
             slash: atom_document.slash,
             control_word_operator: atom_document.control_word_operator,
             starts_control_word_letter: atom_document.starts_control_word_letter,
@@ -1824,7 +1826,13 @@ fn layout_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spacing) 
             .map_or(relation_column, |&(_, end)| end.saturating_add(1));
         let first_assignment = pieces[first].assignment;
         let bounds = std::iter::once(0)
-            .chain(relations.iter().skip(1).copied())
+            .chain(
+                relations
+                    .iter()
+                    .skip(1)
+                    .copied()
+                    .filter(|&index| can_break_before(pieces, index)),
+            )
             .chain(std::iter::once(pieces.len()))
             .collect::<Vec<_>>();
         for segment in 0..bounds.len() - 1 {
@@ -1905,7 +1913,7 @@ fn layout_flat_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spac
         operators
             .iter()
             .map(|&(index, _)| index)
-            .filter(|&index| index > 0),
+            .filter(|&index| index > 0 && can_break_before(pieces, index)),
     );
     bounds.push(pieces.len());
     bounds.dedup();
@@ -1985,6 +1993,12 @@ fn layout_flat_display_pieces(pieces: &[Piece], line_width: usize, spacing: Spac
     )
 }
 
+/// A TeX control space cannot safely end a physical line: line-end hygiene
+/// would trim its space and change the token on the next parse.
+fn can_break_before(pieces: &[Piece], index: usize) -> bool {
+    index == 0 || !pieces[index - 1].control_space
+}
+
 fn operator_break_indent(
     pieces: &[Piece],
     columns: &[(usize, usize)],
@@ -2051,7 +2065,9 @@ fn layout_display_segment(
     let operators = top_level_operators(pieces);
     let binaries = operators
         .iter()
-        .filter_map(|&(index, role)| (role == Role::Binary).then_some(index))
+        .filter_map(|&(index, role)| {
+            (role == Role::Binary && can_break_before(pieces, index)).then_some(index)
+        })
         .collect::<Vec<_>>();
     let Some(&first_binary) = binaries.first() else {
         return vec![(base_indent, flat)];
@@ -2754,6 +2770,8 @@ struct Piece {
     /// dimension on its right without stripping the command-to-argument gap.
     dimension_sign: bool,
     authored_space_before: bool,
+    /// A TeX control space must not end a physical output line.
+    control_space: bool,
     slash: bool,
     control_word_operator: bool,
     starts_control_word_letter: bool,
