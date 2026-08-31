@@ -1,0 +1,9 @@
+So our total degrees of freedom is:
+
+$$ 
+\begin{split} 
+df & = \text{(number of observations) - (number of constraints)} \\\ 
+& = (r \times c) - (c + (r - 1)) \\\ 
+& = rc - c - r + 1 \\\ & = (r - 1)(c - 1) 
+\end{split}
+$$

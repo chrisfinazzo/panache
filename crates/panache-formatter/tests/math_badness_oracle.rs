@@ -1527,6 +1527,20 @@ fn authored_line_break_migration_slice_matches_badness() {
     }
 }
 
+#[test]
+fn control_space_after_authored_line_break_matches_badness() {
+    let body = "df & = a \\\\\\ \n& = b";
+    let context = OracleContext::Environment;
+
+    assert_formatter_parity(body, context);
+    let once = panache_body(body, context).expect("first Panache pass");
+    let twice = panache_body(&once, context).expect("second Panache pass");
+    assert_eq!(
+        once, twice,
+        "control space after authored line break is not idempotent in {context:?}"
+    );
+}
+
 /// The hanging indent this slice emits re-enters the parser as `MATH_SPACE` on
 /// the next pass, so guard the round trip explicitly.
 #[test]

@@ -628,17 +628,21 @@ impl EnvironmentRow {
 struct EnvironmentCell {
     document: Ir,
     atom_offset: usize,
+    trailing_control_space: bool,
 }
 
 impl EnvironmentCell {
     fn first_line_width(&self, printer: &Printer) -> usize {
-        printer
+        let rendered_width = printer
             .print(&self.document, 0)
             .lines()
             .next()
             .unwrap_or_default()
             .chars()
-            .count()
+            .count();
+        // The printer trims line endings, but this space belongs to the TeX
+        // control symbol and must still count toward grid alignment.
+        rendered_width + usize::from(self.trailing_control_space)
     }
 
     fn starts_relation(&self) -> bool {
@@ -727,6 +731,11 @@ fn lower_environment_cell(
     elements: Vec<SyntaxElement>,
     opts: &MathFormatOptions,
 ) -> Option<EnvironmentCell> {
+    let trailing_control_space = elements
+        .iter()
+        .rev()
+        .find(|element| !is_layout_trivia(element))
+        .is_some_and(is_control_space);
     let comment_elements = elements
         .iter()
         .filter(|element| contains_nested_comment(element))
@@ -754,6 +763,7 @@ fn lower_environment_cell(
     Some(EnvironmentCell {
         document,
         atom_offset,
+        trailing_control_space,
     })
 }
 
@@ -814,6 +824,9 @@ fn split_environment_rows(elements: &[SyntaxElement]) -> Vec<EnvironmentRow> {
                 elements: std::mem::take(&mut current),
                 break_text: Some(element.to_string()),
             }),
+            // Keep the control-space byte away from a physical line ending,
+            // where the printer's line hygiene would change its TeX meaning.
+            SyntaxKind::MATH_NEWLINE if row_is_control_space(&current) => {}
             SyntaxKind::MATH_NEWLINE => rows.push(EnvironmentRow {
                 elements: std::mem::take(&mut current),
                 break_text: None,
@@ -828,6 +841,17 @@ fn split_environment_rows(elements: &[SyntaxElement]) -> Vec<EnvironmentRow> {
         });
     }
     rows
+}
+
+fn row_is_control_space(elements: &[SyntaxElement]) -> bool {
+    elements.iter().any(is_control_space)
+        && elements
+            .iter()
+            .all(|element| is_layout_trivia(element) || is_control_space(element))
+}
+
+fn is_control_space(element: &SyntaxElement) -> bool {
+    element.kind() == SyntaxKind::MATH_CONTROL_SYMBOL && element.to_string() == r"\ "
 }
 
 fn split_environment_cells(elements: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
