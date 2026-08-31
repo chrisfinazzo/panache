@@ -1298,6 +1298,48 @@ This has an inline note.^[The note starts here.
 It appears to continue here.]
 ```
 
+### `blank-line-in-display-math` {#blank-line-in-display-math}
+
+Detects standalone `$$` display-math delimiters separated by a blank line.
+
+Severity
+:   Warning
+
+Auto-fix
+:   No (removing the blank line would merge paragraphs and change document
+    structure based on inferred intent)
+
+Requirements
+:   Requires `extensions.tex-math-dollars = true`---a `tex-math-*` extension
+    enabled by default for Pandoc, Quarto, and R Markdown flavors.
+
+Diagnostic codes
+:   [`blank-line-in-display-math`](#blank-line-in-display-math)
+
+Description
+
+:   Pandoc display math may span ordinary line breaks, but it cannot span a
+    blank line. The blank line closes the opening paragraph before Pandoc sees
+    the second delimiter, so both `$$` markers are rendered as literal text in
+    HTML and PDF output rather than as an equation.
+
+    The rule reports the opening delimiter only when the immediately following
+    paragraph contains another standalone `$$` line. It therefore leaves lone
+    literal dollar markers alone.
+
+**Example violation:**
+
+```markdown
+$$
+a
+
+$$
+```
+
+**Resolution:** Remove the blank line to create a display-math block, or escape
+the dollar signs when they are intended as literal text. No auto-fix is offered
+because either interpretation may be correct.
+
 ### `footnote-swallowed-by-bracket` {#footnote-swallowed-by-bracket}
 
 Detects inline footnotes (`^[note]`) followed immediately by `[` or `(`, where

@@ -1,0 +1,12 @@
+# Display math delimiters separated by a blank line
+
+$$
+a
+
+$$
+
+$$
+b
+$$
+
+Escaped delimiters remain literal: \$\$.

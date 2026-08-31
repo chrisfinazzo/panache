@@ -305,6 +305,7 @@ file. Each key is a rule name and each value is a boolean (`true`/`false`).
 ```toml
 [lint.rules]
 heading-hierarchy = true
+blank-line-in-display-math = true
 blank-line-in-inline-footnote = true
 duplicate-reference-labels = true
 undefined-references = true

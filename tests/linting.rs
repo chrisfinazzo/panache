@@ -365,6 +365,41 @@ fn test_math_delimiter_diagnostics() {
 }
 
 #[test]
+fn test_blank_line_in_display_math() {
+    let diagnostics =
+        lint_file_with_config("blank_line_in_display_math.qmd", "flavor = \"quarto\"\n");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "blank-line-in-display-math")
+        .collect();
+
+    assert_eq!(issues.len(), 1, "expected 1 diagnostic, got {issues:#?}");
+    assert_eq!(issues[0].location.line, 3);
+    assert_eq!(issues[0].location.column, 1);
+    assert_eq!(u32::from(issues[0].location.range.len()), 2);
+    assert!(issues[0].fix.is_none());
+}
+
+#[test]
+fn test_blank_line_in_display_math_requires_dollar_math() {
+    let diagnostics = lint_file_with_config(
+        "blank_line_in_display_math.qmd",
+        r#"
+flavor = "commonmark"
+
+[extensions]
+tex-math-single-backslash = true
+"#,
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == "blank-line-in-display-math"),
+        "rule should be gated off without extensions.tex-math-dollars"
+    );
+}
+
+#[test]
 fn test_unused_definitions() {
     let diagnostics = lint_file("unused_definitions.md");
     let unused_labels: Vec<_> = diagnostics

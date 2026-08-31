@@ -6,6 +6,7 @@ use crate::linter::index::LintIndex;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod adjacent_footnote_refs;
+pub mod blank_line_in_display_math;
 pub mod blank_line_in_inline_footnote;
 pub mod chunk_label_spaces;
 pub mod citation_keys;
@@ -67,6 +68,8 @@ pub enum Requirement {
     Emoji,
     /// Needs any `tex-math-*` extension (dollars, gfm, single/double backslash).
     TexMath,
+    /// Needs `extensions.tex-math-dollars`.
+    TexMathDollars,
     /// Needs a flavor with executable chunks (Quarto or R Markdown).
     ChunkFlavor,
     /// Needs the Quarto flavor specifically (e.g. Quarto schema validation).
@@ -98,6 +101,7 @@ impl Requirement {
                     || ext.tex_math_single_backslash
                     || ext.tex_math_double_backslash
             }
+            Requirement::TexMathDollars => ext.tex_math_dollars,
             Requirement::ChunkFlavor => {
                 matches!(config.flavor, Flavor::Quarto | Flavor::RMarkdown)
             }

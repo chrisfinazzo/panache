@@ -95,6 +95,7 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(rules::heading_eaten_attrs::HeadingEatenAttrsRule),
         Box::new(rules::heading_strip_comments_residue::HeadingStripCommentsResidueRule),
         Box::new(rules::adjacent_footnote_refs::AdjacentFootnoteRefsRule),
+        Box::new(rules::blank_line_in_display_math::BlankLineInDisplayMathRule),
         Box::new(rules::blank_line_in_inline_footnote::BlankLineInInlineFootnoteRule),
         Box::new(rules::footnote_ref_in_footnote_def::FootnoteRefInFootnoteDefRule),
         Box::new(rules::duplicate_references::DuplicateReferencesRule),
