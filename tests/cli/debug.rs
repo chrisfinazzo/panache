@@ -5,6 +5,8 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+const SMOKE_TEST_WORKFLOW: &str = include_str!("../../.github/workflows/smoke-test.yml");
+
 #[test]
 fn test_debug_format_stdin_success() {
     cargo_bin_cmd!("panache")
@@ -212,4 +214,10 @@ fn test_debug_format_dash_mixed_with_path_errors() {
         .stderr(predicate::str::contains(
             "'-' (stdin) cannot be combined with file path arguments",
         ));
+}
+
+#[test]
+fn test_smoke_artifact_excludes_upstream_clones() {
+    assert!(SMOKE_TEST_WORKFLOW.contains("REPOS_DIR=\"$RUNNER_TEMP/panache-debug-format-repos\""));
+    assert!(!SMOKE_TEST_WORKFLOW.contains("REPOS_DIR=\"$RESULTS_DIR/repos\""));
 }
