@@ -1817,8 +1817,8 @@ delimiter row and change what pandoc renders.
 ### `math-syntax` {#math-syntax}
 
 Detects structural problems in the TeX content of inline (`$...$`) and display
-(`$$...$$`, `\[...\]`, `\begin{env}...\end{env}`) math: unbalanced braces and
-unclosed or mismatched environments.
+(`$$...$$`, `\[...\]`, `\begin{env}...\end{env}`) math: unbalanced braces,
+unclosed or mismatched environments, and unescaped dollar tokens.
 
 Severity
 :   Error
@@ -1838,7 +1838,8 @@ Diagnostic codes
     [`math-mismatched-environment`](#math-mismatched-environment),
     [`math-unexpected-end`](#math-unexpected-end),
     [`math-unclosed-delimiter`](#math-unclosed-delimiter),
-    [`math-unexpected-right`](#math-unexpected-right)
+    [`math-unexpected-right`](#math-unexpected-right),
+    [`math-unexpected-dollar`](#math-unexpected-dollar)
 
 Description
 
@@ -1849,13 +1850,13 @@ Description
     silently drop the equation. That is why these ride at `error` severity. This
     rule surfaces the structural problems the parser already detected, with the
     diagnostic pointing at the offending byte (the unclosed `{`, the stray `}`,
-    or the mismatched `\end`).
+    the mismatched `\end`, or an unescaped `$`).
 
     The check is purely syntactic: TeX is a macro language, so the rule does not
     validate command names, argument arity, or semantics---only brace, environment,
-    and `\left`/`\right` delimiter nesting. Because a macro can expand to braces or
-    an environment the structural parser cannot see, valid TeX can occasionally look
-    unbalanced; in that rare case disable the rule with
+    dollar, and `\left`/`\right` delimiter nesting. Because a macro can expand to
+    braces or an environment the structural parser cannot see, valid TeX can
+    occasionally look unbalanced; in that rare case disable the rule with
     `[lint.rules] math-syntax     = false` or an ignore directive.
 
 **Example violation:**
@@ -1906,6 +1907,10 @@ example `\left( x` with no `\right)`).
 #### `math-unexpected-right` {#math-unexpected-right}
 
 Emitted when a `\right` appears with no open `\left`.
+
+#### `math-unexpected-dollar` {#math-unexpected-dollar}
+
+Emitted when an unescaped `$` inside TeX math ends math mode prematurely.
 
 ### `quarto-schema` {#quarto-schema}
 

@@ -558,6 +558,24 @@ fn test_math_parse_error_in_built_in_lint_plan() {
 }
 
 #[test]
+fn test_unescaped_dollar_math_error_in_built_in_lint_plan() {
+    let mut server = TestLspServer::new();
+    let content = "$$\n$ a\n$$\n";
+    server.open_document("file:///test.qmd", content, "quarto");
+
+    let diagnostics = server
+        .get_built_in_diagnostics("file:///test.qmd")
+        .expect("diagnostics");
+
+    let math_error = diagnostics
+        .iter()
+        .find(|diag| diag.code == "math-unexpected-dollar")
+        .expect("expected math-unexpected-dollar diagnostic");
+    assert_eq!(math_error.location.line, 2);
+    assert_eq!(math_error.location.column, 1);
+}
+
+#[test]
 fn test_hashpipe_folded_scalar_parse_error_maps_to_host_position() {
     let mut server = TestLspServer::new();
     let content = "```{r}\n#| fig-cap: >-\n#|   A folded caption\n#| bad: [\na <- 1\n```\n";

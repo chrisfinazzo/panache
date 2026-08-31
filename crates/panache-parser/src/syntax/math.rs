@@ -1,6 +1,6 @@
 //! Math AST node wrappers.
 
-use rowan::TextRange;
+use rowan::{TextRange, TextSize};
 
 use super::{AstNode, PanacheLanguage, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -101,32 +101,7 @@ impl DisplayMath {
     }
 
     pub fn has_unescaped_single_dollar_in_content(&self) -> bool {
-        let content = self.content();
-        let chars: Vec<char> = content.chars().collect();
-        let mut idx = 0usize;
-        let mut backslashes = 0usize;
-
-        while idx < chars.len() {
-            let ch = chars[idx];
-            if ch == '\\' {
-                backslashes += 1;
-                idx += 1;
-                continue;
-            }
-
-            let escaped = backslashes % 2 == 1;
-            backslashes = 0;
-            if ch == '$' && !escaped {
-                if idx + 1 < chars.len() && chars[idx + 1] == '$' {
-                    idx += 2;
-                    continue;
-                }
-                return true;
-            }
-            idx += 1;
-        }
-
-        false
+        !unescaped_single_dollar_ranges(&self.0).is_empty()
     }
 }
 
@@ -895,6 +870,8 @@ pub enum MathDiagnosticKind {
     UnclosedDelimiter,
     /// A `\right` with no open `\left` (`\right` outside a `MATH_DELIMITED`).
     UnexpectedRight,
+    /// An unescaped single `$` inside TeX math, which ends math mode prematurely.
+    UnexpectedDollar,
 }
 
 /// Walk a realized `MATH_CONTENT` subtree and report structural problems from
@@ -959,11 +936,54 @@ pub fn math_diagnostics(content: &SyntaxNode) -> Vec<MathDiagnostic> {
                         range: token.text_range(),
                     });
                 }
+                SyntaxKind::MATH_WORD => {
+                    out.extend(
+                        unescaped_single_dollar_ranges_in_token(token)
+                            .into_iter()
+                            .map(|range| MathDiagnostic {
+                                kind: MathDiagnosticKind::UnexpectedDollar,
+                                range,
+                            }),
+                    );
+                }
                 _ => {}
             }
         }
     }
     out
+}
+
+/// Host-aligned ranges of unescaped single-dollar tokens in TeX content.
+///
+/// A `\$` control symbol is represented separately from `MATH_WORD`, so a
+/// dollar in a word token is necessarily unescaped. Adjacent pairs remain
+/// excluded to preserve the formatter's existing guard semantics.
+fn unescaped_single_dollar_ranges(content: &SyntaxNode) -> Vec<TextRange> {
+    content
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() == SyntaxKind::MATH_WORD)
+        .flat_map(|token| unescaped_single_dollar_ranges_in_token(&token))
+        .collect()
+}
+
+fn unescaped_single_dollar_ranges_in_token(token: &SyntaxToken) -> Vec<TextRange> {
+    let bytes = token.text().as_bytes();
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes[offset] == b'$' {
+            if bytes.get(offset + 1) == Some(&b'$') {
+                offset += 2;
+                continue;
+            }
+            let start = token.text_range().start()
+                + TextSize::try_from(offset).expect("token offset fits in TextSize");
+            ranges.push(TextRange::at(start, TextSize::from(1)));
+        }
+        offset += 1;
+    }
+    ranges
 }
 
 fn check_group(group: &MathGroup, out: &mut Vec<MathDiagnostic>) {
@@ -1179,6 +1199,22 @@ mod tests {
             .into_iter()
             .map(|d| d.kind)
             .collect()
+    }
+
+    #[test]
+    fn math_diagnostics_report_unescaped_single_dollar() {
+        assert_eq!(
+            diag_kinds("$ a"),
+            vec![MathDiagnosticKind::UnexpectedDollar]
+        );
+        assert_eq!(
+            diag_kinds("{ $"),
+            vec![
+                MathDiagnosticKind::UnclosedGroup,
+                MathDiagnosticKind::UnexpectedDollar
+            ]
+        );
+        assert!(diag_kinds(r"\$ a").is_empty());
     }
 
     #[test]

@@ -353,7 +353,8 @@ fn test_math_delimiter_diagnostics() {
     // `math-syntax` requires a tex-math extension; the Pandoc flavor enables it.
     let diagnostics = lint_file_with_config("math_delimiters.md", "flavor = \"pandoc\"\n");
     let codes: Vec<&str> = diagnostics.iter().map(|d| d.code.as_str()).collect();
-    // Unclosed `\left(` in the display block, stray `\right)` in the inline span.
+    // Unclosed `\left(` in the display block, stray `\right)` in the inline span,
+    // and an unescaped `$` inside display math.
     assert!(
         codes.contains(&"math-unclosed-delimiter"),
         "expected math-unclosed-delimiter, got {codes:?}"
@@ -361,6 +362,27 @@ fn test_math_delimiter_diagnostics() {
     assert!(
         codes.contains(&"math-unexpected-right"),
         "expected math-unexpected-right, got {codes:?}"
+    );
+    assert!(
+        codes.contains(&"math-unexpected-dollar"),
+        "expected math-unexpected-dollar, got {codes:?}"
+    );
+}
+
+#[test]
+fn test_math_syntax_can_be_disabled() {
+    let diagnostics = lint_file_with_config(
+        "math_delimiters.md",
+        r#"
+flavor = "pandoc"
+
+[lint.rules]
+math-syntax = false
+"#,
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d.code.starts_with("math-")),
+        "math-syntax diagnostics should be disabled, got {diagnostics:#?}"
     );
 }
 

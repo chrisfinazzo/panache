@@ -21,6 +21,7 @@
 //! | `math-unexpected-end` | [`MathDiagnosticKind::UnexpectedEnd`] |
 //! | `math-unclosed-delimiter` | [`MathDiagnosticKind::UnclosedDelimiter`] |
 //! | `math-unexpected-right` | [`MathDiagnosticKind::UnexpectedRight`] |
+//! | `math-unexpected-dollar` | [`MathDiagnosticKind::UnexpectedDollar`] |
 
 use crate::linter::diagnostics::{Diagnostic, Location};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
@@ -48,6 +49,7 @@ impl Rule for MathContentRule {
                     DiagnosticCode::error("math-unexpected-end"),
                     DiagnosticCode::error("math-unclosed-delimiter"),
                     DiagnosticCode::error("math-unexpected-right"),
+                    DiagnosticCode::error("math-unexpected-dollar"),
                 ]
             },
         }
@@ -109,6 +111,10 @@ fn describe(kind: MathDiagnosticKind) -> (&'static str, &'static str) {
             "math-unexpected-right",
             r"`\right` without a matching `\left`",
         ),
+        MathDiagnosticKind::UnexpectedDollar => (
+            "math-unexpected-dollar",
+            "unescaped `$` inside TeX math ends math mode",
+        ),
     }
 }
 
@@ -162,6 +168,15 @@ mod tests {
     fn flags_stray_end() {
         let diags = parse_and_lint("$x \\end{aligned}$\n");
         assert_eq!(codes(&diags), vec!["math-unexpected-end"]);
+    }
+
+    #[test]
+    fn flags_unescaped_dollar() {
+        let input = "$$\n$ a\n$$\n";
+        let diags = parse_and_lint(input);
+        assert_eq!(codes(&diags), vec!["math-unexpected-dollar"]);
+        let start: usize = diags[0].location.range.start().into();
+        assert_eq!(&input[start..start + 1], "$");
     }
 
     #[test]
