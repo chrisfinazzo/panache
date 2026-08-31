@@ -54,8 +54,6 @@ This line hygiene does not otherwise normalize or reflow the preserved content.
 ## Intentional Badness differences
 
 - Markdown inline hosts join layout lines unless a TeX comment pins the break.
-- Standalone display environments own their indentation; `math_indent` is not
-  applied around their markers.
 - A soft newline before a signature-proven argument collapses as insignificant
   whitespace.
 - Panache applies both sides of the TeXbook Bin-to-Ord rule: it tightens
@@ -100,9 +98,11 @@ This line hygiene does not otherwise normalize or reflow the preserved content.
 
 3. **Environment layout.** A standalone `\begin{name}` and `\end{name}` each go
    on their own line at the environment's indent. The body is indented **one
-   level (2 spaces) deeper**, accumulating for nested environments.
-   `math_indent` does **not** apply inside standalone environments; their
-   two-space body indent is a fixed part of the stable style.
+   level (2 spaces) deeper**, accumulating for nested environments. An
+   environment inside a Markdown display-math host inherits `math_indent` around
+   its markers, then adds the fixed two-space body indent. A raw standalone TeX
+   environment has no Markdown host indent; its body still uses the same fixed
+   two-space step.
 
    Signature-declared environment arguments remain attached to the opening
    marker. In particular, `array`'s optional position and required column

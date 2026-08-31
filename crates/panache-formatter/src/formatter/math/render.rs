@@ -200,25 +200,9 @@ fn render_display(
             opts.line_width.saturating_sub(opts.math_indent),
         )
     {
-        let significant = top
-            .iter()
-            .filter(|element| !is_layout_whitespace(element))
-            .collect::<Vec<_>>();
-        let base_indent = if significant.len() == 1
-            && significant[0].as_node().is_some_and(|node| {
-                node.kind() == SyntaxKind::MATH_ENVIRONMENT
-                    || MathScripted::cast(node.clone()).is_some_and(|scripted| {
-                        scripted
-                            .base()
-                            .and_then(SyntaxElement::into_node)
-                            .is_some_and(|base| base.kind() == SyntaxKind::MATH_ENVIRONMENT)
-                    })
-            }) {
-            0
-        } else {
-            opts.math_indent
-        };
-        return Some(Printer::new(opts.line_width, INDENT.len()).print(&document, base_indent));
+        return Some(
+            Printer::new(opts.line_width, INDENT.len()).print(&document, opts.math_indent),
+        );
     }
 
     if has_mixed_environment_content(top) {

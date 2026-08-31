@@ -3,8 +3,8 @@ Oracle: badness-formatter =0.7.0
 Corpus: tests/fixtures/math_corpus
 Cases: 108
 Context runs: 324
-Mandatory byte parity: 259 / 324
-Named intentional difference: 35 / 324
+Mandatory byte parity: 274 / 324
+Named intentional difference: 20 / 324
 Preserved at named boundary: 30 / 324
 Unclassified: 0 / 324
 
@@ -13,7 +13,7 @@ Regenerate with:
 
 === Counts by context ===
 inline: parity 80, intentional 18, preserved 10, unclassified 0
-display: parity 82, intentional 16, preserved 10, unclassified 0
+display: parity 97, intentional 1, preserved 10, unclassified 0
 environment: parity 97, intentional 1, preserved 10, unclassified 0
 
 === Mandatory byte parity ===
@@ -139,21 +139,35 @@ display/sum_over_n.tex [environment]
 display/with_text.tex [inline]
 display/with_text.tex [display]
 display/with_text.tex [environment]
+environments/aligned/multi_ampersand.tex [display]
 environments/aligned/multi_ampersand.tex [environment]
+environments/aligned/ragged_columns.tex [display]
 environments/aligned/ragged_columns.tex [environment]
+environments/aligned/single_row.tex [display]
 environments/aligned/single_row.tex [environment]
+environments/aligned/three_rows.tex [display]
 environments/aligned/three_rows.tex [environment]
+environments/aligned/two_rows.tex [display]
 environments/aligned/two_rows.tex [environment]
+environments/aligned/with_frac.tex [display]
 environments/aligned/with_frac.tex [environment]
+environments/cases/piecewise.tex [display]
 environments/cases/piecewise.tex [environment]
+environments/cases/sign.tex [display]
 environments/cases/sign.tex [environment]
+environments/cases/single.tex [display]
 environments/cases/single.tex [environment]
+environments/matrix/bmatrix.tex [display]
 environments/matrix/bmatrix.tex [environment]
+environments/matrix/plain.tex [display]
 environments/matrix/plain.tex [environment]
+environments/matrix/pmatrix.tex [display]
 environments/matrix/pmatrix.tex [environment]
+environments/matrix/three_by_three.tex [display]
 environments/matrix/three_by_three.tex [environment]
 environments/nested/delimited_matrix.tex [display]
 environments/nested/delimited_matrix.tex [environment]
+environments/recovery/nested.tex [display]
 environments/recovery/nested.tex [environment]
 escapes/escaped_brace.tex [inline]
 escapes/escaped_brace.tex [display]
@@ -161,6 +175,7 @@ escapes/escaped_brace.tex [environment]
 escapes/escaped_dollar.tex [inline]
 escapes/escaped_dollar.tex [display]
 escapes/escaped_dollar.tex [environment]
+escapes/literal_backslash_in_env.tex [display]
 escapes/literal_backslash_in_env.tex [environment]
 groups/braced_group.tex [inline]
 groups/braced_group.tex [display]
@@ -314,26 +329,12 @@ Input: "\\begin{aligned}\na &= 1 & b &= 2 \\\\\nc &= 3 & d &= 4\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   a & = 1 & b & = 2 \\\\\n   c & = 3 & d & = 4\n \\end{aligned}"
 Panache: "\\begin{aligned} a & = 1 & b & = 2 \\\\ c & = 3 & d & = 4 \\end{aligned}"
 
---- environments/aligned/multi_ampersand.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\na &= 1 & b &= 2 \\\\\nc &= 3 & d &= 4\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    a & = 1 & b & = 2 \\\\\n    c & = 3 & d & = 4\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  a & = 1 & b & = 2 \\\\\n  c & = 3 & d & = 4\n\\end{aligned}"
-
 --- environments/aligned/ragged_columns.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{aligned}\n\\alpha &= 1 \\\\\nx &= 22\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   \\alpha & = 1  \\\\\n   x      & = 22\n \\end{aligned}"
 Panache: "\\begin{aligned} \\alpha & = 1  \\\\ x      & = 22 \\end{aligned}"
-
---- environments/aligned/ragged_columns.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\n\\alpha &= 1 \\\\\nx &= 22\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    \\alpha & = 1  \\\\\n    x      & = 22\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  \\alpha & = 1  \\\\\n  x      & = 22\n\\end{aligned}"
 
 --- environments/aligned/single_row.tex [inline] ---
 Reason: inline-host-flattening
@@ -342,26 +343,12 @@ Input: "\\begin{aligned}\nx &= y + z\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   x & = y + z\n \\end{aligned}"
 Panache: "\\begin{aligned} x & = y + z \\end{aligned}"
 
---- environments/aligned/single_row.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\nx &= y + z\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    x & = y + z\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  x & = y + z\n\\end{aligned}"
-
 --- environments/aligned/three_rows.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   x & = 1   \\\\\n   y & = 22  \\\\\n   z & = 333\n \\end{aligned}"
 Panache: "\\begin{aligned} x & = 1   \\\\ y & = 22  \\\\ z & = 333 \\end{aligned}"
-
---- environments/aligned/three_rows.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    x & = 1   \\\\\n    y & = 22  \\\\\n    z & = 333\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  x & = 1   \\\\\n  y & = 22  \\\\\n  z & = 333\n\\end{aligned}"
 
 --- environments/aligned/two_rows.tex [inline] ---
 Reason: inline-host-flattening
@@ -370,26 +357,12 @@ Input: "\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   x & = 1  \\\\\n   y & = 22\n \\end{aligned}"
 Panache: "\\begin{aligned} x & = 1  \\\\ y & = 22 \\end{aligned}"
 
---- environments/aligned/two_rows.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    x & = 1  \\\\\n    y & = 22\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  x & = 1  \\\\\n  y & = 22\n\\end{aligned}"
-
 --- environments/aligned/with_frac.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{aligned}\nf(x) &= \\frac{1}{2} \\\\\ng(x) &= x^2\n\\end{aligned}"
 Badness: "\\begin{aligned}\n   f(x) & = \\frac{1}{2} \\\\\n   g(x) & = x^2\n \\end{aligned}"
 Panache: "\\begin{aligned} f(x) & = \\frac{1}{2} \\\\ g(x) & = x^2 \\end{aligned}"
-
---- environments/aligned/with_frac.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\nf(x) &= \\frac{1}{2} \\\\\ng(x) &= x^2\n\\end{aligned}"
-Badness: "  \\begin{aligned}\n    f(x) & = \\frac{1}{2} \\\\\n    g(x) & = x^2\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  f(x) & = \\frac{1}{2} \\\\\n  g(x) & = x^2\n\\end{aligned}"
 
 --- environments/cases/piecewise.tex [inline] ---
 Reason: inline-host-flattening
@@ -398,26 +371,12 @@ Input: "\\begin{cases}\nx^2 & x \\geq 0 \\\\\n-x & x < 0\n\\end{cases}"
 Badness: "\\begin{cases}\n   x^2 & x \\geq 0 \\\\\n   -x  & x < 0\n \\end{cases}"
 Panache: "\\begin{cases} x^2 & x \\geq 0 \\\\ -x  & x < 0 \\end{cases}"
 
---- environments/cases/piecewise.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{cases}\nx^2 & x \\geq 0 \\\\\n-x & x < 0\n\\end{cases}"
-Badness: "  \\begin{cases}\n    x^2 & x \\geq 0 \\\\\n    -x  & x < 0\n  \\end{cases}"
-Panache: "\\begin{cases}\n  x^2 & x \\geq 0 \\\\\n  -x  & x < 0\n\\end{cases}"
-
 --- environments/cases/sign.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{cases}\n1 & x > 0 \\\\\n0 & x = 0 \\\\\n-1 & x < 0\n\\end{cases}"
 Badness: "\\begin{cases}\n   1  & x > 0 \\\\\n   0  & x = 0 \\\\\n   -1 & x < 0\n \\end{cases}"
 Panache: "\\begin{cases} 1  & x > 0 \\\\ 0  & x = 0 \\\\ -1 & x < 0 \\end{cases}"
-
---- environments/cases/sign.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{cases}\n1 & x > 0 \\\\\n0 & x = 0 \\\\\n-1 & x < 0\n\\end{cases}"
-Badness: "  \\begin{cases}\n    1  & x > 0 \\\\\n    0  & x = 0 \\\\\n    -1 & x < 0\n  \\end{cases}"
-Panache: "\\begin{cases}\n  1  & x > 0 \\\\\n  0  & x = 0 \\\\\n  -1 & x < 0\n\\end{cases}"
 
 --- environments/cases/single.tex [inline] ---
 Reason: inline-host-flattening
@@ -426,26 +385,12 @@ Input: "\\begin{cases}\na & b\n\\end{cases}"
 Badness: "\\begin{cases}\n   a & b\n \\end{cases}"
 Panache: "\\begin{cases} a & b \\end{cases}"
 
---- environments/cases/single.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{cases}\na & b\n\\end{cases}"
-Badness: "  \\begin{cases}\n    a & b\n  \\end{cases}"
-Panache: "\\begin{cases}\n  a & b\n\\end{cases}"
-
 --- environments/matrix/bmatrix.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}"
 Badness: "\\begin{bmatrix}\n   x \\\\\n   y\n \\end{bmatrix}"
 Panache: "\\begin{bmatrix} x \\\\ y \\end{bmatrix}"
-
---- environments/matrix/bmatrix.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}"
-Badness: "  \\begin{bmatrix}\n    x \\\\\n    y\n  \\end{bmatrix}"
-Panache: "\\begin{bmatrix}\n  x \\\\\n  y\n\\end{bmatrix}"
 
 --- environments/matrix/plain.tex [inline] ---
 Reason: inline-host-flattening
@@ -454,13 +399,6 @@ Input: "\\begin{matrix}\na & b \\\\\nc & d\n\\end{matrix}"
 Badness: "\\begin{matrix}\n   a & b \\\\\n   c & d\n \\end{matrix}"
 Panache: "\\begin{matrix} a & b \\\\ c & d \\end{matrix}"
 
---- environments/matrix/plain.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{matrix}\na & b \\\\\nc & d\n\\end{matrix}"
-Badness: "  \\begin{matrix}\n    a & b \\\\\n    c & d\n  \\end{matrix}"
-Panache: "\\begin{matrix}\n  a & b \\\\\n  c & d\n\\end{matrix}"
-
 --- environments/matrix/pmatrix.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
@@ -468,26 +406,12 @@ Input: "\\begin{pmatrix}\n1 & 0 \\\\\n0 & 1\n\\end{pmatrix}"
 Badness: "\\begin{pmatrix}\n   1 & 0 \\\\\n   0 & 1\n \\end{pmatrix}"
 Panache: "\\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix}"
 
---- environments/matrix/pmatrix.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{pmatrix}\n1 & 0 \\\\\n0 & 1\n\\end{pmatrix}"
-Badness: "  \\begin{pmatrix}\n    1 & 0 \\\\\n    0 & 1\n  \\end{pmatrix}"
-Panache: "\\begin{pmatrix}\n  1 & 0 \\\\\n  0 & 1\n\\end{pmatrix}"
-
 --- environments/matrix/three_by_three.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{matrix}\n1 & 2 & 3 \\\\\n4 & 5 & 6 \\\\\n7 & 8 & 9\n\\end{matrix}"
 Badness: "\\begin{matrix}\n   1 & 2 & 3 \\\\\n   4 & 5 & 6 \\\\\n   7 & 8 & 9\n \\end{matrix}"
 Panache: "\\begin{matrix} 1 & 2 & 3 \\\\ 4 & 5 & 6 \\\\ 7 & 8 & 9 \\end{matrix}"
-
---- environments/matrix/three_by_three.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{matrix}\n1 & 2 & 3 \\\\\n4 & 5 & 6 \\\\\n7 & 8 & 9\n\\end{matrix}"
-Badness: "  \\begin{matrix}\n    1 & 2 & 3 \\\\\n    4 & 5 & 6 \\\\\n    7 & 8 & 9\n  \\end{matrix}"
-Panache: "\\begin{matrix}\n  1 & 2 & 3 \\\\\n  4 & 5 & 6 \\\\\n  7 & 8 & 9\n\\end{matrix}"
 
 --- environments/nested/delimited_matrix.tex [inline] ---
 Reason: inline-host-flattening
@@ -503,26 +427,12 @@ Input: "\\begin{aligned}\\begin{matrix}x\\end{matrix}\\end{aligned}"
 Badness: "\\begin{aligned}\n   \\begin{matrix}\n     x\n   \\end{matrix}\n \\end{aligned}"
 Panache: "\\begin{aligned} \\begin{matrix} x \\end{matrix} \\end{aligned}"
 
---- environments/recovery/nested.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{aligned}\\begin{matrix}x\\end{matrix}\\end{aligned}"
-Badness: "  \\begin{aligned}\n    \\begin{matrix}\n      x\n    \\end{matrix}\n  \\end{aligned}"
-Panache: "\\begin{aligned}\n  \\begin{matrix}\n    x\n  \\end{matrix}\n\\end{aligned}"
-
 --- escapes/literal_backslash_in_env.tex [inline] ---
 Reason: inline-host-flattening
 Policy: Markdown inline math joins Badness layout lines unless a TeX comment pins them.
 Input: "\\begin{matrix}\na \\\\\nb\n\\end{matrix}"
 Badness: "\\begin{matrix}\n   a \\\\\n   b\n \\end{matrix}"
 Panache: "\\begin{matrix} a \\\\ b \\end{matrix}"
-
---- escapes/literal_backslash_in_env.tex [display] ---
-Reason: standalone-display-environment-indentation
-Policy: A standalone environment owns its indentation in Panache, so display math-indent is not added around it.
-Input: "\\begin{matrix}\na \\\\\nb\n\\end{matrix}"
-Badness: "  \\begin{matrix}\n    a \\\\\n    b\n  \\end{matrix}"
-Panache: "\\begin{matrix}\n  a \\\\\n  b\n\\end{matrix}"
 
 === Preserved at the named boundary ===
 commands/argument_after_comment.tex [inline]: missing-supported-shape: nested-comment-lowering (Badness: formatted)

@@ -8,8 +8,8 @@ $$
 $$
 
 $$
-\begin{array}[t]{ll}
-  x & = 1  \\
-  y & = 22
-\end{array}
+  \begin{array}[t]{ll}
+    x & = 1  \\
+    y & = 22
+  \end{array}
 $$

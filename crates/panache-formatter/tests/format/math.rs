@@ -263,7 +263,7 @@ fn every_non_verbatim_mode_aligns_environment_columns() {
     for mode in [MathMode::Preserve, MathMode::SingleLine, MathMode::Reflow] {
         let output = format(input, Some(math_mode_config(mode)), None);
         assert!(
-            output.contains("x  & = 1  \\\\\n  yy & = 22"),
+            output.contains("    x  & = 1  \\\\\n    yy & = 22"),
             "mode {mode:?}: {output}"
         );
     }
@@ -276,7 +276,9 @@ fn stable_math_host_matrix_formats_environment_bodies_identically() {
     let expected_rows = "  x & = 1  \\\\\n  y & = 22";
     let input_environment = format!("\\begin{{aligned}}\n{input_rows}\n\\end{{aligned}}");
     let inline_environment = r"\begin{aligned} x & = 1  \\ y & = 22 \end{aligned}";
-    let display_environment = format!("\\begin{{aligned}}\n{expected_rows}\n\\end{{aligned}}");
+    let display_environment = indent_math_body(&format!(
+        "\\begin{{aligned}}\n{expected_rows}\n\\end{{aligned}}"
+    ));
 
     let dollar_inline = assert_math_host_body(
         MathHost::DollarInline,
@@ -312,7 +314,15 @@ fn stable_math_host_matrix_formats_environment_bodies_identically() {
         expected_rows,
         &config,
     );
-    let display_rows = dollar_display
+    let logical_display = dollar_display
+        .lines()
+        .map(|line| {
+            line.strip_prefix("  ")
+                .expect("display environment should inherit the host indent")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let display_rows = logical_display
         .strip_prefix("\\begin{aligned}\n")
         .and_then(|body| body.strip_suffix("\n\\end{aligned}"))
         .expect("display environment should retain its TeX delimiters");
@@ -529,9 +539,19 @@ fn display_math_indent_zero_stays_flush() {
 }
 
 #[test]
+fn display_environment_is_nested_inside_math_indent() {
+    let input = "$$\n\\begin{aligned}\n  a & = b\n\\end{aligned}\n$$\n";
+    let expected = "$$\n  \\begin{aligned}\n    a & = b\n  \\end{aligned}\n$$\n";
+    let output = format(input, Some(math_config(true)), None);
+
+    similar_asserts::assert_eq!(output, expected);
+    similar_asserts::assert_eq!(format(&output, Some(math_config(true)), None), output);
+}
+
+#[test]
 fn stable_format_math_aligns_environment() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22 \\\\\nz &= 333\n\\end{aligned}\n$$\n";
-    let expected = "$$\n\\begin{aligned}\n  x & = 1   \\\\\n  y & = 22  \\\\\n  z & = 333\n\\end{aligned}\n$$\n";
+    let expected = "$$\n  \\begin{aligned}\n    x & = 1   \\\\\n    y & = 22  \\\\\n    z & = 333\n  \\end{aligned}\n$$\n";
     let output = format(input, Some(math_config(true)), None);
     similar_asserts::assert_eq!(output, expected);
     let twice = format(&output, Some(math_config(true)), None);

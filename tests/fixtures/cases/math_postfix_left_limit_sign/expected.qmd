@@ -7,8 +7,8 @@ $$
 $$
 
 $$
-\begin{aligned}
-  N(t-)   & = n \\
-  S(T_i-) & = s
-\end{aligned}
+  \begin{aligned}
+    N(t-)   & = n \\
+    S(T_i-) & = s
+  \end{aligned}
 $$

@@ -7,8 +7,8 @@ $$
 $$
 
 $$
-\begin{aligned}
-  x & = y\hskip -1cm  \\
-  z & = w\hskip -30mm
-\end{aligned}
+  \begin{aligned}
+    x & = y\hskip -1cm  \\
+    z & = w\hskip -30mm
+  \end{aligned}
 $$

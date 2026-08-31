@@ -229,7 +229,6 @@ enum Classification {
 enum IntentionalDifference {
     InlineHostFlattening,
     SoftNewlineBeforeArguments,
-    StandaloneDisplayEnvironmentIndentation,
 }
 
 impl IntentionalDifference {
@@ -237,9 +236,6 @@ impl IntentionalDifference {
         match self {
             Self::InlineHostFlattening => "inline-host-flattening",
             Self::SoftNewlineBeforeArguments => "soft-newline-before-arguments",
-            Self::StandaloneDisplayEnvironmentIndentation => {
-                "standalone-display-environment-indentation"
-            }
         }
     }
 
@@ -250,9 +246,6 @@ impl IntentionalDifference {
             }
             Self::SoftNewlineBeforeArguments => {
                 "Panache collapses an authored soft newline before proven command arguments; Badness preserves it."
-            }
-            Self::StandaloneDisplayEnvironmentIndentation => {
-                "A standalone environment owns its indentation in Panache, so display math-indent is not added around it."
             }
         }
     }
@@ -321,27 +314,6 @@ fn preservation_reason(id: &str) -> Option<PreservationReason> {
         .find_map(|(candidate, reason)| (*candidate == id).then_some(*reason))
 }
 
-fn is_standalone_environment(body: &str) -> bool {
-    let root = SyntaxNode::new_root(parse_math_content(body, MathParseOptions::default()));
-    let significant = root
-        .children_with_tokens()
-        .filter(|element| {
-            !matches!(
-                element.kind(),
-                SyntaxKind::MATH_SPACE | SyntaxKind::MATH_NEWLINE
-            )
-        })
-        .collect::<Vec<_>>();
-    matches!(significant.as_slice(), [NodeOrToken::Node(node)] if node.kind() == SyntaxKind::MATH_ENVIRONMENT)
-}
-
-fn remove_two_space_indent(body: &str) -> Option<String> {
-    body.lines()
-        .map(|line| line.strip_prefix("  "))
-        .collect::<Option<Vec<_>>>()
-        .map(|lines| lines.join("\n"))
-}
-
 fn classify_result(
     id: &str,
     input: &str,
@@ -380,11 +352,6 @@ fn classify_result(
         && panache_output == flatten_inline(&badness_output)
     {
         Some(IntentionalDifference::InlineHostFlattening)
-    } else if context == OracleContext::Display
-        && is_standalone_environment(input)
-        && remove_two_space_indent(&badness_output).as_deref() == Some(panache_output.as_str())
-    {
-        Some(IntentionalDifference::StandaloneDisplayEnvironmentIndentation)
     } else {
         None
     };
