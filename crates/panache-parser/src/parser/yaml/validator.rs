@@ -1592,6 +1592,25 @@ fn check_tab_as_indent(tree: &SyntaxNode, ctx: YamlValidationContext) -> Option<
     None
 }
 
+/// Return the current line's content end and the next line's start, recognizing
+/// LF, CRLF, and CR as YAML line breaks.
+fn yaml_line_bounds(text: &str, start: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let Some(relative_end) = bytes[start..]
+        .iter()
+        .position(|byte| matches!(byte, b'\n' | b'\r'))
+    else {
+        return (text.len(), text.len());
+    };
+    let end = start + relative_end;
+    let next = if bytes[end] == b'\r' && bytes.get(end + 1) == Some(&b'\n') {
+        end + 2
+    } else {
+        end + 1
+    };
+    (end, next)
+}
+
 /// Cluster E — block scalar header anomalies (partial coverage).
 ///
 /// Inspects every `YAML_SCALAR` token whose text begins with `>` or
@@ -1613,7 +1632,7 @@ fn check_block_scalar_header(tree: &SyntaxNode) -> Option<YamlDiagnostic> {
         if !text.starts_with('>') && !text.starts_with('|') {
             continue;
         }
-        let header_end = text.find('\n').unwrap_or(text.len());
+        let (header_end, _) = yaml_line_bounds(&text, 0);
         let header = &text[..header_end];
         let bytes = header.as_bytes();
         let mut i = 1usize;
@@ -1720,7 +1739,7 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
         if !text.starts_with('>') && !text.starts_with('|') {
             continue;
         }
-        let header_end = text.find('\n').unwrap_or(text.len());
+        let (header_end, mut cursor) = yaml_line_bounds(&text, 0);
         let bytes = text.as_bytes();
         let mut i = 1usize;
         let mut explicit_indent = false;
@@ -1735,20 +1754,13 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
 
         let scalar_start: usize = token.text_range().start().into();
         let mut leading_blanks: Vec<(usize, usize)> = Vec::new();
-        let mut cursor = header_end + 1; // first byte after the header's newline
-        while cursor <= text.len() {
-            let line_end = text[cursor..]
-                .find('\n')
-                .map(|rel| cursor + rel)
-                .unwrap_or(text.len());
+        while cursor < text.len() {
+            let (line_end, next_cursor) = yaml_line_bounds(&text, cursor);
             let line = &text[cursor..line_end];
 
             if line.bytes().any(|b| b == b'\t') {
                 if line.trim_matches([' ', '\t']).is_empty() {
-                    if line_end >= text.len() {
-                        break;
-                    }
-                    cursor = line_end + 1;
+                    cursor = next_cursor;
                     continue;
                 }
                 break;
@@ -1771,10 +1783,10 @@ fn check_block_scalar_leading_indent(tree: &SyntaxNode) -> Option<YamlDiagnostic
                 break;
             }
 
-            if line_end >= text.len() {
+            if next_cursor == line_end {
                 break;
             }
-            cursor = line_end + 1;
+            cursor = next_cursor;
         }
     }
     None
@@ -3488,6 +3500,39 @@ categories:
         let input = "block: ># comment\n  scalar\n";
         let diag = run(input).expect("expected diagnostic");
         assert_eq!(diag.code, diagnostic_codes::PARSE_INVALID_KEY_TOKEN);
+    }
+
+    #[test]
+    fn block_scalar_headers_accept_yaml_line_breaks() {
+        for line_break in ["\n", "\r\n", "\r"] {
+            for header in [">", "|-", ">2", "| # comment"] {
+                let input = [
+                    format!("text: {header}"),
+                    "  body".to_string(),
+                    String::new(),
+                ]
+                .join(line_break);
+                assert!(
+                    run(&input).is_none(),
+                    "block scalar header {header:?} failed with {line_break:?}: {:?}",
+                    run(&input),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn block_scalar_leading_indent_uses_yaml_line_breaks() {
+        for line_break in ["\n", "\r\n", "\r"] {
+            let input = ["block scalar: >", " ", "  ", "   ", " invalid", ""].join(line_break);
+            let diag = run(&input).expect("expected diagnostic");
+            assert_eq!(
+                diag.code,
+                diagnostic_codes::PARSE_UNEXPECTED_INDENT,
+                "wrong diagnostic with {line_break:?}: {diag:?}",
+            );
+            assert_eq!(&input[diag.byte_start..diag.byte_end], " ");
+        }
     }
 
     #[test]
