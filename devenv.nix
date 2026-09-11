@@ -32,7 +32,6 @@ in
     pkgs.cargo-flamegraph
     pkgs.cargo-audit
     pkgs.cargo-deny
-    pkgs.cargo-machete
     pkgs.cmark
     pkgs.go-task
     pkgs.jarl
