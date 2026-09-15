@@ -602,9 +602,9 @@ fn is_closing_marker(line: &str, block_type: &HtmlBlockType) -> bool {
 }
 
 /// Count occurrences of `<tag_name ...>` (open) and `</tag_name>` (close) in
-/// `line`. Self-closing forms (`<tag .../>`) and tags whose name appears
-/// inside a quoted attribute value are NOT counted — the scanner walks
-/// `<...>` brackets and respects `"`/`'` quoting.
+/// `line`. Pandoc treats `<div/>` as an opening div, so it increases
+/// nesting depth despite the slash. Other self-closing forms and tags
+/// inside quoted attribute values are not counted.
 ///
 /// Used by [`parse_html_block_with_wrapper`] to balance nested same-name
 /// tags under Pandoc dialect (mirrors pandoc's `htmlInBalanced`), and by
@@ -663,7 +663,7 @@ pub(crate) fn count_tag_balance(line: &str, tag_name: &str) -> (usize, usize) {
         if matched && is_boundary {
             if is_close {
                 closes += 1;
-            } else if !self_close {
+            } else if !self_close || tag_lower == "div" {
                 opens += 1;
             }
         }
@@ -2420,7 +2420,7 @@ fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)
                 if depth == 0 && found_gt {
                     return Some((i, j + 1));
                 }
-            } else if !self_close {
+            } else if !self_close || tag_lower == "div" {
                 depth += 1;
             }
         }

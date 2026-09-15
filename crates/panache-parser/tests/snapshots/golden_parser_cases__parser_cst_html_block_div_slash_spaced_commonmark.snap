@@ -1,0 +1,14 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..28
+  HTML_BLOCK@0..20
+    HTML_BLOCK_TAG@0..20
+      TEXT@0..19 "<div id=\"outer\" / >"
+      NEWLINE@19..20 "\n"
+  BLANK_LINE@20..21
+    BLANK_LINE@20..21 "\n"
+  PARAGRAPH@21..28
+    TEXT@21..27 "inside"
+    NEWLINE@27..28 "\n"

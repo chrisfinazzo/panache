@@ -851,3 +851,14 @@
 # Underindented fancy markers cannot interrupt the enclosing item's plain
 # block, including markers whose start number would be restricted in a sublist.
 548
+
+# html-block: a slash on a div opener does not close it in Pandoc.
+# Balance both line-spanning and same-line nested divs before lifting their
+# bodies; retain the same behavior in blockquotes and list items.
+549
+550
+551
+552
+553
+554
+555

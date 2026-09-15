@@ -19,7 +19,9 @@ load-bearing; the code holds the full detail.
   after `cargo build`. Fix with `cargo run -- clean --all`, or disable the cache.
   Validate via unit tests first.
 - **Conformance compare is whitespace-insensitive** (`normalize_native`
-  collapses to one line) — visual diffs mislead.
+  collapses to one line) — visual diffs mislead. Check the oracle version:
+  the shell has Pandoc 3.11, but the corpus pins 3.10.2 (available in the
+  Nix store). Generate new expectations with the pinned binary.
 - **Config walks up from the INPUT FILE's dir, not CWD.** A stray
   `/tmp/panache.toml` (`flavor="myst"`, CommonMark → no `<div>` lift)
   shadows test files under `/tmp/…`, faking `undefined-anchor` on `<div
@@ -35,8 +37,9 @@ load-bearing; the code holds the full detail.
   in a TEXT child; scan to first **unquoted** `>` (naive
   `strip_suffix('>')` grabs the close's). Quote-aware scanners thread
   state across lines (`count_tag_balance`, `find_multiline_open_end`,
-  `pandoc_html_open_tag_closes`). Self-closing `<tag/>` doesn't bump
-  depth (matchers check `bytes[j-1]==b'/'`).
+  `pandoc_html_open_tag_closes`). **`<div/>` DOES bump depth** in
+  Pandoc; keep `count_tag_balance` and `matched_close_offset` consistent.
+  Other slash-suffixed tags retain their existing handling.
 - **`input.lines()` strips newlines** — losslessness tests use
   `split_lines_inclusive`.
 - **A new wrapper retag (`HTML_BLOCK_RAW`/`_DIV`/…) must reach EVERY
@@ -302,7 +305,7 @@ load-bearing; the code holds the full detail.
 | 3 | Sectioning + verbatim pin; `eitherBlockOrInline` | **Landed** — non-void 05-09, void `area`/`embed`/`source`/`track` 05-10. |
 | 4 | Comments, PIs, declarations, CDATA | **Landed** 05-08; type-4 CM lowercase gappy. |
 | 5 | `markdown_in_html_blocks` edge cases | **Landed** — superseded by Phase 6 structural lift. |
-| 6 | Lift inner HTML content into structural CST children | **All non-bq + bq shapes** for `<div>` + non-div strict-block + inline-block matched-pair (clean, open-trailing, butted/indented-close, same-line, empty, multi-line-open, depth-aware nested, multi-close, unclosed). List items + bq-in-listitem. `PARAGRAPH→PLAIN` at adjacency. **Pass 105 → 257.** |
+| 6 | Lift inner HTML content into structural CST children | **All non-bq + bq shapes** for `<div>` + non-div strict-block + inline-block matched-pair (clean, open-trailing, butted/indented-close, same-line, empty, multi-line-open, depth-aware nested, multi-close, unclosed). List items + bq-in-listitem. `PARAGRAPH→PLAIN` at adjacency. **Pass 105 → 257.** Slash-suffixed div openers fixed 09-15. |
 | 7a | Single-construct opaque → `HTML_BLOCK_RAW` | **Landed** 06-17. Comment/PI/verbatim retag (`html_raw_block`). |
 | 7b | Standalone-tag split (≥ 2 tags/line) | **Landed** 06-29; bq 07-02. `try_parse_standalone_block_tags_split`. |
 | 7c | Open-only body lift (open + trailing, no close) | **Landed** 07-02 (+bq). `emit_html_block_body` non-div arm. |
@@ -317,70 +320,65 @@ load-bearing; the code holds the full detail.
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-08-05 (Phase G: entities in attribute values)
+## Latest session — 2026-09-15 (Phase 6: slash-suffixed div openers)
 
-Conformance: **html 295 → 300, total 500 → 505 (100%)**. Workspace tests
-4841 → 4850. Corpus was already 100% with 0 blocked at session start, so
-this was **divergence hunting, not failure chasing**: ~100 probe shapes
-diffed against pandoc-native surfaced two new clusters; took the larger.
+Conformance: **html-block 267/267 → 274/274; html-inline 33/33 → 33/33**.
+Total **548/548 → 555/555**. Workspace **6139 → 6161 passing**, zero
+failures. No red tests remain.
 
 ### What landed
 
-- **Target**: pandoc's TagSoup reader decodes character references in the
-  attribute values it lifts, so `<div id="a&amp;b">` carries id `a&b`.
-  Panache kept the raw spelling in every consumer. 13 probe shapes fixed.
-- **New `decode_html_attr_entities`** (`parser/utils/attributes.rs`):
-  single-pass, semicolon-required, case-sensitive named lookup against the
-  vendored HTML5 table + decimal/hex numeric. Borrows on the no-op path.
-  Numeric edges match pandoc: surrogate → U+FFFD, `> U+10FFFF` (or u32
-  overflow) → `?`, `&#0;` → NUL.
-- **Wired into all three readers** — the two-read-path trap cost a
-  debugging round: `parse_html_attribute_list` (reparse fallback),
-  `AttributeNode::{id,classes,key_values}` (structured tokens, the LIVE
-  path for HTML_ATTRS — salsa/linter), and
-  `pandoc_ast::attr_from_html_attrs_node` (projector).
-- **Gated to `HTML_ATTRS`.** Verified pandoc rejects `&` in a brace body
-  entirely (`:::{#a&amp;b}` → literal class), so Pandoc `{...}` values
-  must never decode. Pinned by `brace_attrs_do_not_decode_entities`.
-- **Fixed a latent range bug**: `id_value_range`'s reparse branch derived
-  its span length from `id()`. Decoding made that too short; now measured
-  in source bytes (scan to closing quote / whitespace).
-- **Read-time only** — CST bytes untouched, so losslessness, idempotency,
-  and formatter output are unchanged (`debug format --checks all` clean;
-  golden pins `&amp;` surviving a round-trip).
+- **Parser-shape gap:** `<div/>` opens a div in Pandoc. Both the line
+  balance scanner and same-line close finder now count it as an opener.
+  The existing structural lift owns the body; no projector changes.
+- Confirmed the regression with a failing CST containment assertion and
+  five failing corpus cases before the fix. Pinned seven corpus cases
+  (0549-0555), including multiline and spaced-slash controls that already
+  passed. Generated expectations with the pinned Pandoc 3.10.2 binary;
+  the shell's 3.11 agrees on all probes.
+- Seven paired Pandoc/CommonMark parser fixtures and seven formatter
+  goldens cover implicit EOF, explicit close, same-line nesting,
+  blockquotes, list items, multiline tags, and `/ >` spelling. Goldens
+  preserve the slash and check losslessness and idempotency.
+- `cargo check`, workspace and parser tests, both conformance allowlists,
+  all-feature/all-target Clippy, and rustfmt pass. Updated native-divs
+  documentation and regenerated the report before allowlisting.
 
 ### Files in committable diff
 
-- `crates/panache-parser/src/parser/utils/attributes.rs` (decoder + 5
-  unit tests), `src/syntax/attributes.rs` (3 readers, range fix, 2 tests),
-  `src/pandoc_ast.rs` (projector reader).
-- `src/salsa.rs` — anchor-index regression test.
-- Corpus 0501-0505 + allowlist; formatter golden
-  `html_block_div_attr_entities` (+ runner); RECAP.
+- `crates/panache-parser/src/parser/blocks/` — two scanner conditions
+  and their semantic contract (parser-shape bucket).
+- `crates/panache-parser/tests/` — focused containment assertion, paired
+  goldens, snapshots, corpus 0549-0555, allowlist, and generated reports.
+- `tests/` — formatter fixture registration and seven round-trip goldens.
+- `docs/guide/` and `.agents/skills/html-conformance/` — behavior and recap.
 
 ### Suggested next sub-targets (ranked)
 
-1. **Self-closing non-void tags** — `<div id="x"/>` opens a div in pandoc
-   (the `/` is ignored for non-void tags) and swallows following blocks;
-   panache emits an empty `Div` + siblings. 4 probe shapes
-   (bare, spaced `/ >`, with later `</div>`, inline-context). Contained,
-   but touches the matched-pair/depth model — read that trap first.
-2. **Entity in attribute NAME** — `<div a&amp;b>` must NOT lift at all
-   (pandoc `RawBlock`). Lift-eligibility gate on attribute-name validity;
-   small, and it pairs naturally with this session's work.
-3. **Semicolon-less legacy refs** (`id="a&amp b"` → `a& b`) — needs
-   TagSoup's name charset (`-` appears to terminate a match, `=`/space do
-   not). Obscure; verify the charset by probing before implementing.
-4. **Multi-line-second-div inter-tag** — depth-model rework; risky, not
-   in corpus.
-5. **Definition-list-in-blockquote broad gap** — NOT html scope; flag to
-   the general pandoc-conformance effort.
+1. **Entity in attribute NAME** — `<div a&amp;b>` must stay raw in
+   Pandoc. Add a lift-eligibility gate after probing name validity.
+2. **Semicolon-less legacy refs** (`id="a&amp b"` → `a& b`) — probe
+   TagSoup's name charset before implementing.
+3. **Multi-line-second-div inter-tag** — remains a depth-model gap.
+4. **Paragraph text before a block tag** — `one<div/>two</div>` in a
+   div body stays inline. This is the existing general paragraph-boundary
+   gap, beyond slash handling; nested openers at the body start now work.
+5. **Definition-list-in-blockquote broad gap** — general conformance scope.
+
+### New trap
+
+- A slash closes neither a native div nor its body. Do not generalize this
+  to other tag families; both depth scanners must agree. Folded above,
+  along with the pinned-oracle version mismatch.
 
 --------------------------------------------------------------------------------
 
 ## Earlier sessions (compact log)
 
 Newest first. date — sub-target — pass delta — lever.
+
+- 2026-08-05 — Phase G attribute-value entities — html 295 → 300 —
+  read-time decoding in all three attribute readers; source-byte id spans.
 
 - 2026-08-02 — Phase F unclosed-div + bq-nested-def later-line — html
   292 → 295 — container-aware lift made the shape byte-lossless; corpus

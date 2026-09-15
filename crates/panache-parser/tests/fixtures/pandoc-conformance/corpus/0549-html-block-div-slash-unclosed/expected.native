@@ -1,0 +1,3 @@
+[ Div
+    ( "outer" , [] , [] ) [ Para [ Strong [ Str "inside" ] ] ]
+]

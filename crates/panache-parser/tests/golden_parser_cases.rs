@@ -107,6 +107,21 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn html_block_div_slash_keeps_following_content_inside() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input = include_str!("fixtures/cases/html_block_div_slash_unclosed_pandoc/input.md");
+    let tree = parse(input, None);
+    let div = tree.children().next().unwrap();
+    assert_eq!(div.kind(), SyntaxKind::HTML_BLOCK_DIV);
+    assert!(
+        div.children()
+            .any(|child| child.kind() == SyntaxKind::PARAGRAPH),
+        "the paragraph following <div/> belongs inside the div"
+    );
+}
+
+#[test]
 fn list_restricted_marker_outdent() {
     use panache_parser::syntax::{AstNode, ListItem, Plain};
 
@@ -548,6 +563,20 @@ golden_test_cases!(
     html_block_div_nested_pandoc,
     html_block_div_nested_trailing_commonmark,
     html_block_div_nested_trailing_pandoc,
+    html_block_div_slash_unclosed_commonmark,
+    html_block_div_slash_unclosed_pandoc,
+    html_block_div_slash_matched_commonmark,
+    html_block_div_slash_matched_pandoc,
+    html_block_div_slash_nested_commonmark,
+    html_block_div_slash_nested_pandoc,
+    html_block_div_slash_blockquote_commonmark,
+    html_block_div_slash_blockquote_pandoc,
+    html_block_div_slash_list_commonmark,
+    html_block_div_slash_list_pandoc,
+    html_block_div_slash_multiline_commonmark,
+    html_block_div_slash_multiline_pandoc,
+    html_block_div_slash_spaced_commonmark,
+    html_block_div_slash_spaced_pandoc,
     html_block_div_same_line_commonmark,
     html_block_div_same_line_pandoc,
     html_block_div_same_line_trailing_commonmark,

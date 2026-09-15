@@ -956,7 +956,12 @@ native-divs = true
 :   Fenced divs `::: {.class}` (default: enabled)
 
 `native-divs`
+
 :   HTML `<div>` elements (default: enabled)
+
+    In Pandoc-based flavors, `<div/>` starts a div just like `<div>`. Following
+    content belongs to it until `</div>` or the end of its container. Formatting
+    preserves the opening tag's spelling.
 
 #### Other Blocks
 

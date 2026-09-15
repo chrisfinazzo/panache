@@ -1,0 +1,6 @@
+[ Div
+    ( "outer" , [] , [] )
+    [ Div ( "inner" , [] , [] ) [ Plain [ Str "two" ] ]
+    , Plain [ Str "three" ]
+    ]
+]
