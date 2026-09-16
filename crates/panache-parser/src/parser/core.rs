@@ -696,7 +696,10 @@ impl<'a> Parser<'a> {
             || (bq_depth > current_bq_depth
                 && !self.previous_block_requires_blank_before_new_block());
         let mut blockquote_match: Option<PreparedBlockMatch> = None;
-        let dispatcher_ctx = if current_bq_depth == 0 {
+        // This probe resolves precedence for a possible new blockquote.
+        // Ordinary lines reach the registry in `parse_inner_content` after
+        // container handling, so probing them here repeats detection work.
+        let dispatcher_ctx = if current_bq_depth == 0 && bq_depth > 0 {
             Some(BlockContext {
                 has_blank_before,
                 has_blank_before_strict: has_blank_before,
