@@ -1596,6 +1596,14 @@ fn is_fence_like_triplet_paragraph(node: &SyntaxNode) -> bool {
     if node.kind() != SyntaxKind::PARAGRAPH {
         return false;
     }
+    // Whitespace can occupy its own token, so only reject a token that
+    // already contains a non-whitespace character other than the fence marker.
+    if node.first_token().is_some_and(|token| {
+        let first = token.text().trim_start();
+        !first.is_empty() && !first.starts_with(':')
+    }) {
+        return false;
+    }
 
     let text = node.text().to_string();
     let lines: Vec<&str> = text.lines().collect();

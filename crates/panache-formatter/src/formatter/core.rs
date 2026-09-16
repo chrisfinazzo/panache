@@ -155,6 +155,14 @@ impl Formatter {
         if node.kind() != SyntaxKind::PARAGRAPH {
             return false;
         }
+        // Most paragraphs cannot be table continuations. Avoid copying their
+        // entire subtree just to reject the first non-whitespace character.
+        if node.first_token().is_some_and(|token| {
+            let first = token.text().trim_start();
+            !first.is_empty() && !first.starts_with(['|', '+'])
+        }) {
+            return false;
+        }
         let text = node.text().to_string();
         let lines: Vec<&str> = text
             .lines()
@@ -175,19 +183,18 @@ impl Formatter {
         if node.kind() != SyntaxKind::DEFINITION_LIST {
             return false;
         }
-        if !node
-            .text()
-            .to_string()
-            .lines()
-            .any(|line| line.trim_start().starts_with(':'))
+        let Some(prev) = node.prev_sibling() else {
+            return false;
+        };
+        if prev.kind() != SyntaxKind::GRID_TABLE
+            && !self.is_grid_table_continuation_paragraph(&prev)
         {
             return false;
         }
-        if let Some(prev) = node.prev_sibling() {
-            return prev.kind() == SyntaxKind::GRID_TABLE
-                || self.is_grid_table_continuation_paragraph(&prev);
-        }
-        false
+        node.text()
+            .to_string()
+            .lines()
+            .any(|line| line.trim_start().starts_with(':'))
     }
 
     pub(super) fn horizontal_rule_text(&self, available_width: usize) -> String {

@@ -166,7 +166,6 @@ pub fn format_tree(tree: &SyntaxNode, config: &Config, range: Option<(usize, usi
         config.wrap
     );
 
-    let input = tree.text().to_string();
     let frontmatter_region = collect_yaml_frontmatter_region(tree);
     let mut formatter_config = to_formatter_config(config);
     formatter_config.math_signature_scope =
@@ -177,6 +176,7 @@ pub fn format_tree(tree: &SyntaxNode, config: &Config, range: Option<(usize, usi
         .map(|region| region.content.trim_end().to_string());
 
     let formatted_code = if !config.formatters.is_empty() {
+        let input = tree.text().to_string();
         let code_blocks = panache_formatter::collect_code_blocks(tree, &input, &formatter_config);
         if !code_blocks.is_empty() {
             log::debug!(
