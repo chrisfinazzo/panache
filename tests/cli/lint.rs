@@ -386,7 +386,7 @@ fn test_lint_stdin_shows_source_snippet() {
         .stdout(predicate::str::contains("3 | ### Subheading"))
         .stdout(predicate::str::contains("^"))
         .stdout(predicate::str::contains(
-            "help: Change heading level from 3 to 2",
+            "= help: Change heading level from 3 to 2",
         ))
         .stdout(predicate::str::contains(
             "= note: configure this rule in panache.toml",

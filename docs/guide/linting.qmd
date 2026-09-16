@@ -122,6 +122,10 @@ panache lint --message-format human document.qmd # default rich output
 panache lint --message-format short document.qmd # GNU-style one-line diagnostics
 ```
 
+Human output highlights the reported issue and shows any suggested fix on a
+separate `help` line. The highlighted location matches short output, even when
+the fix edits a larger range of source text.
+
 ## Lint Rules
 
 Panache includes several built-in lint rules that analyze document structure and

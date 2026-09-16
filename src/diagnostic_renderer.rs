@@ -39,13 +39,15 @@ pub(crate) fn print_diagnostics(
         }
 
         if let Some(source) = source {
-            print_source_snippet(
-                diag,
-                file_name,
-                source,
-                index.as_ref().expect("built whenever source is present"),
-                &renderer,
-                diag.fix.as_ref(),
+            println!(
+                "{}",
+                render_source_snippet(
+                    diag,
+                    file_name,
+                    source,
+                    index.as_ref().expect("built whenever source is present"),
+                    &renderer,
+                )
             );
         } else {
             println!(
@@ -60,9 +62,7 @@ pub(crate) fn print_diagnostics(
             );
         }
 
-        if let Some(fix) = &diag.fix
-            && (source.is_none() || fix.edits.is_empty())
-        {
+        if let Some(fix) = &diag.fix {
             print_subdiag("help", &fix.message);
         }
         for note in &diag.notes {
@@ -175,27 +175,20 @@ impl SourceIndex {
     }
 }
 
-fn print_source_snippet(
+fn render_source_snippet(
     diag: &Diagnostic,
     file_name: &str,
     source: &str,
     index: &SourceIndex,
     renderer: &Renderer,
-    fix: Option<&panache::linter::Fix>,
-) {
+) -> String {
     let start: usize = diag.location.range.start().into();
     let end: usize = diag.location.range.end().into();
     let end = end.max(start.saturating_add(1)).min(source.len());
 
-    let primary_span = if let Some(fix) = fix
-        && let Some(edit) = fix.edits.first()
-    {
-        let edit_start: usize = edit.range.start().into();
-        let edit_end: usize = edit.range.end().into();
-        edit_start..edit_end.max(edit_start.saturating_add(1)).min(source.len())
-    } else {
-        start..end
-    };
+    // Fixes can remove surrounding lines; the primary span must still identify
+    // the issue itself so human and short output report the same location.
+    let primary_span = start..end;
     let context_span = (diag.code == "heading-hierarchy")
         .then(|| index.previous_heading(start))
         .flatten();
@@ -219,15 +212,7 @@ fn print_source_snippet(
         span.start.saturating_sub(from)..span.end.saturating_sub(from).min(to - from)
     };
 
-    let primary = if let Some(fix) = fix
-        && !fix.edits.is_empty()
-    {
-        AnnotationKind::Primary
-            .span(rebase(primary_span))
-            .label(format!("help: {}", fix.message))
-    } else {
-        AnnotationKind::Primary.span(rebase(primary_span))
-    };
+    let primary = AnnotationKind::Primary.span(rebase(primary_span));
 
     let snippet = Snippet::source(&source[from..to])
         .line_start(first_line + 1)
@@ -248,7 +233,7 @@ fn print_source_snippet(
     let report = &[severity_level(&diag.severity)
         .primary_title(&title)
         .element(snippet)];
-    println!("{}", renderer.render(report));
+    renderer.render(report)
 }
 
 fn severity_level(severity: &Severity) -> Level<'static> {
@@ -273,9 +258,49 @@ fn print_subdiag(kind: &str, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceIndex, severity_name};
-    use panache::linter::{Diagnostic, DiagnosticOrigin, Location, Severity};
+    use super::{SourceIndex, render_source_snippet, severity_name};
+    use annotate_snippets::Renderer;
+    use panache::linter::diagnostics::Edit;
+    use panache::linter::{Diagnostic, DiagnosticOrigin, Fix, Location, Severity};
     use rowan::TextRange;
+
+    #[test]
+    fn unused_binding_highlights_the_name_instead_of_its_deletion() {
+        let source = "```r\n\nmy_mean <- function(x) {\n  sum(x) / length(x)\n}\n```\n";
+        let start = source.find("my_mean").unwrap();
+        let end = start + "my_mean".len();
+        let fix_end = source.rfind("```").unwrap();
+        let diag = Diagnostic::warning(
+            Location::from_range(
+                TextRange::new((start as u32).into(), (end as u32).into()),
+                source,
+            ),
+            "unused-binding",
+            "local binding `my_mean` is assigned but never read",
+        )
+        .with_origin(DiagnosticOrigin::External)
+        .with_fix(Fix::unsafe_fix(
+            "Remove unused binding `my_mean`",
+            vec![Edit {
+                range: TextRange::new(((start - 1) as u32).into(), (fix_end as u32).into()),
+                replacement: String::new(),
+            }],
+        ));
+
+        let rendered = render_source_snippet(
+            &diag,
+            "document.qmd",
+            source,
+            &SourceIndex::new(source),
+            &Renderer::plain(),
+        );
+
+        assert!(rendered.contains("document.qmd:3:1"), "{rendered}");
+        assert!(
+            rendered.lines().any(|line| line.trim() == "| ^^^^^^^"),
+            "{rendered}"
+        );
+    }
 
     /// The linear scan `SourceIndex::previous_heading` replaced: walk from byte
     /// 0, remembering the last heading on a line that ends before `before_offset`.
