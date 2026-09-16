@@ -49,6 +49,10 @@ members = [
 [lib]
 doctest = false
 
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
 [[bin]]
 name = "panache"
 path = "src/main.rs"
