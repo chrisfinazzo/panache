@@ -115,11 +115,18 @@ fn escape_special_chars(
 }
 
 fn expand_tabs_with_width<'a>(text: &'a str, tab_width: usize) -> Cow<'a, str> {
+    expand_tabs_from_column(text, tab_width, 0)
+}
+
+pub(super) fn expand_tabs_from_column(
+    text: &str,
+    tab_width: usize,
+    mut col: usize,
+) -> Cow<'_, str> {
     if !text.contains('\t') {
         return Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len());
-    let mut col = 0usize;
     for ch in text.chars() {
         match ch {
             '\t' => {

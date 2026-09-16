@@ -729,7 +729,16 @@ below show the default indent of 2.
 Pipe tables are normalized to have consistent spacing and alignment. The header
 separator row is standardized to use hyphens and colons for alignment, and
 spacing within cells is normalized: whitespace runs inside a cell collapse to a
-single space, just as Pandoc reads them (code spans keep their spacing).
+single space, including inside emphasis, bold text, and link labels. Code spans,
+raw content, link destinations, and escaped or nonbreaking spaces keep their
+spacing.
+
+In Pandoc-based flavors, wide pipe tables keep the number of dashes and
+alignment colons in each separator segment, because those proportions control
+the rendered column widths. Spaces around the segments are normalized, and rows
+align using cell padding. Enough padding is retained to keep the table above
+Pandoc's default 72-column limit for assigning explicit widths. Panache uses
+compact rows when aligning a narrow table would push it over that limit.
 
 Input
 
@@ -768,11 +777,10 @@ rule flags the mismatch so it can be resolved deliberately.
 
 Grid tables are normalized to have consistent spacing and alignment. They are
 kept at column 0 rather than indented, since Pandoc does not recognize an
-indented grid border. Unlike pipe and simple tables, their column widths are
-**preserved** rather than shrunk to fit the content: Pandoc derives relative
-column widths from the source border widths and propagates them to output
-formats (e.g. HTML `<col style="width:…">`), so resizing a column would change
-the rendered layout.
+indented grid border. Their column widths are **preserved** rather than shrunk
+to fit the content: Pandoc derives relative column widths from the source border
+widths and propagates them to output formats (e.g. HTML
+`<col style="width:…">`), so resizing a column would change the rendered layout.
 
 Input
 
@@ -893,8 +901,9 @@ We normalize simple tables so that cell contents align with the alignment
 specified in the header row, and the column spacing is recomputed from the
 content: each column's dash run is the width of its widest cell plus two, and
 columns are separated by a single space. Whitespace runs inside a cell collapse
-to a single space, just as Pandoc reads them (code spans keep their spacing).
-The output is therefore independent of the incoming spacing and dash lengths.
+to a single space, including inside inline markup. Literal content and escaped
+or nonbreaking spaces keep their spacing, as in pipe tables. The output is
+therefore independent of the incoming spacing and dash lengths.
 
 Headerless simple tables (delimited by a dash run above and below the data) have
 no header row, so each column's alignment is read from the **first data row's**

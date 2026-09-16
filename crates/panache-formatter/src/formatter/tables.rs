@@ -1,9 +1,12 @@
-use crate::config::{Config, WrapMode};
+use crate::config::{Config, Dialect, WrapMode};
 use crate::formatter::Formatter;
-use crate::formatter::inline::format_inline_node;
-use crate::formatter::inline_layout::wrap_text_first_fit;
+use crate::formatter::inline::{collapse_spaces, format_inline_node_with_spacing};
+use crate::formatter::inline_layout::{expand_tabs_from_column, wrap_text_first_fit};
 use crate::formatter::sentence_wrap::{ResolvedProfile, SentenceProfileCache, split_sentence_text};
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken, text_without_line_prefixes};
+use crate::syntax::{
+    AstNode, PipeTable, SyntaxKind, SyntaxNode, SyntaxToken, TableCell, TableRowNode,
+    text_without_line_prefixes,
+};
 use panache_parser::analyze_grid;
 use rowan::NodeOrToken;
 use std::collections::BTreeSet;
@@ -491,31 +494,12 @@ struct TableData {
     has_header: bool,           // True if table has a header row
 }
 
-fn collapse_cell_ws_runs(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut in_ws = false;
-    for ch in text.chars() {
-        if ch == ' ' || ch == '\t' {
-            if !in_ws {
-                result.push(' ');
-            }
-            in_ws = true;
-        } else {
-            result.push(ch);
-            in_ws = false;
-        }
-    }
-    result
-}
-
 /// Format cell content, handling both TEXT tokens and inline elements.
 ///
-/// With `collapse_ws`, whitespace runs inside `TEXT` tokens collapse to a
-/// single space, matching pandoc's reader (intra-cell whitespace is a single
-/// `Space` inline). Inline nodes are untouched, so code-span content keeps its
-/// runs. The simple- and pipe-table paths opt in; the multiline paths slice
-/// cells by byte offsets against the source geometry (collapsing would skew
-/// the columns) and collapse later instead, when cells reflow.
+/// With `collapse_ws`, whitespace runs in prose, including nested inline
+/// markup, collapse to a single space. Literal content keeps its spacing.
+/// Simple and pipe tables opt in; multiline tables must retain source offsets
+/// until their cells have been sliced, then reflow within the original widths.
 fn format_cell_content(node: &SyntaxNode, config: &Config, collapse_ws: bool) -> String {
     let mut result = String::new();
 
@@ -527,14 +511,14 @@ fn format_cell_content(node: &SyntaxNode, config: &Config, collapse_ws: bool) ->
                     || token.kind() == SyntaxKind::ESCAPED_CHAR
                 {
                     if collapse_ws && token.kind() == SyntaxKind::TEXT {
-                        result.push_str(&collapse_cell_ws_runs(token.text()));
+                        result.push_str(&collapse_spaces(token.text()));
                     } else {
                         result.push_str(token.text());
                     }
                 }
             }
             NodeOrToken::Node(node) => {
-                result.push_str(&format_inline_node(&node, config));
+                result.push_str(&format_inline_node_with_spacing(&node, config, collapse_ws));
             }
         }
     }
@@ -750,6 +734,127 @@ fn calculate_grid_column_widths(rows: &[Vec<String>]) -> Vec<usize> {
     widths
 }
 
+// Pandoc defaults to this reader limit, independently of our wrapping width.
+const PANDOC_READER_COLUMNS: usize = 72;
+
+/// Measure source fields before trimming cell padding. Pandoc uses their
+/// widths to decide whether the separator proportions control rendered widths.
+fn pipe_row_source_widths(row: &TableRowNode, config: &Config) -> Vec<usize> {
+    let mut widths = Vec::new();
+    let mut source_column = 0;
+    let mut field_width = 0;
+    let mut in_field = false;
+    let mut has_cell = false;
+
+    for element in row.syntax().children_with_tokens() {
+        match element {
+            NodeOrToken::Node(node) => {
+                let source = node.text().to_string();
+                let expanded = expand_tabs_from_column(&source, config.tab_width, source_column);
+                source_column += expanded.chars().count();
+                if TableCell::can_cast(node.kind()) {
+                    field_width += expanded.width();
+                    in_field = true;
+                    has_cell = true;
+                }
+            }
+            NodeOrToken::Token(token) => {
+                if token.kind() == SyntaxKind::NEWLINE {
+                    break;
+                }
+                let expanded =
+                    expand_tabs_from_column(token.text(), config.tab_width, source_column);
+                source_column += expanded.chars().count();
+                match token.kind() {
+                    SyntaxKind::LINE_PREFIX => {}
+                    SyntaxKind::TEXT if token.text() == "|" => {
+                        if has_cell {
+                            widths.push(field_width);
+                        }
+                        field_width = 0;
+                        in_field = true;
+                        has_cell = false;
+                    }
+                    _ if in_field => field_width += expanded.width(),
+                    _ => {}
+                }
+            }
+        }
+    }
+    if has_cell {
+        widths.push(field_width);
+    }
+    widths
+}
+
+struct PipeTableLayout {
+    cell_widths: Vec<usize>,
+    separator_widths: Vec<usize>,
+    align_columns: bool,
+}
+
+fn pipe_table_layout(
+    node: &SyntaxNode,
+    config: &Config,
+    rows: &[Vec<String>],
+) -> Option<PipeTableLayout> {
+    let mut layout = PipeTableLayout {
+        cell_widths: calculate_column_widths(rows),
+        separator_widths: Vec::new(),
+        align_columns: true,
+    };
+    layout.separator_widths.clone_from(&layout.cell_widths);
+    if config.dialect() != Dialect::Pandoc {
+        return Some(layout);
+    }
+    let table = PipeTable::cast(node.clone())?;
+    let separator = table.separator()?;
+    let marker_widths: Vec<usize> = crate::syntax::separator_column_segments(&separator)
+        .into_iter()
+        .map(|segment| {
+            segment
+                .iter()
+                .filter(|token| token.kind() != SyntaxKind::TABLE_SEP_WHITESPACE)
+                .map(|token| token.text().len())
+                .sum()
+        })
+        .collect();
+    let cols = marker_widths.len();
+    let source_rows: Vec<Vec<usize>> = table
+        .cell_rows()
+        .filter_map(TableRowNode::cast)
+        .map(|row| pipe_row_source_widths(&row, config))
+        .collect();
+    let wide_source = std::iter::once(marker_widths.iter().sum::<usize>())
+        .chain(source_rows.iter().map(|row| row.iter().sum()))
+        .any(|width| width + cols + 1 > PANDOC_READER_COLUMNS);
+
+    if wide_source {
+        // Padding may change, but the dash/colon counts encode the proportions.
+        // Retaining source field widths also keeps the table in wide mode.
+        layout.separator_widths = marker_widths;
+        for (width, marker_width) in layout.cell_widths.iter_mut().zip(&layout.separator_widths) {
+            *width = (*width).max(*marker_width);
+        }
+        for row in source_rows {
+            for (width, source_width) in layout.cell_widths.iter_mut().zip(row) {
+                *width = (*width).max(source_width.saturating_sub(2));
+            }
+        }
+    } else if layout.cell_widths.iter().sum::<usize>() + 3 * cols + 1 > PANDOC_READER_COLUMNS {
+        // Aligning individually narrow rows can introduce explicit widths.
+        // Even without padding, growing literal content might not fit safely.
+        if rows.iter().any(|row| {
+            row.iter().map(|cell| cell.width()).sum::<usize>() + cols + 1 > PANDOC_READER_COLUMNS
+        }) {
+            return None;
+        }
+        layout.align_columns = false;
+        layout.separator_widths = marker_widths;
+    }
+    Some(layout)
+}
+
 /// Format a pipe table with consistent alignment and padding
 pub(super) fn format_pipe_table(
     node: &SyntaxNode,
@@ -774,20 +879,34 @@ pub(super) fn format_pipe_table(
         }
     }
 
-    let widths = calculate_column_widths(&table_data.rows);
+    let Some(layout) = pipe_table_layout(node, config, &table_data.rows) else {
+        return indent_table_block(&text_without_line_prefixes(node), indent);
+    };
 
     for (row_idx, row) in table_data.rows.iter().enumerate() {
+        let padding = if !layout.align_columns
+            && row.iter().map(|cell| cell.width()).sum::<usize>() + 3 * row.len() + 1
+                > PANDOC_READER_COLUMNS
+        {
+            ""
+        } else {
+            " "
+        };
         output.push('|');
 
         for (col_idx, cell) in row.iter().enumerate() {
-            let width = widths.get(col_idx).copied().unwrap_or(3);
+            let width = if layout.align_columns {
+                layout.cell_widths.get(col_idx).copied().unwrap_or(3)
+            } else {
+                cell.width()
+            };
             let alignment = table_data
                 .alignments
                 .get(col_idx)
                 .copied()
                 .unwrap_or(Alignment::Default);
 
-            output.push(' ');
+            output.push_str(padding);
 
             let cell_width = cell.width();
             let total_padding = width.saturating_sub(cell_width);
@@ -816,7 +935,8 @@ pub(super) fn format_pipe_table(
             };
 
             output.push_str(&padded_cell);
-            output.push_str(" |");
+            output.push_str(padding);
+            output.push('|');
         }
 
         output.push('\n');
@@ -824,7 +944,7 @@ pub(super) fn format_pipe_table(
         if row_idx == 0 {
             output.push('|');
 
-            for (col_idx, width) in widths.iter().enumerate() {
+            for (col_idx, width) in layout.separator_widths.iter().enumerate() {
                 let alignment = table_data
                     .alignments
                     .get(col_idx)
@@ -841,6 +961,10 @@ pub(super) fn format_pipe_table(
                 };
 
                 output.push_str(&separator);
+                if layout.align_columns {
+                    let padding = layout.cell_widths[col_idx].saturating_sub(*width);
+                    output.extend(std::iter::repeat_n(' ', padding));
+                }
                 output.push_str(" |");
             }
 
@@ -1748,7 +1872,7 @@ fn split_simple_table_row(row_text: &str, columns: &[SimpleColumn]) -> Vec<Strin
         } else {
             ""
         };
-        cells.push(collapse_cell_ws_runs(cell_text));
+        cells.push(collapse_spaces(cell_text));
     }
 
     cells

@@ -13,3 +13,10 @@ Widest cell has runs:
 A   B
 ----- -----
 x   y
+
+Nested prose keeps literal content intact:
+
+Head1                               Head2
+----------------------------------  -----
+*I   will   **do   something***      x
+**a   `b  c`   d**                  y
