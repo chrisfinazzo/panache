@@ -58,6 +58,10 @@ In `sentence` and `semantic` modes, Panache applies conservative no-break rules
 for common abbreviations (for example `i.e.` and `e.g.`), so these do not
 trigger sentence splits by themselves.
 
+Citations and footnote references immediately after sentence-ending punctuation
+stay attached to the preceding sentence. For example,
+`Text.[^note] Next sentence.` breaks after `[^note]`.
+
 A sentence break is also suppressed when it would push the next token to the
 start of a line where the parser would read it as the opening of a block---an
 ordered or unordered list marker (`1.`, `-`, `+`, `1)`), an ATX heading (`#`), a

@@ -1,0 +1,30 @@
+A footnote reference after the period.[^a] The next sentence.
+
+A citation after the period.[@b] The next sentence.
+
+A footnote reference before the period[^c]. The next sentence.
+
+An authored break.[^a]
+The next sentence.
+
+Question?[^a] "Exclamation!"[^c] The next sentence.
+
+Multiple.[^a][^c] The next sentence.
+
+Mixed.[@b][^a] Reversed.[^c][@b] The next sentence.
+
+Use e.g.[^a] examples here.
+
+At 9 a.m.[^a] It started.
+
+A reference[^a] within a sentence.
+
+Use `what?`[^a] in the code.
+
+- A list item.[^a] The next sentence.
+
+> A blockquote.[^a] The next sentence.
+
+[^a]: note a
+
+[^c]: note c
