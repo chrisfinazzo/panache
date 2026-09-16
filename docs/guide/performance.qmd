@@ -38,11 +38,7 @@ Yamark's formatting path uses [source spans and formatting
 plans](https://github.com/t-kalinowski/yamark/blob/v0.3.0/src/core/markdown.rs)
 and preserves display math as opaque content. Panache builds the lossless syntax
 tree also used by its linter and language server, and parses and formats TeX
-math. These differences explain part of the gap, but they do not make all of
-Panache's overhead necessary: profiling also found avoidable tree traversals and
-text copies in formatting checks. The [investigation
-notes](https://github.com/jolars/panache/blob/main/benches/yamark-investigation.md)
-record the measured improvements and remaining bottlenecks.
+math, which explains part of the gap.
 
 The numbers on this page are produced by the scripts in
 [`benches/`](https://github.com/jolars/panache/tree/main/benches) and read from
