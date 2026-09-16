@@ -153,6 +153,19 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 }
             }
 
+            // Reducing the delimiter would turn documented examples into execution.
+            if marker_len > 1
+                && crate::syntax::inline_execution_parts(content.trim(), &config.parser_extensions)
+                    .is_some()
+            {
+                return node
+                    .descendants_with_tokens()
+                    .filter_map(|el| el.into_token())
+                    .filter(|token| token.kind() != SyntaxKind::LINE_PREFIX)
+                    .map(|token| token.text().to_string())
+                    .collect();
+            }
+
             let mut collapse_block_chunk = false;
             if marker_len >= 3 && content.contains('\n') {
                 let trimmed_start = content.trim_start();
@@ -210,6 +223,12 @@ pub(super) fn format_inline_node(node: &SyntaxNode, config: &Config) -> String {
                 attributes
             )
         }
+        SyntaxKind::INLINE_EXEC_SPAN => node
+            .descendants_with_tokens()
+            .filter_map(|el| el.into_token())
+            .filter(|token| token.kind() != SyntaxKind::LINE_PREFIX)
+            .map(|token| token.text().to_string())
+            .collect(),
         SyntaxKind::INLINE_EXEC => {
             let mut prefix = String::new();
             let mut spacing = String::from(" ");

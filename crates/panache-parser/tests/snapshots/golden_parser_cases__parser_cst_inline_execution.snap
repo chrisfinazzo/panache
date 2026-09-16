@@ -1,0 +1,128 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..309
+  PARAGRAPH@0..42
+    TEXT@0..14 "The answer is "
+    INLINE_EXEC_SPAN@14..20
+      INLINE_EXEC_MARKER@14..15 "`"
+      INLINE_EXEC_LANG@15..16 "r"
+      WHITESPACE@16..18 "  "
+      INLINE_EXEC_CONTENT@18..19 "x"
+      INLINE_EXEC_MARKER@19..20 "`"
+    TEXT@20..25 " and "
+    INLINE_EXEC_SPAN@25..40
+      INLINE_EXEC_MARKER@25..26 "`"
+      INLINE_EXEC_LANG@26..29 "{r}"
+      WHITESPACE@29..30 " "
+      INLINE_EXEC_CONTENT@30..31 "x"
+      INLINE_EXEC_MARKER@31..32 "`"
+      ATTRIBUTE@32..40
+        TEXT@32..33 "{"
+        ATTR_CLASS@33..39 ".value"
+        TEXT@39..40 "}"
+    TEXT@40..41 "."
+    NEWLINE@41..42 "\n"
+  BLANK_LINE@42..43
+    BLANK_LINE@42..43 "\n"
+  PARAGRAPH@43..97
+    TEXT@43..55 "Python uses "
+    INLINE_EXEC_SPAN@55..67
+      INLINE_EXEC_MARKER@55..56 "`"
+      INLINE_EXEC_LANG@56..64 "{python}"
+      WHITESPACE@64..65 " "
+      INLINE_EXEC_CONTENT@65..66 "x"
+      INLINE_EXEC_MARKER@66..67 "`"
+    TEXT@67..84 ", and Julia uses "
+    INLINE_EXEC_SPAN@84..95
+      INLINE_EXEC_MARKER@84..85 "`"
+      INLINE_EXEC_LANG@85..92 "{julia}"
+      WHITESPACE@92..93 " "
+      INLINE_EXEC_CONTENT@93..94 "x"
+      INLINE_EXEC_MARKER@94..95 "`"
+    TEXT@95..96 "."
+    NEWLINE@96..97 "\n"
+  BLANK_LINE@97..98
+    BLANK_LINE@97..98 "\n"
+  PARAGRAPH@98..162
+    TEXT@98..118 "These are literals: "
+    INLINE_CODE@118..125
+      INLINE_CODE_MARKER@118..120 "``"
+      INLINE_CODE_CONTENT@120..123 "r x"
+      INLINE_CODE_MARKER@123..125 "``"
+    TEXT@125..127 ", "
+    INLINE_CODE@127..141
+      INLINE_CODE_MARKER@127..129 "``"
+      INLINE_CODE_CONTENT@129..139 "{python} x"
+      INLINE_CODE_MARKER@139..141 "``"
+    TEXT@141..147 ", and "
+    INLINE_CODE@147..160
+      INLINE_CODE_MARKER@147..148 "`"
+      INLINE_CODE_CONTENT@148..159 "{{julia}} x"
+      INLINE_CODE_MARKER@159..160 "`"
+    TEXT@160..161 "."
+    NEWLINE@161..162 "\n"
+  BLANK_LINE@162..163
+    BLANK_LINE@162..163 "\n"
+  BLOCK_QUOTE@163..197
+    BLOCK_QUOTE_MARKER@163..164 ">"
+    WHITESPACE@164..165 " "
+    PARAGRAPH@165..197
+      TEXT@165..178 "The value is "
+      INLINE_EXEC_SPAN@178..195
+        INLINE_EXEC_MARKER@178..179 "`"
+        INLINE_EXEC_LANG@179..182 "{r}"
+        WHITESPACE@182..183 " "
+        INLINE_EXEC_CONTENT@183..188 "(x +\n"
+        LINE_PREFIX@188..189 ">"
+        LINE_PREFIX@189..190 " "
+        INLINE_EXEC_CONTENT@190..194 "  1)"
+        INLINE_EXEC_MARKER@194..195 "`"
+      TEXT@195..196 "."
+      NEWLINE@196..197 "\n"
+  BLANK_LINE@197..198
+    BLANK_LINE@197..198 "\n"
+  LIST@198..264
+    LIST_ITEM@198..226
+      LIST_MARKER@198..199 "-"
+      WHITESPACE@199..200 " "
+      PLAIN@200..226
+        TEXT@200..213 "The value is "
+        INLINE_EXEC_SPAN@213..224
+          INLINE_EXEC_MARKER@213..214 "`"
+          INLINE_EXEC_LANG@214..221 "{julia}"
+          WHITESPACE@221..222 " "
+          INLINE_EXEC_CONTENT@222..223 "x"
+          INLINE_EXEC_MARKER@223..224 "`"
+        TEXT@224..225 "."
+        NEWLINE@225..226 "\n"
+    BLANK_LINE@226..227
+      BLANK_LINE@226..227 "\n"
+    LIST_ITEM@227..264
+      LIST_MARKER@227..228 "-"
+      WHITESPACE@228..229 " "
+      PLAIN@229..264
+        TEXT@229..236 "String "
+        INLINE_EXEC_SPAN@236..262
+          INLINE_EXEC_MARKER@236..237 "`"
+          INLINE_EXEC_LANG@237..245 "{python}"
+          WHITESPACE@245..246 " "
+          INLINE_EXEC_CONTENT@246..251 "\"\"\"a\n"
+          LINE_PREFIX@251..253 "  "
+          INLINE_EXEC_CONTENT@253..261 "    b\"\"\""
+          INLINE_EXEC_MARKER@261..262 "`"
+        TEXT@262..263 "."
+        NEWLINE@263..264 "\n"
+  BLANK_LINE@264..265
+    BLANK_LINE@264..265 "\n"
+  PARAGRAPH@265..309
+    TEXT@265..285 "Multiline Python is "
+    INLINE_EXEC_SPAN@285..307
+      INLINE_EXEC_MARKER@285..286 "`"
+      INLINE_EXEC_LANG@286..294 "{python}"
+      WHITESPACE@294..295 " "
+      INLINE_EXEC_CONTENT@295..306 "(x +\n    1)"
+      INLINE_EXEC_MARKER@306..307 "`"
+    TEXT@307..308 "."
+    NEWLINE@308..309 "\n"

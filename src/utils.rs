@@ -1,11 +1,13 @@
 use crate::config::Extensions;
-use crate::syntax::{AstNode, Heading, SyntaxKind, SyntaxNode};
+use crate::linter::code_block_collector::SnippetKind;
+use crate::syntax::{AstNode, Heading, InlineExecutable, SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
-/// A code block with its location in the document.
+/// A block or inline expression with its location in the document.
 #[derive(Debug, Clone)]
-pub struct CodeBlock {
+pub struct CodeSnippet {
+    pub kind: SnippetKind,
     /// Programming language of the block
     pub language: String,
     /// Content of the code block (without fences), dedented: container
@@ -61,15 +63,19 @@ fn dedented_text_with_line_starts(node: &SyntaxNode) -> (String, Vec<usize>) {
     (text, line_starts)
 }
 
-/// Collect all fenced code blocks from a syntax tree, grouped by language.
-pub fn collect_code_blocks(tree: &SyntaxNode, input: &str) -> HashMap<String, Vec<CodeBlock>> {
-    let mut blocks: HashMap<String, Vec<CodeBlock>> = HashMap::new();
+/// Collect lintable blocks and executable inline expressions in document order.
+pub fn collect_code_snippets(tree: &SyntaxNode, input: &str) -> HashMap<String, Vec<CodeSnippet>> {
+    let mut blocks: HashMap<String, Vec<CodeSnippet>> = HashMap::new();
 
     for node in tree.descendants() {
-        let block = match node.kind() {
-            SyntaxKind::CODE_BLOCK => extract_code_block(&node, input),
-            SyntaxKind::MYST_DIRECTIVE => extract_myst_directive_block(&node, input),
-            _ => None,
+        let block = if let Some(inline) = InlineExecutable::cast(node.clone()) {
+            extract_inline_expression(&inline, input)
+        } else {
+            match node.kind() {
+                SyntaxKind::CODE_BLOCK => extract_code_block(&node, input),
+                SyntaxKind::MYST_DIRECTIVE => extract_myst_directive_block(&node, input),
+                _ => None,
+            }
         };
         if let Some(block) = block {
             blocks
@@ -82,12 +88,39 @@ pub fn collect_code_blocks(tree: &SyntaxNode, input: &str) -> HashMap<String, Ve
     blocks
 }
 
+fn extract_inline_expression(inline: &InlineExecutable, input: &str) -> Option<CodeSnippet> {
+    let language = inline.language()?;
+    let range = inline.code_range()?;
+    let start: usize = range.start().into();
+    let mut content = String::new();
+    let mut line_starts = Vec::new();
+    let mut at_line_start = true;
+    for segment in inline.code_source_segments() {
+        let base: usize = segment.text_range().start().into();
+        for (offset, byte) in segment.text().bytes().enumerate() {
+            if at_line_start {
+                line_starts.push(base + offset);
+            }
+            at_line_start = byte == b'\n';
+        }
+        content.push_str(segment.text());
+    }
+    Some(CodeSnippet {
+        kind: SnippetKind::Inline,
+        language,
+        content,
+        start_line: offset_to_line(input, start),
+        original_range: start..usize::from(range.end()),
+        line_starts,
+    })
+}
+
 /// Extract a verbatim MyST directive body as a lintable code block, keyed by the
 /// directive argument (e.g. `python` in `` ```{code-block} python ``). Returns
 /// `None` for non-verbatim directives (no `MYST_DIRECTIVE_BODY` child) or when
 /// the language or body is empty. The body's byte range is preserved so external
 /// diagnostics map back onto the original source.
-fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
+fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeSnippet> {
     let mut language = None;
     let mut body_node = None;
 
@@ -120,7 +153,8 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeBl
     let start: usize = range.start().into();
     let end: usize = range.end().into();
 
-    Some(CodeBlock {
+    Some(CodeSnippet {
+        kind: crate::linter::code_block_collector::SnippetKind::Block,
         language,
         content,
         start_line: offset_to_line(input, start),
@@ -129,7 +163,7 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeBl
     })
 }
 
-fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
+fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeSnippet> {
     let mut language = None;
     let mut content = String::new();
     let mut line_starts = Vec::new();
@@ -193,7 +227,8 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeBlock> {
             (offset_to_line(input, start), start..end)
         };
 
-    Some(CodeBlock {
+    Some(CodeSnippet {
+        kind: crate::linter::code_block_collector::SnippetKind::Block,
         language,
         content,
         start_line,

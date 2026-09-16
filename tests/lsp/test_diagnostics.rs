@@ -5,6 +5,66 @@ use lsp_types::*;
 use std::time::Duration;
 
 #[test]
+fn inline_execution_diagnostics_and_actions_use_utf16_positions() {
+    if which::which("arity").is_err() {
+        eprintln!("Skipping inline R LSP test: arity is not installed");
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let path = dir.path().join("inline.qmd");
+    let source = "```{r}\n#| label: setup\nx <- 42\n```\n\n🦀 `r x` and `{r} any(is.na(NA))`.\n";
+    std::fs::write(&path, source).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
+    let mut server = TestLspServer::new();
+    server.initialize(Uri::from_file_path(dir.path()).unwrap().as_str());
+    server.open_document(&uri, source, "quarto");
+    server.save_document(&uri);
+    server.pump(Duration::from_secs(5));
+    let publications = server.drain_publish_diagnostics(&uri);
+    let diagnostics = &publications
+        .last()
+        .expect("published diagnostics")
+        .diagnostics;
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.code == Some(NumberOrString::String("unused-binding".into())))
+    );
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diag| diag.code == Some(NumberOrString::String("any-is-na".into())))
+        .expect("external inline diagnostic");
+    let line = source.lines().nth(5).unwrap();
+    let start = line[..line.find("any(is.na(NA))").unwrap()]
+        .encode_utf16()
+        .count() as u32;
+    let end = start + "any(is.na(NA))".len() as u32;
+    let expected = Range::new(Position::new(5, start), Position::new(5, end));
+    assert_eq!(diagnostic.range, expected);
+
+    let actions = server.get_code_actions(&uri, 5, start, 5, end).unwrap();
+    let edit = actions
+        .iter()
+        .filter_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => action.edit.as_ref(),
+            _ => None,
+        })
+        .flat_map(|edit| {
+            edit.changes
+                .iter()
+                .flat_map(|changes| changes.values().flatten())
+        })
+        .find(|edit| edit.new_text == "anyNA(NA)")
+        .expect("inline quick fix");
+    assert_eq!(edit.range, expected);
+}
+
+#[test]
 fn test_diagnostics_on_heading_hierarchy_issue() {
     let mut server = TestLspServer::new();
 

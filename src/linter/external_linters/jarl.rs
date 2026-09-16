@@ -2,10 +2,10 @@ use rowan::TextRange;
 use serde::Deserialize;
 
 use super::{
-    ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
-    map_tool_line_col_to_original,
+    ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
+    map_concatenated_edit_to_original, map_diagnostic_range,
 };
-use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin, Location};
+use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin};
 
 #[derive(Debug, Deserialize)]
 struct JarlOutput {
@@ -62,14 +62,14 @@ impl ExternalLinterParser for JarlParser {
             let line = jarl_diag.location.row;
             let column = jarl_diag.location.column + 1;
             let range_len = jarl_diag.range[1].saturating_sub(jarl_diag.range[0]);
-            let start_offset = map_tool_line_col_to_original(ctx, line, column)
-                .unwrap_or(ctx.original_input.len());
-            let end_offset = start_offset
-                .saturating_add(range_len)
-                .min(ctx.original_input.len());
-            let range = TextRange::new((start_offset as u32).into(), (end_offset as u32).into());
-
-            let location = Location::from_range(range, ctx.original_input);
+            let Some(start_offset) = line_col_to_offset(ctx.linted_input, line, column) else {
+                continue;
+            };
+            let Some(location) =
+                map_diagnostic_range(ctx, start_offset, start_offset.saturating_add(range_len))
+            else {
+                continue;
+            };
 
             let fix = if let Some(mappings) = ctx.mappings {
                 if !jarl_diag.fix.to_skip {

@@ -152,6 +152,8 @@ macro_rules! golden_test_cases {
 // 1. Create a new directory under tests/fixtures/cases/
 // 2. Add the directory name to this list
 golden_test_cases!(
+    inline_execution,
+    inline_execution_preserve,
     adjacent_simple_then_pipe_table_captions,
     alerts,
     alerts_disabled,

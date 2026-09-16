@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 use super::{
     ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_edit_to_original, map_tool_line_col_to_original,
+    map_concatenated_edit_to_original, map_diagnostic_range,
 };
-use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
+use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct RuffDiagnostic {
@@ -31,6 +31,8 @@ struct RuffPosition {
 struct RuffFix {
     message: String,
     edits: Vec<RuffEdit>,
+    #[serde(default)]
+    applicability: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,16 +57,19 @@ impl ExternalLinterParser for RuffParser {
         for ruff_diag in output {
             let line = ruff_diag.location.row;
             let column = ruff_diag.location.column;
-            let start_offset = map_tool_line_col_to_original(ctx, line, column)
-                .unwrap_or(ctx.original_input.len());
+            let Some(start_offset) = line_col_to_offset(ctx.linted_input, line, column) else {
+                continue;
+            };
 
             let end_line = ruff_diag.end_location.row;
             let end_column = ruff_diag.end_location.column;
-            let end_offset = map_tool_line_col_to_original(ctx, end_line, end_column)
-                .unwrap_or(ctx.original_input.len());
-
-            let range = TextRange::new((start_offset as u32).into(), (end_offset as u32).into());
-            let location = Location::from_range(range, ctx.original_input);
+            let Some(end_offset) = line_col_to_offset(ctx.linted_input, end_line, end_column)
+            else {
+                continue;
+            };
+            let Some(location) = map_diagnostic_range(ctx, start_offset, end_offset) else {
+                continue;
+            };
 
             let fix = if let (Some(mappings), Some(fix)) = (ctx.mappings, ruff_diag.fix.as_ref()) {
                 let mut edits = Vec::new();
@@ -112,7 +117,11 @@ impl ExternalLinterParser for RuffParser {
                 if edits.is_empty() {
                     None
                 } else {
-                    Some(Fix::safe(fix.message.clone(), edits))
+                    Some(if fix.applicability == "unsafe" {
+                        Fix::unsafe_fix(fix.message.clone(), edits)
+                    } else {
+                        Fix::safe(fix.message.clone(), edits)
+                    })
                 }
             } else {
                 None

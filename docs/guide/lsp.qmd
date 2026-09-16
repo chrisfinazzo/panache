@@ -685,9 +685,12 @@ Built-in rules
     Run debounced as you type.
 
 External linters
-:   Code block linting (e.g., `jarl` for R when configured in `[linters]`). Run
-    on save, not on every keystroke, since each pass spawns a subprocess per
-    embedded code block.
+:   Code blocks and executable inline expressions are analyzed together (e.g.,
+    `arity` for R when configured in `[linters]`). Run on save, with one
+    subprocess per configured language. Quarto inline R, Python, and Julia
+    expressions receive diagnostics and quick fixes at their original document
+    positions. Inline fixes preserve the surrounding Markdown, and unsafe fixes
+    remain excluded from the aggregate fix-all action.
 
 Project manifests
 :   YAML parse errors in the project's manifest files---`_quarto.yml`,

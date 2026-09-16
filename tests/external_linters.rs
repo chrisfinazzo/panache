@@ -6,6 +6,118 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn inline_execution_keeps_r_bindings_used() {
+        if which::which("arity").is_err() {
+            eprintln!("Skipping inline R test: arity is not installed");
+            return;
+        }
+        for expression in ["`r x`", "`{r} x`"] {
+            let input =
+                format!("```{{r}}\n#| label: setup\nx <- 42\n```\n\nThe answer is {expression}.\n");
+            let config = Config {
+                flavor: panache::config::Flavor::Quarto,
+                extensions: panache::config::Extensions::for_flavor(
+                    panache::config::Flavor::Quarto,
+                ),
+                linters: HashMap::from([("r".into(), "arity".into())]),
+                ..Config::default()
+            };
+            let tree = parse(&input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+            assert!(diagnostics.is_empty(), "{expression}: {diagnostics:#?}");
+        }
+    }
+
+    fn quarto_external_config(language: &str, linter: &str) -> Config {
+        Config {
+            flavor: panache::config::Flavor::Quarto,
+            extensions: panache::config::Extensions::for_flavor(panache::config::Flavor::Quarto),
+            linters: HashMap::from([(language.into(), linter.into())]),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn inline_execution_r_fixes_target_only_expression_content() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        let input = "> Résultat 🦀 `r any(is.na(NA))` et `{r} any(is.na(NA))`.\r\n";
+        let config = quarto_external_config("r", "arity");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        let fixes: Vec<_> = diagnostics
+            .iter()
+            .filter(|diag| diag.code == "any-is-na")
+            .collect();
+        assert_eq!(fixes.len(), 2, "{diagnostics:#?}");
+        for (diag, (offset, _)) in fixes.iter().zip(input.match_indices("any(is.na(NA))")) {
+            assert_eq!(usize::from(diag.location.range.start()), offset);
+            let edit = &diag.fix.as_ref().unwrap().edits[0];
+            assert_eq!(
+                &input[usize::from(edit.range.start())..usize::from(edit.range.end())],
+                "any(is.na(NA))"
+            );
+            assert_eq!(edit.replacement, "anyNA(NA)");
+        }
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("panache_inline_"))
+        );
+    }
+
+    #[test]
+    fn inline_execution_python_reads_imports_and_maps_undefined_names() {
+        if which::which("ruff").is_err() {
+            return;
+        }
+        let input = "```{python}\n#| label: setup\nimport math\n```\n\nValue `{python} math.pi`, missing `{python} missing_value`.\n";
+        let config = quarto_external_config("python", "ruff");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diag| ["F401", "B018"].contains(&diag.code.as_str())),
+            "{diagnostics:#?}"
+        );
+        let missing = diagnostics
+            .iter()
+            .find(|diag| diag.code == "F821")
+            .expect("inline diagnostic");
+        assert_eq!(
+            usize::from(missing.location.range.start()),
+            input.find("missing_value").unwrap()
+        );
+    }
+
+    #[test]
+    fn inline_execution_julia_reads_bindings_and_maps_fixes() {
+        if which::which("fatou").is_err() {
+            return;
+        }
+        let input = "```{julia}\n#| label: setup\nx = 42\n```\n\nValue `{julia} x == nothing`.\n";
+        let config = quarto_external_config("julia", "fatou");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(
+            !diagnostics.iter().any(|diag| diag.code == "unused-binding"),
+            "{diagnostics:#?}"
+        );
+        let comparison = diagnostics
+            .iter()
+            .find(|diag| diag.code == "nothing-comparison")
+            .expect("inline diagnostic");
+        let edit = &comparison.fix.as_ref().unwrap().edits[0];
+        assert_eq!(
+            &input[usize::from(edit.range.start())..usize::from(edit.range.end())],
+            "=="
+        );
+        assert_eq!(edit.replacement, "===");
+    }
+
+    #[test]
     fn test_jarl_linter_integration() {
         // Skip if jarl not available
         if which::which("jarl").is_err() {

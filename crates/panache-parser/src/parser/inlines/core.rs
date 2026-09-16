@@ -947,6 +947,31 @@ fn parse_inline_range_impl(
                     backtick_count
                 );
 
+                if backtick_count == 1
+                    && let Some((marker, spacing, code)) =
+                        crate::syntax::inline_execution_parts(content, &config.extensions)
+                {
+                    builder.start_node(SyntaxKind::INLINE_EXEC_SPAN.into());
+                    builder.token(SyntaxKind::INLINE_EXEC_MARKER.into(), "`");
+                    builder.token(SyntaxKind::INLINE_EXEC_LANG.into(), marker);
+                    builder.token(SyntaxKind::WHITESPACE.into(), spacing);
+                    builder.token(SyntaxKind::INLINE_EXEC_CONTENT.into(), code);
+                    builder.token(SyntaxKind::INLINE_EXEC_MARKER.into(), "`");
+                    if config.extensions.inline_code_attributes
+                        && let Some((_, raw)) = attributes.as_ref()
+                    {
+                        crate::parser::utils::attributes::emit_attribute_node(builder, raw);
+                    }
+                    builder.finish_node();
+                    pos += if config.extensions.inline_code_attributes {
+                        len
+                    } else {
+                        content.len() + 2
+                    };
+                    text_start = pos;
+                    continue;
+                }
+
                 if let Some((ref attrs, raw_attr)) = attributes
                     && config.extensions.raw_attribute
                     && let Some(format) = is_raw_inline(attrs)

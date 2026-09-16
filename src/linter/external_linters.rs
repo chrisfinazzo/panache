@@ -312,32 +312,103 @@ pub fn parse_linter_output(
         original_input,
         mappings,
     };
+    let mut diagnostics = parse_with_context(linter_name, &ctx)?;
+    if let Some(mappings) = mappings {
+        for diagnostic in &mut diagnostics {
+            if diagnostic
+                .fix
+                .as_ref()
+                .is_some_and(|fix| !preserves_inline_expressions(fix, linted_input, mappings))
+            {
+                diagnostic.fix = None;
+            }
+        }
+    }
+    Ok(diagnostics)
+}
+
+fn preserves_inline_expressions(
+    fix: &crate::linter::diagnostics::Fix,
+    linted_input: &str,
+    mappings: &[BlockMapping],
+) -> bool {
+    use crate::linter::code_block_collector::SnippetKind;
+    mappings
+        .iter()
+        .filter(|mapping| mapping.kind == SnippetKind::Inline)
+        .all(|mapping| {
+            let mut edits: Vec<_> = fix
+                .edits
+                .iter()
+                .filter(|edit| {
+                    mapping.original_range.start <= usize::from(edit.range.start())
+                        && usize::from(edit.range.end()) <= mapping.original_range.end
+                })
+                .collect();
+            if edits.is_empty() {
+                return true;
+            }
+            edits.sort_by_key(|edit| edit.range.start());
+            let mut result = String::new();
+            let mut cursor = mapping.concatenated_range.start;
+            for edit in edits {
+                let original_start = usize::from(edit.range.start());
+                let &(line_start, original_line) = mapping
+                    .line_offsets
+                    .iter()
+                    .rev()
+                    .find(|(_, original)| *original <= original_start)
+                    .unwrap_or(&(
+                        mapping.concatenated_range.start,
+                        mapping.original_range.start,
+                    ));
+                let start = line_start + (original_start - original_line);
+                let end = start + usize::from(edit.range.len());
+                let Some(before) = linted_input.get(cursor..start) else {
+                    return false;
+                };
+                result.push_str(before);
+                result.push_str(&edit.replacement);
+                cursor = end;
+            }
+            let Some(after) = linted_input.get(cursor..mapping.concatenated_range.end) else {
+                return false;
+            };
+            result.push_str(after);
+            !result.trim().is_empty()
+        })
+}
+
+fn parse_with_context(
+    linter_name: &str,
+    ctx: &ParseContext<'_>,
+) -> Result<Vec<Diagnostic>, LinterError> {
     if linter_name == jarl::JarlParser::NAME {
-        return jarl::JarlParser::parse(&ctx);
+        return jarl::JarlParser::parse(ctx);
     }
     if linter_name == jolars::ArityParser::NAME {
-        return jolars::ArityParser::parse(&ctx);
+        return jolars::ArityParser::parse(ctx);
     }
     if linter_name == jolars::FatouParser::NAME {
-        return jolars::FatouParser::parse(&ctx);
+        return jolars::FatouParser::parse(ctx);
     }
     if linter_name == jolars::BadnessParser::NAME {
-        return jolars::BadnessParser::parse(&ctx);
+        return jolars::BadnessParser::parse(ctx);
     }
     if linter_name == ruff::RuffParser::NAME {
-        return ruff::RuffParser::parse(&ctx);
+        return ruff::RuffParser::parse(ctx);
     }
     if linter_name == eslint::EslintParser::NAME {
-        return eslint::EslintParser::parse(&ctx);
+        return eslint::EslintParser::parse(ctx);
     }
     if linter_name == staticcheck::StaticcheckParser::NAME {
-        return staticcheck::StaticcheckParser::parse(&ctx);
+        return staticcheck::StaticcheckParser::parse(ctx);
     }
     if linter_name == clippy::ClippyParser::NAME {
-        return clippy::ClippyParser::parse(&ctx);
+        return clippy::ClippyParser::parse(ctx);
     }
     if linter_name == shellcheck::ShellcheckParser::NAME {
-        return shellcheck::ShellcheckParser::parse(&ctx);
+        return shellcheck::ShellcheckParser::parse(ctx);
     }
 
     Err(LinterError::ParseError(format!(
@@ -363,11 +434,9 @@ pub(crate) fn map_tool_line_col_to_original(
     column: usize,
 ) -> Option<usize> {
     match ctx.mappings {
-        Some(mappings) => line_col_to_offset(ctx.linted_input, line, column)
-            .and_then(|offset| {
-                map_concatenated_offset_to_original_with_end_boundary(offset, mappings)
-            })
-            .or_else(|| line_col_to_offset(ctx.original_input, line, column)),
+        Some(mappings) => line_col_to_offset(ctx.linted_input, line, column).and_then(|offset| {
+            map_concatenated_offset_to_original_with_end_boundary(offset, mappings)
+        }),
         None => line_col_to_offset(ctx.original_input, line, column),
     }
 }
@@ -417,6 +486,46 @@ pub(crate) fn map_concatenated_offset_to_original_with_end_boundary(
     })
 }
 
+/// A diagnostic must belong to one source snippet. Generated framing and gaps
+/// have no document location, and must never fall back to unrelated prose.
+pub(crate) fn map_diagnostic_range(
+    ctx: &ParseContext<'_>,
+    start: usize,
+    end: usize,
+) -> Option<crate::linter::diagnostics::Location> {
+    if end < start
+        || !ctx.linted_input.is_char_boundary(start)
+        || !ctx.linted_input.is_char_boundary(end)
+    {
+        return None;
+    }
+    let (start, end) = match ctx.mappings {
+        Some(mappings) => {
+            let mapping = mappings.iter().find(|mapping| {
+                (mapping.concatenated_range.contains(&start)
+                    || (start == end && mapping.concatenated_range.end == start))
+                    && end <= mapping.concatenated_range.end
+            })?;
+            let mapping = std::slice::from_ref(mapping);
+            (
+                map_concatenated_offset_to_original_with_end_boundary(start, mapping)?,
+                map_concatenated_offset_to_original_with_end_boundary(end, mapping)?,
+            )
+        }
+        None => (
+            start.min(ctx.original_input.len()),
+            end.min(ctx.original_input.len()),
+        ),
+    };
+    if !ctx.original_input.is_char_boundary(start) || !ctx.original_input.is_char_boundary(end) {
+        return None;
+    }
+    Some(crate::linter::diagnostics::Location::from_range(
+        rowan::TextRange::new((start as u32).into(), (end as u32).into()),
+        ctx.original_input,
+    ))
+}
+
 /// Map a fix edit's `[start, end)` (offsets in the concatenated lint input)
 /// plus its replacement text onto an original-document range.
 ///
@@ -447,6 +556,23 @@ pub(crate) fn map_concatenated_edit_to_original(
         return None;
     }
 
+    let covered = linted_input.get(start..end)?;
+    if mapping.kind == crate::linter::code_block_collector::SnippetKind::Inline {
+        if replacement.contains(['`', '\n', '\r']) || covered.contains(['\n', '\r']) {
+            return None;
+        }
+        let before = linted_input.get(mapping.concatenated_range.start..start)?;
+        let after = linted_input.get(end..mapping.concatenated_range.end)?;
+        if before.trim().is_empty() && replacement.trim().is_empty() && after.trim().is_empty() {
+            return None;
+        }
+        // An inline's final boundary is before its closing backtick, even in
+        // a multiline container. Inserting there does not disturb a prefix.
+        if start == mapping.concatenated_range.end {
+            return Some((mapping.original_range.end, mapping.original_range.end));
+        }
+    }
+
     let block_delta = mapping
         .original_range
         .start
@@ -460,7 +586,10 @@ pub(crate) fn map_concatenated_edit_to_original(
     if constant_delta {
         // Content is byte-identical to the document: plain offset
         // arithmetic expresses any edit, including multi-line ones.
-        return Some((start + block_delta, end + block_delta));
+        return Some((
+            mapping.original_range.start + (start - mapping.concatenated_range.start),
+            mapping.original_range.start + (end - mapping.concatenated_range.start),
+        ));
     }
 
     // Prefixed block. A position past the final newline sits before the
@@ -477,7 +606,6 @@ pub(crate) fn map_concatenated_edit_to_original(
     // next line's prefix is orphaned onto this line), and an edit inside
     // the line must not introduce newlines (the inserted line would be
     // prefix-less).
-    let covered = linted_input.get(start..end)?;
     let covered_newlines = covered.matches('\n').count();
     let replacement_newlines = replacement.matches('\n').count();
     let structure_preserved = match covered_newlines {
@@ -508,7 +636,7 @@ mod tests {
 
     fn prefixed_block_mapping(input: &str) -> (String, Vec<BlockMapping>) {
         let tree = crate::parse(input, None);
-        let blocks = crate::utils::collect_code_blocks(&tree, input);
+        let blocks = crate::utils::collect_code_snippets(&tree, input);
         let result = crate::linter::code_block_collector::concatenate_with_blanks_and_mapping(
             &blocks["python"],
         );

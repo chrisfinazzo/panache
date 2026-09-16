@@ -1,5 +1,5 @@
 use crate::config::WrapMode;
-use crate::formatter::preserve::preserve_lines;
+use crate::formatter::preserve::preserve_lines_normalized;
 use crate::formatter::smart::normalize_smart_punctuation;
 use crate::formatter::utils::is_block_element;
 use crate::formatter::{Formatter, paragraphs};
@@ -132,22 +132,21 @@ impl Formatter {
         match wrap_mode {
             WrapMode::Preserve => {
                 log::trace!("Preserving paragraph line breaks");
-                let escaped = self.config.formatter_extensions.escaped_line_breaks;
-                for (i, line) in preserve_lines(node, escaped).iter().enumerate() {
+                for (i, line) in preserve_lines_normalized(node, &self.config)
+                    .iter()
+                    .enumerate()
+                {
                     if i > 0 {
                         self.output.push('\n');
                     }
                     if indent > 0 {
                         self.output.push_str(&paragraph_indent);
                     }
-                    self.output.push_str(
-                        normalize_smart_punctuation(
-                            if indent > 0 { line.trim_start() } else { line },
-                            self.config.formatter_extensions.smart,
-                            self.config.formatter_extensions.smart_quotes,
-                        )
-                        .as_ref(),
-                    );
+                    self.output.push_str(if indent > 0 {
+                        paragraphs::trim_prose_indent(node, line)
+                    } else {
+                        line
+                    });
                 }
                 if !self.output.ends_with('\n') {
                     self.output.push('\n');
@@ -218,25 +217,20 @@ impl Formatter {
             && !self.output.ends_with(":   ");
         match wrap_mode {
             WrapMode::Preserve => {
-                let escaped = self.config.formatter_extensions.escaped_line_breaks;
-                for (i, line) in preserve_lines(node, escaped).iter().enumerate() {
+                for (i, line) in preserve_lines_normalized(node, &self.config)
+                    .iter()
+                    .enumerate()
+                {
                     if needs_indent {
                         self.output.push_str(&" ".repeat(indent));
                     } else if i > 0 {
                         self.output.push('\n');
                     }
-                    self.output.push_str(
-                        normalize_smart_punctuation(
-                            if needs_indent {
-                                line.trim_start()
-                            } else {
-                                line
-                            },
-                            self.config.formatter_extensions.smart,
-                            self.config.formatter_extensions.smart_quotes,
-                        )
-                        .as_ref(),
-                    );
+                    self.output.push_str(if needs_indent {
+                        paragraphs::trim_prose_indent(node, line)
+                    } else {
+                        line
+                    });
                     if needs_indent {
                         self.output.push('\n');
                     }
@@ -274,7 +268,7 @@ impl Formatter {
                         self.output.push_str(&" ".repeat(indent));
                     }
                     let rendered = if i > 0 && indent > 0 {
-                        line.trim_start()
+                        paragraphs::trim_prose_indent(node, line)
                     } else {
                         line.as_str()
                     };
@@ -307,7 +301,7 @@ impl Formatter {
                         self.output.push_str(&" ".repeat(indent));
                     }
                     let rendered = if i > 0 && indent > 0 {
-                        line.trim_start()
+                        paragraphs::trim_prose_indent(node, line)
                     } else {
                         line.as_str()
                     };

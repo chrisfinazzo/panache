@@ -159,6 +159,7 @@ pub enum SyntaxKind {
     INLINE_EXEC_MARKER,  // Backtick markers delimiting inline executable code
     INLINE_EXEC_LANG,    // Runtime marker (`r` or `{r}`)
     INLINE_EXEC_CONTENT, // Executable inline code expression
+    INLINE_EXEC_SPAN,    // Ordinary executable span, distinct from nested-backtick tails
     CODE_FENCE_MARKER,   // ``` or ~~~
     CODE_BLOCK,
 

@@ -974,7 +974,13 @@ impl<'a> TraversalBuilder<'a> {
 
     fn finish(mut self) -> Vec<String> {
         self.flush_current(false);
-        self.sink.finish()
+        // Executable spans can contain significant newlines inside one atomic
+        // piece. Containers must still prefix every physical output line.
+        self.sink
+            .finish()
+            .into_iter()
+            .flat_map(|line| line.split('\n').map(str::to_owned).collect::<Vec<_>>())
+            .collect()
     }
 
     fn push_verbatim_lines(&mut self, text: &str) {
@@ -1262,6 +1268,7 @@ fn process_node_recursive(
                     }
                 }
                 SyntaxKind::INLINE_CODE
+                | SyntaxKind::INLINE_EXEC_SPAN
                 | SyntaxKind::INLINE_EXEC
                 | SyntaxKind::INLINE_EXEC_CONTENT => {
                     let text = format_inline_fn(&n);

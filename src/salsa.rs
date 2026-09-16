@@ -674,7 +674,7 @@ pub fn built_in_lint_plan(db: &dyn Db, file: FileText, config: FileConfig) -> Bu
 
     let mut external_jobs = Vec::new();
     if !cfg.linters.is_empty() {
-        let code_blocks = crate::utils::collect_code_blocks(&tree, text);
+        let code_blocks = crate::utils::collect_code_snippets(&tree, text);
         for (language, linter_name) in &cfg.linters {
             let Some(blocks) = code_blocks.get(language) else {
                 continue;

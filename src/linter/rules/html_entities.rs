@@ -210,6 +210,7 @@ const EXCLUDED_ANCESTOR_KINDS: &[SyntaxKind] = &[
     SyntaxKind::YAML_METADATA,
     SyntaxKind::YAML_METADATA_CONTENT,
     SyntaxKind::INLINE_EXEC,
+    SyntaxKind::INLINE_EXEC_SPAN,
     SyntaxKind::INLINE_EXEC_CONTENT,
     SyntaxKind::SHORTCODE,
     SyntaxKind::SHORTCODE_CONTENT,

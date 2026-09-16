@@ -262,8 +262,8 @@ impl CodeBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeSourceSegment {
-    text: String,
-    range: TextRange,
+    pub(crate) text: String,
+    pub(crate) range: TextRange,
 }
 
 impl CodeSourceSegment {

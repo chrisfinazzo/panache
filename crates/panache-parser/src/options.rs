@@ -78,9 +78,9 @@ pub struct Extensions {
     pub fenced_code_attributes: bool,
     /// Executable code syntax (currently fenced chunks like ```{r} / ```{python})
     pub executable_code: bool,
-    /// R Markdown inline executable code (`...`r ...)
+    /// R Markdown inline executable code and nested-backtick tails.
     pub rmarkdown_inline_code: bool,
-    /// Quarto inline executable code (`...`{r} ...)
+    /// Quarto inline R, Python, and Julia expressions and nested-backtick R tails.
     pub quarto_inline_code: bool,
     /// Attributes on inline code
     pub inline_code_attributes: bool,

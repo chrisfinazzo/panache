@@ -905,15 +905,16 @@ inline-code-attributes = true
     flavors).
 
 `rmarkdown-inline-code`
-:   Parse inline executable code that uses R Markdown style tails like
-    `` `3 == `r 2 + 1 `` \`\` (default: disabled, enabled for Quarto and
-    RMarkdown flavors).
+:   Parse classic R inline expressions such as `` `r x` `` and R Markdown
+    nested-backtick tails (default: disabled, enabled for Quarto and RMarkdown
+    flavors). Executable expressions participate in external linting.
 
 `quarto-inline-code`
-:   Parse inline executable code that uses braced tails like
-    `` `3 == `{r} 2 + 1 ``
-    \``(default: disabled, enabled for Quarto flavor).     Formatted output is normalized to the braced`{r}\`
-    marker for renderer parity in this syntax family.
+:   Parse braced inline expressions such as `` `{r} x` ``, `` `{python} x` ``,
+    and `` `{julia} x` ``, as well as braced R nested-backtick tails (default:
+    disabled, enabled for Quarto flavor). Executable expressions participate in
+    external linting. Formatting preserves ordinary expressions and extra
+    backticks used to escape them.
 
 `inline-code-attributes`
 :   Attributes on inline code `` `code`{.class} `` (default: enabled)

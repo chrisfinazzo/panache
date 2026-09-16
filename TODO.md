@@ -193,7 +193,7 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 
 ### External linter context (compstat triage, 2026-09)
 
-- [ ] Include executable inline expressions in external linter analysis under
+- [x] Include executable inline expressions in external linter analysis under
   `--flavor quarto`. With `[linters] r = "arity"`, the following renders
   `The answer is 42` in Quarto, but Panache reports `unused-binding` on `x`.
   `lint --fix --unsafe-fixes` deletes the assignment, after which Quarto

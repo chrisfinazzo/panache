@@ -13,7 +13,7 @@ use crate::linter::rules::LintContext;
 use crate::linter::rules::RuleRegistry;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::utils::collect_code_blocks;
+use crate::utils::collect_code_snippets;
 
 pub struct LintRunner {
     registry: RuleRegistry,
@@ -137,12 +137,12 @@ impl LintRunner {
         log_missing_linter_commands(&missing_linter_commands);
 
         // Collect code blocks by language
-        let code_blocks = collect_code_blocks(tree, input);
+        let code_blocks = collect_code_snippets(tree, input);
 
         // Resolve which (language, linter) pairs are actually runnable. This
         // pre-pass stays sequential: the skip/warn logging is cheap and its
         // order should be stable. The expensive subprocess work happens below.
-        let mut jobs: Vec<(&str, &str, &[crate::utils::CodeBlock])> = Vec::new();
+        let mut jobs: Vec<(&str, &str, &[crate::utils::CodeSnippet])> = Vec::new();
         for (language, linter_name) in &config.linters {
             let Some(linter_info) = self.external_linters.get(linter_name) else {
                 log::warn!(
@@ -193,7 +193,7 @@ impl LintRunner {
         let run_one = |(language, linter_name, blocks): (
             &str,
             &str,
-            &[crate::utils::CodeBlock],
+            &[crate::utils::CodeSnippet],
         )|
          -> Vec<Diagnostic> {
             log::debug!(

@@ -1,0 +1,16 @@
+The answer is `r  x` and `{r} x`{.value}.
+
+Python uses `{python} x`, and Julia uses `{julia} x`.
+
+These are literals: ``r x``, ``{python} x``, and `{{julia}} x`.
+
+> The value is `{r} (x +
+>   1)`.
+
+- The value is `{julia} x`.
+
+- String `{python} """a
+      b"""`.
+
+Multiline Python is `{python} (x +
+    1)`.

@@ -1,18 +1,25 @@
-//! Code block concatenation for external linter invocation.
+//! Block and inline code concatenation for external linter invocation.
 //!
-//! This module provides utilities to concatenate code blocks with blank line
-//! preservation for accurate position mapping in diagnostics.
+//! Explicit source mappings keep diagnostics and fixes aligned even when inline
+//! framing shifts later snippets away from their original line numbers.
 
-use crate::utils::CodeBlock;
+use crate::utils::CodeSnippet;
 
-/// Mapping information for a code block in the concatenated file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetKind {
+    Block,
+    Inline,
+}
+
+/// Mapping information for a source snippet in the concatenated file.
 #[derive(Debug, Clone)]
 pub struct BlockMapping {
+    pub kind: SnippetKind,
     /// Byte offset range in the concatenated file
     pub concatenated_range: std::ops::Range<usize>,
     /// Byte offset range in the original document
     pub original_range: std::ops::Range<usize>,
-    /// Starting line number in both files (preserved by blank line padding)
+    /// Starting line number in the original document.
     pub start_line: usize,
     /// Per content line: the line's start offset in the concatenated file
     /// paired with the offset of its first content byte in the original
@@ -33,9 +40,9 @@ pub struct ConcatenatedBlocks {
 
 /// Concatenate code blocks with blank line preservation and return mapping info.
 ///
-/// Returns the concatenated string where each block appears at its original line number,
-/// with blank lines filling the gaps, plus mapping information to convert offsets back.
-pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> ConcatenatedBlocks {
+/// Pads to original line numbers where possible. Inline framing may shift later
+/// snippets; mappings, rather than line-number equality, locate source content.
+pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeSnippet]) -> ConcatenatedBlocks {
     if blocks.is_empty() {
         return ConcatenatedBlocks {
             content: String::new(),
@@ -46,6 +53,15 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
     let mut content = String::new();
     let mut mappings = Vec::new();
     let mut current_line = 1;
+    let mut binding_index = 0;
+    // Reserve a namespace once instead of scanning every snippet per expression.
+    let mut binding_prefix = "panache_inline_".to_string();
+    while blocks
+        .iter()
+        .any(|snippet| snippet.content.contains(&binding_prefix))
+    {
+        binding_prefix.push('_');
+    }
 
     for block in blocks {
         // Add blank lines to reach the block's start line
@@ -54,7 +70,20 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
             current_line += 1;
         }
 
-        // Track the start of this block in the concatenated file
+        if block.kind == SnippetKind::Inline {
+            let binding = format!("{binding_prefix}{binding_index}");
+            binding_index += 1;
+            let framing = match block.language.as_str() {
+                "r" => format!("{binding} <- {{\n"),
+                "python" => format!("{binding} = (\n"),
+                "julia" => format!("{binding} = begin\n"),
+                _ => unreachable!("parser only recognizes supported inline runtimes"),
+            };
+            content.push_str(&framing);
+            current_line += 1;
+        }
+
+        // Only expression bytes receive source mappings, never generated framing.
         let concat_start = content.len();
 
         // Add the block content
@@ -75,17 +104,26 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
         }
 
         mappings.push(BlockMapping {
+            kind: block.kind,
             concatenated_range: concat_start..concat_end,
             original_range: block.original_range.clone(),
             start_line: block.start_line,
             line_offsets,
         });
 
-        let lines_added = block.content.lines().count().max(1);
-        current_line += lines_added;
+        current_line += block.content.bytes().filter(|&byte| byte == b'\n').count();
 
         if !block.content.ends_with('\n') {
             content.push('\n');
+            current_line += 1;
+        }
+        if block.kind == SnippetKind::Inline {
+            content.push_str(match block.language.as_str() {
+                "r" => "}\n",
+                "python" => ")\n",
+                "julia" => "end\n",
+                _ => unreachable!(),
+            });
             current_line += 1;
         }
     }
@@ -93,11 +131,8 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeBlock]) -> Concatenated
     ConcatenatedBlocks { content, mappings }
 }
 
-/// Concatenate code blocks with blank line preservation.
-///
-/// Returns the concatenated string where each block appears at its original line number,
-/// with blank lines filling the gaps.
-pub fn concatenate_with_blanks(blocks: &[CodeBlock]) -> String {
+/// Concatenate snippets with inline framing and blank-line padding.
+pub fn concatenate_with_blanks(blocks: &[CodeSnippet]) -> String {
     concatenate_with_blanks_and_mapping(blocks).content
 }
 
@@ -106,7 +141,164 @@ mod tests {
     use super::*;
     use crate::config::{Config, Flavor};
     use crate::parse;
-    use crate::utils::{CodeBlock, collect_code_blocks, offset_to_line};
+    use crate::utils::{CodeSnippet, collect_code_snippets, offset_to_line};
+
+    fn inline_input(input: &str) -> ConcatenatedBlocks {
+        let config = Config {
+            flavor: Flavor::Quarto,
+            extensions: crate::config::Extensions::for_flavor(Flavor::Quarto),
+            ..Default::default()
+        };
+        let tree = parse(input, Some(config));
+        let blocks = collect_code_snippets(&tree, input);
+        concatenate_with_blanks_and_mapping(&blocks["r"])
+    }
+
+    #[test]
+    fn inline_execution_maps_same_line_and_later_block() {
+        let input = "é `r first` and `r second`.\r\n\r\n> ```{r}\r\n> third\r\n> ```\r\n";
+        let result = inline_input(input);
+        assert_eq!(result.mappings.len(), 3);
+        for word in ["first", "second", "third"] {
+            let offset = result.content.find(word).unwrap();
+            assert_eq!(
+                super::super::external_linters::map_concatenated_edit_to_original(
+                    &result.content,
+                    offset,
+                    offset + word.len(),
+                    "value",
+                    &result.mappings,
+                ),
+                Some((
+                    input.find(word).unwrap(),
+                    input.find(word).unwrap() + word.len()
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn inline_execution_maps_multiline_expression_edits() {
+        use super::super::external_linters::map_concatenated_edit_to_original;
+        let input = "> Value `r (x +\r\n>   y)`.\r\n";
+        let result = inline_input(input);
+        let start = result.content.find("y)").unwrap();
+        let original = input.find("y)").unwrap();
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &result.content,
+                start,
+                start + 1,
+                "z",
+                &result.mappings
+            ),
+            Some((original, original + 1))
+        );
+        let mapping = &result.mappings[0];
+        assert_eq!(
+            map_concatenated_edit_to_original(
+                &result.content,
+                mapping.concatenated_range.end,
+                mapping.concatenated_range.end,
+                " + 1",
+                &result.mappings
+            ),
+            Some((mapping.original_range.end, mapping.original_range.end))
+        );
+        assert!(
+            map_concatenated_edit_to_original(
+                &result.content,
+                mapping.concatenated_range.start,
+                mapping.concatenated_range.end,
+                "z",
+                &result.mappings
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn inline_execution_rejects_fixes_that_change_markdown_structure() {
+        let input = "`r x` and `r y`\n";
+        let result = inline_input(input);
+        let range = result.mappings[0].concatenated_range.clone();
+        for replacement in ["", " ", "a\nb", "a\rb", "`x`"] {
+            assert!(
+                super::super::external_linters::map_concatenated_edit_to_original(
+                    &result.content,
+                    range.start,
+                    range.end,
+                    replacement,
+                    &result.mappings,
+                )
+                .is_none(),
+                "{replacement:?}"
+            );
+        }
+        assert!(
+            super::super::external_linters::map_concatenated_edit_to_original(
+                &result.content,
+                range.start,
+                result.mappings[1].concatenated_range.end,
+                "x",
+                &result.mappings,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn inline_execution_skips_generated_diagnostics() {
+        let input = "`r x`\n";
+        let result = inline_input(input);
+        let start = result.content.find("panache_inline_").unwrap();
+        let output = serde_json::json!([{
+            "rule": "unused-binding", "severity": "Warning",
+            "range": {"start": start, "end": start + 16},
+            "message": {"name": "unused-binding", "body": "synthetic"}
+        }]);
+        let diagnostics = super::super::external_linters::parse_linter_output(
+            "arity",
+            &output.to_string(),
+            &result.content,
+            input,
+            Some(&result.mappings),
+        )
+        .unwrap();
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn inline_execution_rejects_combined_fixes_that_empty_an_expression() {
+        let input = "`r x+y`\n";
+        let result = inline_input(input);
+        let output = serde_json::json!([{
+            "code": "example", "message": "example", "filename": "input.py",
+            "location": {"row": 2, "column": 1}, "end_location": {"row": 2, "column": 4},
+            "fix": {"message": "remove both", "applicability": "unsafe", "edits": [
+                {"content": "", "location": {"row": 2, "column": 1}, "end_location": {"row": 2, "column": 2}},
+                {"content": "", "location": {"row": 2, "column": 2}, "end_location": {"row": 2, "column": 4}}
+            ]}
+        }]);
+        let diagnostics = super::super::external_linters::parse_linter_output(
+            "ruff",
+            &output.to_string(),
+            &result.content,
+            input,
+            Some(&result.mappings),
+        )
+        .unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].fix.is_none());
+    }
+
+    #[test]
+    fn inline_execution_binding_names_do_not_shadow_document_code() {
+        let input = "```r\npanache_inline_0 <- 1\n```\n\n`r panache_inline_0`\n";
+        let result = inline_input(input);
+        assert!(result.content.contains("panache_inline__0 <- {"));
+        assert!(!result.content.contains("panache_inline_0 <- {"));
+    }
 
     #[test]
     fn test_collect_single_r_block() {
@@ -119,7 +311,7 @@ y <- 2
 "#;
 
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains_key("r"));
@@ -145,7 +337,7 @@ y <- 2
 "#;
 
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 1);
         let r_blocks = &blocks["r"];
@@ -166,7 +358,7 @@ print("hello")
 "#;
 
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains_key("python"));
@@ -175,7 +367,8 @@ print("hello")
 
     #[test]
     fn test_concatenate_with_blanks_single_block() {
-        let blocks = vec![CodeBlock {
+        let blocks = vec![CodeSnippet {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             language: "r".to_string(),
             content: "x <- 1\n".to_string(),
             start_line: 5,
@@ -193,14 +386,16 @@ print("hello")
     #[test]
     fn test_concatenate_with_blanks_multiple_blocks() {
         let blocks = vec![
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "x <- 1\n".to_string(),
                 start_line: 2,
                 original_range: 50..57,
                 line_starts: vec![50],
             },
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "y <- 2\n".to_string(),
                 start_line: 6,
@@ -228,14 +423,16 @@ print("hello")
     #[test]
     fn test_concatenate_preserves_line_numbers() {
         let blocks = vec![
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "a <- 1\n".to_string(),
                 start_line: 10,
                 original_range: 200..207,
                 line_starts: vec![200],
             },
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "b <- 2\n".to_string(),
                 start_line: 20,
@@ -273,7 +470,7 @@ print("hello")
     fn test_collect_blockquoted_block_dedents_prefix() {
         let input = "> ```python\n> x=1\n> y=2\n> ```\n";
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         let py_blocks = &blocks["python"];
         assert_eq!(py_blocks.len(), 1);
@@ -292,7 +489,7 @@ print("hello")
     fn test_collect_list_item_block_dedents_indent() {
         let input = "- item\n\n  ```python\n  x=1\n  ```\n";
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         let py_blocks = &blocks["python"];
         assert_eq!(py_blocks.len(), 1);
@@ -304,7 +501,7 @@ print("hello")
     fn test_mapping_maps_dedented_offsets_back_through_prefix() {
         let input = "> ```python\n> x=1\n> y=2\n> ```\n";
         let tree = parse(input, None);
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
         let result = concatenate_with_blanks_and_mapping(&blocks["python"]);
 
         // Line numbers are preserved: content starts on document line 2.
@@ -346,7 +543,7 @@ x <- 1
             ..Default::default()
         };
         let tree = parse(input, Some(config));
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains_key("r"), "Should extract 'r' from '{{r}}'");
@@ -371,7 +568,7 @@ x <- 1
             ..Default::default()
         };
         let tree = parse(input, Some(config));
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 1);
         assert!(
@@ -393,7 +590,7 @@ x <- 1
             ..Default::default()
         };
         let tree = parse(input, Some(config));
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert!(blocks.contains_key("bash"));
         let bash_blocks = &blocks["bash"];
@@ -426,7 +623,7 @@ d <- 4
             ..Default::default()
         };
         let tree = parse(input, Some(config));
-        let blocks = collect_code_blocks(&tree, input);
+        let blocks = collect_code_snippets(&tree, input);
 
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains_key("r"));
@@ -442,14 +639,16 @@ d <- 4
     #[test]
     fn test_concatenate_with_mapping() {
         let blocks = vec![
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "x <- 1\n".to_string(),
                 start_line: 2,
                 original_range: 10..17, // Hypothetical original positions
                 line_starts: vec![10],
             },
-            CodeBlock {
+            CodeSnippet {
+                kind: crate::linter::code_block_collector::SnippetKind::Block,
                 language: "r".to_string(),
                 content: "y <- 2\n".to_string(),
                 start_line: 6,

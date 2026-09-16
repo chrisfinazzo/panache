@@ -1,7 +1,7 @@
 use crate::config::WrapMode;
 use crate::formatter::Formatter;
-use crate::formatter::preserve::preserve_lines;
-use crate::formatter::smart::normalize_smart_punctuation;
+use crate::formatter::paragraphs::trim_prose_indent;
+use crate::formatter::preserve::preserve_lines_normalized;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 
@@ -64,20 +64,10 @@ impl Formatter {
                     let para_start = self.output.len();
                     let available_width = self.config.line_width.saturating_sub(child_indent);
                     let lines = match wrap_mode {
-                        WrapMode::Preserve => preserve_lines(
-                            child,
-                            self.config.formatter_extensions.escaped_line_breaks,
-                        )
-                        .iter()
-                        .map(|line| {
-                            normalize_smart_punctuation(
-                                line.trim_start_matches([' ', '\t']),
-                                self.config.formatter_extensions.smart,
-                                self.config.formatter_extensions.smart_quotes,
-                            )
-                            .to_string()
-                        })
-                        .collect(),
+                        WrapMode::Preserve => preserve_lines_normalized(child, &self.config)
+                            .iter()
+                            .map(|line| trim_prose_indent(child, line).to_string())
+                            .collect(),
                         WrapMode::Reflow => {
                             self.wrapped_lines_for_paragraph(child, available_width)
                         }
@@ -86,7 +76,7 @@ impl Formatter {
                     };
                     for line in lines {
                         self.output.push_str(&" ".repeat(child_indent));
-                        self.output.push_str(line.trim_start_matches([' ', '\t']));
+                        self.output.push_str(trim_prose_indent(child, &line));
                         self.output.push('\n');
                     }
                     self.guard_definition_marker_start(para_start, child_indent);
@@ -152,20 +142,7 @@ impl Formatter {
                     let rest_width = self.config.line_width.saturating_sub(child_indent);
                     let widths = [first_width, rest_width];
                     let lines = match wrap_mode {
-                        WrapMode::Preserve => preserve_lines(
-                            child,
-                            self.config.formatter_extensions.escaped_line_breaks,
-                        )
-                        .iter()
-                        .map(|line| {
-                            normalize_smart_punctuation(
-                                line,
-                                self.config.formatter_extensions.smart,
-                                self.config.formatter_extensions.smart_quotes,
-                            )
-                            .to_string()
-                        })
-                        .collect(),
+                        WrapMode::Preserve => preserve_lines_normalized(child, &self.config),
                         WrapMode::Reflow => {
                             self.wrapped_lines_for_paragraph_with_widths(child, &widths)
                         }
@@ -174,12 +151,11 @@ impl Formatter {
                     };
                     if !lines.is_empty() {
                         self.output.push(' ');
-                        self.output
-                            .push_str(lines[0].trim_start_matches([' ', '\t']));
+                        self.output.push_str(trim_prose_indent(child, &lines[0]));
                         self.output.push('\n');
                         for line in lines.iter().skip(1) {
                             self.output.push_str(&" ".repeat(child_indent));
-                            self.output.push_str(line.trim_start_matches([' ', '\t']));
+                            self.output.push_str(trim_prose_indent(child, line));
                             self.output.push('\n');
                         }
                         continue;
@@ -204,24 +180,16 @@ impl Formatter {
                     let available_width = self.config.line_width.saturating_sub(child_indent);
                     match wrap_mode {
                         WrapMode::Preserve => {
-                            let escaped = self.config.formatter_extensions.escaped_line_breaks;
-                            for line in preserve_lines(child, escaped) {
+                            for line in preserve_lines_normalized(child, &self.config) {
                                 self.output.push_str(&" ".repeat(child_indent));
-                                self.output.push_str(
-                                    normalize_smart_punctuation(
-                                        line.trim_start_matches([' ', '\t']),
-                                        self.config.formatter_extensions.smart,
-                                        self.config.formatter_extensions.smart_quotes,
-                                    )
-                                    .as_ref(),
-                                );
+                                self.output.push_str(trim_prose_indent(child, &line));
                                 self.output.push('\n');
                             }
                         }
                         WrapMode::Reflow => {
                             for line in self.wrapped_lines_for_paragraph(child, available_width) {
                                 self.output.push_str(&" ".repeat(child_indent));
-                                self.output.push_str(line.trim_start_matches([' ', '\t']));
+                                self.output.push_str(trim_prose_indent(child, &line));
                                 self.output.push('\n');
                             }
                         }
@@ -233,7 +201,7 @@ impl Formatter {
                             };
                             for line in lines {
                                 self.output.push_str(&" ".repeat(child_indent));
-                                self.output.push_str(line.trim_start_matches([' ', '\t']));
+                                self.output.push_str(trim_prose_indent(child, &line));
                                 self.output.push('\n');
                             }
                         }

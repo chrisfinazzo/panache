@@ -170,22 +170,31 @@ Available external linters:
 
 ### How External Linters Work
 
-External linters analyze code blocks using a stateful concatenation approach:
+External linters analyze code blocks and executable inline expressions together:
 
-1. **Collection**: All code blocks of the target language are extracted, with
-   any enclosing container syntax (block quote markers, list item indentation)
-   stripped so the linter sees valid code
-2. **Concatenation**: Blocks are joined with blank-line preservation to maintain
-   line numbers
-3. **Analysis**: The external linter analyzes the concatenated code
+1. **Collection**: Code blocks and executable inline expressions of the target
+   language are extracted in document order, with any enclosing container syntax
+   (block quote markers, list item indentation) stripped so the linter sees
+   valid code
+2. **Concatenation**: Code is joined, retaining blank-line padding where
+   possible
+3. **Analysis**: The external linter analyzes the combined code, treating inline
+   expression results as used values
 4. **Mapping**: Diagnostics are mapped back to original document positions,
    accounting for each line's stripped container prefix
 
 ::: {.callout-note}
 This approach correctly handles stateful code. If a variable is defined in one
-code block and used in another, the linter sees the complete context and won't
-report false positives.
+code block and used in another block or an inline expression, the linter sees
+both the definition and the use.
 :::
+
+Under the Quarto flavor, inline analysis supports `` `r expression` ``,
+`` `{r} expression` ``, `` `{python} expression` ``, and
+`` `{julia} expression` ``. R Markdown supports the classic R form. These follow
+the `rmarkdown-inline-code` and `quarto-inline-code` extension settings.
+Ordinary code spans and escaped examples using extra backticks or doubled braces
+are excluded.
 
 ::: {.callout-note}
 For a code block nested in a block quote or list item, an autofix that would add
@@ -193,6 +202,10 @@ or remove whole lines cannot be applied without disturbing the surrounding
 container syntax, so such fixes are dropped and only the diagnostic is reported.
 Fixes that stay within a single line apply normally.
 :::
+
+Inline fixes must stay within expression content. Fixes that cross expression
+boundaries, introduce backticks or line breaks, remove existing line breaks, or
+leave an empty expression are omitted while retaining the diagnostic.
 
 ### Example
 
@@ -241,9 +254,9 @@ Line accuracy
 Auto-fixes
 :   Supported for external linters that return fix edits with mappable ranges
     (currently `arity`, `fatou`, `badness`, `jarl`, `ruff`, and `eslint`). Fixes
-    that the linter marks as unsafe (`arity`, `fatou`, `badness`) are only
-    applied under `--unsafe-fixes`. Requires badness 0.14+ for LaTeX (earlier
-    versions lack JSON output and are skipped).
+    that the linter marks as unsafe (`arity`, `fatou`, `badness`, `ruff`) are
+    only applied under `--unsafe-fixes`. Requires badness 0.14+ for LaTeX
+    (earlier versions lack JSON output and are skipped).
 
 ### Where External Linters Run
 

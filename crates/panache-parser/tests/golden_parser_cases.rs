@@ -215,6 +215,7 @@ macro_rules! golden_test_cases {
 }
 
 golden_test_cases!(
+    inline_execution,
     adjacent_simple_then_pipe_table_captions,
     alerts,
     alerts_disabled,

@@ -57,7 +57,7 @@ pub(crate) fn code_action(
         let mut jobs = Vec::new();
 
         if !config.linters.is_empty() {
-            let code_blocks = crate::utils::collect_code_blocks(&tree, &text);
+            let code_blocks = crate::utils::collect_code_snippets(&tree, &text);
             for (language, linter_name) in &config.linters {
                 let Some(blocks) = code_blocks.get(language) else {
                     continue;

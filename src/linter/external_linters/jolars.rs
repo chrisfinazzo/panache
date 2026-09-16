@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 use super::{
     ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
-    map_concatenated_offset_to_original_with_end_boundary,
+    map_diagnostic_range,
 };
 use crate::linter::diagnostics::{
     Diagnostic, DiagnosticNoteKind, DiagnosticOrigin, Edit, Fix, Location,
@@ -85,25 +85,6 @@ struct BadnessEdit {
     path: Option<String>,
 }
 
-/// Map a byte offset in the linted (possibly concatenated) input back to the
-/// original document, clamped to the input like the other parsers do.
-fn map_diagnostic_offset(offset: usize, ctx: &ParseContext<'_>) -> usize {
-    match ctx.mappings {
-        Some(mappings) => map_concatenated_offset_to_original_with_end_boundary(offset, mappings)
-            .unwrap_or(ctx.original_input.len()),
-        None => offset.min(ctx.original_input.len()),
-    }
-}
-
-/// Map the diagnostic's byte range and resolve it to a `Location` in the
-/// original document.
-fn diagnostic_location(start: usize, end: usize, ctx: &ParseContext<'_>) -> Location {
-    let start_offset = map_diagnostic_offset(start, ctx);
-    let end_offset = map_diagnostic_offset(end, ctx).max(start_offset);
-    let range = TextRange::new((start_offset as u32).into(), (end_offset as u32).into());
-    Location::from_range(range, ctx.original_input)
-}
-
 /// Build an external diagnostic with the family's case-insensitive severity
 /// words (`hint` folds into info, like the other parsers' fallback arm).
 fn build_diagnostic(severity: &str, location: Location, rule: String, body: String) -> Diagnostic {
@@ -130,7 +111,11 @@ fn parse_family(ctx: &ParseContext<'_>, tool: &str) -> Result<Vec<Diagnostic>, L
 
     let mut diagnostics = Vec::new();
     for family_diag in output {
-        let location = diagnostic_location(family_diag.range.start, family_diag.range.end, ctx);
+        let Some(location) =
+            map_diagnostic_range(ctx, family_diag.range.start, family_diag.range.end)
+        else {
+            continue;
+        };
 
         let fix = if let Some(mappings) = ctx.mappings {
             family_diag
@@ -186,7 +171,9 @@ fn parse_badness(ctx: &ParseContext<'_>) -> Result<Vec<Diagnostic>, LinterError>
 
     let mut diagnostics = Vec::new();
     for badness_diag in output {
-        let location = diagnostic_location(badness_diag.start, badness_diag.end, ctx);
+        let Some(location) = map_diagnostic_range(ctx, badness_diag.start, badness_diag.end) else {
+            continue;
+        };
 
         let fix = if let Some(mappings) = ctx.mappings {
             badness_diag.fix.as_ref().and_then(|badness_fix| {
@@ -368,6 +355,7 @@ mod tests {
         // Concatenated file: three blank lines, then the block content.
         let linted = "\n\n\nany(is.na(x))\n";
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 3..17,
             original_range: 14..28,
             start_line: 4,
@@ -420,6 +408,7 @@ mod tests {
     fn parses_fatou_diagnostics_with_fixes_array() {
         let original = "if x == nothing\n    y = 1\nend\n";
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 0..30,
             original_range: 0..30,
             start_line: 1,
@@ -464,6 +453,7 @@ mod tests {
   }
 ]"#;
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 0..20,
             original_range: 0..20,
             start_line: 1,
@@ -527,6 +517,7 @@ mod tests {
   }
 ]"#;
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 0..7,
             original_range: 0..7,
             start_line: 1,
@@ -548,6 +539,7 @@ mod tests {
         let original = "# Title\n\n```r\nany(is.na(x))\n```\n";
         let linted = "\n\n\nany(is.na(x))\n";
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 3..17,
             original_range: 14..28,
             start_line: 4,
@@ -615,6 +607,7 @@ mod tests {
         let original = "# Title\n\n```latex\nWait ... what\n```\n";
         let linted = "\n\n\nWait ... what\n";
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 3..17,
             original_range: 18..32,
             start_line: 4,
@@ -673,6 +666,7 @@ mod tests {
   }
 ]"#;
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 0..6,
             original_range: 0..6,
             start_line: 1,
@@ -715,6 +709,7 @@ mod tests {
   }
 ]"#;
         let mappings = vec![BlockMapping {
+            kind: crate::linter::code_block_collector::SnippetKind::Block,
             concatenated_range: 0..6,
             original_range: 0..6,
             start_line: 1,

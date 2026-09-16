@@ -208,6 +208,7 @@ pub enum InlineNode {
     Superscript(InlineContainer),
     Subscript(InlineContainer),
     Code(CodeSpan),
+    Executable(InlineExecutable),
     Link(Link),
     Image(ImageLink),
     AutoLink(AutoLink),
@@ -236,6 +237,9 @@ impl InlineNode {
                 SyntaxKind::SUBSCRIPT => Self::Subscript(InlineContainer(node)),
                 SyntaxKind::INLINE_CODE => {
                     Self::Code(CodeSpan::cast(node).expect("checked inline code"))
+                }
+                SyntaxKind::INLINE_EXEC_SPAN => {
+                    Self::Executable(InlineExecutable::cast(node).expect("checked executable span"))
                 }
                 SyntaxKind::LINK => Self::Link(Link::cast(node).expect("checked link")),
                 SyntaxKind::IMAGE_LINK => {
@@ -269,6 +273,7 @@ impl InlineNode {
             | Self::Superscript(node)
             | Self::Subscript(node) => node.syntax().text_range(),
             Self::Code(node) => node.syntax().text_range(),
+            Self::Executable(node) => node.syntax().text_range(),
             Self::Link(node) => node.syntax().text_range(),
             Self::Image(node) => node.syntax().text_range(),
             Self::AutoLink(node) => node.syntax().text_range(),
@@ -292,6 +297,7 @@ impl InlineNode {
             | Self::Superscript(node)
             | Self::Subscript(node) => node.syntax().kind(),
             Self::Code(node) => node.syntax().kind(),
+            Self::Executable(node) => node.syntax().kind(),
             Self::Link(node) => node.syntax().kind(),
             Self::Image(node) => node.syntax().kind(),
             Self::AutoLink(node) => node.syntax().kind(),
@@ -315,6 +321,7 @@ impl InlineNode {
             | Self::Superscript(node)
             | Self::Subscript(node) => node.syntax().text().to_string(),
             Self::Code(node) => node.syntax().text().to_string(),
+            Self::Executable(node) => node.syntax().text().to_string(),
             Self::Link(node) => node.syntax().text().to_string(),
             Self::Image(node) => node.syntax().text().to_string(),
             Self::AutoLink(node) => node.syntax().text().to_string(),

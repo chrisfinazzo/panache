@@ -8,6 +8,7 @@ use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use rowan::NodeOrToken;
 
 use super::Formatter;
+use super::paragraphs::trim_prose_indent;
 use super::preserve::{preserve_lines, preserve_lines_unprefixed};
 use super::utils::is_block_element;
 
@@ -266,7 +267,7 @@ impl Formatter {
                                 self.output.push('\n');
                                 for line in lines.iter().skip(1) {
                                     self.output.push_str(&" ".repeat(def_indent));
-                                    self.output.push_str(line.trim_start());
+                                    self.output.push_str(trim_prose_indent(n, line));
                                     self.output.push('\n');
                                 }
                             }
@@ -575,7 +576,7 @@ impl Formatter {
                 let escaped = self.config.formatter_extensions.escaped_line_breaks;
                 for line in preserve_lines_unprefixed(node, escaped) {
                     self.output.push_str(&" ".repeat(indent));
-                    self.output.push_str(line.trim_start());
+                    self.output.push_str(trim_prose_indent(node, &line));
                     self.output.push('\n');
                 }
             }
@@ -1293,7 +1294,7 @@ impl Formatter {
                 } else {
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
-                self.output.push_str(line.trim_start());
+                self.output.push_str(trim_prose_indent(node, line));
                 if !has_only_empty_nested_list {
                     self.output.push('\n');
                 }
@@ -1316,7 +1317,7 @@ impl Formatter {
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
                 if i > 0 {
-                    self.output.push_str(text.trim_start());
+                    self.output.push_str(trim_prose_indent(node, text));
                 } else {
                     let normalized = text
                         .replace("<summary>\n\t", "<summary>\n    ")
@@ -1345,7 +1346,7 @@ impl Formatter {
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
                 let mut rendered_line = if i > 0 {
-                    line.trim_start().to_string()
+                    trim_prose_indent(node, line).to_string()
                 } else {
                     line.to_string()
                 };

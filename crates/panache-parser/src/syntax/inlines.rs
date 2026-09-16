@@ -2,6 +2,89 @@
 
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode};
 
+/// Split an executable span's payload into its runtime marker, spacing, and code.
+/// Delimiter length is checked by the caller: extra backticks escape execution.
+pub fn inline_execution_parts<'a>(
+    content: &'a str,
+    extensions: &crate::options::Extensions,
+) -> Option<(&'a str, &'a str, &'a str)> {
+    let marker = [
+        ("r", extensions.rmarkdown_inline_code),
+        ("{r}", extensions.quarto_inline_code),
+        ("{python}", extensions.quarto_inline_code),
+        ("{julia}", extensions.quarto_inline_code),
+    ]
+    .into_iter()
+    .find_map(|(marker, enabled)| {
+        (enabled && content.strip_prefix(marker)?.starts_with([' ', '\t'])).then_some(marker)
+    })?;
+    let rest = &content[marker.len()..];
+    let code = rest.trim_start_matches([' ', '\t']);
+    if code.trim().is_empty() {
+        return None;
+    }
+    Some((marker, &rest[..rest.len() - code.len()], code))
+}
+
+/// A Quarto or R Markdown executable inline expression with host-aligned ranges.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InlineExecutable(SyntaxNode);
+
+impl AstNode for InlineExecutable {
+    type Language = PanacheLanguage;
+
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::INLINE_EXEC_SPAN
+    }
+
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self(syntax))
+    }
+
+    fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
+}
+
+impl InlineExecutable {
+    pub fn language(&self) -> Option<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find_map(|token| {
+                (token.kind() == SyntaxKind::INLINE_EXEC_LANG)
+                    .then(|| token.text().trim_matches(['{', '}']).to_string())
+            })
+    }
+
+    pub fn code_source_segments(&self) -> Vec<super::CodeSourceSegment> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .filter(|token| token.kind() == SyntaxKind::INLINE_EXEC_CONTENT)
+            .map(|token| super::CodeSourceSegment {
+                text: token.text().to_string(),
+                range: token.text_range(),
+            })
+            .collect()
+    }
+
+    pub fn code_source(&self) -> String {
+        self.code_source_segments()
+            .iter()
+            .map(|segment| segment.text())
+            .collect()
+    }
+
+    pub fn code_range(&self) -> Option<rowan::TextRange> {
+        let segments = self.code_source_segments();
+        Some(rowan::TextRange::new(
+            segments.first()?.text_range().start(),
+            segments.last()?.text_range().end(),
+        ))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InlineMath(SyntaxNode);
 
@@ -166,6 +249,91 @@ impl InlineHtml {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_execution_obeys_flavor_and_extension_gates() {
+        use crate::options::{Extensions, Flavor, ParserOptions};
+        let input = "`r x` `{r} x` `{python} x` `{julia} x`\n";
+        for (flavor, languages) in [
+            (Flavor::Quarto, vec!["r", "r", "python", "julia"]),
+            (Flavor::RMarkdown, vec!["r"]),
+            (Flavor::Pandoc, vec![]),
+            (Flavor::CommonMark, vec![]),
+        ] {
+            let options = ParserOptions {
+                flavor,
+                dialect: crate::options::Dialect::for_flavor(flavor),
+                extensions: Extensions::for_flavor(flavor),
+                ..Default::default()
+            };
+            let tree = crate::parse(input, Some(options));
+            let actual: Vec<_> = tree
+                .descendants()
+                .filter_map(InlineExecutable::cast)
+                .map(|inline| inline.language().unwrap())
+                .collect();
+            assert_eq!(actual, languages);
+            assert_eq!(tree.text().to_string(), input);
+        }
+        for (classic, braced, expected) in [(false, false, 0), (true, false, 1), (false, true, 3)] {
+            let mut options = ParserOptions::default();
+            options.extensions.rmarkdown_inline_code = classic;
+            options.extensions.quarto_inline_code = braced;
+            let tree = crate::parse(input, Some(options));
+            assert_eq!(
+                tree.descendants()
+                    .filter_map(InlineExecutable::cast)
+                    .count(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn inline_execution_excludes_literals_and_empty_expressions() {
+        use crate::options::{Extensions, Flavor, ParserOptions};
+        let input = "``r x`` ``{python} x`` `{{r}} x` `{{julia}} x` `r ` `{r}` `rust x`\n\n```text\n`r x`\n```\n";
+        let tree = crate::parse(
+            input,
+            Some(ParserOptions {
+                flavor: Flavor::Quarto,
+                extensions: Extensions::for_flavor(Flavor::Quarto),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(tree.text().to_string(), input);
+        assert_eq!(
+            tree.descendants()
+                .filter_map(InlineExecutable::cast)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn inline_execution_preserves_host_ranges_in_multiline_containers() {
+        use crate::options::{Extensions, Flavor, ParserOptions};
+        let input = "> Résultat `{python}\t(x +\r\n>   1)`{.result}.\r\n";
+        let tree = crate::parse(
+            input,
+            Some(ParserOptions {
+                flavor: Flavor::Quarto,
+                extensions: Extensions::for_flavor(Flavor::Quarto),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(tree.text().to_string(), input);
+        let inline = tree.descendants().find_map(InlineExecutable::cast).unwrap();
+        assert_eq!(inline.language().as_deref(), Some("python"));
+        assert_eq!(inline.code_source(), "(x +\r\n  1)");
+        for segment in inline.code_source_segments() {
+            let range = segment.text_range();
+            assert_eq!(
+                &input[usize::from(range.start())..usize::from(range.end())],
+                segment.text()
+            );
+        }
+    }
 
     #[test]
     fn inline_html_discriminates_comments_from_tags() {

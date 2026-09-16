@@ -10,6 +10,38 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 #[test]
+fn inline_execution_preserves_used_binding_in_both_fix_modes() {
+    if which::which("arity").is_err() {
+        eprintln!("Skipping inline R CLI test: arity is not installed");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("panache.toml");
+    fs::write(&config, "[linters]\nr = \"arity\"\n").unwrap();
+    let path = dir.path().join("test.qmd");
+    let input = "```{r}\n#| label: setup\nx <- 42\n```\n\nThe answer is `r x`.\n";
+    for unsafe_fixes in [false, true] {
+        fs::write(&path, input).unwrap();
+        let mut cmd = cargo_bin_cmd!("panache");
+        cmd.args([
+            "--config",
+            config.to_str().unwrap(),
+            "--no-cache",
+            "lint",
+            "--fix",
+        ]);
+        if unsafe_fixes {
+            cmd.arg("--unsafe-fixes");
+        }
+        cmd.arg(&path)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("unused-binding").not());
+        assert_eq!(fs::read_to_string(&path).unwrap(), input);
+    }
+}
+
+#[test]
 fn test_lint_clean_file() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("test.qmd");
