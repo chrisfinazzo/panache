@@ -107,6 +107,23 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn html_block_div_invalid_attribute_name_keeps_body_raw() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input = include_str!("fixtures/cases/html_block_div_attr_name_invalid_pandoc/input.md");
+    let tree = parse(input, None);
+    let block = tree.children().next().unwrap();
+    assert_eq!(block.kind(), SyntaxKind::HTML_BLOCK_RAW);
+    assert!(
+        !block.descendants().any(|child| matches!(
+            child.kind(),
+            SyntaxKind::HTML_ATTRS | SyntaxKind::STRONG | SyntaxKind::HTML_BLOCK_DIV
+        )),
+        "a rejected native div must not expose attributes or parse its body as Markdown"
+    );
+}
+
+#[test]
 fn html_block_div_slash_keeps_following_content_inside() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -563,6 +580,26 @@ golden_test_cases!(
     html_block_div_nested_pandoc,
     html_block_div_nested_trailing_commonmark,
     html_block_div_nested_trailing_pandoc,
+    html_block_div_attr_name_invalid_commonmark,
+    html_block_div_attr_name_invalid_pandoc,
+    html_block_div_attr_name_multiline_commonmark,
+    html_block_div_attr_name_multiline_pandoc,
+    html_block_div_attr_name_nested_commonmark,
+    html_block_div_attr_name_nested_pandoc,
+    html_block_div_attr_name_blockquote_commonmark,
+    html_block_div_attr_name_blockquote_pandoc,
+    html_block_div_attr_name_quoted_list_commonmark,
+    html_block_div_attr_name_quoted_list_pandoc,
+    html_block_div_attr_name_list_commonmark,
+    html_block_div_attr_name_list_pandoc,
+    html_block_div_attr_name_trailing_commonmark,
+    html_block_div_attr_name_trailing_pandoc,
+    html_block_div_attr_name_ascii_commonmark,
+    html_block_div_attr_name_ascii_pandoc,
+    html_block_div_attr_name_valid_commonmark,
+    html_block_div_attr_name_valid_pandoc,
+    html_block_div_attr_name_unicode_commonmark,
+    html_block_div_attr_name_unicode_pandoc,
     html_block_div_slash_unclosed_commonmark,
     html_block_div_slash_unclosed_pandoc,
     html_block_div_slash_matched_commonmark,

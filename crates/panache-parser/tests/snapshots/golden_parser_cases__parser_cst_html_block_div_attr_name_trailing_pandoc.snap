@@ -1,0 +1,13 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..43
+  HTML_BLOCK_RAW@0..26
+    HTML_BLOCK_TAG@0..26
+      TEXT@0..26 "<div a&amp;b>**raw**< ..."
+  PARAGRAPH@26..43
+    TEXT@26..32 " after"
+    NEWLINE@32..33 "\n"
+    TEXT@33..42 "continues"
+    NEWLINE@42..43 "\n"

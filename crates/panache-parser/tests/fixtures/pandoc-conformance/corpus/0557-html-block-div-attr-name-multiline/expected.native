@@ -1,0 +1,4 @@
+[ RawBlock
+    (Format "html")
+    "<div\n  id=\"outer\"\n  a&#38;b=\"value\">\n\n*keep  spacing*\n\n</div>"
+]

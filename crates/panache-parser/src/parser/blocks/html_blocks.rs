@@ -9,7 +9,7 @@ use super::blockquotes::{count_blockquote_markers, strip_n_blockquote_markers};
 use super::container_prefix::{
     ContainerPrefix, ContainerPrefixLine, ContainerPrefixState, emit_grafted_token,
 };
-use crate::parser::utils::attributes::emit_html_attrs_node;
+use crate::parser::utils::attributes::{emit_html_attrs_node, pandoc_html_attribute_names_valid};
 use crate::parser::utils::helpers::{strip_leading_spaces, strip_newline};
 
 /// HTML block-level tags as defined by CommonMark spec.
@@ -819,37 +819,75 @@ fn try_parse_comment_pi_with_trailing_split(
         }
     }
     let close_line_idx = close_line_idx?;
-    let close_line = lines[close_line_idx];
     let close_inner = if bq_depth > 0 {
+        strip_n_blockquote_markers(lines[close_line_idx], bq_depth)
+    } else {
+        lines[close_line_idx]
+    };
+    if !close_inner[marker_end_in_inner..]
+        .bytes()
+        .any(|b| !b.is_ascii_whitespace())
+    {
+        return None;
+    }
+
+    Some(parse_raw_html_block_with_trailing(
+        builder,
+        lines,
+        start_pos,
+        if bq_depth > 0 {
+            strip_n_blockquote_markers(lines[start_pos], bq_depth)
+        } else {
+            lines[start_pos]
+        },
+        (close_line_idx, marker_end_in_inner),
+        html_block_node_kind(wrapper_kind, block_type, config.dialect),
+        bq_depth,
+        fusion,
+        config,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_raw_html_block_with_trailing(
+    builder: &mut GreenNodeBuilder<'static>,
+    lines: &[&str],
+    start_pos: usize,
+    first_inner: &str,
+    (close_line_idx, marker_end_in_inner): (usize, usize),
+    wrapper_kind: SyntaxKind,
+    bq_depth: usize,
+    fusion: SoftbreakFusion,
+    config: &ParserOptions,
+) -> usize {
+    let close_line = lines[close_line_idx];
+    let close_inner = if close_line_idx == start_pos {
+        first_inner
+    } else if bq_depth > 0 {
         strip_n_blockquote_markers(close_line, bq_depth)
     } else {
         close_line
     };
     let close_prefix_len = close_line.len() - close_inner.len();
+    let marker_end_in_inner = if close_inner[marker_end_in_inner..]
+        .bytes()
+        .all(|b| b.is_ascii_whitespace())
+    {
+        close_inner.len()
+    } else {
+        marker_end_in_inner
+    };
     let trailing = &close_inner[marker_end_in_inner..];
 
-    let has_non_ws_trailing = trailing.bytes().any(|b| !b.is_ascii_whitespace());
-    if !has_non_ws_trailing {
-        return None;
-    }
-
-    builder.start_node(html_block_node_kind(wrapper_kind, block_type, config.dialect).into());
+    builder.start_node(wrapper_kind.into());
 
     if close_line_idx == start_pos {
         builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
         let close_part = &close_inner[..marker_end_in_inner];
-        if !close_part.is_empty() {
-            builder.token(SyntaxKind::TEXT.into(), close_part);
-        }
+        emit_html_block_line(builder, close_part, 0);
         builder.finish_node();
     } else {
         builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
-        let first_line = lines[start_pos];
-        let first_inner = if bq_depth > 0 {
-            strip_n_blockquote_markers(first_line, bq_depth)
-        } else {
-            first_line
-        };
         let (line_no_nl, nl) = strip_newline(first_inner);
         if !line_no_nl.is_empty() {
             builder.token(SyntaxKind::TEXT.into(), line_no_nl);
@@ -872,9 +910,7 @@ fn try_parse_comment_pi_with_trailing_split(
             emit_bq_prefix_tokens(builder, &close_line[..close_prefix_len]);
         }
         let close_part = &close_inner[..marker_end_in_inner];
-        if !close_part.is_empty() {
-            builder.token(SyntaxKind::TEXT.into(), close_part);
-        }
+        emit_html_block_line(builder, close_part, 0);
         builder.finish_node();
     }
 
@@ -921,7 +957,7 @@ fn try_parse_comment_pi_with_trailing_split(
                 }
                 let mut bq = ContainerPrefixState::new(prefix_lines);
                 graft_subtree(builder, &first, &mut bq);
-                return Some(close_line_idx + 1 + extra_lines);
+                return close_line_idx + 1 + extra_lines;
             }
         }
 
@@ -933,7 +969,79 @@ fn try_parse_comment_pi_with_trailing_split(
         graft_document_children(builder, &inner_root, LastParaDemote::Never, &mut bq);
     }
 
-    Some(close_line_idx + 1)
+    close_line_idx + 1
+}
+
+/// A balanced div rejected by Pandoc's attribute-name check is one raw
+/// block. Its body must not create Markdown nodes or indexed attributes.
+fn try_parse_div_with_invalid_attribute_names(
+    builder: &mut GreenNodeBuilder<'static>,
+    lines: &[&str],
+    start_pos: usize,
+    prefix: &ContainerPrefix,
+    fusion: SoftbreakFusion,
+    config: &ParserOptions,
+) -> Option<usize> {
+    use std::borrow::Cow;
+
+    let first_inner = prefix.strip_line_0_for_emission(lines[start_pos]);
+    let open_end =
+        find_multiline_open_end(lines, start_pos, first_inner, "div", prefix).unwrap_or(start_pos);
+    let mut text = if open_end == start_pos {
+        Cow::Borrowed(first_inner)
+    } else {
+        let mut text = first_inner.to_string();
+        for line in &lines[start_pos + 1..=open_end] {
+            text.push_str(prefix.strip(line));
+        }
+        Cow::Owned(text)
+    };
+    let open_gt = locate_open_tag_close_gt(&text, "div")?;
+    let name_start = text.find('<')? + "<div".len();
+    if pandoc_html_attribute_names_valid(&text[name_start..open_gt]) {
+        return None;
+    }
+
+    let body_end = if prefix.bq_depth() > 0 {
+        blockquote_body_end(lines, open_end + 1, prefix.bq_depth())
+    } else {
+        lines.len()
+    };
+    let mut close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
+    for line in &lines[open_end + 1..body_end] {
+        if close_offset.is_some() {
+            break;
+        }
+        let inner = prefix.strip(line);
+        text.to_mut().push_str(inner);
+        if inner.contains('>') {
+            close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
+        }
+    }
+    let (_, close_end) = close_offset?;
+    let mut remaining = open_gt + 1 + close_end;
+    for (line_idx, line) in lines.iter().enumerate().take(body_end).skip(start_pos) {
+        let inner = if line_idx == start_pos {
+            first_inner
+        } else {
+            prefix.strip(line)
+        };
+        if remaining <= inner.len() {
+            return Some(parse_raw_html_block_with_trailing(
+                builder,
+                lines,
+                start_pos,
+                first_inner,
+                (line_idx, remaining),
+                SyntaxKind::HTML_BLOCK_RAW,
+                prefix.bq_depth(),
+                fusion,
+                config,
+            ));
+        }
+        remaining -= inner.len();
+    }
+    None
 }
 
 enum StandaloneTagSegment<'a> {
@@ -1087,6 +1195,14 @@ pub(crate) fn parse_html_block_with_wrapper(
     config: &ParserOptions,
 ) -> usize {
     let bq_depth = prefix.bq_depth();
+    if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV
+        && config.dialect == crate::options::Dialect::Pandoc
+        && let Some(consumed) = try_parse_div_with_invalid_attribute_names(
+            builder, lines, start_pos, prefix, fusion, config,
+        )
+    {
+        return consumed;
+    }
     if config.dialect == crate::options::Dialect::Pandoc
         && matches!(
             block_type,
@@ -2289,7 +2405,7 @@ fn same_line_trailing_forces_opaque(line: &str, tag_name: &str) -> bool {
         return false;
     };
     let trailing = &after_name[gt_idx + 1..];
-    let Some((_, close_end)) = matched_close_offset(trailing, tag_name) else {
+    let Some((_, close_end)) = matched_close_offset(trailing, tag_name, true) else {
         return false;
     };
     let after_close = &trailing[close_end..];
@@ -2363,10 +2479,14 @@ fn probe_same_line_lift(line: &str, tag_name: &str) -> bool {
         return false;
     };
     let trailing = &after_name[gt_idx + 1..];
-    matched_close_offset(trailing, tag_name).is_some()
+    matched_close_offset(trailing, tag_name, true).is_some()
 }
 
-fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)> {
+fn matched_close_offset(
+    trailing: &str,
+    tag_name: &str,
+    native_divs: bool,
+) -> Option<(usize, usize)> {
     let bytes = trailing.as_bytes();
     let lower_line = trailing.to_ascii_lowercase();
     let lower_bytes = lower_line.as_bytes();
@@ -2420,7 +2540,7 @@ fn matched_close_offset(trailing: &str, tag_name: &str) -> Option<(usize, usize)
                 if depth == 0 && found_gt {
                     return Some((i, j + 1));
                 }
-            } else if !self_close || tag_lower == "div" {
+            } else if !self_close || (native_divs && tag_lower == "div") {
                 depth += 1;
             }
         }
@@ -2498,7 +2618,7 @@ fn try_split_close_line_depth_aware<'a>(
     line: &'a str,
     tag_name: &str,
 ) -> Option<(&'a str, &'a str)> {
-    let (close_start, _close_end) = matched_close_offset(line, tag_name)?;
+    let (close_start, _close_end) = matched_close_offset(line, tag_name, true)?;
     Some((&line[..close_start], &line[close_start..]))
 }
 
@@ -2510,7 +2630,7 @@ fn find_next_matched_pair(s: &str, tag_name: &str) -> Option<(usize, usize)> {
         if let Some(gt_rel) = locate_open_tag_close_gt(&s[lt..], tag_name) {
             let after_open = lt + gt_rel + 1;
             if let Some((_close_start, close_end)) =
-                matched_close_offset(&s[after_open..], tag_name)
+                matched_close_offset(&s[after_open..], tag_name, true)
             {
                 return Some((lt, after_open + close_end));
             }

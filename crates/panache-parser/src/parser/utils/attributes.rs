@@ -514,6 +514,58 @@ pub fn parse_html_attribute_list(attrs_text: &str) -> Option<AttributeBlock> {
     })
 }
 
+/// Pandoc's native HTML elements require every attribute name to start with
+/// a Unicode letter and continue with letters, numbers, `:`, `-`, or `_`.
+/// Values are skipped verbatim: entities there do not invalidate the name.
+pub(crate) fn pandoc_html_attribute_names_valid(mut attrs: &str) -> bool {
+    while !attrs.is_empty() {
+        attrs = attrs.trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '/');
+        if attrs.is_empty() {
+            break;
+        }
+        let name_end = attrs
+            .find(|c: char| c.is_ascii_whitespace() || matches!(c, '=' | '/'))
+            .unwrap_or(attrs.len());
+        if !pandoc_html_name_valid(&attrs[..name_end]) {
+            return false;
+        }
+        attrs = attrs[name_end..].trim_start_matches(|c: char| c.is_ascii_whitespace());
+        if let Some(value) = attrs.strip_prefix('=') {
+            attrs = value.trim_start_matches(|c: char| c.is_ascii_whitespace());
+            if let Some(quote @ (b'\'' | b'"')) = attrs.bytes().next() {
+                let Some(end) = attrs[1..].find(char::from(quote)) else {
+                    return false;
+                };
+                attrs = &attrs[end + 2..];
+            } else {
+                let end = attrs
+                    .find(|c: char| c.is_ascii_whitespace())
+                    .unwrap_or(attrs.len());
+                attrs = &attrs[end..];
+            }
+        }
+    }
+    true
+}
+
+fn pandoc_html_name_valid(name: &str) -> bool {
+    use unicode_general_category::{GeneralCategory, get_general_category};
+
+    let is_letter = |c| {
+        matches!(
+            get_general_category(c),
+            GeneralCategory::UppercaseLetter
+                | GeneralCategory::LowercaseLetter
+                | GeneralCategory::TitlecaseLetter
+                | GeneralCategory::ModifierLetter
+                | GeneralCategory::OtherLetter
+        )
+    };
+    let mut chars = name.chars();
+    chars.next().is_some_and(is_letter)
+        && chars.all(|c| is_letter(c) || c.is_numeric() || matches!(c, ':' | '-' | '_'))
+}
+
 /// One recognized HTML attribute, as byte ranges relative to the attribute
 /// body passed to [`html_attribute_spans`] (the bytes between a tag name and
 /// the closing `>`, exclusive). Range semantics match the `ATTR_*` token each
@@ -1399,6 +1451,35 @@ mod tests {
         assert_eq!(decode_html_attr_entities("a&#x110000;b"), "a?b");
         assert_eq!(decode_html_attr_entities("a&#99999999999999;b"), "a?b");
         assert_eq!(decode_html_attr_entities("a&#0;b"), "a\0b");
+    }
+
+    #[test]
+    fn pandoc_html_attribute_name_character_rules() {
+        for name in [
+            "id", "data-id", "xml:lang", "a_b", "a1", "é", "名字", "x²", "xⅧ",
+        ] {
+            assert!(pandoc_html_attribute_names_valid(name), "{name:?}");
+        }
+        for name in [
+            "a&amp;b", "a&#38;b", "a&b", "1a", "_a", ":a", "a.b", "Ⅷ", "a\u{345}",
+        ] {
+            assert!(!pandoc_html_attribute_names_valid(name), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn pandoc_html_attribute_names_skip_quoted_and_unquoted_values() {
+        for attrs in [
+            "id=\"a&amp;b\" data-key='> & x' hidden",
+            "id=a&amp;b data-key = \"a&amp;b\" /",
+            "id=\"line one\n& line two\"\nclass='x'",
+            "id='x\\' data-key='a&amp;b'",
+        ] {
+            assert!(pandoc_html_attribute_names_valid(attrs), "{attrs:?}");
+        }
+        assert!(!pandoc_html_attribute_names_valid(
+            "id=\"a&amp;b\"\ninvalid&amp;name='x'"
+        ));
     }
 
     #[test]

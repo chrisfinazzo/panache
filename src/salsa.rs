@@ -3563,6 +3563,22 @@ mod tests {
     }
 
     #[test]
+    fn symbol_usage_index_skips_markdown_in_raw_divs() {
+        let db = SalsaDb::default();
+        let tree = crate::parse(
+            "<div a&amp;b>\n\n# Not a heading {#hidden}\n\n</div>\n",
+            Some(crate::Config {
+                flavor: crate::config::Flavor::Pandoc,
+                ..Default::default()
+            }),
+        );
+        let index = symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+
+        assert!(index.crossref_declarations("hidden").is_none());
+        assert!(index.heading_explicit_definition_ranges("hidden").is_none());
+    }
+
+    #[test]
     fn heading_outline_collects_heading_title_level_and_range() {
         let mut db = SalsaDb::default();
         let path = PathBuf::from("/tmp/heading_outline.qmd");

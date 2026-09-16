@@ -1,0 +1,29 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..41
+  LIST@0..41
+    LIST_ITEM@0..41
+      LIST_MARKER@0..1 "-"
+      WHITESPACE@1..2 " "
+      BLOCK_QUOTE@2..41
+        BLOCK_QUOTE_MARKER@2..3 ">"
+        WHITESPACE@3..4 " "
+        HTML_BLOCK@4..41
+          HTML_BLOCK_TAG@4..18
+            TEXT@4..17 "<div a&amp;b>"
+            NEWLINE@17..18 "\n"
+          HTML_BLOCK_CONTENT@18..41
+            LINE_PREFIX@18..19 " "
+            LINE_PREFIX@19..20 " "
+            LINE_PREFIX@20..21 ">"
+            LINE_PREFIX@21..22 " "
+            TEXT@22..29 "**raw**"
+            NEWLINE@29..30 "\n"
+            LINE_PREFIX@30..31 " "
+            LINE_PREFIX@31..32 " "
+            LINE_PREFIX@32..33 ">"
+            LINE_PREFIX@33..34 " "
+            TEXT@34..40 "</div>"
+            NEWLINE@40..41 "\n"

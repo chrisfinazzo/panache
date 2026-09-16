@@ -862,3 +862,17 @@
 553
 554
 555
+
+# html-block: matched divs with invalid attribute names stay opaque.
+# Includes multiline tags, nested divs, containers, trailing text, and
+# valid Unicode names and attribute-value entity controls.
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565

@@ -1,0 +1,3 @@
+[ RawBlock (Format "html") "<div a&amp;b>**raw**</div>"
+, Para [ Str "after" , SoftBreak , Str "continues" ]
+]

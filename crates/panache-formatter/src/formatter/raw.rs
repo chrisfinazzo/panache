@@ -17,6 +17,11 @@ impl Formatter {
                 continue;
             };
             if token.kind() == SyntaxKind::LINE_PREFIX {
+                // Raw blocks have no parsed inner containers. Their entire
+                // prefix belongs to the enclosing container, which emits it.
+                if node.kind() == SyntaxKind::HTML_BLOCK_RAW {
+                    continue;
+                }
                 if token.text().contains('>') {
                     after_marker = true;
                 } else if after_marker {

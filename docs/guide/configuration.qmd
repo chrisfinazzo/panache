@@ -963,6 +963,11 @@ native-divs = true
     content belongs to it until `</div>` or the end of its container. Formatting
     preserves the opening tag's spelling.
 
+    A matched `<div>...</div>` with an invalid attribute name, such as `a&amp;b`,
+    stays raw HTML. Its body is preserved without parsing Markdown. Attribute names
+    must start with a Unicode letter and continue with letters, numbers, `:`, `-`,
+    or `_`. Entities in attribute values remain supported.
+
 #### Other Blocks
 
 ```toml

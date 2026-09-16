@@ -1,0 +1,38 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..74
+  HTML_BLOCK_DIV@0..74
+    HTML_BLOCK_TAG@0..56
+      TEXT@0..4 "<div"
+      WHITESPACE@4..5 " "
+      HTML_ATTRS@5..54
+        ATTR_KEY_VALUE@5..25
+          ATTR_KEY@5..11 "data-x"
+          TEXT@11..12 "="
+          ATTR_VALUE@12..25 "\"a&amp;b > q\""
+        WHITESPACE@25..26 " "
+        ATTR_KEY_VALUE@26..39
+          ATTR_KEY@26..34 "xml:lang"
+          TEXT@34..35 "="
+          ATTR_VALUE@35..39 "'en'"
+        WHITESPACE@39..40 " "
+        ATTR_KEY_VALUE@40..51
+          ATTR_KEY@40..43 "a_b"
+          TEXT@43..44 "="
+          ATTR_VALUE@44..51 "a&amp;b"
+        WHITESPACE@51..52 " "
+        ATTR_KEY_VALUE@52..54
+          ATTR_KEY@52..54 "a1"
+      TEXT@54..55 ">"
+      NEWLINE@55..56 "\n"
+    PARAGRAPH@56..67
+      STRONG@56..66
+        STRONG_MARKER@56..58 "**"
+        TEXT@58..64 "parsed"
+        STRONG_MARKER@64..66 "**"
+      NEWLINE@66..67 "\n"
+    HTML_BLOCK_TAG@67..74
+      TEXT@67..73 "</div>"
+      NEWLINE@73..74 "\n"

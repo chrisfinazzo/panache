@@ -1,0 +1,7 @@
+[ RawBlock
+    (Format "html")
+    "<div a&amp;b>\n<div id=\"inner\">**raw**</div>\n<div/>\n</div>"
+, Div
+    ( "outer" , [] , [] )
+    [ RawBlock (Format "html") "<div a&amp;b>**raw**</div>" ]
+]

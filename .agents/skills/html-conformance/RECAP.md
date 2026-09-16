@@ -20,8 +20,9 @@ load-bearing; the code holds the full detail.
   Validate via unit tests first.
 - **Conformance compare is whitespace-insensitive** (`normalize_native`
   collapses to one line) — visual diffs mislead. Check the oracle version:
-  the shell has Pandoc 3.11, but the corpus pins 3.10.2 (available in the
-  Nix store). Generate new expectations with the pinned binary.
+  the shell has Pandoc 3.11, but the corpus pins 3.10.2. Generate new
+  expectations with the pinned binary; download the official release when
+  the older Nix-store binary has been garbage-collected.
 - **Config walks up from the INPUT FILE's dir, not CWD.** A stray
   `/tmp/panache.toml` (`flavor="myst"`, CommonMark → no `<div>` lift)
   shadows test files under `/tmp/…`, faking `undefined-anchor` on `<div
@@ -39,7 +40,8 @@ load-bearing; the code holds the full detail.
   state across lines (`count_tag_balance`, `find_multiline_open_end`,
   `pandoc_html_open_tag_closes`). **`<div/>` DOES bump depth** in
   Pandoc; keep `count_tag_balance` and `matched_close_offset` consistent.
-  Other slash-suffixed tags retain their existing handling.
+  Raw balanced HTML treats `<div/>` as self-closing: the close finder
+  takes a native-div flag so opaque bodies use the raw rule.
 - **`input.lines()` strips newlines** — losslessness tests use
   `split_lines_inclusive`.
 - **A new wrapper retag (`HTML_BLOCK_RAW`/`_DIV`/…) must reach EVERY
@@ -159,6 +161,14 @@ load-bearing; the code holds the full detail.
 
 ### Structural lift (the lift family)
 
+- **Invalid attribute names reject the whole native div.** Matched divs
+  use `HTML_BLOCK_RAW`, including all body bytes; no Markdown or HTML_ATTRS
+  descendants. Names use Unicode Letter/Number categories, not Rust's
+  broader `is_alphabetic`. Reuse `pandoc_html_attribute_names_valid` when
+  extending the gate. `parse_raw_html_block_with_trailing` receives the
+  stripped first line explicitly: stripping only bq markers duplicates
+  `- > ` in bq-in-list input. Raw-block formatting drops whole LINE_PREFIX
+  tokens, including indent before `>`; enclosing containers emit them again.
 - **Lifted `HTML_BLOCK[_DIV]` MUST route structural, not byte.**
   `collect_block`→`html_div_block`; `emit_html_block`→
   `emit_html_block_structural` (NOT `split_html_block_by_tags`, whose
@@ -275,9 +285,8 @@ load-bearing; the code holds the full detail.
   code/raw HTML. Residual: `[x](#a&amp;b)` false-positives
   `undefined-anchor` until *link URLs* decode too (declaration side is now
   correct). Smaller known gaps: semicolon-less legacy refs (`id="a&amp b"`
-  → `a& b`); entity in attribute NAME must block the lift entirely
-  (`<div a&amp;b>` → pandoc `RawBlock`, panache lifts a `Div`); `&#0;`
-  prints `\0` where pandoc's writer prints `\NUL`.
+  → `a& b`); invalid names in unclosed/self-closing divs and spans
+  (matched divs fixed 09-16); `&#0;` prints `\0` where pandoc prints `\NUL`.
 - **Definition-list-in-blockquote broad gap**: `> Term\n>\n> :   text` →
   pandoc `DefinitionList [([Term],[[Para text]])]`; panache emits
   `Para [Term]` + empty-term `DefinitionList` with `Plain [text]`.
@@ -315,61 +324,62 @@ load-bearing; the code holds the full detail.
 | C | Comment/PI trailing softbreak fusion | **Landed** 07-02; fenced-div + bq containers 07-08. `SoftbreakFusion` enum. Corpus 0390/0481/0482. List/content-indent containers deferred. |
 | D | Definition-body marker-line HTML (`:   <div>…`) | **Landed** 07-08. `try_dispatch_definition_html_block`; multi-line body + comment-trailing fusion. Corpus 0483/0484/0487/0488. |
 | E | Footnote-body marker-line HTML (`[^1]: <div>…`) | **Landed** 07-08. `try_dispatch_footnote_html_block`, gated `!html_block_cannot_interrupt`. Corpus 0485/0486. |
-| G | Character references in lifted attribute values | **Landed** 08-05. `decode_html_attr_entities`, read-time only. Corpus 0501-0505. Semicolon-less legacy form + entity-in-attr-NAME deferred. |
+| G | HTML attribute values and name eligibility | Values **landed** 08-05; matched-div name validation **landed** 09-16 (0556-0565). Semicolon-less values, invalid-name spans, and unclosed/self-closing divs deferred. |
 | F | Later-line HTML in a content-container body | **Landed** 07-08 + variants 08-02. `try_dispatch_content_indent_html_block` (bq0) + `try_dispatch_bq_content_indent_html_block` (bq>0). Unclosed-div (later-line 0494, list-item 0495/0496). bq-nested-def **fully fixed** 08-02 (goldens only, no corpus — def-list-in-bq gap). Corpus 0489. |
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-09-15 (Phase 6: slash-suffixed div openers)
+## Latest session — 2026-09-16 (Phase G: matched-div attribute names)
 
-Conformance: **html-block 267/267 → 274/274; html-inline 33/33 → 33/33**.
-Total **548/548 → 555/555**. Workspace **6139 → 6161 passing**, zero
-failures. No red tests remain.
+Conformance: **html-block 274/274 → 284/284; html-inline 33/33 → 33/33**.
+Total **555/555 → 565/565**. Workspace **6162 → 6196 passing**, zero
+failures. All required checks pass; no red tests remain.
 
 ### What landed
 
-- **Parser-shape gap:** `<div/>` opens a div in Pandoc. Both the line
-  balance scanner and same-line close finder now count it as an opener.
-  The existing structural lift owns the body; no projector changes.
-- Confirmed the regression with a failing CST containment assertion and
-  five failing corpus cases before the fix. Pinned seven corpus cases
-  (0549-0555), including multiline and spaced-slash controls that already
-  passed. Generated expectations with the pinned Pandoc 3.10.2 binary;
-  the shell's 3.11 agrees on all probes.
-- Seven paired Pandoc/CommonMark parser fixtures and seven formatter
-  goldens cover implicit EOF, explicit close, same-line nesting,
-  blockquotes, list items, multiline tags, and `/ >` spelling. Goldens
-  preserve the slash and check losslessness and idempotency.
-- `cargo check`, workspace and parser tests, both conformance allowlists,
-  all-feature/all-target Clippy, and rustfmt pass. Updated native-divs
-  documentation and regenerated the report before allowlisting.
+- **Parser-shape gap:** matched divs with invalid attribute names now emit
+  one `HTML_BLOCK_RAW`. Their bodies expose neither Markdown nodes nor
+  attributes. No projector changes.
+- Name validation follows Pandoc's Unicode Letter/Number rules and skips
+  quoted/unquoted values. Uses the already-locked `unicode-general-category`
+  crate, now a direct parser dependency. Expectations use Pandoc 3.10.2.
+- Reused raw-HTML tail emission for text following the close tag. Raw
+  balancing treats nested `<div/>` as self-closing; native divs still do not.
+- Ten html-block corpus cases (0556-0565), ten paired Pandoc/CommonMark
+  parser fixtures, and ten formatter goldens cover invalid names, value
+  controls, multiline tags, nesting, containers, and trailing softbreaks.
+- Test-first CST and corpus failures reproduced the gap. An additional
+  bq-in-list losslessness failure exposed the first-line prefix contract;
+  formatter prefix stripping then fixed indentation growth on each pass.
+  A Salsa regression confirms Markdown-looking raw content adds no heading.
+- Workspace check/tests, parser tests, Pandoc/CommonMark allowlists,
+  all-feature/all-target Clippy, rustfmt, and the regenerated report pass.
 
 ### Files in committable diff
 
-- `crates/panache-parser/src/parser/blocks/` — two scanner conditions
-  and their semantic contract (parser-shape bucket).
-- `crates/panache-parser/tests/` — focused containment assertion, paired
-  goldens, snapshots, corpus 0549-0555, allowlist, and generated reports.
-- `tests/` — formatter fixture registration and seven round-trip goldens.
+- `crates/panache-parser/src/parser/` — name gate and shared raw emission
+  (parser-shape bucket); parser manifest + workspace lock for Unicode data.
+- `crates/panache-parser/tests/` — fixtures, snapshots, corpus, allowlist,
+  and regenerated reports.
+- `crates/panache-formatter/`, `tests/`, and `src/salsa.rs` — raw-container
+  prefix handling (consumer bucket), formatter goldens, and index regression.
 - `docs/guide/` and `.agents/skills/html-conformance/` — behavior and recap.
 
 ### Suggested next sub-targets (ranked)
 
-1. **Entity in attribute NAME** — `<div a&amp;b>` must stay raw in
-   Pandoc. Add a lift-eligibility gate after probing name validity.
-2. **Semicolon-less legacy refs** (`id="a&amp b"` → `a& b`) — probe
-   TagSoup's name charset before implementing.
+1. **Invalid-name spans and unclosed/self-closing divs** — ordinary unclosed
+   invalid divs fall back to text; invalid `<div .../>` is one raw tag.
+   Span fallback also needs general text entity decoding.
+2. **Semicolon-less legacy value refs** (`id="a&amp b"` → `a& b`).
 3. **Multi-line-second-div inter-tag** — remains a depth-model gap.
-4. **Paragraph text before a block tag** — `one<div/>two</div>` in a
-   div body stays inline. This is the existing general paragraph-boundary
-   gap, beyond slash handling; nested openers at the body start now work.
+4. **Paragraph text before a block tag** — general paragraph-boundary gap.
 5. **Definition-list-in-blockquote broad gap** — general conformance scope.
 
 ### New trap
 
-- A slash closes neither a native div nor its body. Do not generalize this
-  to other tag families; both depth scanners must agree. Folded above,
-  along with the pinned-oracle version mismatch.
+- Raw and native divs disagree on slash balancing, and bq-in-list first
+  lines need the full container prefix stripped in parser and formatter.
+  Folded into Persistent.
 
 --------------------------------------------------------------------------------
 
@@ -377,20 +387,10 @@ failures. No red tests remain.
 
 Newest first. date — sub-target — pass delta — lever.
 
-- 2026-08-05 — Phase G attribute-value entities — html 295 → 300 —
-  read-time decoding in all three attribute readers; source-byte id spans.
-
-- 2026-08-02 — Phase F unclosed-div + bq-nested-def later-line — html
-  292 → 295 — container-aware lift made the shape byte-lossless; corpus
-  0494-0496.
-- 2026-07-08 — Phases D/E/F marker-line + later-line container HTML —
-  html 282 → 292 — definition, footnote, and content-indent dispatch;
-  corpus 0480-0489.
-- 2026-07-02 — Phases A/B/C + 7e cluster — html 262 → 282 — softbreak
-  `ToDocEnd` (0390), inter-tag peel (0479), `body_fence_depth` (0478),
-  `same_line_trailing_forces_opaque` (0472/0475-0477), void strict-block
-  (0470-0471).
-- 2026-06-17→07-02 — Phases 7a/7b/7c — html 259 → 271 — raw retag,
-  standalone-tag splitting, and blockquote lifts; corpus 0464-0469.
-- 2026-05-08→18 — Phases 1-6 seed + waves — html 0 → 257 — structural
-  div/span/attribute lifts, tag categorization, and blockquote dispatch.
+- 2026-09-15 — Phase 6 slash-suffixed div openers — html 300 → 307 — both depth scanners count native `<div/>`.
+- 2026-08-05 — Phase G attribute values — html 295 → 300 — read-time decoding in all attribute readers; source-byte id spans.
+- 2026-08-02 — Phase F unclosed-div + bq-nested-def — html 292 → 295 — container-aware lossless lift; corpus 0494-0496.
+- 2026-07-08 — D/E/F container HTML — html 282 → 292 — definition, footnote, and content-indent dispatch; corpus 0480-0489.
+- 2026-07-02 — A/B/C + 7e — html 262 → 282 — softbreak fusion, inter-tag peel, fence depth, opaque trailing text, void strict-block.
+- 2026-06-17→07-02 — 7a/7b/7c — html 259 → 271 — raw retag, standalone-tag splitting, and blockquote lifts.
+- 2026-05-08→18 — Phases 1-6 — html 0 → 257 — structural div/span/attribute lifts, tag categories, and blockquote dispatch.

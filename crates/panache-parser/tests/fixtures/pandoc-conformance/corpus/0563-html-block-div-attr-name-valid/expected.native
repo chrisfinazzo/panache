@@ -1,0 +1,11 @@
+[ Div
+    ( ""
+    , []
+    , [ ( "data-x" , "a&b > q" )
+      , ( "xml:lang" , "en" )
+      , ( "a_b" , "a&b" )
+      , ( "a1" , "" )
+      ]
+    )
+    [ Para [ Strong [ Str "parsed" ] ] ]
+]

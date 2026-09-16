@@ -30,6 +30,7 @@ log = { version = "0.4.31", features = ["release_max_level_debug"] }
 memchr = "2.8.3"
 phf = "0.14.0"
 smallvec = "1.15.2"
+unicode-general-category = "1.1.0"
 unicode-width = "0.2.2"
 
 [features]
