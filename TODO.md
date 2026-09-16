@@ -191,6 +191,68 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   analysis can't see these targets; consider a heuristic or an opt-out for
   known render-time / cross-document anchors.
 
+### External linter context (compstat triage, 2026-09)
+
+- [ ] Include executable inline expressions in external linter analysis under
+  `--flavor quarto`. With `[linters] r = "arity"`, the following renders
+  `The answer is 42` in Quarto, but Panache reports `unused-binding` on `x`.
+  `lint --fix --unsafe-fixes` deletes the assignment, after which Quarto
+  fails with `object 'x' not found`; plain `--fix` preserves it. Seen in
+  `compstat/index.qmd`, where inline R calls `session_info`.
+
+  ````qmd
+  ```{r}
+  #| label: setup
+  x <- 42
+  ```
+
+  The answer is `r x`.
+  ````
+
+- [ ] Resolve Quarto include execution context before invoking external linters,
+  preserving source ownership for diagnostics and fixes. Under
+  `--flavor quarto` with `[linters] r = "arity"`, including `_binding.qmd`
+  containing a labeled R execution chunk with `included_value <- 42` before
+  the chunk below prints `42` in Quarto. Panache reports `undefined-symbol`
+  for `included_value` and calls its definition unused when linting the
+  partial separately. Expanding the shared include in scratch copies of
+  `compstat/slides/lecture4.qmd` and `lecture10.qmd` removes 163 such
+  warnings (126 and 37, respectively).
+
+  ````qmd
+  {{< include _binding.qmd >}}
+
+  ```{r}
+  #| label: use
+  print(included_value)
+  ```
+  ````
+
+- [ ] Keep displayed R examples separate from executable Quarto chunk context in
+  external linting. Under `--flavor quarto` with `[linters] r = "arity"`,
+  Panache reports `duplicated-function-definition` for the following, but
+  Quarto prints `2`: the plain `r` fence never executes. An execution chunk
+  with `#| eval: false` causes the same false positive. All four
+  duplicate-definition warnings in compstat cross one of these boundaries.
+  Concatenation also hides missing runtime bindings: replacing the displayed
+  definition with `x <- 1` and the execution chunk with `print(x)` yields no
+  findings, but Quarto fails on undefined `x`. Preserve linting of displayed
+  examples without letting their assignments satisfy references in
+  executable chunks.
+
+  ````qmd
+  ```r
+  f <- function() 1
+  ```
+
+  ```{r}
+  #| label: run
+  stopifnot(!exists("f"))
+  f <- function() 2
+  f()
+  ```
+  ````
+
 ### Configuration
 
 - [ ] Severity levels (error, warning, info)
