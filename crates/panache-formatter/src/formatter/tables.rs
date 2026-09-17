@@ -509,6 +509,7 @@ fn format_cell_content(node: &SyntaxNode, config: &Config, collapse_ws: bool) ->
                 if token.kind() == SyntaxKind::TEXT
                     || token.kind() == SyntaxKind::NEWLINE
                     || token.kind() == SyntaxKind::ESCAPED_CHAR
+                    || token.kind() == SyntaxKind::NONBREAKING_SPACE
                 {
                     if collapse_ws && token.kind() == SyntaxKind::TEXT {
                         result.push_str(&collapse_spaces(token.text()));
@@ -1956,7 +1957,7 @@ fn extract_simple_table_data(node: &SyntaxNode, config: &Config) -> TableData {
 }
 
 /// Pad a single simple-table cell to `width` according to its alignment.
-fn pad_simple_cell(cell: &str, width: usize, alignment: Alignment) -> String {
+pub(super) fn pad_simple_cell(cell: &str, width: usize, alignment: Alignment) -> String {
     let total_padding = width.saturating_sub(cell.width());
     match alignment {
         Alignment::Left | Alignment::Default => format!("{cell}{}", " ".repeat(total_padding)),
@@ -2263,19 +2264,7 @@ fn extract_multiline_table_data(node: &SyntaxNode, config: &Config) -> Multiline
         rows.insert(0, header_cells);
     }
 
-    let mut column_positions = multiline_columns(&raw_columns).render;
-    if let Some(&(last_start, last_end)) = column_positions.last() {
-        let last_idx = column_positions.len() - 1;
-        let content_width = rows
-            .iter()
-            .filter_map(|row| row.get(last_idx))
-            .flat_map(|cell| cell.iter())
-            .map(|line| line.trim_end().width())
-            .max()
-            .unwrap_or(0);
-        let width = (last_end - last_start).max(content_width);
-        column_positions[last_idx] = (last_start, last_start + width);
-    }
+    let column_positions = multiline_columns(&raw_columns).render;
 
     if has_header && !column_positions.is_empty() {
         for &(col_start, col_end) in &column_positions {
@@ -2341,9 +2330,27 @@ fn format_multiline_table(
         for row in table_data.rows.iter_mut().skip(body_start) {
             for (col_idx, cell) in row.iter_mut().enumerate() {
                 let width = col_widths.get(col_idx).copied().unwrap_or(0);
-                *cell = reflow_cell_lines(cell, width, false, str::to_string);
+                if let Some(lines) =
+                    super::table_conversion::reflow_inline_cell(cell, width, config)
+                {
+                    *cell = lines;
+                }
             }
         }
+    }
+
+    // Dash lengths encode output widths. If an atomic inline or preserved
+    // line cannot fit, retaining the source avoids widening the table or
+    // truncating cell content in the fixed-column renderer below.
+    if table_data.rows.iter().any(|row| {
+        row.iter()
+            .zip(&table_data.column_positions)
+            .any(|(cell, &(start, end))| {
+                cell.iter()
+                    .any(|line| line.trim_end().width() > end.saturating_sub(start))
+            })
+    }) {
+        return indent_table_block(&raw_table, config.table_indent + indent);
     }
 
     let base_offset = table_data
@@ -2467,7 +2474,9 @@ fn format_multiline_table(
             output.push('\n');
         }
 
-        if row_idx < table_data.rows.len() - 1 {
+        if row_idx < table_data.rows.len() - 1
+            || (!table_data.has_header && table_data.rows.len() == 1)
+        {
             output.push('\n');
         }
     }

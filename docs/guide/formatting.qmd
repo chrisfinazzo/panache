@@ -939,6 +939,20 @@ Output
 
 ### Multiline Tables
 
+Cell wrapping keeps code spans, links, math, and other inline constructs intact.
+Literal whitespace inside those constructs is preserved. A headerless table with
+one row retains a blank line before its closing separator so that it remains a
+multiline table after formatting.
+
+If an unbreakable inline construct or a line retained by `wrap = "preserve"`
+cannot fit within its column, the table is preserved to avoid changing its
+column widths or losing content. Text overflowing the last column does not
+increase the width Pandoc assigns to it. Extending the column separator to fit
+that text would change the rendered layout.
+
+Explicit [table-style conversions](lsp.qmd#code-actions) may choose new column
+widths and wrapping while preserving the table's content and structure.
+
 Input
 
 :   ```markdown

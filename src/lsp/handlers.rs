@@ -22,5 +22,6 @@ pub(crate) mod references;
 pub(crate) mod rename;
 pub(crate) mod semantic_tokens;
 pub(crate) mod shortcode_args;
+pub(crate) mod table_conversion;
 pub(crate) mod workspace_folders;
 pub(crate) mod workspace_symbols;

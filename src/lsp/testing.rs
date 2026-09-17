@@ -67,6 +67,27 @@ impl LspTester {
         self.initialize_with_options(root_uri, None);
     }
 
+    /// Initialize with client support for explanations on disabled code actions.
+    pub fn initialize_disabled_code_actions(&mut self, root_uri: &str) {
+        self.gs.on_initialize(InitializeParams {
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: root_uri.parse().unwrap(),
+                name: "workspace".to_string(),
+            }]),
+            capabilities: ClientCapabilities {
+                text_document: Some(TextDocumentClientCapabilities {
+                    code_action: Some(CodeActionClientCapabilities {
+                        disabled_support: Some(true),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    }
+
     /// Initialize advertising pull-diagnostics client support (and refresh), so
     /// the server switches into pull mode (push suppressed).
     pub fn initialize_pull(&mut self, root_uri: &str) {
@@ -441,14 +462,27 @@ impl LspTester {
         end_line: u32,
         end_char: u32,
     ) -> Option<CodeActionResponse> {
-        let params = CodeActionParams {
-            text_document: text_doc(uri),
-            range: range(start_line, start_char, end_line, end_char),
-            context: CodeActionContext {
+        self.get_code_actions_with_context(
+            uri,
+            range(start_line, start_char, end_line, end_char),
+            CodeActionContext {
                 diagnostics: vec![],
                 only: None,
                 trigger_kind: None,
             },
+        )
+    }
+
+    pub fn get_code_actions_with_context(
+        &self,
+        uri: &str,
+        range: Range,
+        context: CodeActionContext,
+    ) -> Option<CodeActionResponse> {
+        let params = CodeActionParams {
+            text_document: text_doc(uri),
+            range,
+            context,
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };

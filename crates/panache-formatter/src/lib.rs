@@ -24,6 +24,7 @@ pub use formatter::continuation_indent_at;
 pub use formatter::format_tree;
 pub use formatter::format_tree_with_formatted_code;
 pub use formatter::resolve_math_signature_scope;
+pub use formatter::table_conversion::{TableConversionError, TableStyle, convert_table};
 pub use syntax::SyntaxNode;
 
 fn detect_line_ending(input: &str) -> &str {

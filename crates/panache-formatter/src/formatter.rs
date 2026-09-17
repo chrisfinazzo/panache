@@ -23,6 +23,7 @@ mod raw;
 mod sentence_wrap;
 mod shortcodes;
 mod smart;
+pub mod table_conversion;
 mod tables;
 mod utils;
 #[allow(dead_code)]

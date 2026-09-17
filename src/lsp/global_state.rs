@@ -221,6 +221,7 @@ pub(crate) struct StateSnapshot {
     /// Client capabilities the pull handler needs, copied so it runs off-thread.
     pub(crate) supports_pull_diagnostics: bool,
     pub(crate) supports_related_documents: bool,
+    pub(crate) supports_disabled_code_actions: bool,
     /// The same line-index cache the writer patches, shared by handle. This is
     /// what lets a worker read find the index the last keystroke left behind
     /// instead of rebuilding it: the cache is not part of the salsa revision, so
@@ -421,6 +422,7 @@ pub(crate) struct GlobalState {
     /// `didChangeConfiguration`) rather than relying solely on the
     /// `initializationOptions` seed and pushed settings.
     pub(crate) supports_pull_configuration: bool,
+    pub(crate) supports_disabled_code_actions: bool,
     /// The current diagnostic set: push delivery, the pull store, and clear-on-fix
     /// bookkeeping unified behind one diff-based owner.
     pub(crate) diagnostics: DiagnosticCollection,
@@ -522,6 +524,7 @@ impl GlobalState {
             supports_diagnostic_refresh: false,
             supports_related_documents: false,
             supports_pull_configuration: false,
+            supports_disabled_code_actions: false,
             diagnostics: DiagnosticCollection::default(),
             salsa: crate::salsa::SalsaDb::default(),
             config_intern: Vec::new(),
@@ -671,6 +674,7 @@ impl GlobalState {
             diagnostics: self.diagnostics.shared(),
             supports_pull_diagnostics: self.supports_pull_diagnostics,
             supports_related_documents: self.supports_related_documents,
+            supports_disabled_code_actions: self.supports_disabled_code_actions,
         }
     }
 

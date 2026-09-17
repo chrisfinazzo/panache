@@ -4,7 +4,7 @@ use crate::syntax::{SyntaxKind, SyntaxNode, YamlFrontmatterRegion};
 use panache_formatter::FormattedCodeMap;
 use std::collections::HashMap;
 
-fn to_formatter_config(config: &Config) -> panache_formatter::Config {
+pub(crate) fn to_formatter_config(config: &Config) -> panache_formatter::Config {
     let line_ending = config.line_ending.as_ref().map(|ending| match ending {
         crate::config::LineEnding::Auto => panache_formatter::LineEnding::Auto,
         crate::config::LineEnding::Lf => panache_formatter::LineEnding::Lf,

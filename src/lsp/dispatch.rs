@@ -310,6 +310,13 @@ impl GlobalState {
             .as_ref()
             .and_then(|ws| ws.configuration)
             .unwrap_or(false);
+        self.supports_disabled_code_actions = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.code_action.as_ref())
+            .and_then(|action| action.disabled_support)
+            .unwrap_or(false);
         log::debug!(
             "lsp pull diagnostics: supported={} refresh={}; pull configuration: supported={}",
             self.supports_pull_diagnostics,

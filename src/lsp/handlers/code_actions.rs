@@ -15,7 +15,7 @@ pub(crate) fn code_action(
     snap: &StateSnapshot,
     params: CodeActionParams,
 ) -> Option<CodeActionResponse> {
-    let uri = params.text_document.uri;
+    let uri = params.text_document.uri.clone();
     let (text, config) = snap.document_and_config(&uri)?;
     let line_index = snap.line_index(&uri)?;
     let request_range = params.range;
@@ -199,6 +199,17 @@ pub(crate) fn code_action(
     }
 
     let tree = crate::parse(&text, Some(config.clone()));
+
+    if !in_frontmatter_region {
+        actions.extend(super::table_conversion::code_actions(
+            snap,
+            &params,
+            &tree,
+            &text,
+            &config,
+            &line_index,
+        ));
+    }
 
     // Add list conversion code actions (refactoring)
     // Parse tree synchronously (SyntaxNode is not Send, can't use spawn_blocking)
