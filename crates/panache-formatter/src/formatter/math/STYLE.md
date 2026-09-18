@@ -96,8 +96,9 @@ This line hygiene does not otherwise normalize or reflow the preserved content.
    `single-line` and `reflow` modes, top-level soft newlines are insignificant
    whitespace and are removed before layout; blank lines collapse. Each
    resulting row's whitespace is collapsed and trimmed, then indented by
-   `math_indent` (default 2). Free content is **never** column-aligned---a bare
-   `&` outside an environment is not a separator.
+   `math_indent` (default 2), in addition to any list or blockquote indentation.
+   Free content is **never** column-aligned---a bare `&` outside an environment
+   is not a separator.
 
 3. **Environment layout.** A standalone `\begin{name}` and `\end{name}` each go
    on their own line at the environment's indent. The body is indented **one

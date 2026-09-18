@@ -1091,7 +1091,9 @@ Output
     $$
     ```
 
-Set `math-indent = 0` to keep the content flush against the left margin.
+Set `math-indent = 0` to keep the content flush against the left margin. Inside
+lists and blockquotes, `math-indent` adds indentation after the container
+prefix.
 
 ### Content-Aware Math Formatting
 

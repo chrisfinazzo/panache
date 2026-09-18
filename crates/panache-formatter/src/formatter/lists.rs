@@ -1317,7 +1317,7 @@ impl Formatter {
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
                 if i > 0 {
-                    self.output.push_str(trim_prose_indent(node, text));
+                    self.output.push_str(text);
                 } else {
                     let normalized = text
                         .replace("<summary>\n\t", "<summary>\n    ")
@@ -1345,12 +1345,9 @@ impl Formatter {
                 } else {
                     self.output.push_str(&" ".repeat(text_continuation));
                 }
-                let mut rendered_line = if i > 0 {
-                    trim_prose_indent(node, line).to_string()
-                } else {
-                    line.to_string()
-                };
-                rendered_line = rendered_line
+                // Layout already removes container prefixes. Any remaining
+                // indentation belongs to math or other embedded content.
+                let rendered_line = line
                     .replace("<summary>\n\t", "<summary>\n    ")
                     .replace("<summary>\n  ", "<summary>\n    ");
                 if rendered_line.contains('\n') {

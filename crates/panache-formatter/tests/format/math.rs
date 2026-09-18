@@ -1,4 +1,4 @@
-use panache_formatter::config::{Extensions, Flavor};
+use panache_formatter::config::{Extensions, Flavor, WrapMode};
 use panache_formatter::format;
 use panache_formatter::{Config, ConfigBuilder, MathMode};
 use panache_parser::semantic::math::{ArgKind, ArgumentDomain};
@@ -522,6 +522,34 @@ fn list_item_bracket_display_math_preserves_following_markdown_structure() {
         "the heading after the list must survive formatting, got:\n{output}"
     );
     similar_asserts::assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
+fn list_display_math_respects_indent_across_wrap_modes() {
+    for wrap in [WrapMode::Reflow, WrapMode::Sentence, WrapMode::Semantic] {
+        for math_indent in [0, 2, 4] {
+            let config = Config {
+                wrap: Some(wrap.clone()),
+                math_indent,
+                ..math_config(true)
+            };
+            let input = "1. A\n   $$\n   a=b\n   $$\n";
+            let expected = format!("1. A\n   $$\n   {}a = b\n   $$\n", " ".repeat(math_indent));
+            let output = format(input, Some(config.clone()), None);
+
+            similar_asserts::assert_eq!(output, expected, "wrap: {wrap:?}, indent: {math_indent}");
+            similar_asserts::assert_eq!(format(&output, Some(config), None), output);
+        }
+    }
+}
+
+#[test]
+fn nested_list_display_math_keeps_environment_indentation() {
+    let input = "- outer\n  - inner\n    $$\n      \\begin{aligned}\n        a & = b\n      \\end{aligned}\n    $$\n";
+    let output = format(input, Some(math_config(true)), None);
+
+    similar_asserts::assert_eq!(output, input);
+    similar_asserts::assert_eq!(format(&output, Some(math_config(true)), None), output);
 }
 
 #[test]
