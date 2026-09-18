@@ -92,6 +92,76 @@ pub(crate) fn reload_open_documents_referenced_files(gs: &mut GlobalState) {
         gs.salsa
             .resync_cached_file_from_disk(&path, Durability::MEDIUM);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    reload_execution_contexts(gs);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn reload_execution_contexts(gs: &mut GlobalState) {
+    use crate::linter::execution_context::{ExecutionRoot, load_execution_sources, normalize_path};
+    let mut candidates = std::collections::BTreeMap::new();
+    for state in gs.document_map.values() {
+        let config = state.salsa_config.config(&gs.salsa);
+        let Some(path) = crate::salsa::Db::path_of(&gs.salsa, state.salsa_file) else {
+            continue;
+        };
+        let project = crate::includes::find_quarto_root(&path);
+        if config.flavor != crate::config::Flavor::Quarto && project.is_none() {
+            continue;
+        }
+        candidates.entry(normalize_path(&path)).or_insert(false);
+        if let Some(project) = project {
+            for path in crate::includes::find_project_documents(&project, config, false) {
+                candidates.insert(normalize_path(&path), true);
+            }
+        }
+    }
+    let mut roots = Vec::new();
+    for (path, render_target) in candidates {
+        let Some(uri) = lsp_types::Uri::from_file_path(&path) else {
+            continue;
+        };
+        let config = if let Some(state) = gs.document_map.get(uri.as_str()) {
+            state.salsa_config
+        } else {
+            let cfg = gs.load_config_notifying(&uri);
+            gs.intern_config(cfg)
+        };
+        let id = gs.salsa.intern_file(Some(path.clone()));
+        gs.salsa.load_file_from_disk(id);
+        let file = gs
+            .salsa
+            .file_text_if_cached(&path)
+            .expect("interned execution root");
+        roots.push(ExecutionRoot {
+            file,
+            config,
+            render_target,
+        });
+    }
+    if roots
+        .iter()
+        .all(|root| root.config.config(&gs.salsa).linters.is_empty())
+    {
+        roots.clear();
+    }
+    let mut loaded = load_execution_sources(&mut gs.salsa, &roots);
+    let open = open_document_paths(gs);
+    let mut disk_changed = false;
+    for path in &loaded.paths {
+        if !open.contains(path) {
+            disk_changed |= gs
+                .salsa
+                .resync_cached_file_from_disk(path, Durability::MEDIUM);
+        }
+    }
+    if disk_changed {
+        loaded = load_execution_sources(&mut gs.salsa, &roots);
+        gs.external_pending
+            .extend(gs.document_map.keys().filter_map(|key| key.parse().ok()));
+    }
+    gs.execution_read_errors = std::sync::Arc::new(loaded.read_errors);
+    gs.execution_roots = std::sync::Arc::new(roots);
 }
 
 /// Re-resolve `uri`'s on-disk config and re-point its `DocumentState` at the
@@ -204,6 +274,9 @@ pub(crate) fn did_open(gs: &mut GlobalState, params: DidOpenTextDocumentParams) 
     if let Some(path) = doc_path.as_ref() {
         load_project_files(gs, salsa_file, salsa_config, path.clone());
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    reload_execution_contexts(gs);
 
     gs.sender
         .log_message(MessageType::INFO, format!("Opened document: {uri_string}"));
@@ -353,6 +426,8 @@ pub(crate) fn did_save(gs: &mut GlobalState, params: DidSaveTextDocumentParams) 
     {
         load_project_files(gs, salsa_file, salsa_config, path);
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    reload_execution_contexts(gs);
     // Save is the heavy pass: external linters for the saved document. Debounced
     // like every other settle so a save-all burst coalesces into one pass.
     gs.arm_settle_external(uri);

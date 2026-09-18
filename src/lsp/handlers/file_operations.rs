@@ -46,6 +46,11 @@ pub(crate) fn did_create_files(gs: &mut GlobalState, params: CreateFilesParams) 
         }
     }
     reload_open_documents_referenced_files(gs);
+    #[cfg(not(target_arch = "wasm32"))]
+    if !gs.execution_roots.is_empty() {
+        gs.external_pending
+            .extend(gs.document_map.keys().filter_map(|key| key.parse().ok()));
+    }
     gs.arm_settle();
 }
 
@@ -71,6 +76,11 @@ pub(crate) fn did_delete_files(gs: &mut GlobalState, params: DeleteFilesParams) 
         }
     }
     reload_open_documents_referenced_files(gs);
+    #[cfg(not(target_arch = "wasm32"))]
+    if !gs.execution_roots.is_empty() {
+        gs.external_pending
+            .extend(gs.document_map.keys().filter_map(|key| key.parse().ok()));
+    }
     gs.arm_settle();
 }
 
@@ -100,5 +110,10 @@ pub(crate) fn did_rename_files(gs: &mut GlobalState, params: RenameFilesParams) 
         }
     }
     reload_open_documents_referenced_files(gs);
+    #[cfg(not(target_arch = "wasm32"))]
+    if !gs.execution_roots.is_empty() {
+        gs.external_pending
+            .extend(gs.document_map.keys().filter_map(|key| key.parse().ok()));
+    }
     gs.arm_settle();
 }

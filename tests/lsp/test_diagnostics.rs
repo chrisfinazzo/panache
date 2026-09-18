@@ -5,6 +5,236 @@ use lsp_types::*;
 use std::time::Duration;
 
 #[test]
+fn include_execution_discovers_parent_configuration_for_open_markdown_partial() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join("partials")).unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("partials/panache.toml"), "").unwrap();
+    std::fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("parent.qmd"),
+        "{{< include partials/_child.md >}}\n",
+    )
+    .unwrap();
+    let child_path = dir.path().join("partials/_child.md");
+    let child = "`r any(is.na(NA))`\n";
+    std::fs::write(&child_path, child).unwrap();
+    let uri = Uri::from_file_path(&child_path).unwrap().to_string();
+    let mut server = TestLspServer::new();
+    server.initialize(Uri::from_file_path(dir.path()).unwrap().as_str());
+    server.open_document(&uri, child, "markdown");
+    server.pump(Duration::from_secs(5));
+    let publications = server.drain_publish_diagnostics(&uri);
+    assert!(
+        publications
+            .last()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code == Some(NumberOrString::String("any-is-na".into()))
+            })
+    );
+    let actions = server.get_code_actions(&uri, 0, 0, 1, 0).unwrap();
+    assert!(actions.iter().any(|action| matches!(action,
+        CodeActionOrCommand::CodeAction(action) if action.title.contains("anyNA")
+    )));
+}
+
+#[test]
+fn include_execution_publishes_on_source_and_uses_parent_for_actions() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    let parent_path = dir.path().join("parent.qmd");
+    let child_path = dir.path().join("_child.qmd");
+    let parent =
+        "{{< include _child.qmd >}}\n\n```{r}\n#| label: use\nprint(included_value)\n```\n";
+    let child = "```{r}\n#| label: binding\nincluded_value <- 42\n```\n\n🦀 `r any(is.na(NA))`\n";
+    std::fs::write(&parent_path, parent).unwrap();
+    std::fs::write(&child_path, child).unwrap();
+    let parent_uri = Uri::from_file_path(&parent_path).unwrap().to_string();
+    let child_uri = Uri::from_file_path(&child_path).unwrap().to_string();
+    let mut server = TestLspServer::new();
+    server.initialize(Uri::from_file_path(dir.path()).unwrap().as_str());
+    server.open_document(&parent_uri, parent, "quarto");
+    server.pump(Duration::from_secs(5));
+    let pubs = server.drain_all_publish_diagnostics();
+    let parent_diagnostics = &pubs
+        .iter()
+        .find(|p| p.uri.as_str() == parent_uri)
+        .unwrap()
+        .diagnostics;
+    assert!(
+        parent_diagnostics
+            .iter()
+            .all(|d| d.code != Some(NumberOrString::String("undefined-symbol".into())))
+    );
+    let diagnostics = &pubs
+        .iter()
+        .find(|p| p.uri.as_str() == child_uri)
+        .expect("unopened include diagnostic")
+        .diagnostics;
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.code != Some(NumberOrString::String("unused-binding".into())))
+    );
+    let diagnostic = diagnostics
+        .iter()
+        .find(|d| d.code == Some(NumberOrString::String("any-is-na".into())))
+        .unwrap();
+    let range = Range::new(Position::new(5, 6), Position::new(5, 20));
+    assert_eq!(diagnostic.range, range);
+    server.open_document(&child_uri, child, "quarto");
+    server.pump(Duration::from_secs(5));
+    let actions = server.get_code_actions(&child_uri, 0, 0, 6, 0).unwrap();
+    let edits: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => action.edit.as_ref(),
+            _ => None,
+        })
+        .flat_map(|edit| edit.changes.iter().flat_map(|changes| changes.iter()))
+        .collect();
+    assert!(edits.iter().all(|(uri, _)| uri.as_str() == child_uri));
+    assert!(
+        edits
+            .iter()
+            .flat_map(|(_, edits)| edits.iter())
+            .any(|edit| edit.range == range && edit.new_text == "anyNA(NA)")
+    );
+    assert!(
+        !edits
+            .iter()
+            .flat_map(|(_, edits)| edits.iter())
+            .any(|edit| edit.range.start.line == 2)
+    );
+}
+
+#[test]
+fn include_execution_respects_buffers_and_refreshes_after_watcher_events() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    let parent_path = dir.path().join("parent.qmd");
+    let child_path = dir.path().join("_child.qmd");
+    let parent = "{{< include _child.qmd >}}\n\n`r included_value`\n";
+    let binding = "```{r}\n#| label: binding\nincluded_value <- 42\n```\n";
+    std::fs::write(&parent_path, parent).unwrap();
+    std::fs::write(&child_path, "No binding on disk.\n").unwrap();
+    let parent_uri = Uri::from_file_path(&parent_path).unwrap().to_string();
+    let child_uri = Uri::from_file_path(&child_path).unwrap().to_string();
+    let mut server = TestLspServer::new();
+    server.initialize_pull(Uri::from_file_path(dir.path()).unwrap().as_str());
+    server.open_document(&parent_uri, parent, "quarto");
+    server.open_document(&child_uri, binding, "quarto");
+    server.pump(Duration::from_secs(5));
+    server.did_change_watched_files(vec![FileEvent {
+        uri: child_uri.parse().unwrap(),
+        typ: FileChangeType::CHANGED,
+    }]);
+    server.pump(Duration::from_secs(5));
+    let codes = |report: DocumentDiagnosticReportResult| -> Vec<String> {
+        let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report
+        else {
+            panic!("full report")
+        };
+        report
+            .full_document_diagnostic_report
+            .items
+            .into_iter()
+            .filter_map(|d| match d.code {
+                Some(NumberOrString::String(code)) => Some(code),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(
+        !codes(server.document_diagnostic(&parent_uri, None)).contains(&"undefined-symbol".into())
+    );
+    server.edit_document(
+        &parent_uri,
+        vec![full_document_change("{{< include _child.qmd >}}\n")],
+    );
+    server.save_document(&parent_uri);
+    server.pump(Duration::from_secs(5));
+    assert!(codes(server.document_diagnostic(&child_uri, None)).contains(&"unused-binding".into()));
+    server.edit_document(&parent_uri, vec![full_document_change(parent)]);
+    server.save_document(&parent_uri);
+    server.pump(Duration::from_secs(5));
+    assert!(
+        !codes(server.document_diagnostic(&child_uri, None)).contains(&"unused-binding".into())
+    );
+    server.close_document(&child_uri);
+    server.save_document(&parent_uri);
+    server.pump(Duration::from_secs(5));
+    assert!(
+        codes(server.document_diagnostic(&parent_uri, None)).contains(&"undefined-symbol".into())
+    );
+    std::fs::write(&child_path, binding).unwrap();
+    server.did_change_watched_files(vec![FileEvent {
+        uri: child_uri.parse().unwrap(),
+        typ: FileChangeType::CHANGED,
+    }]);
+    server.pump(Duration::from_secs(5));
+    assert!(
+        !codes(server.document_diagnostic(&parent_uri, None)).contains(&"undefined-symbol".into())
+    );
+    std::fs::remove_file(&child_path).unwrap();
+    server.did_change_watched_files(vec![FileEvent {
+        uri: child_uri.parse().unwrap(),
+        typ: FileChangeType::DELETED,
+    }]);
+    server.pump(Duration::from_secs(5));
+    let missing = codes(server.document_diagnostic(&parent_uri, None));
+    assert!(missing.contains(&"include-not-found".into()));
+    assert!(!missing.contains(&"undefined-symbol".into()));
+    std::fs::write(&child_path, binding).unwrap();
+    server.did_change_watched_files(vec![FileEvent {
+        uri: child_uri.parse().unwrap(),
+        typ: FileChangeType::CREATED,
+    }]);
+    server.pump(Duration::from_secs(5));
+    assert!(
+        !codes(server.document_diagnostic(&parent_uri, None)).contains(&"include-not-found".into())
+    );
+}
+
+#[test]
 fn inline_execution_diagnostics_and_actions_use_utf16_positions() {
     if which::which("arity").is_err() {
         eprintln!("Skipping inline R LSP test: arity is not installed");

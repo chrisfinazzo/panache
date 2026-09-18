@@ -716,6 +716,22 @@ impl LspTester {
         Some(file.content_or_empty(&self.gs.salsa).to_string())
     }
 
+    /// Exercise index identity guards with a writer that bypasses index updates.
+    /// Filesystem notifications cannot serve this purpose: open buffers must
+    /// remain authoritative when their on-disk files change.
+    pub fn replace_document_text_without_index_update(&mut self, uri: &str, text: &str) {
+        let file = self
+            .gs
+            .document_map
+            .get(uri)
+            .expect("open document")
+            .salsa_file;
+        self.gs
+            .salsa
+            .update_input_text(file, text.to_owned(), salsa::Durability::LOW);
+        self.gs.arm_settle();
+    }
+
     /// Whether `path`'s contents are loaded in the database. Sharper than
     /// [`Self::get_cached_file_text`], which reports an interned-but-unloaded
     /// file as `Some("")`: a merely interned path answers `false` here. Pins

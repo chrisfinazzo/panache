@@ -209,7 +209,7 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   The answer is `r x`.
   ````
 
-- [ ] Resolve Quarto include execution context before invoking external linters,
+- [x] Resolve Quarto include execution context before invoking external linters,
   preserving source ownership for diagnostics and fixes. Under
   `--flavor quarto` with `[linters] r = "arity"`, including `_binding.qmd`
   containing a labeled R execution chunk with `included_value <- 42` before

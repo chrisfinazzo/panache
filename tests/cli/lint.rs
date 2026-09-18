@@ -10,6 +10,340 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 #[test]
+fn include_execution_uses_parent_context_for_partial_targets() {
+    if which::which("arity").is_err() {
+        eprintln!("Skipping include R CLI test: arity is not installed");
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let partial = "```{r}\n#| label: binding\nincluded_value <- 42\n```\n";
+    fs::write(dir.path().join("_binding.qmd"), partial).unwrap();
+    fs::write(
+        dir.path().join("parent.qmd"),
+        "{{< include _binding.qmd >}}\n\n```{r}\n#| label: use\nprint(included_value)\n```\n",
+    )
+    .unwrap();
+    for target in ["parent.qmd", "_binding.qmd", "."] {
+        cargo_bin_cmd!("panache")
+            .current_dir(dir.path())
+            .args(["lint", "--no-cache", target])
+            .assert()
+            .success();
+    }
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args([
+            "lint",
+            "--no-cache",
+            "--fix",
+            "--unsafe-fixes",
+            "_binding.qmd",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_binding.qmd")).unwrap(),
+        partial
+    );
+}
+
+#[test]
+fn include_execution_fixes_only_explicit_sources() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let partial = "> ```{r included}\n> print(any(is.na(NA)))\n> ```\n";
+    let parent = "{{< include _partial.qmd >}}\n";
+    fs::write(dir.path().join("_partial.qmd"), partial).unwrap();
+    fs::write(dir.path().join("parent.qmd"), parent).unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "parent.qmd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("_partial.qmd:2:"));
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "--fix", "parent.qmd"])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_partial.qmd")).unwrap(),
+        partial
+    );
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "--fix", "_partial.qmd"])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_partial.qmd")).unwrap(),
+        partial.replace("any(is.na(NA))", "anyNA(NA)")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("parent.qmd")).unwrap(),
+        parent
+    );
+}
+
+#[test]
+fn include_execution_shared_warning_cannot_delete_used_binding() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let partial = "```{r}\n#| label: binding\nincluded_value <- 42\n```\n";
+    fs::write(dir.path().join("_binding.qmd"), partial).unwrap();
+    fs::write(
+        dir.path().join("used.qmd"),
+        "{{< include _binding.qmd >}}\n\n`r included_value`\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("unused.qmd"),
+        "{{< include _binding.qmd >}}\n",
+    )
+    .unwrap();
+    let output = cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args([
+            "lint",
+            "--no-cache",
+            "--fix",
+            "--unsafe-fixes",
+            "_binding.qmd",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unused-binding"))
+        .stdout(predicate::str::contains("In execution context:"))
+        .get_output()
+        .stdout
+        .clone();
+    assert!(String::from_utf8(output).unwrap().contains("unused.qmd"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_binding.qmd")).unwrap(),
+        partial
+    );
+}
+
+#[test]
+fn include_execution_nested_paths_use_main_document_directory() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::create_dir(dir.path().join("parts")).unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("parent.qmd"),
+        "{{< include parts/_first.qmd >}}\n\n`r included_value`\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("parts/_first.qmd"),
+        "{{< include \"_binding with space.qmd\" >}}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("_binding with space.qmd"),
+        "```{r}\n#| label: binding\nincluded_value <- 42\n```\n",
+    )
+    .unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "parent.qmd"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn include_execution_cache_tracks_parent_changes_and_new_parents() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("_binding.qmd"),
+        "```{r}\n#| label: binding\nincluded_value <- 42\n```\n",
+    )
+    .unwrap();
+    let used = "{{< include _binding.qmd >}}\n\n`r included_value`\n";
+    let unused = "{{< include _binding.qmd >}}\n";
+    fs::write(dir.path().join("parent.qmd"), used).unwrap();
+    let lint = || {
+        let mut cmd = cargo_bin_cmd!("panache");
+        cmd.current_dir(dir.path())
+            .args(["lint", "--cache-dir", ".cache", "_binding.qmd"]);
+        cmd
+    };
+    lint().assert().success();
+    let cache = dir.path().join(".cache/cli-cache-v1.bin");
+    let before = fs::read(&cache).unwrap();
+    lint().assert().success();
+    assert_eq!(fs::read(&cache).unwrap(), before);
+    fs::write(dir.path().join("parent.qmd"), unused).unwrap();
+    lint()
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("unused-binding"));
+    fs::write(dir.path().join("parent.qmd"), used).unwrap();
+    lint().assert().success();
+    fs::write(dir.path().join("another.qmd"), unused).unwrap();
+    lint()
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("another.qmd"));
+    fs::remove_file(dir.path().join("another.qmd")).unwrap();
+    lint().assert().success();
+}
+
+#[test]
+fn include_execution_stdin_filename_uses_supplied_source() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let partial = "```{r}\n#| label: binding\nincluded_value <- 42\n```\n";
+    fs::write(dir.path().join("_binding.qmd"), partial).unwrap();
+    let disk = "`r missing_on_disk`\n";
+    fs::write(dir.path().join("parent.qmd"), disk).unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "--stdin-filename", "parent.qmd"])
+        .write_stdin("{{< include _binding.qmd >}}\n\n`r included_value`\n")
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("parent.qmd")).unwrap(),
+        disk
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_binding.qmd")).unwrap(),
+        partial
+    );
+}
+
+#[test]
+fn include_execution_reports_unreadable_source_without_partial_analysis() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("parent.qmd"),
+        "{{< include _invalid.qmd >}}\n\n`r missing`\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("_invalid.qmd"), [0xff]).unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "parent.qmd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("include-read-error"))
+        .stdout(predicate::str::contains("undefined-symbol").not());
+}
+
+#[test]
+fn include_execution_uses_parent_configuration_for_direct_partial_lint() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::create_dir(dir.path().join("partials")).unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("partials/panache.toml"), "").unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    let input = "`r any(is.na(NA))`\n";
+    for extension in ["md", "qmd"] {
+        let partial = format!("partials/_child.{extension}");
+        fs::write(
+            dir.path().join("parent.qmd"),
+            format!("{{{{< include {partial} >}}}}\n"),
+        )
+        .unwrap();
+        fs::write(dir.path().join(&partial), input).unwrap();
+        cargo_bin_cmd!("panache")
+            .current_dir(dir.path())
+            .args(["lint", "--no-cache", &partial])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains("any-is-na"));
+        cargo_bin_cmd!("panache")
+            .current_dir(dir.path())
+            .args(["lint", "--no-cache", "--stdin-filename", &partial])
+            .write_stdin(input)
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains("any-is-na"));
+    }
+}
+
+#[test]
 fn inline_execution_preserves_used_binding_in_both_fix_modes() {
     if which::which("arity").is_err() {
         eprintln!("Skipping inline R CLI test: arity is not installed");

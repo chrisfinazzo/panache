@@ -421,24 +421,17 @@ pub(crate) fn line_col_to_offset(input: &str, line: usize, column: usize) -> Opt
     line_col_to_byte_offset_1based(input, line, column)
 }
 
-/// Byte offset in the original document for a tool-reported 1-based
-/// (line, column). Tool positions are relative to the concatenated,
-/// *dedented* lint input, so with mappings present the position must go
-/// through the per-line offset table — a column on a container-prefixed
-/// line is short of the document column by the stripped prefix. Reading
-/// the original input directly is only correct when the whole input was
-/// linted as-is (no mappings).
-pub(crate) fn map_tool_line_col_to_original(
+/// Project both endpoints together so a diagnostic cannot cross source snippets.
+pub(crate) fn map_tool_range(
     ctx: &ParseContext<'_>,
     line: usize,
     column: usize,
-) -> Option<usize> {
-    match ctx.mappings {
-        Some(mappings) => line_col_to_offset(ctx.linted_input, line, column).and_then(|offset| {
-            map_concatenated_offset_to_original_with_end_boundary(offset, mappings)
-        }),
-        None => line_col_to_offset(ctx.original_input, line, column),
-    }
+    end_line: usize,
+    end_column: usize,
+) -> Option<crate::linter::diagnostics::Location> {
+    let start = line_col_to_offset(ctx.linted_input, line, column)?;
+    let end = line_col_to_offset(ctx.linted_input, end_line, end_column)?;
+    map_diagnostic_range(ctx, start, end)
 }
 
 pub(crate) fn map_concatenated_offset_to_original(

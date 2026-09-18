@@ -1,6 +1,8 @@
 pub mod code_block_collector;
 pub mod diagnostics;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod execution_context;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod external_linters;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod external_linters_sync;

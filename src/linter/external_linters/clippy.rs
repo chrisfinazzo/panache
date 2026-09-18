@@ -1,8 +1,7 @@
-use rowan::TextRange;
 use serde::Deserialize;
 
-use super::{ExternalLinterParser, LinterError, ParseContext, map_tool_line_col_to_original};
-use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin, Location};
+use super::{ExternalLinterParser, LinterError, ParseContext, map_tool_range};
+use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin};
 
 #[derive(Debug, Deserialize)]
 struct ClippyMessage {
@@ -68,16 +67,15 @@ impl ExternalLinterParser for ClippyParser {
 
             let line = primary_span.line_start;
             let column = primary_span.column_start;
-            let start_offset = map_tool_line_col_to_original(ctx, line, column)
-                .unwrap_or(ctx.original_input.len());
-            let end_offset =
-                map_tool_line_col_to_original(ctx, primary_span.line_end, primary_span.column_end)
-                    .unwrap_or(ctx.original_input.len());
-
-            let location = Location::from_range(
-                TextRange::new((start_offset as u32).into(), (end_offset as u32).into()),
-                ctx.original_input,
-            );
+            let Some(location) = map_tool_range(
+                ctx,
+                line,
+                column,
+                primary_span.line_end,
+                primary_span.column_end,
+            ) else {
+                continue;
+            };
 
             let code = msg
                 .code

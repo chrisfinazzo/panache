@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use crate::linter;
 use crate::lsp::uri_ext::UriExt;
 use lsp_types::*;
 
-use crate::linter;
 use crate::lsp::global_state::StateSnapshot;
 use crate::syntax::{AstNode, List};
 
@@ -37,70 +37,37 @@ pub(crate) fn code_action(
             false
         };
 
-    #[derive(Debug)]
-    struct ExternalLintJob {
-        linter_name: String,
-        language: String,
-        content: String,
-        mappings: Vec<crate::linter::code_block_collector::BlockMapping>,
-    }
-
-    // Parse + built-in lint + collect external jobs (synchronous).
-    let doc_path = uri.to_file_path().map(|path| path.into_owned());
-    let (mut diagnostics, external_jobs) = {
-        let tree = crate::parse(&text, Some(config.clone()));
-        let metadata = doc_path
-            .as_ref()
-            .and_then(|path| crate::metadata::extract_project_metadata(&tree, path).ok());
-
-        let mut diagnostics = linter::lint_with_metadata(&tree, &text, &config, metadata.as_ref());
-        let mut jobs = Vec::new();
-
-        if !config.linters.is_empty() {
-            let code_blocks = crate::utils::collect_code_snippets(&tree, &text);
-            for (language, linter_name) in &config.linters {
-                let Some(blocks) = code_blocks.get(language) else {
-                    continue;
-                };
-                if blocks.is_empty() {
-                    continue;
-                }
-
-                let concatenated =
-                    crate::linter::code_block_collector::concatenate_with_blanks_and_mapping(
-                        blocks,
-                    );
-                jobs.push(ExternalLintJob {
-                    linter_name: linter_name.clone(),
-                    language: language.clone(),
-                    content: concatenated.content,
-                    mappings: concatenated.mappings,
-                });
-            }
-        }
-
-        diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
-        (diagnostics, jobs)
-    };
-
+    let state = snap.document_state(&uri)?;
+    let plan = crate::salsa::built_in_lint_plan(snap.db(), state.salsa_file, state.salsa_config);
+    let mut diagnostics = plan.diagnostics.clone();
     #[cfg(not(target_arch = "wasm32"))]
-    if !external_jobs.is_empty() {
+    if let Some(batch) = snap.execution_batch_for(&uri) {
+        let results = snap.execution_cache.get_or_run(&batch, true);
+        snap.db().unwind_if_revision_cancelled();
+        if let Some(path) = uri.to_file_path()
+            && let Some(items) = results
+                .diagnostics
+                .get(&crate::linter::execution_context::normalize_path(&path))
+        {
+            diagnostics.extend(items.iter().cloned());
+        }
+    } else {
         let registry = crate::linter::external_linters::ExternalLinterRegistry::new();
-        for job in external_jobs {
+        for job in &plan.external_jobs {
             match crate::linter::external_linters_sync::run_linter_sync(
                 &job.linter_name,
                 &job.language,
                 &job.content,
                 &text,
                 &registry,
-                Some(job.mappings.as_slice()),
+                Some(&job.mappings),
             ) {
-                Ok(diags) => diagnostics.extend(diags),
-                Err(e) => log::warn!("External linter failed: {e}"),
+                Ok(items) => diagnostics.extend(items),
+                Err(error) => log::warn!("External linter failed: {error}"),
             }
         }
-        diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
     }
+    diagnostics.sort_by_key(|diagnostic| (diagnostic.location.line, diagnostic.location.column));
 
     let mut actions = Vec::new();
     let mut fix_all_edits: Vec<(usize, usize, String)> = Vec::new();

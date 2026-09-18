@@ -19,7 +19,7 @@
 //! status quo, so unifying the two caches will invert them, deliberately.
 
 use super::helpers::{TestLspServer, UriExt, full_document_change, incremental_change};
-use lsp_types::{FileChangeType, FileEvent, Uri};
+use lsp_types::Uri;
 use std::fs;
 use tempfile::TempDir;
 
@@ -50,11 +50,9 @@ fn a_typing_burst_rebuilds_the_line_index_once() {
     assert_eq!(server.cached_line_indexes(), 1);
 }
 
-/// The correctness pin. A watcher event rewrites an open document's text input
-/// behind the write phase's back; the cached index still describes the *old*
-/// bytes, and using it would splice the next edit into them --- silently
-/// throwing the on-disk change away. Validating by allocation identity turns
-/// that into a rebuild.
+/// The correctness pin. A direct text-input write leaves the cached index
+/// describing the old bytes. Validating by allocation identity makes the next
+/// edit rebuild the index instead of splicing into stale text.
 #[test]
 fn a_text_write_outside_did_change_discards_the_cached_index() {
     let temp_dir = TempDir::new().unwrap();
@@ -71,13 +69,7 @@ fn a_text_write_outside_did_change_discards_the_cached_index() {
     let after_first = server.line_index_rebuilds();
     assert_eq!(server.cached_line_indexes(), 1);
 
-    // The document's own file changes on disk, and the watcher syncs it into
-    // salsa: a *different* allocation carrying different bytes.
-    fs::write(&path, "# Title\n\nAlpha\nBeta\n").unwrap();
-    server.did_change_watched_files(vec![FileEvent {
-        uri: Uri::from_file_path(&path).unwrap(),
-        typ: FileChangeType::CHANGED,
-    }]);
+    server.replace_document_text_without_index_update(&uri, "# Title\n\nAlpha\nBeta\n");
 
     server.edit_document(&uri, vec![incremental_change(3, 0, 3, 4, "Gamma")]);
 
@@ -295,7 +287,7 @@ fn reads_between_keystrokes_cost_no_rebuilds() {
 /// identity check. A reader must therefore rebuild after a text write it did not
 /// see, rather than answer positions against the bytes that write replaced.
 #[test]
-fn a_read_after_a_watcher_write_rebuilds() {
+fn a_read_after_an_unindexed_text_write_rebuilds() {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
     let path = root.join("watched.qmd");
@@ -309,13 +301,8 @@ fn a_read_after_a_watcher_write_rebuilds() {
     server.document_highlight(&uri, 2, 0);
     let after_first_read = server.line_index_read_rebuilds();
 
-    // A longer document on disk, so a stale index would resolve line 3 to
-    // nothing and the length below would be the old one.
-    fs::write(&path, "# Title\n\nAlpha\nBeta\nGamma\n").unwrap();
-    server.did_change_watched_files(vec![FileEvent {
-        uri: Uri::from_file_path(&path).unwrap(),
-        typ: FileChangeType::CHANGED,
-    }]);
+    // A longer input makes a stale index resolve line 3 to nothing.
+    server.replace_document_text_without_index_update(&uri, "# Title\n\nAlpha\nBeta\nGamma\n");
 
     server.document_highlight(&uri, 3, 0);
 

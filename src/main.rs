@@ -1686,12 +1686,52 @@ fn run() -> io::Result<()> {
                     .as_deref()
                     .unwrap_or(Path::new("stdin.md"));
                 let metadata = panache::metadata::extract_project_metadata(&tree, stdin_path).ok();
-                let mut diagnostics = panache::linter::lint_with_external_sync_and_metadata(
-                    &tree,
-                    &input,
-                    &cfg,
-                    metadata.as_ref(),
-                );
+                let mut included_documents = Vec::new();
+                let execution_documents = if let Some(filename) = cli.stdin_filename.as_deref() {
+                    let absolute = panache::linter::execution_context::normalize_path(
+                        &std::path::absolute(filename)?,
+                    );
+                    if cfg.flavor == Flavor::Quarto
+                        || panache::includes::find_quarto_root(&absolute).is_some()
+                    {
+                        lint_stdin_execution(&input, &cfg, &absolute, |candidate| {
+                            load_config_for_cli(
+                                cli.config.as_deref(),
+                                cli.isolated,
+                                cli.cache_dir.as_deref(),
+                                candidate.parent().unwrap_or(Path::new(".")),
+                                Some(candidate),
+                                cli.flavor.map(Flavor::from),
+                            )
+                            .map(|(cfg, _)| cfg)
+                        })?
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let mut diagnostics = if let Some(documents) = execution_documents {
+                    let path = panache::linter::execution_context::normalize_path(
+                        &std::path::absolute(stdin_path)?,
+                    );
+                    let mut own = Vec::new();
+                    for document in documents {
+                        if document.path == path {
+                            own = document.diagnostics;
+                        } else {
+                            included_documents.push(document);
+                        }
+                    }
+                    own
+                } else {
+                    panache::linter::lint_with_external_sync_and_metadata(
+                        &tree,
+                        &input,
+                        &cfg,
+                        metadata.as_ref(),
+                    )
+                };
                 let db = panache::salsa::SalsaDb::default();
                 let yaml_diags = panache::salsa::built_in_lint_plan(
                     &db,
@@ -1705,7 +1745,11 @@ fn run() -> io::Result<()> {
                 .collect::<Vec<_>>();
                 merge_missing_diagnostics(&mut diagnostics, yaml_diags);
 
-                if diagnostics.is_empty() {
+                if diagnostics.is_empty()
+                    && included_documents
+                        .iter()
+                        .all(|doc| doc.diagnostics.is_empty())
+                {
                     if !cli.quiet {
                         println!("No issues found");
                     }
@@ -1740,6 +1784,19 @@ fn run() -> io::Result<()> {
                         message_format,
                         true,
                     );
+                }
+
+                if !cli.quiet {
+                    for document in included_documents {
+                        print_diagnostics(
+                            &document.diagnostics,
+                            Some(&document.path),
+                            Some(&document.input),
+                            use_color,
+                            message_format,
+                            true,
+                        );
+                    }
                 }
 
                 // Reporting mode exits non-zero whenever violations are found.
@@ -1829,9 +1886,14 @@ fn run() -> io::Result<()> {
             let prepare = |idx: usize,
                            file_path: &Path,
                            db: &mut panache::salsa::SalsaDb,
-                           intern: &mut Vec<(panache::Config, panache::salsa::FileConfig)>|
+                           intern: &mut Vec<(panache::Config, panache::salsa::FileConfig)>,
+                           defer_cache: bool|
              -> Prepared {
                 let mut load = || -> io::Result<Prepared> {
+                    let absolute_path = panache::linter::execution_context::normalize_path(
+                        &std::path::absolute(file_path)?,
+                    );
+                    let file_path = absolute_path.as_path();
                     let start_dir = file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
                     let (mut cfg, cfg_source) = load_config_for_cli(
                         cli.config.as_deref(),
@@ -1863,7 +1925,9 @@ fn run() -> io::Result<()> {
                             let tf = CliCache::tool_fingerprint();
                             let guard = cache_handle.lock().unwrap();
                             let supports = guard.supports_lint(&cfg);
-                            let hit = if supports {
+                            // Quarto external results depend on parent membership as
+                            // well as this file. Consult their cache after discovery.
+                            let hit = if supports && !defer_cache {
                                 guard
                                     .get_lint(file_path, &ff, &cf, &tf)
                                     .filter(|docs| cached_lint_documents_are_fresh(docs))
@@ -1932,20 +1996,33 @@ fn run() -> io::Result<()> {
                     let mut results: Vec<(usize, io::Result<LintOutcome>)> = Vec::new();
                     let mut jobs: Vec<PreparedJob> = Vec::new();
 
-                    for (idx, file_path) in files {
-                        match prepare(*idx, file_path, &mut db, &mut intern) {
-                            Prepared::Cached(i, outcome) => results.push((i, Ok(*outcome))),
-                            Prepared::Failed(i, err) => results.push((i, Err(err))),
-                            Prepared::Job(job) => jobs.push(*job),
-                        }
-                    }
-
                     let is_project = files.first().is_some_and(|(_, p)| {
                         let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
                         panache::includes::find_project_roots(&canonical)
                             .quarto_first()
                             .is_some()
                     });
+                    // A cached partial must still participate in discovering a
+                    // selected parent's context, even under a different flavor.
+                    let defer_cache = is_project
+                        || files.iter().any(|(_, path)| {
+                            load_config_for_cli(
+                                cli.config.as_deref(),
+                                cli.isolated,
+                                cli.cache_dir.as_deref(),
+                                path.parent().unwrap_or(Path::new(".")),
+                                Some(path),
+                                cli.flavor.map(Flavor::from),
+                            )
+                            .is_ok_and(|(cfg, _)| cfg.flavor == Flavor::Quarto)
+                        });
+                    for (idx, file_path) in files {
+                        match prepare(*idx, file_path, &mut db, &mut intern, defer_cache) {
+                            Prepared::Cached(i, outcome) => results.push((i, Ok(*outcome))),
+                            Prepared::Failed(i, err) => results.push((i, Err(err))),
+                            Prepared::Job(job) => jobs.push(*job),
+                        }
+                    }
 
                     // Load the project's referenced files once per distinct config
                     // (projects are almost always single-config), rather than once per
@@ -2008,6 +2085,39 @@ fn run() -> io::Result<()> {
                         }
                     }
 
+                    let execution_batch =
+                        if is_project || jobs.iter().any(|job| job.cfg.flavor == Flavor::Quarto) {
+                            let selected = jobs
+                                .iter()
+                                .map(|job| (job.file_path.clone(), job.file_config))
+                                .collect::<Vec<_>>();
+                            prepare_execution_batch(&mut db, &selected, |path| {
+                                load_config_for_cli(
+                                    cli.config.as_deref(),
+                                    cli.isolated,
+                                    cli.cache_dir.as_deref(),
+                                    path.parent().unwrap_or(Path::new(".")),
+                                    Some(path),
+                                    cli.flavor.map(Flavor::from),
+                                )
+                                .map(|(config, _)| config)
+                            })
+                        } else {
+                            Ok(None)
+                        };
+                    let execution_batch = match execution_batch {
+                        Ok(batch) => batch,
+                        Err(error) => {
+                            results
+                                .extend(jobs.iter().map(|job| {
+                                    (job.idx, Err(io::Error::other(error.to_string())))
+                                }));
+                            return results;
+                        }
+                    };
+                    let execution_results = std::sync::OnceLock::new();
+                    let execution_key = execution_batch.as_ref().map(|batch| batch.fingerprint());
+
                     let graph_ref = &graph_by_config;
                     // `SalsaDb` is `!Sync` (its query stack is a `RefCell`), so each
                     // reader task gets its own cloned handle (cheap: the storage is
@@ -2024,27 +2134,66 @@ fn run() -> io::Result<()> {
                         } else {
                             None
                         };
+                        let cache_keys = job.cache_store.as_ref().map(|(ff, cf, tf)| {
+                            (
+                                ff.clone(),
+                                match &execution_key {
+                                    Some(key) => format!("{cf}:{key}"),
+                                    None => cf.clone(),
+                                },
+                                tf.clone(),
+                            )
+                        });
+                        if let (Some(cache), Some((ff, cf, tf))) =
+                            (cache_shared.as_ref(), cache_keys.as_ref())
+                            && let Some(cached) = cache
+                                .lock()
+                                .unwrap()
+                                .get_lint(&job.file_path, ff, cf, tf)
+                                .filter(|docs| cached_lint_documents_are_fresh(docs))
+                        {
+                            let docs = cached.iter().map(linted_document_from_cached).collect();
+                            return (job.idx, Ok(build_lint_outcome(&job.file_path, docs)));
+                        }
                         let mut documents = Vec::new();
                         let mut visited = std::collections::HashSet::new();
                         let mut active = std::collections::HashSet::new();
-                        match lint_loaded_document_with_includes(
-                            &job.file_path,
-                            &job.input,
-                            Some(job.file_text),
-                            &job.cfg,
-                            job.file_config,
-                            &mut documents,
-                            &mut visited,
-                            &mut active,
-                            &db,
-                            graph_diags,
-                        ) {
+                        let lint_result = if let Some(batch) = &execution_batch {
+                            let external = execution_results.get_or_init(|| batch.run());
+                            lint_execution_sources(
+                                &job.file_path,
+                                job.file_config,
+                                &db,
+                                batch,
+                                external,
+                                graph_diags,
+                            )
+                            .map(|docs| documents = docs)
+                        } else {
+                            lint_loaded_document_with_includes(
+                                &job.file_path,
+                                &job.input,
+                                Some(job.file_text),
+                                &job.cfg,
+                                job.file_config,
+                                &mut documents,
+                                &mut visited,
+                                &mut active,
+                                &db,
+                                graph_diags,
+                            )
+                        };
+                        match lint_result {
                             Ok(()) => {
                                 if let (Some(cache_handle), Some((ff, cf, tf))) =
-                                    (cache_shared.as_ref(), job.cache_store.as_ref())
+                                    (cache_shared.as_ref(), cache_keys.as_ref())
                                 {
                                     let mut guard = cache_handle.lock().unwrap();
-                                    if guard.supports_lint(&job.cfg) {
+                                    if guard.supports_lint(&job.cfg)
+                                        && execution_results
+                                            .get()
+                                            .is_none_or(|result| result.successful)
+                                    {
                                         let cached_docs = documents
                                             .iter()
                                             .map(cached_lint_document_from_linted)
@@ -2084,18 +2233,17 @@ fn run() -> io::Result<()> {
             // Group files by the project they belong to. One shared database per
             // project lets `project_structure`, `project_graph`, and
             // `project_symbol_index` (plus every document's parse) be computed
-            // once for the whole project instead of once per file — the fix for
-            // the O(n^2) whole-project reparse. Files with no project become
-            // singleton groups, preserving per-file parallelism for flat
-            // directories. Distinct projects (and singleton files) run in
-            // parallel; within a project the reader phase parallelizes too.
+            // once for the whole project instead of once per file. Files with
+            // no project share a group so explicit parents and partials can be
+            // recognized across the selected paths. Reader jobs still run in
+            // parallel within each group.
             let group_key = |file_path: &Path| -> PathBuf {
                 let canonical = file_path
                     .canonicalize()
                     .unwrap_or_else(|_| file_path.to_path_buf());
                 panache::includes::find_project_roots(&canonical)
                     .quarto_first()
-                    .unwrap_or(canonical)
+                    .unwrap_or_default()
             };
             let mut group_map: std::collections::HashMap<PathBuf, Vec<(usize, PathBuf)>> =
                 std::collections::HashMap::new();
@@ -2226,28 +2374,26 @@ fn run() -> io::Result<()> {
                     }
                 }
 
-                if !fix {
-                    for doc in &included_docs {
-                        if doc.diagnostics.is_empty() {
-                            continue;
-                        }
-                        // Report each included file at most once, and never a
-                        // file already covered as an explicit target.
-                        if !reported_paths.insert(canonical_path(&doc.path)) {
-                            continue;
-                        }
-                        any_issues = true;
-                        total_issues += doc.diagnostics.len();
-                        if !cli.quiet {
-                            print_diagnostics(
-                                &doc.diagnostics,
-                                Some(doc.path.as_path()),
-                                Some(&doc.input),
-                                use_color,
-                                message_format,
-                                true,
-                            );
-                        }
+                for doc in &included_docs {
+                    if doc.diagnostics.is_empty() {
+                        continue;
+                    }
+                    // Report each included file at most once, and never a
+                    // file already covered as an explicit target.
+                    if !reported_paths.insert(canonical_path(&doc.path)) {
+                        continue;
+                    }
+                    any_issues = true;
+                    total_issues += doc.diagnostics.len();
+                    if !cli.quiet {
+                        print_diagnostics(
+                            &doc.diagnostics,
+                            Some(doc.path.as_path()),
+                            Some(&doc.input),
+                            use_color,
+                            message_format,
+                            true,
+                        );
                     }
                 }
             }
@@ -2481,6 +2627,148 @@ fn build_lint_outcome(file_path: &Path, documents: Vec<LintedDocument>) -> LintO
 /// handler) and shared by every file's lint so the O(project) accumulator does
 /// not re-run per file.
 type ProjectGraphDiagnostics = std::collections::HashMap<PathBuf, Vec<panache::linter::Diagnostic>>;
+
+fn prepare_execution_batch(
+    db: &mut panache::salsa::SalsaDb,
+    selected: &[(PathBuf, panache::salsa::FileConfig)],
+    mut load_config: impl FnMut(&Path) -> io::Result<panache::Config>,
+) -> io::Result<Option<panache::linter::execution_context::ExecutionBatch>> {
+    use panache::linter::execution_context::{
+        ExecutionBatch, ExecutionRoot, load_execution_sources,
+    };
+    let mut candidates = std::collections::BTreeMap::new();
+    let mut configs = Vec::new();
+    for (path, handle) in selected {
+        candidates.entry(path.clone()).or_insert(false);
+        configs.push((handle.config(db).clone(), *handle));
+        if let Some(project) = panache::includes::find_quarto_root(path) {
+            for candidate in
+                panache::includes::find_project_documents(&project, handle.config(db), false)
+            {
+                candidates.insert(candidate, true);
+            }
+        }
+    }
+    let mut roots = Vec::new();
+    for (path, render_target) in candidates {
+        let config =
+            if let Some((_, handle)) = selected.iter().find(|(selected, _)| *selected == path) {
+                *handle
+            } else {
+                let cfg = load_config(&path)?;
+                if let Some((_, handle)) = configs.iter().find(|(seen, _)| *seen == cfg) {
+                    *handle
+                } else {
+                    let handle = panache::salsa::FileConfig::new(db, cfg.clone());
+                    configs.push((cfg, handle));
+                    handle
+                }
+            };
+        let id = db.intern_file(Some(path.clone()));
+        db.load_file_from_disk(id);
+        let file = db
+            .file_text_if_cached(&path)
+            .expect("interned execution root");
+        roots.push(ExecutionRoot {
+            file,
+            config,
+            render_target,
+        });
+    }
+    if roots
+        .iter()
+        .all(|root| root.config.config(db).linters.is_empty())
+    {
+        return Ok(None);
+    }
+    let loaded = load_execution_sources(db, &roots);
+    let targets = selected
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<Vec<_>>();
+    Ok(Some(
+        ExecutionBatch::new(db, &roots, &targets).with_read_errors(&loaded.read_errors),
+    ))
+}
+
+fn lint_stdin_execution(
+    input: &str,
+    config: &panache::Config,
+    filename: &Path,
+    load_config: impl FnMut(&Path) -> io::Result<panache::Config>,
+) -> io::Result<Option<Vec<LintedDocument>>> {
+    use panache::linter::execution_context::normalize_path;
+    let path = normalize_path(&std::path::absolute(filename)?);
+    let mut db = panache::salsa::SalsaDb::default();
+    let file = db.update_file_text(path.clone(), input.to_owned());
+    let file_config = panache::salsa::FileConfig::new(&db, config.clone());
+    db.load_referenced_files(file, file_config, path.clone());
+    let Some(batch) =
+        prepare_execution_batch(&mut db, &[(path.clone(), file_config)], load_config)?
+    else {
+        return Ok(None);
+    };
+    let results = batch.run();
+    lint_execution_sources(&path, file_config, &db, &batch, &results, None).map(Some)
+}
+
+fn lint_execution_sources(
+    target: &Path,
+    config: panache::salsa::FileConfig,
+    db: &panache::salsa::SalsaDb,
+    batch: &panache::linter::execution_context::ExecutionBatch,
+    external: &panache::linter::execution_context::ExecutionResults,
+    graph_diags: Option<&ProjectGraphDiagnostics>,
+) -> io::Result<Vec<LintedDocument>> {
+    use panache::linter::execution_context::normalize_path;
+    let mut documents = Vec::new();
+    let Some(scope) = batch.scopes.get(&normalize_path(target)) else {
+        return Ok(documents);
+    };
+    let mut local_graph = ProjectGraphDiagnostics::new();
+    if graph_diags.is_none()
+        && let Some(file) = db.file_text_if_cached(&normalize_path(target))
+    {
+        for entry in panache::salsa::project_graph::accumulated::<panache::salsa::GraphDiagnostic>(
+            db, file, config,
+        ) {
+            local_graph
+                .entry(entry.0.path.clone())
+                .or_default()
+                .push(entry.0.diagnostic.clone());
+        }
+    }
+    let graph_diags = graph_diags.unwrap_or(&local_graph);
+    for path in scope {
+        let Some(file) = db.file_text_if_cached(path) else {
+            continue;
+        };
+        let input = file.content_or_empty(db);
+        let mut diagnostics = panache::salsa::built_in_lint_plan(db, file, config)
+            .diagnostics
+            .clone();
+        if let Some(graph) = graph_diags.get(path) {
+            // Include failures belong to an execution root's path context.
+            // The generic project graph resolves partials independently.
+            diagnostics.extend(
+                graph
+                    .iter()
+                    .filter(|d| !d.code.starts_with("include-"))
+                    .cloned(),
+            );
+        }
+        if let Some(items) = external.diagnostics.get(path) {
+            diagnostics.extend(items.iter().cloned());
+        }
+        diagnostics.sort_by_key(|d| (d.location.line, d.location.column));
+        documents.push(LintedDocument {
+            path: path.clone(),
+            input: input.to_string(),
+            diagnostics,
+        });
+    }
+    Ok(documents)
+}
 
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn lint_loaded_document_with_includes(

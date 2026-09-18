@@ -257,9 +257,18 @@ pub(crate) fn compute_publishes(
     let external_jobs = lint_plan.external_jobs;
 
     #[cfg(not(target_arch = "wasm32"))]
-    if run_external && !external_jobs.is_empty() {
-        // The index carries the allocation salsa holds, so handing the document
-        // to the linters costs a refcount bump rather than a copy of the text.
+    let batch = snap.execution_batch_for(uri);
+    #[cfg(not(target_arch = "wasm32"))]
+    let contextual = batch.is_some();
+    #[cfg(not(target_arch = "wasm32"))]
+    let execution = batch.as_ref().map(|batch| {
+        let result = snap.execution_cache.get_or_run(batch, run_external);
+        snap.db().unwind_if_revision_cancelled();
+        result
+    });
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if !contextual && run_external && !external_jobs.is_empty() {
         let text = line_index.text_arc();
         let registry = crate::linter::external_linters::ExternalLinterRegistry::new();
         for job in &external_jobs {
@@ -293,6 +302,10 @@ pub(crate) fn compute_publishes(
         doc_state.salsa_file,
         doc_state.salsa_config,
     ) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if contextual && entry.0.diagnostic.code.starts_with("include-") {
+            continue;
+        }
         by_path
             .entry(entry.0.path.clone())
             .or_default()
@@ -300,6 +313,15 @@ pub(crate) fn compute_publishes(
     }
     if let Some(root_path) = root_path {
         by_path.entry(root_path).or_default();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(execution) = execution {
+        for (path, diagnostics) in &execution.diagnostics {
+            by_path
+                .entry(path.clone())
+                .or_default()
+                .extend(diagnostics.iter().cloned());
+        }
     }
 
     let mut publishes = Vec::new();
@@ -313,14 +335,10 @@ pub(crate) fn compute_publishes(
         let target_index = if target_uri == *uri {
             Arc::clone(&line_index)
         } else {
-            let Some(target_state) = snap.document_state(&target_uri) else {
+            let Some(file) = snap.db().file_text(path.clone()) else {
                 continue;
             };
-            crate::lsp::line_index::line_index(
-                &snap.line_index_cache,
-                snap.db(),
-                target_state.salsa_file,
-            )
+            crate::lsp::line_index::line_index(&snap.line_index_cache, snap.db(), file)
         };
         let mapped: Vec<Diagnostic> = diags
             .iter()
@@ -512,7 +530,16 @@ fn related_documents(
         crate::salsa::project_structure(snap.db(), doc_state.salsa_file, doc_state.salsa_config);
 
     let mut map = HashMap::new();
-    for path in project_closure(graph, &root) {
+    let mut closure = project_closure(graph, &root);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(batch) = snap.execution_batch_for(uri) {
+        for plan in batch.plans {
+            if plan.sources.iter().any(|source| source.path == root) {
+                closure.extend(plan.sources.into_iter().map(|source| source.path));
+            }
+        }
+    }
+    for path in closure {
         let Some(target) = Uri::from_file_path(&path) else {
             continue;
         };

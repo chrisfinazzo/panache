@@ -196,6 +196,28 @@ the `rmarkdown-inline-code` and `quarto-inline-code` extension settings.
 Ordinary code spans and escaped examples using extra backticks or doubled braces
 are excluded.
 
+Under the Quarto flavor, external linters also analyze code from `include`
+shortcodes in inclusion order. Nested include paths resolve relative to the main
+document; paths starting with `/` resolve from the project root. Repeated
+includes contribute code at each occurrence. An include that is missing,
+unreadable, or cyclic prevents external analysis of that execution context and
+produces an include diagnostic instead.
+
+Panache uses known parent documents when linting a partial directly. It
+discovers parents among the project's render targets and the documents selected
+for the current lint command. Without a known parent, the partial is analyzed on
+its own. Diagnostics point to the file containing the code. A finding specific
+to a parent names that parent in a note; identical findings from several parents
+are combined.
+
+`lint --fix` edits only the command's target files, including files selected by
+a directory scan. Findings in other included files are reported but do not
+modify those files. A fix in shared source is available only when every known
+execution context and repeated occurrence agrees on its edits, even with
+`--unsafe-fixes`. Fixes spanning source files are omitted. With
+`--stdin-filename`, include resolution uses that filename and the supplied input
+replaces its on-disk contents for analysis; fixes still write only to stdout.
+
 ::: {.callout-note}
 For a code block nested in a block quote or list item, an autofix that would add
 or remove whole lines cannot be applied without disturbing the surrounding

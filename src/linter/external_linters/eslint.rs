@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 use super::{
     ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
-    map_tool_line_col_to_original,
+    map_tool_range,
 };
-use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
+use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin};
 
 #[derive(Debug, Deserialize)]
 struct EslintFileReport {
@@ -57,17 +57,15 @@ impl ExternalLinterParser for EslintParser {
             for msg in report.messages {
                 let line = msg.line;
                 let column = msg.column;
-                let start_offset = map_tool_line_col_to_original(ctx, line, column)
-                    .unwrap_or(ctx.original_input.len());
-                let end_line = msg.end_line.unwrap_or(line);
-                let end_column = msg.end_column.unwrap_or(column.saturating_add(1));
-                let end_offset = map_tool_line_col_to_original(ctx, end_line, end_column)
-                    .unwrap_or(ctx.original_input.len());
-
-                let location = Location::from_range(
-                    TextRange::new((start_offset as u32).into(), (end_offset as u32).into()),
-                    ctx.original_input,
-                );
+                let Some(location) = map_tool_range(
+                    ctx,
+                    line,
+                    column,
+                    msg.end_line.unwrap_or(line),
+                    msg.end_column.unwrap_or(column.saturating_add(1)),
+                ) else {
+                    continue;
+                };
 
                 let code = msg.rule_id.unwrap_or_else(|| "eslint".to_string());
                 let diagnostic = match msg.severity {

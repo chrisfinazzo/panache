@@ -62,11 +62,34 @@ pub fn collect_includes(
     project_root: Option<&Path>,
     config: &Config,
 ) -> IncludeResolution {
-    if !config.extensions.quarto_shortcodes {
-        return IncludeResolution::default();
-    }
-
     let mut resolution = IncludeResolution::default();
+    for include in include_occurrences(tree, base_dir, project_root, config) {
+        if !include.path.is_file() {
+            resolution.diagnostics.push(include_not_found_diagnostic(
+                input,
+                include.range,
+                &include.path,
+            ));
+        } else {
+            resolution.includes.push(include);
+        }
+    }
+    resolution
+}
+
+/// Resolve syntactic include occurrences without probing the filesystem.
+/// Callers expanding a Quarto document pass its root directory for every
+/// partial, because nested includes retain the main document's path context.
+pub fn include_occurrences(
+    tree: &SyntaxNode,
+    base_dir: &Path,
+    project_root: Option<&Path>,
+    config: &Config,
+) -> Vec<IncludeOccurrence> {
+    if !config.extensions.quarto_shortcodes {
+        return Vec::new();
+    }
+    let mut includes = Vec::new();
 
     for shortcode in tree.descendants().filter_map(Shortcode::cast) {
         if shortcode.is_escaped() {
@@ -82,22 +105,13 @@ pub fn collect_includes(
         };
 
         let resolved = resolve_include_path(raw_path, base_dir, project_root);
-        if !resolved.exists() || !resolved.is_file() {
-            resolution.diagnostics.push(include_not_found_diagnostic(
-                input,
-                shortcode.syntax().text_range(),
-                &resolved,
-            ));
-            continue;
-        }
-
-        resolution.includes.push(IncludeOccurrence {
+        includes.push(IncludeOccurrence {
             path: resolved,
             range: shortcode.syntax().text_range(),
         });
     }
 
-    resolution
+    includes
 }
 
 pub fn collect_cross_doc_duplicates(
@@ -571,7 +585,11 @@ fn wildcard_match(path: &str, pattern: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn include_not_found_diagnostic(input: &str, range: TextRange, path: &Path) -> Diagnostic {
+pub(crate) fn include_not_found_diagnostic(
+    input: &str,
+    range: TextRange,
+    path: &Path,
+) -> Diagnostic {
     Diagnostic::error(
         Location::from_range(range, input),
         "include-not-found",

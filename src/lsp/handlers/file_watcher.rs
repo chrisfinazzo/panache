@@ -118,6 +118,7 @@ pub(crate) fn did_change_watched_files(gs: &mut GlobalState, params: DidChangeWa
         // actually references are loaded precisely by
         // `reload_open_documents_referenced_files`, never by watch traffic.
         if loaded_paths.contains(&path)
+            && !open_paths.contains(&path)
             && let Ok(contents) = std::fs::read_to_string(&path)
             && gs.salsa.update_file_text_if_cached_with_durability(
                 &path,
@@ -215,6 +216,11 @@ pub(crate) fn did_change_watched_files(gs: &mut GlobalState, params: DidChangeWa
     // text); arm the settle so the all-docs pass re-lints over the fresh state
     // even when no document was flagged for external linters above.
     if !changed_paths.is_empty() {
+        #[cfg(not(target_arch = "wasm32"))]
+        if !gs.execution_roots.is_empty() {
+            gs.external_pending
+                .extend(gs.document_map.keys().filter_map(|key| key.parse().ok()));
+        }
         gs.arm_settle();
     }
 }

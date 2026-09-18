@@ -228,9 +228,46 @@ pub(crate) struct StateSnapshot {
     /// a text write does not invalidate it -- identity does
     /// ([`crate::lsp::line_index::LineIndexCache`]).
     pub(crate) line_index_cache: crate::lsp::line_index::SharedLineIndexCache,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_roots: Arc<Vec<crate::linter::execution_context::ExecutionRoot>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_cache: Arc<crate::linter::execution_context::ExecutionCache>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_read_errors: Arc<std::collections::BTreeMap<PathBuf, String>>,
 }
 
 impl StateSnapshot {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn execution_batch(&self) -> crate::linter::execution_context::ExecutionBatch {
+        let targets = self
+            .document_map
+            .values()
+            .filter_map(|state| self.db().path_of(state.salsa_file))
+            .collect::<Vec<_>>();
+        crate::linter::execution_context::ExecutionBatch::new(
+            self.db(),
+            &self.execution_roots,
+            &targets,
+        )
+        .with_read_errors(&self.execution_read_errors)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn execution_batch_for(
+        &self,
+        uri: &Uri,
+    ) -> Option<crate::linter::execution_context::ExecutionBatch> {
+        let path = crate::linter::execution_context::normalize_path(
+            &super::uri_ext::UriExt::to_file_path(uri)?,
+        );
+        if self.execution_roots.is_empty() {
+            return None;
+        }
+        let batch = self.execution_batch();
+        batch.source_text(&path)?;
+        Some(batch)
+    }
+
     /// Shared, read-only database handle for worker read queries.
     pub(crate) fn db(&self) -> &dyn crate::salsa::Db {
         self.analysis.db()
@@ -393,6 +430,12 @@ pub(crate) enum OutgoingRequest {
 
 /// The synchronous, single-threaded-mutation server state.
 pub(crate) struct GlobalState {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_roots: Arc<Vec<crate::linter::execution_context::ExecutionRoot>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_cache: Arc<crate::linter::execution_context::ExecutionCache>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) execution_read_errors: Arc<std::collections::BTreeMap<PathBuf, String>>,
     pub(crate) sender: ClientSender,
 
     /// Open documents. `Arc` so snapshots clone it in O(1); writers use
@@ -517,6 +560,12 @@ impl GlobalState {
         let fmt_pool = TaskPool::new(task_tx, 1);
         Self {
             sender,
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_roots: Arc::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_cache: Arc::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_read_errors: Arc::default(),
             document_map: Arc::new(DocumentMap::new()),
             workspace_folders: Vec::new(),
             runtime_settings: LspRuntimeSettings::default(),
@@ -667,6 +716,12 @@ impl GlobalState {
     /// A cheap read snapshot for a worker thread.
     pub(crate) fn snapshot(&self) -> StateSnapshot {
         StateSnapshot {
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_roots: self.execution_roots.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_cache: self.execution_cache.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            execution_read_errors: self.execution_read_errors.clone(),
             analysis: crate::salsa::Analysis::new(self.salsa.clone()),
             document_map: Arc::clone(&self.document_map),
             line_index_cache: Arc::clone(&self.line_index_cache),

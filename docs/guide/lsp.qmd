@@ -711,12 +711,26 @@ Built-in rules
     Run debounced as you type.
 
 External linters
+
 :   Code blocks and executable inline expressions are analyzed together (e.g.,
-    `arity` for R when configured in `[linters]`). Run on save, with one
-    subprocess per configured language. Quarto inline R, Python, and Julia
-    expressions receive diagnostics and quick fixes at their original document
-    positions. Inline fixes preserve the surrounding Markdown, and unsafe fixes
-    remain excluded from the aggregate fix-all action.
+    `arity` for R when configured in `[linters]`). Run on open and save, with
+    one subprocess per execution context and configured language. Quarto inline
+    R, Python, and Julia expressions receive diagnostics and quick fixes at
+    their original document positions. Inline fixes preserve the surrounding
+    Markdown, and unsafe fixes remain excluded from the aggregate fix-all
+    action.
+
+    Quarto includes share their parent document's execution context. When a partial
+    is open, Panache also considers known parents among the project's render targets
+    and open documents. Diagnostics appear on the file containing the code, even
+    when an included file is not open. Notes identify the parents affected by a
+    finding. Quick fixes and fix-all edit only the requested document, and
+    shared-source fixes require agreement across all known contexts.
+
+    Analysis uses unsaved buffers for open files. Saving a parent or partial, or
+    receiving a file-watch notification, refreshes the affected execution contexts.
+    Pull requests reuse current external results without starting subprocesses;
+    results from an older source snapshot are omitted.
 
 Project manifests
 :   YAML parse errors in the project's manifest files---`_quarto.yml`,

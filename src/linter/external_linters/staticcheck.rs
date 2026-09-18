@@ -1,8 +1,7 @@
-use rowan::TextRange;
 use serde::Deserialize;
 
-use super::{ExternalLinterParser, LinterError, ParseContext, map_tool_line_col_to_original};
-use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin, Location};
+use super::{ExternalLinterParser, LinterError, ParseContext, map_tool_range};
+use crate::linter::diagnostics::{Diagnostic, DiagnosticOrigin};
 
 #[derive(Debug, Deserialize)]
 struct StaticcheckDiagnostic {
@@ -33,15 +32,10 @@ impl ExternalLinterParser for StaticcheckParser {
         for diag in diagnostics {
             let line = diag.location.line;
             let column = diag.location.column;
-            let start_offset = map_tool_line_col_to_original(ctx, line, column)
-                .unwrap_or(ctx.original_input.len());
-            let end_offset = map_tool_line_col_to_original(ctx, line, column.saturating_add(1))
-                .unwrap_or(ctx.original_input.len());
-
-            let location = Location::from_range(
-                TextRange::new((start_offset as u32).into(), (end_offset as u32).into()),
-                ctx.original_input,
-            );
+            let Some(location) = map_tool_range(ctx, line, column, line, column.saturating_add(1))
+            else {
+                continue;
+            };
 
             output.push(
                 Diagnostic::warning(location, diag.check, diag.message)

@@ -7,7 +7,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::io_context::IoResultExt;
 
-const CACHE_SCHEMA_VERSION: u32 = 2;
+const CACHE_SCHEMA_VERSION: u32 = 3;
 const CACHE_FILE_NAME: &str = "cli-cache-v1.bin";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
