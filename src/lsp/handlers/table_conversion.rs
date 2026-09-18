@@ -53,6 +53,7 @@ pub(super) fn code_actions(
     let config = crate::formatter::to_formatter_config(config);
     let mut actions = Vec::new();
     for (target, title) in [
+        (TableStyle::Pipe, "Convert to pipe table"),
         (TableStyle::Simple, "Convert to simple table"),
         (TableStyle::Multiline, "Convert to multiline table"),
     ] {

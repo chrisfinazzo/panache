@@ -10,6 +10,7 @@ fn actions(server: &TestLspServer, uri: &str, line: u32, character: u32) -> Vec<
         .filter_map(|action| match action {
             CodeActionOrCommand::CodeAction(action)
                 if action.title == "Convert to simple table"
+                    || action.title == "Convert to pipe table"
                     || action.title == "Convert to multiline table" =>
             {
                 Some(action)
@@ -118,11 +119,134 @@ fn omits_unsupported_actions_and_current_style() {
     let mut server = TestLspServer::new();
     for (text, expected) in [
         ("| A | B |\n|---|---|\n| x |\n", 0),
-        ("A     B\n----- -----\none   two\n", 1),
+        ("A     B\n----- -----\none   two\n", 2),
     ] {
         server.open_document("file:///table.qmd", text, "quarto");
         assert_eq!(actions(&server, "file:///table.qmd", 0, 1).len(), expected);
         server.close_document("file:///table.qmd");
+    }
+}
+
+#[test]
+fn converts_simple_and_multiline_tables_to_pipe() {
+    for source in [
+        "A     B\n----- -----\none   two\n",
+        "-------------\nA      B\n------ ------\none    two\nthree\n\n-------------\n",
+        "----- -----\none   two\n----- -----\n",
+    ] {
+        let text = format!("Before 😀.\n\n{source}\n: Caption {{#tbl-id}}\n\nAfter.\n");
+        let mut server = TestLspServer::new();
+        server.open_document("file:///table.qmd", &text, "quarto");
+        let line = text
+            .lines()
+            .position(|line| line.starts_with(": Caption"))
+            .unwrap();
+        let actions = actions(&server, "file:///table.qmd", line as u32, 3);
+        assert_eq!(actions.len(), 2);
+        let action = actions
+            .iter()
+            .find(|action| action.title == "Convert to pipe table")
+            .unwrap();
+        assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
+        let result = apply(&text, action);
+        assert!(result.starts_with("Before 😀.\n\n|"));
+        assert!(result.ends_with("\n: Caption {#tbl-id}\n\nAfter.\n"));
+        assert!(result.contains("two"));
+        if source.contains("three") {
+            assert!(result.contains("one three"));
+        }
+        let tree = panache::parse(&result, None);
+        assert_eq!(
+            tree.descendants()
+                .find_map(Table::cast)
+                .unwrap()
+                .syntax()
+                .kind(),
+            SyntaxKind::PIPE_TABLE
+        );
+    }
+}
+
+#[test]
+fn pipe_conversion_preserves_nested_prefixes_crlf_and_final_newline() {
+    let source = "A     B\n----- -----\n😀    界\n";
+    let nested = source
+        .lines()
+        .map(|line| format!("  > {line}\r\n"))
+        .collect::<String>();
+    for text in [
+        format!("- Item.\r\n\r\n{nested}\r\n- Sibling.\r\n"),
+        source.trim_end().to_string(),
+        format!(": Caption 😀 {{#tbl-id}}\n\n{source}"),
+    ] {
+        let mut server = TestLspServer::new();
+        server.open_document("file:///table.qmd", &text, "quarto");
+        let (line, content) = text
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("界"))
+            .unwrap();
+        let col = content[..content.find("界").unwrap()]
+            .encode_utf16()
+            .count();
+        let action = actions(&server, "file:///table.qmd", line as u32, col as u32)
+            .into_iter()
+            .find(|action| action.title == "Convert to pipe table")
+            .unwrap();
+        let result = apply(&text, &action);
+        assert_eq!(text.ends_with('\n'), result.ends_with('\n'));
+        assert!(result.contains("😀"));
+        assert!(result.contains("界"));
+        if text.contains("\r\n") {
+            assert!(result.contains("\r\n  > |"));
+            assert!(result.ends_with("\r\n- Sibling.\r\n"));
+            assert!(!result.replace("\r\n", "").contains('\n'));
+        }
+        if text.starts_with(": Caption") {
+            assert!(result.starts_with(": Caption 😀 {#tbl-id}\n\n|"));
+        }
+    }
+}
+
+#[test]
+fn pipe_conversion_reports_disabled_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "flavor = \"pandoc\"\n[extensions]\npipe-tables = false\n",
+    )
+    .unwrap();
+    let uri = Uri::from_file_path(dir.path().join("table.md")).unwrap();
+    for disabled_support in [false, true] {
+        let mut server = TestLspServer::new();
+        if disabled_support {
+            server.initialize_disabled_code_actions(
+                Uri::from_file_path(dir.path()).unwrap().as_str(),
+            );
+        } else {
+            server.initialize(Uri::from_file_path(dir.path()).unwrap().as_str());
+        }
+        server.open_document(
+            uri.as_str(),
+            "A     B\n----- -----\none   two\n",
+            "markdown",
+        );
+        let action = actions(&server, uri.as_str(), 0, 1)
+            .into_iter()
+            .find(|action| action.title == "Convert to pipe table");
+        if disabled_support {
+            let action = action.unwrap();
+            assert!(action.edit.is_none());
+            assert!(
+                action
+                    .disabled
+                    .unwrap()
+                    .reason
+                    .contains("extension is disabled")
+            );
+        } else {
+            assert!(action.is_none());
+        }
     }
 }
 

@@ -2,7 +2,10 @@
 
 use crate::{
     Config,
-    syntax::{AstNode, SyntaxKind, SyntaxNode, Table, TableAlignment, text_without_line_prefixes},
+    syntax::{
+        AstNode, LatexCommand, SyntaxKind, SyntaxNode, Table, TableAlignment,
+        text_without_line_prefixes,
+    },
 };
 use panache_parser::parser::inlines::core::parse_inline_text_recursive;
 use rowan::{GreenNodeBuilder, NodeOrToken};
@@ -15,6 +18,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableStyle {
+    Pipe,
     Simple,
     Multiline,
 }
@@ -22,6 +26,7 @@ pub enum TableStyle {
 impl TableStyle {
     pub fn syntax_kind(self) -> SyntaxKind {
         match self {
+            Self::Pipe => SyntaxKind::PIPE_TABLE,
             Self::Simple => SyntaxKind::SIMPLE_TABLE,
             Self::Multiline => SyntaxKind::MULTILINE_TABLE,
         }
@@ -66,9 +71,11 @@ impl std::fmt::Display for TableConversionError {
 impl std::error::Error for TableConversionError {}
 
 /// Breaks are permitted only between pieces, never inside an inline construct.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct Cell {
     pieces: Vec<String>,
+    pipe_text: String,
+    comparison: String,
 }
 
 impl Cell {
@@ -104,46 +111,27 @@ impl Cell {
         {
             return Err(TableConversionError::HardLineBreak);
         }
-        let mut pieces = Vec::new();
-        let mut current = String::new();
-        for element in node.children_with_tokens() {
-            match element {
-                NodeOrToken::Token(token)
-                    if matches!(
-                        token.kind(),
-                        SyntaxKind::TEXT | SyntaxKind::NEWLINE | SyntaxKind::WHITESPACE
-                    ) =>
-                {
-                    for ch in token.text().chars() {
-                        if ch.is_ascii_whitespace() {
-                            if !current.is_empty() {
-                                pieces.push(std::mem::take(&mut current));
-                            }
-                        } else {
-                            current.push(ch);
-                        }
-                    }
-                }
-                NodeOrToken::Node(node) => {
-                    let text = normalize_prose(&node);
-                    if text.contains(['\n', '\r']) {
-                        return Err(TableConversionError::MultilineLiteral);
-                    }
-                    current.push_str(&text);
-                }
-                element => {
-                    let text = element.to_string();
-                    if text.contains(['\n', '\r']) {
-                        return Err(TableConversionError::MultilineLiteral);
-                    }
-                    current.push_str(&text);
-                }
-            }
+        // The parser does not yet include verbatim delimiters and content in
+        // the command node. Escaping or reflowing those bytes can change TeX.
+        if node
+            .descendants()
+            .filter_map(LatexCommand::cast)
+            .any(|command| {
+                command
+                    .text()
+                    .chars()
+                    .skip(1)
+                    .take_while(char::is_ascii_alphabetic)
+                    .eq("verb".chars())
+            })
+        {
+            return Err(TableConversionError::InvalidOutput);
         }
-        if !current.is_empty() {
-            pieces.push(current);
-        }
-        Ok(Self { pieces })
+        Ok(Self {
+            pieces: cell_pieces(&node, CellText::Source)?,
+            pipe_text: cell_pieces(&node, CellText::Pipe)?.join(" "),
+            comparison: cell_pieces(&node, CellText::Comparison)?.join(" "),
+        })
     }
 
     fn text(&self) -> String {
@@ -173,7 +161,67 @@ impl Cell {
     }
 }
 
-fn normalize_prose(node: &SyntaxNode) -> String {
+fn cell_pieces(node: &SyntaxNode, mode: CellText) -> Result<Vec<String>, TableConversionError> {
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    for element in node.children_with_tokens() {
+        match element {
+            NodeOrToken::Token(token)
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::TEXT | SyntaxKind::NEWLINE | SyntaxKind::WHITESPACE
+                ) =>
+            {
+                for ch in token.text().chars() {
+                    if ch.is_ascii_whitespace() {
+                        if !current.is_empty() {
+                            pieces.push(std::mem::take(&mut current));
+                        }
+                    } else {
+                        if ch == '|' && matches!(mode, CellText::Pipe) {
+                            current.push('\\');
+                        }
+                        current.push(ch);
+                    }
+                }
+            }
+            element => {
+                let text = match element {
+                    NodeOrToken::Node(node) => inline_cell_text(&node, mode),
+                    NodeOrToken::Token(token) => comparison_token_text(&token, mode),
+                };
+                if text.contains(['\n', '\r']) {
+                    return Err(TableConversionError::MultilineLiteral);
+                }
+                current.push_str(&text);
+            }
+        }
+    }
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+    Ok(pieces)
+}
+
+fn comparison_token_text(token: &crate::syntax::SyntaxToken, mode: CellText) -> String {
+    if matches!(mode, CellText::Comparison)
+        && token.kind() == SyntaxKind::ESCAPED_CHAR
+        && token.text() == "\\|"
+    {
+        "|".to_string()
+    } else {
+        token.text().to_string()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CellText {
+    Source,
+    Pipe,
+    Comparison,
+}
+
+fn inline_cell_text(node: &SyntaxNode, mode: CellText) -> String {
     if !matches!(
         node.kind(),
         SyntaxKind::EMPHASIS
@@ -189,12 +237,20 @@ fn normalize_prose(node: &SyntaxNode) -> String {
     node.children_with_tokens()
         .map(|element| match element {
             NodeOrToken::Token(token)
-                if matches!(token.kind(), SyntaxKind::TEXT | SyntaxKind::NEWLINE) =>
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::TEXT | SyntaxKind::NEWLINE | SyntaxKind::WHITESPACE
+                ) =>
             {
-                collapse_spaces(token.text())
+                let text = collapse_spaces(token.text());
+                if matches!(mode, CellText::Pipe) {
+                    text.replace('|', "\\|")
+                } else {
+                    text
+                }
             }
-            NodeOrToken::Node(node) => normalize_prose(&node),
-            element => element.to_string(),
+            NodeOrToken::Node(node) => inline_cell_text(&node, mode),
+            NodeOrToken::Token(token) => comparison_token_text(&token, mode),
         })
         .collect()
 }
@@ -211,7 +267,7 @@ pub(super) fn reflow_inline_cell(
         .map(|cell| cell.wrap(width))
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct LogicalTable {
     rows: Vec<Vec<Cell>>,
     alignments: Vec<TableAlignment>,
@@ -274,7 +330,7 @@ impl LogicalTable {
             return Err(TableConversionError::UnsupportedSource);
         }
         let rows = table.rows();
-        let has_header = rows.first().is_some_and(|row| row.is_header());
+        let mut has_header = rows.first().is_some_and(|row| row.is_header());
         if rows.len() <= usize::from(has_header) {
             return Err(TableConversionError::MissingBody);
         }
@@ -351,10 +407,20 @@ impl LogicalTable {
             }
             (result, alignments)
         };
-        let rows = cell_texts
+        let mut rows: Vec<Vec<Cell>> = cell_texts
             .into_iter()
             .map(|row| row.iter().map(|cell| Cell::parse(cell, config)).collect())
             .collect::<Result<_, _>>()?;
+        // Pandoc uses an empty pipe header as the spelling of a headerless
+        // table. Keep that syntax in the CST, but compare its logical rows.
+        if matches!(table, Table::Pipe(_))
+            && config.dialect() == panache_parser::Dialect::Pandoc
+            && has_header
+            && rows[0].iter().all(|cell| cell.pieces.is_empty())
+        {
+            rows.remove(0);
+            has_header = false;
+        }
         Ok(Self {
             rows,
             alignments,
@@ -364,9 +430,17 @@ impl LogicalTable {
     }
 
     fn matches(&self, other: &Self) -> bool {
-        self.rows == other.rows
+        self.rows.len() == other.rows.len()
+            && self.rows.iter().zip(&other.rows).all(|(source, target)| {
+                source.len() == target.len()
+                    && source
+                        .iter()
+                        .zip(target)
+                        .all(|(source, target)| source.comparison == target.comparison)
+            })
             && self.has_header == other.has_header
             && self.caption == other.caption
+            && self.alignments.len() == other.alignments.len()
             && self
                 .alignments
                 .iter()
@@ -382,6 +456,9 @@ impl LogicalTable {
         target: TableStyle,
         available_width: usize,
     ) -> Result<String, TableConversionError> {
+        if target == TableStyle::Pipe {
+            return Ok(self.render_pipe());
+        }
         let cols = self.alignments.len();
         let mut widths = vec![2; cols];
         let mut minimum = vec![2; cols];
@@ -484,6 +561,69 @@ impl LogicalTable {
         }
         Ok(out)
     }
+
+    fn render_pipe(&self) -> String {
+        let rows: Vec<Vec<String>> = self
+            .rows
+            .iter()
+            .map(|row| row.iter().map(|cell| cell.pipe_text.clone()).collect())
+            .collect();
+        let widths = super::tables::calculate_column_widths(&rows);
+        let mut out = String::new();
+        if let Some((true, caption)) = &self.caption {
+            out.push_str(caption);
+            out.push_str("\n\n");
+        }
+        let empty_header = vec![String::new(); widths.len()];
+        let header = if self.has_header {
+            &rows[0]
+        } else {
+            &empty_header
+        };
+        let write_row = |out: &mut String, row: &[String]| {
+            out.push('|');
+            for (i, cell) in row.iter().enumerate() {
+                let alignment = match self.alignments[i] {
+                    TableAlignment::Default | TableAlignment::Left => Alignment::Left,
+                    TableAlignment::Center => Alignment::Center,
+                    TableAlignment::Right => Alignment::Right,
+                };
+                out.push(' ');
+                out.push_str(&pad_simple_cell(cell, widths[i], alignment));
+                out.push_str(" |");
+            }
+            out.push('\n');
+        };
+        write_row(&mut out, header);
+        out.push('|');
+        for (i, &width) in widths.iter().enumerate() {
+            out.push(' ');
+            let (left, right) = match self.alignments[i] {
+                TableAlignment::Default => (false, false),
+                TableAlignment::Left => (true, false),
+                TableAlignment::Center => (true, true),
+                TableAlignment::Right => (false, true),
+            };
+            if left {
+                out.push(':');
+            }
+            out.push_str(&"-".repeat(width - usize::from(left) - usize::from(right)));
+            if right {
+                out.push(':');
+            }
+            out.push_str(" |");
+        }
+        out.push('\n');
+        for row in rows.iter().skip(usize::from(self.has_header)) {
+            write_row(&mut out, row);
+        }
+        if let Some((false, caption)) = &self.caption {
+            out.push('\n');
+            out.push_str(caption);
+            out.push('\n');
+        }
+        out
+    }
 }
 
 /// Convert a table while preserving its content, structure, and explicit alignment.
@@ -491,6 +631,9 @@ impl LogicalTable {
 /// Column widths and wrapping may change, and default alignment may become
 /// left alignment. Simple tables discard explicit column widths. Conversions
 /// that cannot preserve the remaining table information return an error.
+/// Pipe tables join wrapped prose onto one line per row and use an empty
+/// header for headerless tables under the Pandoc dialect. Pipes in prose are
+/// escaped; literal content in code and math is preserved.
 /// The result has no container prefixes and uses LF line endings.
 pub fn convert_table(
     table: &Table,
@@ -499,6 +642,7 @@ pub fn convert_table(
     available_width: usize,
 ) -> Result<String, TableConversionError> {
     let enabled = match target {
+        TableStyle::Pipe => config.parser_extensions.pipe_tables,
         TableStyle::Simple => config.parser_extensions.simple_tables,
         TableStyle::Multiline => config.parser_extensions.multiline_tables,
     };

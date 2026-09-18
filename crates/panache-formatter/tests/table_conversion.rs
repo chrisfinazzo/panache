@@ -35,6 +35,8 @@ fn converts_all_supported_pairs_and_survives_formatting() {
             TableStyle::Simple,
             SyntaxKind::SIMPLE_TABLE,
         ),
+        (simple.as_str(), TableStyle::Pipe, SyntaxKind::PIPE_TABLE),
+        (multiline.as_str(), TableStyle::Pipe, SyntaxKind::PIPE_TABLE),
     ] {
         let output = convert(source, target).unwrap();
         assert_style(&output, kind);
@@ -44,6 +46,116 @@ fn converts_all_supported_pairs_and_survives_formatting() {
         assert!(formatted.contains("one"));
         assert!(formatted.contains("two"));
     }
+}
+
+fn simple_cell(cell: &str) -> String {
+    format!("{:<80} B\n{} ---\n{cell:<80} y\n", "A", "-".repeat(80))
+}
+
+#[test]
+fn pipe_conversion_escapes_prose_and_preserves_literals() {
+    for (cell, expected) in [
+        ("a|b", r"a\|b"),
+        (r"a\|b", r"a\|b"),
+        (r"a\\|b", r"a\\\|b"),
+        ("**a|b** [c|d](url)", r"**a\|b** [c\|d](url)"),
+        ("`a|b` $x|y$", "`a|b` $x|y$"),
+        (r"`a\|b` $x\|y$", r"`a\|b` $x\|y$"),
+        ("**`a|b`**", "**`a|b`**"),
+        (r"`\verb|x|`", r"`\verb|x|`"),
+        (r"\\verb|x|", r"\\verb\|x\|"),
+    ] {
+        let source = simple_cell(cell);
+        for source in [
+            source.clone(),
+            convert(&source, TableStyle::Multiline).unwrap(),
+        ] {
+            let output = convert(&source, TableStyle::Pipe).unwrap();
+            assert!(output.contains(expected), "{output}");
+            assert_style(&output, SyntaxKind::PIPE_TABLE);
+            let formatted = format(&output, None, None);
+            assert_eq!(format(&formatted, None, None), formatted);
+        }
+    }
+}
+
+#[test]
+fn pipe_conversion_preserves_headerless_tables_and_empty_cells() {
+    for source in ["----- -----\none\n----- -----\n", "---\none\n---\n"] {
+        for source in [
+            source.to_string(),
+            convert(source, TableStyle::Multiline).unwrap(),
+        ] {
+            let output = convert(&source, TableStyle::Pipe).unwrap();
+            assert_style(&output, SyntaxKind::PIPE_TABLE);
+            assert!(
+                output
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .chars()
+                    .all(|ch| ch == '|' || ch == ' ')
+            );
+            let back = convert(&output, TableStyle::Simple).unwrap();
+            let tree = panache_formatter::parser::parse(&back, None);
+            assert!(
+                tree.descendants()
+                    .find_map(Table::cast)
+                    .unwrap()
+                    .rows()
+                    .iter()
+                    .all(|row| !row.is_header())
+            );
+        }
+    }
+}
+
+#[test]
+fn pipe_conversion_declines_unsupported_literal_contexts() {
+    assert!(
+        convert(
+            &simple_cell("<span title=\"a|b\">text</span>"),
+            TableStyle::Pipe
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn conversion_declines_raw_tex_verbatim() {
+    for cell in [r"\verb|x|", r"\verb*|x y|", r"**\verb|x|**", r"\verb!a|b!"] {
+        for target in [TableStyle::Pipe, TableStyle::Multiline] {
+            assert_eq!(
+                convert(&simple_cell(cell), target),
+                Err(TableConversionError::InvalidOutput),
+                "{cell} to {target:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conversion_honors_disabled_code_attributes() {
+    let mut config = Config::default();
+    config.parser_extensions.inline_code_attributes = false;
+    let input = "| A | B | C |\n|---|---|---|\n| `x`{title=\"a|b\"} | z |\n";
+    let tree = panache_formatter::parser::parse(input, Some(config.parser_options()));
+    let table = tree.descendants().find_map(Table::cast).unwrap();
+    let output = convert_table(&table, TableStyle::Simple, &config, 80).unwrap();
+    assert!(output.contains("z"));
+}
+
+#[test]
+fn pipe_conversion_honors_disabled_extension() {
+    let mut config = Config::default();
+    config.parser_extensions.pipe_tables = false;
+    let tree =
+        panache_formatter::parser::parse(&simple_cell("text"), Some(config.parser_options()));
+    let table = tree.descendants().find_map(Table::cast).unwrap();
+    assert_eq!(
+        convert_table(&table, TableStyle::Pipe, &config, 40),
+        Err(TableConversionError::DisabledExtension)
+    );
 }
 
 #[test]
@@ -362,7 +474,7 @@ fn matches_pandoc_content_and_structure() {
     ];
     for source in samples {
         let expected = pandoc(source);
-        for target in [TableStyle::Simple, TableStyle::Multiline] {
+        for target in [TableStyle::Pipe, TableStyle::Simple, TableStyle::Multiline] {
             let output = convert(source, target).unwrap();
             assert_eq!(
                 pandoc(&output),
@@ -388,6 +500,51 @@ fn matches_pandoc_content_and_structure() {
                     "multiline back to simple: {simple}"
                 );
             }
+            if target != TableStyle::Pipe {
+                let pipe = convert(&output, TableStyle::Pipe).unwrap();
+                assert_eq!(pandoc(&pipe), expected, "{target:?} back to pipe: {pipe}");
+            }
+        }
+    }
+}
+
+#[test]
+fn pipe_conversion_matches_pandoc_for_literal_pipes_and_wrapped_prose() {
+    if std::process::Command::new("pandoc")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping table conversion oracle: pandoc is unavailable");
+        return;
+    }
+    let config = Config {
+        math: panache_formatter::MathMode::Verbatim,
+        ..Config::default()
+    };
+    for cell in [
+        "one two three four five six seven eight nine ten",
+        "a|b **c|d** [e|f](url) ![g|h](image.png)",
+        r"a\|b a\\|b",
+        "`a|b` `` a`|b `` $x|y$ $$x|y$$",
+        r"`a\|b` $x\|y$",
+        "界 café e\u{301} 😀",
+    ] {
+        let simple = simple_cell(cell);
+        let expected = pandoc(&simple);
+        for source in [
+            simple.clone(),
+            convert(&simple, TableStyle::Multiline).unwrap(),
+        ] {
+            let pipe = convert(&source, TableStyle::Pipe).unwrap();
+            assert_eq!(pandoc(&pipe), expected, "{source}\n{pipe}");
+            let formatted = format(&pipe, Some(config.clone()), None);
+            assert_eq!(
+                pandoc(&formatted),
+                expected,
+                "format after conversion: {formatted}"
+            );
+            assert_eq!(format(&formatted, Some(config.clone()), None), formatted);
         }
     }
 }

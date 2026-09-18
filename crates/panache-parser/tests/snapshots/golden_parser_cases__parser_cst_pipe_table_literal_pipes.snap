@@ -1,0 +1,98 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..98
+  PIPE_TABLE@0..98
+    TABLE_HEADER@0..18
+      TEXT@0..1 "|"
+      WHITESPACE@1..2 " "
+      TABLE_CELL@2..7
+        INLINE_CODE@2..7
+          INLINE_CODE_MARKER@2..3 "`"
+          INLINE_CODE_CONTENT@3..6 "a|b"
+          INLINE_CODE_MARKER@6..7 "`"
+      WHITESPACE@7..8 " "
+      TEXT@8..9 "|"
+      WHITESPACE@9..10 " "
+      TABLE_CELL@10..15
+        INLINE_MATH@10..15
+          INLINE_MATH_MARKER@10..11 "$"
+          MATH_CONTENT@11..14
+            MATH_WORD@11..14 "x|y"
+          INLINE_MATH_MARKER@14..15 "$"
+      WHITESPACE@15..16 " "
+      TEXT@16..17 "|"
+      NEWLINE@17..18 "\n"
+    TABLE_SEPARATOR@18..32
+      TABLE_SEP_DELIM@18..19 "|"
+      TABLE_SEP_WHITESPACE@19..20 " "
+      TABLE_SEP_DASHES@20..23 "---"
+      TABLE_SEP_WHITESPACE@23..24 " "
+      TABLE_SEP_DELIM@24..25 "|"
+      TABLE_SEP_WHITESPACE@25..26 " "
+      TABLE_SEP_DASHES@26..29 "---"
+      TABLE_SEP_WHITESPACE@29..30 " "
+      TABLE_SEP_DELIM@30..31 "|"
+      NEWLINE@31..32 "\n"
+    TABLE_ROW@32..57
+      TEXT@32..33 "|"
+      WHITESPACE@33..34 " "
+      TABLE_CELL@34..44
+        INLINE_CODE@34..44
+          INLINE_CODE_MARKER@34..36 "``"
+          INLINE_CODE_CONTENT@36..42 " a`|b "
+          INLINE_CODE_MARKER@42..44 "``"
+      WHITESPACE@44..45 " "
+      TEXT@45..46 "|"
+      WHITESPACE@46..47 " "
+      TABLE_CELL@47..54
+        DISPLAY_MATH@47..54
+          DISPLAY_MATH_MARKER@47..49 "$$"
+          MATH_CONTENT@49..52
+            MATH_WORD@49..52 "x|y"
+          DISPLAY_MATH_MARKER@52..54 "$$"
+      WHITESPACE@54..55 " "
+      TEXT@55..56 "|"
+      NEWLINE@56..57 "\n"
+    TABLE_ROW@57..80
+      TEXT@57..58 "|"
+      WHITESPACE@58..59 " "
+      TABLE_CELL@59..68
+        STRONG@59..68
+          STRONG_MARKER@59..61 "**"
+          INLINE_CODE@61..66
+            INLINE_CODE_MARKER@61..62 "`"
+            INLINE_CODE_CONTENT@62..65 "c|d"
+            INLINE_CODE_MARKER@65..66 "`"
+          STRONG_MARKER@66..68 "**"
+      WHITESPACE@68..69 " "
+      TEXT@69..70 "|"
+      WHITESPACE@70..71 " "
+      TABLE_CELL@71..77
+        INLINE_MATH@71..77
+          INLINE_MATH_MARKER@71..72 "$"
+          MATH_CONTENT@72..76
+            MATH_WORD@72..73 "a"
+            MATH_CONTROL_SYMBOL@73..75 "\\|"
+            MATH_WORD@75..76 "b"
+          INLINE_MATH_MARKER@76..77 "$"
+      WHITESPACE@77..78 " "
+      TEXT@78..79 "|"
+      NEWLINE@79..80 "\n"
+    TABLE_ROW@80..98
+      TEXT@80..81 "|"
+      WHITESPACE@81..82 " "
+      TABLE_CELL@82..86
+        TEXT@82..83 "a"
+        ESCAPED_CHAR@83..85 "\\|"
+        TEXT@85..86 "b"
+      WHITESPACE@86..87 " "
+      TEXT@87..88 "|"
+      WHITESPACE@88..89 " "
+      TABLE_CELL@89..95
+        TEXT@89..93 "tail"
+        ESCAPED_CHAR@93..95 "\\\\"
+      WHITESPACE@95..96 " "
+      TEXT@96..97 "|"
+      NEWLINE@97..98 "\n"

@@ -1295,65 +1295,75 @@ pub(crate) fn try_parse_pipe_separator(line: &str) -> Option<Vec<Alignment>> {
     }
 }
 
-/// Does `line` carry a `|` that would split it into cells? Mirrors
-/// [`parse_pipe_table_row`]'s escape handling, so the gate and the splitter
-/// cannot disagree about what a cell boundary is.
-fn has_unescaped_pipe(line: &str) -> bool {
-    let mut chars = line.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\\' => {
-                if chars.clone().next() == Some('|') {
-                    chars.next();
-                }
+/// Find cell boundaries before inline emission. Pandoc protects literal code
+/// and math, whereas CommonMark table delimiters take precedence over inlines.
+fn pipe_delimiters(line: &str, config: &ParserOptions) -> Vec<usize> {
+    use crate::parser::inlines::{
+        code_spans::try_parse_code_span, inline_ir::try_pandoc_math_opaque,
+        raw_inline::is_raw_inline,
+    };
+
+    let mut positions = Vec::new();
+    let mut pos = 0;
+    while pos < line.len() {
+        let rest = &line[pos..];
+        if config.dialect == Dialect::Pandoc {
+            if rest.starts_with('`')
+                && let Some((len, content, backticks, attributes)) = try_parse_code_span(rest)
+            {
+                let raw_attribute = config.extensions.raw_attribute
+                    && attributes
+                        .as_ref()
+                        .is_some_and(|(attrs, _)| is_raw_inline(attrs).is_some())
+                    && !(backticks == 1
+                        && crate::syntax::inline_execution_parts(content, &config.extensions)
+                            .is_some());
+                pos += if config.extensions.inline_code_attributes || raw_attribute {
+                    len
+                } else {
+                    content.len() + backticks * 2
+                };
+                continue;
             }
-            '|' => return true,
-            _ => {}
+            if let Some(len) = try_pandoc_math_opaque(line, pos, line.len(), config) {
+                pos += len;
+                continue;
+            }
+        }
+        let ch = rest.chars().next().unwrap();
+        if ch == '\\' {
+            pos += 1 + rest[1..].chars().next().map_or(0, char::len_utf8);
+        } else {
+            if ch == '|' {
+                positions.push(pos);
+            }
+            pos += ch.len_utf8();
         }
     }
-    false
+    positions
 }
 
-fn parse_pipe_table_row(line: &str) -> Vec<String> {
-    let trimmed = line.trim();
-
+fn pipe_cell_ranges(line: &str, delimiters: &[usize]) -> Vec<std::ops::Range<usize>> {
     let mut cells = Vec::new();
-    let mut current_cell = String::new();
-    let mut chars = trimmed.chars().peekable();
-    let mut char_count = 0;
-
-    while let Some(ch) = chars.next() {
-        char_count += 1;
-        match ch {
-            '\\' => {
-                if let Some(&'|') = chars.peek() {
-                    current_cell.push('\\');
-                    current_cell.push('|');
-                    chars.next(); // consume the pipe
-                } else {
-                    current_cell.push(ch);
-                }
-            }
-            '|' => {
-                if char_count == 1 {
-                    continue; // Skip leading pipe
-                }
-
-                cells.push(current_cell.trim().to_string());
-                current_cell.clear();
-            }
-            _ => {
-                current_cell.push(ch);
-            }
+    let mut start = usize::from(delimiters.first() == Some(&0));
+    for &end in delimiters {
+        if end >= start {
+            cells.push(start..end);
+            start = end + 1;
         }
     }
-
-    let trimmed_cell = current_cell.trim().to_string();
-    if !trimmed_cell.is_empty() {
-        cells.push(trimmed_cell);
+    if start < line.len() || delimiters.is_empty() {
+        cells.push(start..line.len());
     }
-
     cells
+}
+
+fn parse_pipe_table_row(line: &str, config: &ParserOptions) -> Vec<String> {
+    let trimmed = line.trim();
+    pipe_cell_ranges(trimmed, &pipe_delimiters(trimmed, config))
+        .into_iter()
+        .map(|range| trimmed[range].trim().to_string())
+        .collect()
 }
 
 /// Emit a pipe table row with inline-parsed cells.
@@ -1372,56 +1382,8 @@ fn emit_pipe_table_row(
     let (line_without_newline, newline_str) = strip_newline(line);
     let trimmed = line_without_newline.trim();
 
-    let mut cell_starts = Vec::new();
-    let mut cell_ends = Vec::new();
-    let mut in_escape = false;
-
-    let mut pipe_positions = Vec::new();
-    for (i, ch) in trimmed.char_indices() {
-        if in_escape {
-            in_escape = false;
-            continue;
-        }
-        if ch == '\\' {
-            in_escape = true;
-            continue;
-        }
-        if ch == '|' {
-            pipe_positions.push(i);
-        }
-    }
-
-    if pipe_positions.is_empty() {
-        cell_starts.push(0);
-        cell_ends.push(trimmed.len());
-    } else {
-        let start_pipe = pipe_positions.first() == Some(&0);
-        let end_pipe = pipe_positions.last() == Some(&(trimmed.len() - 1));
-
-        if start_pipe {
-            for i in 1..pipe_positions.len() {
-                cell_starts.push(pipe_positions[i - 1] + 1);
-                cell_ends.push(pipe_positions[i]);
-            }
-            if !end_pipe {
-                cell_starts.push(*pipe_positions.last().unwrap() + 1);
-                cell_ends.push(trimmed.len());
-            }
-        } else {
-            cell_starts.push(0);
-            cell_ends.push(pipe_positions[0]);
-
-            for i in 1..pipe_positions.len() {
-                cell_starts.push(pipe_positions[i - 1] + 1);
-                cell_ends.push(pipe_positions[i]);
-            }
-
-            if !end_pipe {
-                cell_starts.push(*pipe_positions.last().unwrap() + 1);
-                cell_ends.push(trimmed.len());
-            }
-        }
-    }
+    let pipe_positions = pipe_delimiters(trimmed, config);
+    let cells = pipe_cell_ranges(trimmed, &pipe_positions);
 
     let leading_ws_len = line_without_newline.len() - line_without_newline.trim_start().len();
     if leading_ws_len > 0 {
@@ -1431,12 +1393,12 @@ fn emit_pipe_table_row(
         );
     }
 
-    for (idx, (start, end)) in cell_starts.iter().zip(cell_ends.iter()).enumerate() {
-        if *start > 0 || idx == 0 && trimmed.starts_with('|') {
+    for (idx, range) in cells.iter().enumerate() {
+        if range.start > 0 || idx == 0 && trimmed.starts_with('|') {
             builder.token(SyntaxKind::TEXT.into(), "|");
         }
 
-        let cell_with_ws = &trimmed[*start..*end];
+        let cell_with_ws = &trimmed[range.clone()];
         let cell_content = cell_with_ws.trim();
 
         let cell_leading_ws = &cell_with_ws[..cell_with_ws.len() - cell_with_ws.trim_start().len()];
@@ -1455,7 +1417,7 @@ fn emit_pipe_table_row(
         }
     }
 
-    if !pipe_positions.is_empty() && trimmed.ends_with('|') {
+    if pipe_positions.last() == trimmed.len().checked_sub(1).as_ref() {
         builder.token(SyntaxKind::TEXT.into(), "|");
     }
 
@@ -1526,7 +1488,7 @@ pub(crate) fn try_parse_pipe_table(
         return None;
     }
 
-    if !has_unescaped_pipe(window.line(actual_start)) {
+    if pipe_delimiters(window.line(actual_start).trim(), config).is_empty() {
         return None;
     }
 
@@ -1543,7 +1505,7 @@ pub(crate) fn try_parse_pipe_table(
 
     let alignments = try_parse_pipe_separator(window.line(actual_start + 1))?;
 
-    let header_cells = parse_pipe_table_row(window.line(actual_start));
+    let header_cells = parse_pipe_table_row(window.line(actual_start), config);
 
     if config.dialect == Dialect::CommonMark && header_cells.len() != alignments.len() {
         return None;
@@ -2129,14 +2091,26 @@ mod tests {
 
     #[test]
     fn test_parse_pipe_table_row() {
-        let cells = parse_pipe_table_row("| Right | Left | Center |");
+        let cells = parse_pipe_table_row("| Right | Left | Center |", &ParserOptions::default());
         assert_eq!(cells.len(), 3);
         assert_eq!(cells[0], "Right");
         assert_eq!(cells[1], "Left");
         assert_eq!(cells[2], "Center");
 
-        let cells2 = parse_pipe_table_row("Right | Left | Center");
+        let cells2 = parse_pipe_table_row("Right | Left | Center", &ParserOptions::default());
         assert_eq!(cells2.len(), 3);
+    }
+
+    #[test]
+    fn pipe_boundaries_honor_code_attribute_extensions() {
+        let mut config = ParserOptions::default();
+        let row = "| `x`{title=\"a|b\"} | z |";
+        assert_eq!(parse_pipe_table_row(row, &config).len(), 2);
+        config.extensions.inline_code_attributes = false;
+        assert_eq!(
+            parse_pipe_table_row(row, &config),
+            ["`x`{title=\"a", "b\"}", "z"]
+        );
     }
 
     #[test]

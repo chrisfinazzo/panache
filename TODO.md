@@ -55,8 +55,8 @@ This document tracks implementation status for Panache's features.
 
 ### Code Actions
 
-- [ ] Convert between table styles (grid, pipe)
-- [x] Convert between table styles (simple, multiline)
+- [ ] Convert to and from grid tables
+- [x] Convert between table styles (pipe, simple, multiline)
 - [x] Convert between inline/reference links
 
 ### Navigation & Symbols

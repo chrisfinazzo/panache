@@ -530,6 +530,8 @@ golden_test_cases!(
     paragraphs,
     nested_pipe_table_indent,
     pipe_table,
+    pipe_table_literal_pipes,
+    pipe_table_disabled_code_attributes,
     pipe_table_unicode,
     pipe_table_without_body_rows,
     plain_continuation_edge_cases,

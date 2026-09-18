@@ -32,6 +32,61 @@ fn header_cells(node: &SyntaxNode) -> Vec<String> {
 }
 
 #[test]
+fn pandoc_pipe_table_preserves_literal_pipes() {
+    let input = include_str!("../../../../tests/fixtures/cases/pipe_table_literal_pipes/input.md");
+    let node = parse_blocks(input);
+    assert_eq!(node.text().to_string(), input);
+    for row in node.descendants().filter(|node| {
+        matches!(
+            node.kind(),
+            SyntaxKind::TABLE_HEADER | SyntaxKind::TABLE_ROW
+        )
+    }) {
+        assert_eq!(
+            row.children()
+                .filter(|cell| cell.kind() == SyntaxKind::TABLE_CELL)
+                .count(),
+            2,
+            "{}",
+            row.text()
+        );
+    }
+    assert_eq!(header_cells(&node), vec!["`a|b`", "$x|y$"]);
+}
+
+#[test]
+fn pipe_table_literal_boundaries_respect_dialect_and_extensions() {
+    let input = "| A | B |\n|---|---|\n| `a|b` | $x|y$ |\n";
+    let cells = |node: &SyntaxNode| {
+        first_of(node, SyntaxKind::TABLE_ROW)
+            .unwrap()
+            .children()
+            .filter(|cell| cell.kind() == SyntaxKind::TABLE_CELL)
+            .count()
+    };
+    assert_eq!(cells(&parse_blocks_gfm(input)), 4);
+    let mut config = ParserOptions::default();
+    config.extensions.tex_math_dollars = false;
+    assert_eq!(cells(&parse_blocks_with_config(input, &config)), 3);
+    let incomplete = "| A | B |\n|---|---|\n| `a | $x |\n";
+    assert_eq!(cells(&parse_blocks(incomplete)), 2);
+}
+
+#[test]
+fn pipe_table_backslashes_and_empty_headers_use_the_same_boundaries() {
+    for parse in [parse_blocks, parse_blocks_gfm] {
+        for input in [
+            "| | |\n|---|---|\n| a | b |\n",
+            "| a\\\\| b |\n|---|---|\n| x | y |\n",
+        ] {
+            let node = parse(input);
+            assert_eq!(node.text().to_string(), input);
+            assert_eq!(header_cells(&node).len(), 2);
+        }
+    }
+}
+
+#[test]
 fn pipe_table_without_body_rows_is_a_table() {
     let input = "a | b\n---|---\n";
     let node = parse_blocks(input);

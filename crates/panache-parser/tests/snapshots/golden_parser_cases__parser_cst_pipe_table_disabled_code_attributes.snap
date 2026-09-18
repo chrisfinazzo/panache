@@ -1,0 +1,53 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..53
+  PIPE_TABLE@0..53
+    TABLE_HEADER@0..14
+      TEXT@0..1 "|"
+      WHITESPACE@1..2 " "
+      TABLE_CELL@2..3
+        TEXT@2..3 "A"
+      WHITESPACE@3..4 " "
+      TEXT@4..5 "|"
+      WHITESPACE@5..6 " "
+      TABLE_CELL@6..7
+        TEXT@6..7 "B"
+      WHITESPACE@7..8 " "
+      TEXT@8..9 "|"
+      WHITESPACE@9..10 " "
+      TABLE_CELL@10..11
+        TEXT@10..11 "C"
+      WHITESPACE@11..12 " "
+      TEXT@12..13 "|"
+      NEWLINE@13..14 "\n"
+    TABLE_SEPARATOR@14..28
+      TABLE_SEP_DELIM@14..15 "|"
+      TABLE_SEP_DASHES@15..18 "---"
+      TABLE_SEP_DELIM@18..19 "|"
+      TABLE_SEP_DASHES@19..22 "---"
+      TABLE_SEP_DELIM@22..23 "|"
+      TABLE_SEP_DASHES@23..26 "---"
+      TABLE_SEP_DELIM@26..27 "|"
+      NEWLINE@27..28 "\n"
+    TABLE_ROW@28..53
+      TEXT@28..29 "|"
+      WHITESPACE@29..30 " "
+      TABLE_CELL@30..42
+        INLINE_CODE@30..33
+          INLINE_CODE_MARKER@30..31 "`"
+          INLINE_CODE_CONTENT@31..32 "x"
+          INLINE_CODE_MARKER@32..33 "`"
+        TEXT@33..42 "{title=\"a"
+      TEXT@42..43 "|"
+      TABLE_CELL@43..46
+        TEXT@43..46 "b\"}"
+      WHITESPACE@46..47 " "
+      TEXT@47..48 "|"
+      WHITESPACE@48..49 " "
+      TABLE_CELL@49..50
+        TEXT@49..50 "z"
+      WHITESPACE@50..51 " "
+      TEXT@51..52 "|"
+      NEWLINE@52..53 "\n"

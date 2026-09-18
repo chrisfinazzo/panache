@@ -695,7 +695,7 @@ fn extract_pipe_table_data(node: &SyntaxNode, config: &Config) -> TableData {
 }
 
 /// Calculate the maximum width needed for each column
-fn calculate_column_widths(rows: &[Vec<String>]) -> Vec<usize> {
+pub(super) fn calculate_column_widths(rows: &[Vec<String>]) -> Vec<usize> {
     if rows.is_empty() {
         return Vec::new();
     }

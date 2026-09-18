@@ -829,7 +829,7 @@ fn compute_flanking(
 /// forms (gated on `tex_math_single_backslash` / `_double_backslash`).
 /// Math content is opaque to emphasis: `$a * b$` must not produce an
 /// emphasis closer at the inner `*`.
-fn try_pandoc_math_opaque(
+pub(crate) fn try_pandoc_math_opaque(
     text: &str,
     pos: usize,
     end: usize,

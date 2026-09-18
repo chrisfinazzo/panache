@@ -901,6 +901,8 @@ golden_test_cases!(
     paragraph_wrapping,
     paragraphs,
     pipe_table,
+    pipe_table_literal_pipes,
+    pipe_table_disabled_code_attributes,
     pipe_table_caption_attribute,
     pipe_table_caption_before_in_blockquote,
     pipe_table_caption_before_in_blockquote_commonmark,
