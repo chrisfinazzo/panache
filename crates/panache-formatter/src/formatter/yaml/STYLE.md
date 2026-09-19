@@ -27,13 +27,13 @@ the load-bearing invariants.
    ancestors. Root-level entries/items get 0 spaces. Tab-indented input is
    rejected by the in-tree parser outright, so the formatter never sees it.
    Multi-line plain / single-quoted / double-quoted scalar continuation lines
-   indent at `2 * entry/item nesting depth` (one level deeper than the default
-   --- the value column, not the key column), since the continuation belongs to
-   the value side of the entry. Block-scalar (`|`/`>`) interior lines are
-   currently preserved verbatim --- the indent sits inside one multi-line
-   `YAML_SCALAR` token and full canonicalization needs a real block-scalar
-   renderer (tracked separately; keeps pretty_yaml parity on already-canonical
-   cases, diverges on non-canonical block-scalar indent).
+   indent at `2 * entry/item nesting depth` (one level deeper than the default ---
+   the value column, not the key column), since the continuation belongs to the
+   value side of the entry. Block-scalar (`|`/`>`) interior lines are currently
+   preserved verbatim --- the indent sits inside one multi-line `YAML_SCALAR`
+   token and full canonicalization needs a real block-scalar renderer (tracked
+   separately; keeps pretty_yaml parity on already-canonical cases, diverges on
+   non-canonical block-scalar indent).
 
 2. **Sequence items** indented +2 from the parent key (`categories:\n  - foo`,
    never `- foo` at parent column).

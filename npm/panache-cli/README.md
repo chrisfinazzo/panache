@@ -10,8 +10,8 @@ npm install -g @panache-cli/panache
 ```
 
 This installs the `panache` command globally. The package detects your platform
-at install time and pulls in a prebuilt binary via npm's optional dependencies
---- no Rust toolchain or postinstall download required.
+at install time and pulls in a prebuilt binary via npm's optional dependencies ---
+no Rust toolchain or postinstall download required.
 
 You can also use it without a global install:
 
