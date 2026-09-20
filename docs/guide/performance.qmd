@@ -4,9 +4,9 @@ description: >
   This page presents performance benchmarks for Panache, comparing its
   formatting and linting speed against popular alternatives like Prettier,
   Pandoc, rumdl, mdformat, Yamark, mado, markdownlint, and markdownlint-cli2 on
-  real Quarto and Markdown documents, and its language-server memory use against
-  Marksman. The benchmarks highlight Panache's efficiency and suitability for
-  editor and repository-wide work.
+  real Quarto and Markdown documents, and its language-server latency, runtime,
+  and memory use against Marksman. The benchmarks highlight Panache's efficiency
+  and suitability for editor and repository-wide work.
 engine: knitr
 ---
 
@@ -20,13 +20,15 @@ rumdl, mdformat, Yamark, mado, markdownlint, and markdownlint-cli2 on a
 realistic corpus of Quarto and Markdown documents. R Markdown is outside the
 current benchmark corpus.
 
-We have split the benchmarks into two suites: per-document benchmarks that run
-each formatter on each document in the corpus individually, and repository-wide
-benchmarks that run formatters on entire repositories of tracked documents. The
-former highlights raw formatting speed on a variety of real-world documents; the
-latter captures the overhead of processing multiple files in a single run, which
-is more representative of on-save formatting or large-scale linting. Caches are
-disabled for all benchmarks to show worst-case performance.
+The formatting and linting benchmarks have two suites: per-document benchmarks
+that run each formatter on each document in the corpus individually, and
+repository-wide benchmarks that run formatters on entire repositories of tracked
+documents. The former highlights raw formatting speed on a variety of real-world
+documents; the latter captures the overhead of processing multiple files in a
+single run, which is more representative of repository-wide formatting or
+linting. CLI caches are disabled for these comparisons. A separate
+language-server suite measures startup, warm request latency, edit runtime, and
+memory use during an editor session.
 
 Yamark runs with an empty configuration and external code formatters disabled
 (`--config /dev/null --skip-embedded-formatters`). Its default wrapping and
@@ -738,19 +740,20 @@ Plot.plot({
 });
 ```
 
-## Language-Server Memory
+## Language-Server Speed and Memory
 
-This Linux-only benchmark compares the complete process-tree memory used by
+This Linux-only benchmark compares the latency, runtime, and memory use of
 Panache and [Marksman](https://github.com/artempyanykh/marksman). It opens the
 five largest tracked Markdown files in a pinned revision of the Rust Book,
 requests diagnostics and navigation features, and then performs 1,000
 fixed-width reference-label renames. Each rename is followed by a definition
 request, which forces the server to observe the updated label index.
 
-The runner samples RSS and proportional set size (PSS) from `/proc` every 150
-milliseconds. It records a milestone after the process tree remains below 5% of
-one CPU core for five seconds, and reports medians from three fresh server
-processes run in alternating order.
+The runner starts three fresh processes per server in alternating order. Each
+session opens the same files, obtains diagnostics using the server's advertised
+pull or push mode, primes navigation requests, and waits for background work to
+settle. It then times warm requests and the edit workload. The committed JSON
+contains each run's measurements; rendering this page never runs the benchmark.
 
 ```{ojs}
 //| label: load-lsp-memory
@@ -779,14 +782,53 @@ lspMemoryRows = lspMemory.servers.flatMap((server) =>
     })),
 );
 
-lspMemoryTable = lspMemory.servers.map((server) => ({
-    server: server.label,
-    settledRss: server.aggregate.milestones.settled.rss_mb,
-    editedRss: server.aggregate.milestones.edited.rss_mb,
-    editedPss: server.aggregate.milestones.edited.pss_mb,
-    peakRss: server.aggregate.milestones.peak.rss_mb,
-    ratio: server.aggregate.relative_to_panache.edited_rss,
-}));
+lspServers = lspMemory.servers.map((server) => server.label);
+
+logTicks = (domain, multipliers) =>
+    d3
+        .range(
+            Math.round(Math.log10(domain[0])),
+            Math.round(Math.log10(domain[1])) + 1,
+        )
+        .flatMap((exponent) => multipliers.map((value) => value * 10 ** exponent))
+        .filter((value) => value >= domain[0] && value <= domain[1]);
+
+logAxisX = (domain) => [
+    Plot.gridX({ ticks: logTicks(domain, [1]), strokeOpacity: 0.12 }),
+    Plot.axisX({
+        ticks: logTicks(domain, [1]),
+        tickFormat: d3.format(",~g"),
+        tickSize: 9,
+        tickPadding: 4,
+        labelAnchor: "center",
+        labelArrow: "none",
+        labelOffset: 38,
+    }),
+    Plot.axisX({
+        ticks: logTicks(domain, [5]),
+        tickFormat: () => "",
+        tickSize: 6,
+        label: null,
+    }),
+    Plot.axisX({
+        ticks: logTicks(domain, [2, 3, 4, 6, 7, 8, 9]),
+        tickFormat: () => "",
+        tickSize: 3,
+        label: null,
+    }),
+];
+
+lspRowLabel = (label) =>
+    width < 500
+        ? label
+                .replace("Document symbols", "Symbols")
+                .replace("Go to definition", "Definition")
+                .replace("Find references", "References")
+                .replace("Edit to definition", "Edit")
+                .replace("Workspace ready", "Workspace")
+                .replace("Open files ready", "Open files")
+                .replace("Edit workload", "Edits")
+        : label;
 ```
 
 ```{ojs}
@@ -800,10 +842,215 @@ html`<div class="callout-note">
     <li>Host: ${lspMemory.meta.host.cpu} (${lspMemory.meta.host.os}/${lspMemory.meta.host.arch}, ${lspMemory.meta.host.memory_gb} GiB RAM)</li>
     <li>Corpus: ${lspMemory.corpus.name} at ${lspMemory.corpus.revision.slice(0, 12)}; ${lspMemory.session.file_count} open files (${(lspMemory.session.opened_bytes / 1024).toFixed(1)} KiB)</li>
     <li>Workload: ${lspMemory.meta.edit_count.toLocaleString()} edits; ${lspMemory.meta.runs} fresh processes per server</li>
+    <li>Warm requests: ${lspMemory.meta.latency_warmups} warmup rounds and ${lspMemory.meta.latency_runs} measured rounds per target in each process</li>
     <li>${lspMemory.servers.map((server) => `${server.label}: ${server.version.replace(/^panache /, "")}`).join(", ")}</li>
   </ul>
 </div>`;
 ```
+
+### Startup and Edit Runtime
+
+@fig-lsp-runtime shows four elapsed times in milliseconds. **Initialize** runs
+from process launch to the `initialize` response. **Workspace ready** runs from
+launch to the start of the final quiet window after initialization. **Open files
+ready** runs from the burst of file-open notifications through the initial
+diagnostics and navigation requests to the next quiet window. **Edit workload**
+times all reference-label edits and their definition responses, excluding the
+final diagnostics and memory-settling wait.
+
+Readiness is estimated from process-tree CPU samples every 150 ms. A quiet
+window stays below 5% of one CPU core for five seconds; its start is reported
+only after those five seconds have elapsed. This excludes the deliberate wait
+from the plotted readiness times, but the estimate still has sampling error.
+
+```{ojs}
+//| label: prepare-lsp-runtime
+//| echo: false
+
+lspRuntimeMetrics = [
+    { key: "init_seconds", label: "Initialize" },
+    { key: "workspace_ready_seconds", label: "Workspace ready" },
+    { key: "documents_ready_seconds", label: "Open files ready" },
+    { key: "edit_work_seconds", label: "Edit workload" },
+];
+
+lspRuntimeRows = lspRuntimeMetrics.flatMap((metric) =>
+    lspMemory.servers.map((server) => ({
+        server: server.label,
+        row: metric.label,
+        median: server.aggregate.timings[metric.key] * 1000,
+        min: d3.min(server.runs, (run) => run[metric.key]) * 1000,
+        max: d3.max(server.runs, (run) => run[metric.key]) * 1000,
+    })),
+);
+
+lspRuntimeDomain = d3
+    .scaleLog()
+    .domain(d3.extent(lspRuntimeRows.flatMap((d) => [d.min, d.max])))
+    .nice()
+    .domain();
+```
+
+```{ojs}
+//| label: fig-lsp-runtime
+//| echo: false
+//| fig-cap: "Language-server startup and edit runtime on a logarithmic scale.
+//|   Each row compares Panache and Marksman. Dots show medians; lines span the
+//|   minimum and maximum across fresh processes. Lower is faster."
+
+Plot.plot({
+    width,
+    marginLeft: width < 500 ? 90 : 130,
+    marginRight: 25,
+    marginBottom: 50,
+    height: 260,
+    x: {
+        type: "log",
+        domain: lspRuntimeDomain,
+        label: "Elapsed time (ms, log scale)",
+    },
+    y: {
+        label: null,
+        domain: lspRuntimeMetrics.map((d) => d.label),
+        tickFormat: lspRowLabel,
+    },
+    color: { legend: true, domain: lspServers, scheme: "tableau10" },
+    marks: [
+        ...logAxisX(lspRuntimeDomain),
+        Plot.ruleY(lspRuntimeRows, {
+            y: "row",
+            x1: "min",
+            x2: "max",
+            stroke: "server",
+            strokeWidth: 2,
+        }),
+        Plot.dot(lspRuntimeRows, {
+            y: "row",
+            x: "median",
+            fill: "server",
+            r: 5,
+            title: (d) =>
+                `${d.row} — ${d.server}\nMedian: ${d.median.toFixed(2)} ms\nRange: ${d.min.toFixed(2)}–${d.max.toFixed(2)} ms`,
+            tip: true,
+        }),
+    ],
+});
+```
+
+### Request Latency
+
+@fig-lsp-latency shows the median and 95th percentile (p95) of serial request
+round trips over stdio. Each target gets two unmeasured warmup rounds and 20
+measured rounds per fresh process. Percentiles pool the measured samples from
+all three processes. Document-symbol requests cover the three largest open
+files. Hover, definition, references, and rename use the reference link appended
+to the largest file. References include the declaration; rename returns edits
+without applying them.
+
+**Edit to definition** measures each change notification through its following
+definition response, including the work needed to observe the edited document.
+It pools all 1,000 edits per process and has no discarded warmups. Tooltips show
+sample counts, empty responses, returned item counts, files involved, and result
+sizes. These help explain differences in the work each server performs. A failed
+or timed-out request fails the benchmark. Points marked "empty" returned no
+items in any measured request; they measure the overhead of responding without a
+result.
+
+```{ojs}
+//| label: prepare-lsp-latency
+//| echo: false
+
+lspLatencyRows = lspMemory.servers[0].aggregate.request_latencies.flatMap(
+    (request) =>
+        lspMemory.servers.map((server) => {
+            const result = server.aggregate.request_latencies.find(
+                (r) => r.key === request.key,
+            );
+            return {
+                ...result,
+                server: server.label,
+                row: request.label,
+            };
+        }),
+);
+
+lspLatencyTip = (d) =>
+    `${d.row} — ${d.server}\nMedian: ${d.median_ms.toFixed(3)} ms\np95: ${d.p95_ms.toFixed(3)} ms\nSamples: ${d.samples}; empty: ${d.empty_results}\nReturned items: ${d.result_count_min}–${d.result_count_max}\nFiles involved: ${d.result_files_min == null ? "n/a" : `${d.result_files_min}–${d.result_files_max}`}\nMedian result size: ${d.payload_bytes_median} bytes`;
+
+lspLatencyExtent = d3.extent(
+    lspLatencyRows.flatMap((d) => [d.median_ms, d.p95_ms]),
+);
+
+lspLatencyDomain = d3.scaleLog().domain(lspLatencyExtent).nice().domain();
+```
+
+```{ojs}
+//| label: fig-lsp-latency
+//| echo: false
+//| fig-cap: "Language-server request latency on a logarithmic scale. Each row
+//|   compares Panache and Marksman. Dots show medians; lines extend to p95 and
+//|   are not confidence intervals. Lower is faster."
+
+Plot.plot({
+    width,
+    marginLeft: width < 500 ? 90 : 130,
+    marginRight: 25,
+    marginBottom: 50,
+    height: 340,
+    x: {
+        type: "log",
+        domain: lspLatencyDomain,
+        label: "Request latency (ms, log scale)",
+    },
+    y: {
+        label: null,
+        domain: lspMemory.servers[0].aggregate.request_latencies.map(
+            (d) => d.label,
+        ),
+        tickFormat: lspRowLabel,
+    },
+    color: { legend: true, domain: lspServers, scheme: "tableau10" },
+    marks: [
+        ...logAxisX(lspLatencyDomain),
+        Plot.ruleY(lspLatencyRows, {
+            y: "row",
+            x1: "median_ms",
+            x2: "p95_ms",
+            stroke: "server",
+            strokeWidth: 2,
+        }),
+        Plot.dot(lspLatencyRows, {
+            y: "row",
+            x: "median_ms",
+            fill: "server",
+            r: 5,
+            title: lspLatencyTip,
+            tip: true,
+        }),
+        Plot.text(
+            lspLatencyRows.filter((d) => d.empty_results === d.samples),
+            {
+                y: "row",
+                x: "median_ms",
+                text: () => "empty",
+                fill: "server",
+                textAnchor: "start",
+                dx: 7,
+                dy: -10,
+            },
+        ),
+    ],
+});
+```
+
+### Memory
+
+The runner samples the complete process tree's resident set size (RSS) and
+proportional set size (PSS) from `/proc` every 150 ms. RSS counts shared pages
+in each process; PSS divides them among the processes that map them. Each
+milestone follows a quiet window, except peak, which covers the whole session.
+@fig-lsp-memory shows median RSS across the three processes, with PSS in the
+tooltips.
 
 ```{ojs}
 //| label: fig-lsp-memory
@@ -821,13 +1068,14 @@ Plot.plot({
     x: { label: null },
     y: { label: "Median process-tree RSS (MB)", grid: true },
     fx: { label: null, domain: lspMemoryMilestones.map((d) => d.label) },
-    color: { legend: true, domain: ["Panache", "Marksman"], scheme: "tableau10" },
+    color: { legend: true, domain: lspServers, scheme: "tableau10" },
     marks: [
         Plot.barY(lspMemoryRows, {
             fx: "milestone",
             x: "server",
             y: "rss",
             fill: "server",
+            channels: { "PSS (MB)": "pss" },
             tip: true,
         }),
         Plot.text(lspMemoryRows, {
@@ -842,42 +1090,6 @@ Plot.plot({
 });
 ```
 
-```{ojs}
-//| label: table-lsp-memory
-//| echo: false
-
-Inputs.table(lspMemoryTable, {
-    columns: [
-        "server",
-        "settledRss",
-        "editedRss",
-        "editedPss",
-        "peakRss",
-        "ratio",
-    ],
-    header: {
-        server: "Server",
-        settledRss: "Files-open RSS (MB)",
-        editedRss: "Post-edit RSS (MB)",
-        editedPss: "Post-edit PSS (MB)",
-        peakRss: "Peak RSS (MB)",
-        ratio: "Post-edit RSS vs Panache",
-    },
-    format: {
-        settledRss: (value) => value.toFixed(1),
-        editedRss: (value) => value.toFixed(1),
-        editedPss: (value) => value.toFixed(1),
-        peakRss: (value) => value.toFixed(1),
-        ratio: (value) => `${value.toFixed(1)}×`,
-    },
-});
-```
-
-Marksman used 8.2 times as much RSS as Panache after the files were open and 7.5
-times as much after edit churn. Panache's median RSS rose from 16.8 MB to 21.5
-MB during the 1,000 edits; the three runs finished within 0.2 MB of one another.
-This workload therefore did not reproduce unbounded growth in Panache.
-
 The comparison measures default architecture, not identical internal work.
 Marksman indexes the Markdown workspace eagerly, while Panache analyzes open
 documents and discovers project relationships lazily. Both servers receive the
@@ -889,8 +1101,8 @@ strategies.
 
 All benchmarks are reproducible. The formatting and linting comparisons require
 [`hyperfine`](https://github.com/sharkdp/hyperfine); the language-server memory
-comparison requires Linux with `/proc` and Marksman. The scripts in `benches/`
-are designed to be run from the repository root:
+and speed comparison requires Linux with `/proc` and Marksman. The scripts in
+`benches/` are designed to be run from the repository root:
 
 ```bash
 # Download test documents (idempotent)
@@ -919,8 +1131,9 @@ bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/p
 # Run per-document lint benchmark
 bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_data.json
 
-# Run the Linux language-server memory benchmark
-task bench:lsp-memory
+# Run the Linux language-server speed and memory benchmark
+# bench:lsp-memory remains an alias.
+task bench:lsp
 
 # Or run the human-readable text variant
 bash benches/compare_all.sh
@@ -928,7 +1141,7 @@ bash benches/compare_all.sh
 # Re-render this page (uses freeze cache by default)
 quarto render docs/guide/performance.qmd
 
-# Force the benchmark to re-run by invalidating the freeze cache
+# Pick up refreshed JSON by invalidating the rendered page's freeze cache
 rm -rf docs/_freeze/guide/performance
 quarto render docs/guide/performance.qmd
 ```

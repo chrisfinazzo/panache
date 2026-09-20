@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure resident memory across a scripted Markdown LSP session.
+"""Measure latency, runtime, and resident memory in a Markdown LSP session.
 
 The harness launches each server over stdio, samples its complete process tree
 from ``/proc``, and records four milestones: initialized baseline, files-opened
@@ -10,6 +10,7 @@ without additional setup.
 
 import argparse
 import json
+import math
 import os
 import platform
 import shlex
@@ -25,7 +26,7 @@ from pathlib import Path
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 IDLE_CPU_FRACTION = 0.05
 MILESTONES = ("baseline", "settled", "edited", "peak")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SAMPLE_INTERVAL_SECONDS = 0.15
 SERVER_META = {
     "panache": (
@@ -156,16 +157,20 @@ class Sampler(threading.Thread):
             "processes": self.peak_processes,
         }
 
-    def is_quiet(self, seconds):
+    def quiet_since(self, seconds, not_before=0.0):
+        """Return the quiet window's start, excluding samples from earlier phases."""
         if not self.samples:
-            return False
-        cutoff = self.samples[-1][0] - seconds
+            return None
+        cutoff = max(self.samples[-1][0] - seconds, not_before)
         window = [sample for sample in self.samples if sample[0] >= cutoff]
         span = window[-1][0] - window[0][0] if len(window) >= 3 else 0.0
-        if span < seconds * 0.8:
-            return False
+        # Permit sampling slop without shortening the requested quiet period.
+        if span <= 0 or span < seconds - self.interval * 1.5:
+            return None
         cpu_seconds = (window[-1][3] - window[0][3]) / CLK_TCK
-        return cpu_seconds / span < IDLE_CPU_FRACTION
+        if max(0, cpu_seconds) / span >= IDLE_CPU_FRACTION:
+            return None
+        return window[0][0]
 
 
 # --- minimal LSP client -----------------------------------------------------
@@ -323,16 +328,17 @@ def require_response(response, method, require_result=False):
     return response
 
 
-def wait_until_quiet(client, sampler, quiet_seconds, timeout, phase):
+def wait_until_quiet(client, sampler, quiet_seconds, timeout, phase, not_before):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if client.proc.poll() is not None:
             raise RuntimeError(
                 f"server exited during {phase} (rc={client.proc.returncode})"
             )
-        if sampler.is_quiet(quiet_seconds):
-            return
-        time.sleep(0.5)
+        quiet_since = sampler.quiet_since(quiet_seconds, not_before)
+        if quiet_since is not None:
+            return sampler.started_at + quiet_since
+        time.sleep(sampler.interval)
     raise RuntimeError(f"server did not become quiet during {phase} within {timeout}s")
 
 
@@ -423,7 +429,128 @@ def exercise_shared_requests(client, uris):
     )
 
 
+def result_summary(method, result):
+    """Count returned work so an empty response is visible in comparisons."""
+    if result in (None, [], {}):
+        return 0, None
+    if method == "textDocument/documentSymbol":
+
+        def count(symbol):
+            return 1 + sum(count(child) for child in symbol.get("children", []))
+
+        return sum(count(symbol) for symbol in result), None
+    if method in ("textDocument/definition", "textDocument/references"):
+        locations = result if isinstance(result, list) else [result]
+        uris = {
+            location.get("uri") or location.get("targetUri") for location in locations
+        }
+        return len(locations), len(uris - {None})
+    if method == "textDocument/rename":
+        changes = result.get("changes") or {}
+        count = sum(len(edits) for edits in changes.values())
+        uris = set(changes)
+        for change in result.get("documentChanges") or []:
+            if document := change.get("textDocument"):
+                count += len(change.get("edits", []))
+                uris.add(document["uri"])
+        return count, len(uris)
+    return 1, None
+
+
+def request_record(key, label, method, targets):
+    return {
+        "key": key,
+        "label": label,
+        "method": method,
+        "targets": targets,
+        "empty_results": 0,
+        "_latencies_ms": [],
+        "_result_counts": [],
+        "_result_files": [],
+        "_payload_bytes": [],
+    }
+
+
+def record_response(record, response, elapsed_ms):
+    result = require_response(response, record["method"]).get("result")
+    count, files = result_summary(record["method"], result)
+    record["_latencies_ms"].append(elapsed_ms)
+    record["_result_counts"].append(count)
+    record["empty_results"] += count == 0
+    if files is not None:
+        record["_result_files"].append(files)
+    record["_payload_bytes"].append(
+        len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode())
+    )
+
+
+def finalize_request_record(record):
+    latencies = record["_latencies_ms"]
+    record["samples"] = len(latencies)
+    record["median_ms"] = round(statistics.median(latencies), 3)
+    record["p95_ms"] = round(sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1], 3)
+    for field in ("result_counts", "result_files", "payload_bytes"):
+        values = record[f"_{field}"]
+        if values:
+            prefix = "result_count" if field == "result_counts" else field
+            record[f"{prefix}_min"] = min(values)
+            record[f"{prefix}_median"] = statistics.median(values)
+            record[f"{prefix}_max"] = max(values)
+    return record
+
+
+def benchmark_requests(client, key, label, method, params, runs, warmups, timeout):
+    """Measure serial stdio round trips, excluding warmups and result summaries."""
+    for _ in range(warmups):
+        for target in params:
+            require_response(client.request(method, target, timeout=timeout), method)
+    record = request_record(key, label, method, len(params))
+    for _ in range(runs):
+        for target in params:
+            started = time.perf_counter_ns()
+            response = client.request(method, target, timeout=timeout)
+            elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
+            record_response(record, response, elapsed_ms)
+    return finalize_request_record(record)
+
+
+def benchmark_shared_requests(client, uris, target, runs, warmups, timeout):
+    navigation = {
+        "textDocument": {"uri": target["uri"]},
+        "position": {**target["link"], "character": target["link"]["character"] + 1},
+    }
+    requests = [
+        (
+            "document_symbol",
+            "Document symbols",
+            "textDocument/documentSymbol",
+            [{"textDocument": {"uri": uri}} for uri in uris[:3]],
+        ),
+        ("hover", "Hover", "textDocument/hover", [navigation]),
+        ("definition", "Go to definition", "textDocument/definition", [navigation]),
+        (
+            "references",
+            "Find references",
+            "textDocument/references",
+            [{**navigation, "context": {"includeDeclaration": True}}],
+        ),
+        (
+            "rename",
+            "Rename",
+            "textDocument/rename",
+            [{**navigation, "newName": "memory-renamed"}],
+        ),
+    ]
+    return [
+        benchmark_requests(client, key, label, method, params, runs, warmups, timeout)
+        for key, label, method, params in requests
+    ]
+
+
 def churn_reference_labels(client, target, edits, timeout):
+    record = request_record(
+        "edit_definition", "Edit to definition", "textDocument/definition", 1
+    )
     previous_length = target["label_length"]
     for edit in range(1, edits + 1):
         label = label_for_edit(edit)
@@ -442,6 +569,7 @@ def churn_reference_labels(client, target, edits, timeout):
                     "text": label,
                 }
             )
+        started = time.perf_counter_ns()
         client.notify(
             "textDocument/didChange",
             {
@@ -460,8 +588,11 @@ def churn_reference_labels(client, target, edits, timeout):
             },
             timeout=timeout,
         )
+        elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
         require_response(response, "textDocument/definition", require_result=True)
+        record_response(record, response, elapsed_ms)
         previous_length = utf16_length(label)
+    return finalize_request_record(record)
 
 
 def isolated_environment(directory):
@@ -477,20 +608,30 @@ def isolated_environment(directory):
 
 
 def run_session(
-    spec, run_number, project, files, edits, settle_timeout, quiet_seconds, stderr_dir
+    spec,
+    run_number,
+    project,
+    files,
+    edits,
+    settle_timeout,
+    quiet_seconds,
+    stderr_dir,
+    latency_runs,
+    latency_warmups,
 ):
     key, command = spec
-    print(f"==> memory: {key} (run {run_number})", flush=True)
+    print(f"==> speed and memory: {key} (run {run_number})", flush=True)
     stderr_path = Path(stderr_dir) / f"{key}-run-{run_number}.stderr.log"
     client = None
     sampler = None
-    started_at = time.monotonic()
     with tempfile.TemporaryDirectory(prefix=f"panache-memory-{key}-") as state_dir:
         try:
+            env = isolated_environment(state_dir)
+            started_at = time.monotonic()
             client = Client(
                 command,
                 cwd=str(project),
-                env=isolated_environment(state_dir),
+                env=env,
                 stderr_path=str(stderr_path),
             )
             sampler = Sampler(client.proc.pid)
@@ -516,24 +657,27 @@ def run_session(
                 "initialize",
                 require_result=True,
             )
-            init_seconds = round(time.monotonic() - started_at, 2)
+            init_seconds = round(time.monotonic() - started_at, 6)
             capabilities = (initialized.get("result") or {}).get("capabilities", {})
             pull = bool(capabilities.get("diagnosticProvider"))
             client.notify("initialized", {})
 
-            wait_until_quiet(
+            baseline_ready = wait_until_quiet(
                 client,
                 sampler,
                 quiet_seconds,
                 settle_timeout,
                 "initialization",
+                time.monotonic() - sampler.started_at,
             )
+            workspace_ready_seconds = round(baseline_ready - started_at, 6)
             milestones = {"baseline": sampler.milestone()}
             baseline_seconds = round(time.monotonic() - started_at, 2)
             print(f"    baseline {milestones['baseline']['rss_mb']} MB RSS", flush=True)
 
             documents, edit_target = prepare_documents(files)
             uris = [document["uri"] for document in documents]
+            documents_started_at = time.monotonic()
             for document in documents:
                 client.notify(
                     "textDocument/didOpen",
@@ -546,24 +690,40 @@ def run_session(
                         }
                     },
                 )
-                time.sleep(0.2)
 
             if pull:
                 pull_diagnostics(client, uris, settle_timeout)
             exercise_shared_requests(client, uris)
-            wait_until_quiet(
-                client, sampler, quiet_seconds, settle_timeout, "files-opened settle"
+            documents_ready = wait_until_quiet(
+                client,
+                sampler,
+                quiet_seconds,
+                settle_timeout,
+                "files-opened settle",
+                time.monotonic() - sampler.started_at,
             )
+            documents_ready_seconds = round(documents_ready - documents_started_at, 6)
             milestones["settled"] = sampler.milestone()
             settled_seconds = round(time.monotonic() - started_at, 2)
             print(f"    settled  {milestones['settled']['rss_mb']} MB RSS", flush=True)
 
+            request_latencies = benchmark_shared_requests(
+                client, uris, edit_target, latency_runs, latency_warmups, settle_timeout
+            )
             edit_started_at = time.monotonic()
-            churn_reference_labels(client, edit_target, edits, timeout=30)
+            request_latencies.append(
+                churn_reference_labels(client, edit_target, edits, timeout=30)
+            )
+            edit_work_seconds = round(time.monotonic() - edit_started_at, 6)
             if pull:
                 pull_diagnostics(client, uris, settle_timeout)
             wait_until_quiet(
-                client, sampler, quiet_seconds, settle_timeout, "post-edit settle"
+                client,
+                sampler,
+                quiet_seconds,
+                settle_timeout,
+                "post-edit settle",
+                time.monotonic() - sampler.started_at,
             )
             milestones["edited"] = sampler.milestone()
             edit_seconds = round(time.monotonic() - edit_started_at, 2)
@@ -576,6 +736,9 @@ def run_session(
                 "run": run_number,
                 "milestones": milestones,
                 "init_seconds": init_seconds,
+                "workspace_ready_seconds": workspace_ready_seconds,
+                "documents_ready_seconds": documents_ready_seconds,
+                "edit_work_seconds": edit_work_seconds,
                 "baseline_seconds": baseline_seconds,
                 "settled_seconds": settled_seconds,
                 "edit_seconds": edit_seconds,
@@ -585,7 +748,14 @@ def run_session(
                 "diagnostic_requests": len(uris) * 2 if pull else 0,
                 "definition_requests": edits,
                 "samples": len(sampler.samples),
+                "request_latencies": request_latencies,
             }
+            for record in request_latencies:
+                print(
+                    f"    {record['label']}: {record['median_ms']:.3f} ms median, "
+                    f"{record['p95_ms']:.3f} ms p95 ({record['empty_results']} empty)",
+                    flush=True,
+                )
             print(
                 f"    edited   {milestones['edited']['rss_mb']} MB RSS"
                 f"  (peak {milestones['peak']['rss_mb']} MB, {total_seconds}s)",
@@ -609,6 +779,39 @@ def rounded_median(values, digits):
     return round(statistics.median(values), digits)
 
 
+def public_record(value):
+    """Keep per-run summaries while omitting internal raw sample arrays."""
+    if isinstance(value, dict):
+        return {
+            key: public_record(item)
+            for key, item in value.items()
+            if not key.startswith("_")
+        }
+    if isinstance(value, list):
+        return [public_record(item) for item in value]
+    return value
+
+
+def aggregate_latencies(runs):
+    records = []
+    for index, first in enumerate(runs[0]["request_latencies"]):
+        combined = request_record(
+            first["key"], first["label"], first["method"], first["targets"]
+        )
+        for run in runs:
+            record = run["request_latencies"][index]
+            combined["empty_results"] += record["empty_results"]
+            for field in (
+                "_latencies_ms",
+                "_result_counts",
+                "_result_files",
+                "_payload_bytes",
+            ):
+                combined[field].extend(record[field])
+        records.append(public_record(finalize_request_record(combined)))
+    return records
+
+
 def aggregate_runs(runs):
     milestones = {}
     for milestone in MILESTONES:
@@ -627,6 +830,9 @@ def aggregate_runs(runs):
         }
     timing_keys = (
         "init_seconds",
+        "workspace_ready_seconds",
+        "documents_ready_seconds",
+        "edit_work_seconds",
         "baseline_seconds",
         "settled_seconds",
         "edit_seconds",
@@ -635,8 +841,9 @@ def aggregate_runs(runs):
     return {
         "milestones": milestones,
         "timings": {
-            key: rounded_median([run[key] for run in runs], 2) for key in timing_keys
+            key: rounded_median([run[key] for run in runs], 6) for key in timing_keys
         },
+        "request_latencies": aggregate_latencies(runs),
         "samples": int(statistics.median([run["samples"] for run in runs])),
     }
 
@@ -721,6 +928,8 @@ def main():
     parser.add_argument("--server-version", action="append", default=[])
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--edits", type=int, default=1000)
+    parser.add_argument("--latency-runs", type=int, default=20)
+    parser.add_argument("--latency-warmups", type=int, default=2)
     parser.add_argument("--settle-timeout", type=float, default=120)
     parser.add_argument("--quiet-seconds", type=float, default=5)
     parser.add_argument("--stderr-dir", required=True)
@@ -733,6 +942,17 @@ def main():
         parser.error("the memory benchmark requires Linux with /proc/smaps_rollup")
     if args.runs < 1 or args.edits < 1:
         parser.error("--runs and --edits must both be positive")
+    if args.latency_runs < 1 or args.latency_warmups < 0:
+        parser.error(
+            "--latency-runs must be positive and --latency-warmups nonnegative"
+        )
+    if (
+        args.quiet_seconds <= SAMPLE_INTERVAL_SECONDS * 2
+        or args.settle_timeout <= args.quiet_seconds
+    ):
+        parser.error(
+            "--quiet-seconds must exceed two sample intervals and be below --settle-timeout"
+        )
 
     project = Path(args.project).absolute()
     files = [Path(path).absolute() for path in args.files]
@@ -761,6 +981,8 @@ def main():
                     args.settle_timeout,
                     args.quiet_seconds,
                     stderr_dir,
+                    args.latency_runs,
+                    args.latency_warmups,
                 )
             )
             if session_index < args.runs * len(specs):
@@ -777,7 +999,7 @@ def main():
                 "doing": doing,
                 "version": versions.get(key, "unknown"),
                 "command": display_command(command),
-                "runs": runs,
+                "runs": public_record(runs),
                 "aggregate": aggregate_runs(runs),
             }
         )
@@ -793,6 +1015,9 @@ def main():
             "quiet_seconds": args.quiet_seconds,
             "settle_timeout_seconds": args.settle_timeout,
             "edit_count": args.edits,
+            "latency_runs": args.latency_runs,
+            "latency_warmups": args.latency_warmups,
+            "sample_interval_seconds": SAMPLE_INTERVAL_SECONDS,
         },
         "corpus": {
             "name": args.corpus_name,

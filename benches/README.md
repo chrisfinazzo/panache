@@ -31,8 +31,8 @@ task bench:write-phase-gate
 # Run the LSP settle benchmark (what publishing one document costs per settle)
 cargo bench --bench lsp_settle
 
-# Compare Panache and Marksman language-server memory on Linux
-task bench:lsp-memory
+# Compare Panache and Marksman language-server speed and memory on Linux
+task bench:lsp
 
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
@@ -154,20 +154,32 @@ valgrind --tool=cachegrind cargo bench --bench formatting
   - The formatting suite includes Yamark on both the Markdown and Quarto tracks.
   - Restores tracked documents before every sample. Failed runs are recorded
     with null timings and excluded from the performance plots.
-- **`benches/compare_lsp_memory.sh`**: Linux language-server memory comparison
+- **`benches/compare_lsp_memory.sh`**: Linux language-server speed and memory
+  comparison
   - Checks out a pinned revision of the Rust Book into a gitignored directory.
   - Opens the five largest tracked Markdown files under `src/`, exercises
     diagnostics and navigation, and performs 1,000 reference-label edits.
   - Runs three fresh processes per server in alternating order and records the
     median whole-process-tree RSS and PSS at baseline, settled, edited, and peak
     milestones.
+  - Records process startup, estimated workspace and open-file readiness, and
+    edit runtime separately from the deliberate memory-settling waits.
+  - Measures document symbols on three files and hover, definition, references,
+    and rename on the appended reference link. Each target gets two warmups and
+    20 measured rounds per process. Rename edits are not applied. Each edit in
+    the churn workload is also timed through its following definition response.
+  - Pools request samples across processes for the median and nearest-rank p95.
+    Keeps per-run summaries and returned item, file, and payload-size counts.
+    Empty results are counted; errors and timeouts abort the run.
   - Launches Panache with an isolated GFM config and gives both servers isolated
     user config and cache directories.
-  - Writes raw runs and aggregate comparisons to
+  - Writes per-run measurements and aggregate comparisons to
     `docs/guide/performance_lsp_memory_data.json` by default. Override the run
     with the `PANACHE_LSP_MEMORY_RUNS`, `PANACHE_LSP_MEMORY_OPEN_FILES`,
     `PANACHE_LSP_MEMORY_EDITS`, `PANACHE_LSP_MEMORY_QUIET_SECONDS`, and
     `PANACHE_LSP_MEMORY_SETTLE_TIMEOUT` environment variables.
+    `PANACHE_LSP_LATENCY_RUNS` and `PANACHE_LSP_LATENCY_WARMUPS` control request
+    repetitions. `task bench:lsp-memory` remains an alias for `task bench:lsp`.
 - **`benches/generate_docs.sh`**: Captures results for documentation
   - Generates `benches/benchmark_results.json` (machine-readable)
   - Renders `docs/benchmarks.qmd` from JSON

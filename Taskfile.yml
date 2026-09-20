@@ -99,8 +99,9 @@ tasks:
       - task: bench:incremental-gate
       - task: bench:write-phase-gate
 
-  bench:lsp-memory:
-    desc: Compare Panache and Marksman language-server memory on Linux
+  bench:lsp:
+    desc: Compare Panache and Marksman language-server speed and memory on Linux
+    aliases: ["bench:lsp-memory"]
     cmds:
       - bash benches/compare_lsp_memory.sh
 
