@@ -771,3 +771,11 @@ dollar-math, deflists, ...) stay opt-in.
   (never `Flavor::Myst` directly), via the `add-lint-rule` skill. Start with
   `undefined-references` (role target resolves to a `MystTarget`) and an
   unknown-directive/role check. Depends on the AST wrappers.
+
+  ## Panache 3.0.0
+
+  This section tracks the 3.0.0 release and what breaking changes we have
+  planned for it.
+
+  - [ ] Make semantic break wrap mode line width-aware. Current users would need
+    `line-width = 0` to preserve the old behavior.
