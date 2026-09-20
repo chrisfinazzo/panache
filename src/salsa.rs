@@ -682,14 +682,16 @@ pub fn built_in_lint_plan(db: &dyn Db, file: FileText, config: FileConfig) -> Bu
             if blocks.is_empty() {
                 continue;
             }
-            let concatenated =
-                crate::linter::code_block_collector::concatenate_with_blanks_and_mapping(blocks);
-            external_jobs.push(ExternalLintJob {
-                linter_name: linter_name.clone(),
-                language: language.clone(),
-                content: concatenated.content,
-                mappings: concatenated.mappings,
-            });
+            for concatenated in
+                crate::linter::code_block_collector::concatenate_for_lint(blocks, cfg.flavor)
+            {
+                external_jobs.push(ExternalLintJob {
+                    linter_name: linter_name.clone(),
+                    language: language.clone(),
+                    content: concatenated.content,
+                    mappings: concatenated.mappings,
+                });
+            }
         }
     }
 

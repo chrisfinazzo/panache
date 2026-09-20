@@ -712,6 +712,42 @@ mod tests {
     }
 
     #[test]
+    fn edit_mapper_preserves_single_line_container_structure() {
+        for (opening, prefix) in [("> ", "> "), ("- ", "  ")] {
+            for newline in ["\n", "\r\n"] {
+                let input = format!(
+                    "{opening}```python{newline}{prefix}import os{newline}{prefix}```{newline}"
+                );
+                let (linted, mappings) = prefixed_block_mapping(&input);
+                let range = mappings[0].concatenated_range.clone();
+                for (start, end, replacement) in [
+                    (range.start, range.end, ""),
+                    (range.start, range.start, "import sys\n"),
+                    (range.end, range.end, "pass\n"),
+                ] {
+                    assert_eq!(
+                        map_concatenated_edit_to_original(
+                            &linted,
+                            start,
+                            end,
+                            replacement,
+                            &mappings
+                        ),
+                        None,
+                        "{input:?}: {start}..{end} => {replacement:?}"
+                    );
+                }
+                let start = linted.find("os").unwrap();
+                let original = input.find("os").unwrap();
+                assert_eq!(
+                    map_concatenated_edit_to_original(&linted, start, start + 2, "sys", &mappings),
+                    Some((original, original + 2))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn edit_mapper_keeps_multiline_edits_for_unprefixed_blocks() {
         let input = "```python\nimport os\nx = 1\n```\n";
         let (linted, mappings) = prefixed_block_mapping(input);

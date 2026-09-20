@@ -1,6 +1,8 @@
 use crate::config::Extensions;
 use crate::linter::code_block_collector::SnippetKind;
-use crate::syntax::{AstNode, Heading, InlineExecutable, SyntaxKind, SyntaxNode};
+use crate::syntax::{
+    AstNode, CellOptionResolution, CodeBlock, Heading, InlineExecutable, SyntaxKind, SyntaxNode,
+};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
@@ -17,7 +19,8 @@ pub struct CodeSnippet {
     pub content: String,
     /// Starting line number in the document (1-indexed)
     pub start_line: usize,
-    /// Byte offset range of the content in the original document
+    /// Byte offset range of the content in the original document, including
+    /// the first line's container prefix for blocks.
     pub original_range: std::ops::Range<usize>,
     /// For each line of `content`, the byte offset in the original document
     /// where that line's content starts — after the line's container prefix.
@@ -154,7 +157,7 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeSn
     let end: usize = range.end().into();
 
     Some(CodeSnippet {
-        kind: crate::linter::code_block_collector::SnippetKind::Block,
+        kind: SnippetKind::DisplayBlock,
         language,
         content,
         start_line: offset_to_line(input, start),
@@ -164,75 +167,55 @@ fn extract_myst_directive_block(node: &SyntaxNode, input: &str) -> Option<CodeSn
 }
 
 fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeSnippet> {
-    let mut language = None;
-    let mut content = String::new();
-    let mut line_starts = Vec::new();
-    let mut content_start_offset = None;
-    let mut content_end_offset = None;
-
-    for child in node.children_with_tokens() {
-        if let NodeOrToken::Node(n) = child {
-            match n.kind() {
-                SyntaxKind::CODE_FENCE_OPEN => {
-                    // Look for CodeInfo node, then extract CodeLanguage from inside it
-                    for fence_child in n.children_with_tokens() {
-                        if let NodeOrToken::Node(info_node) = fence_child
-                            && info_node.kind() == SyntaxKind::CODE_INFO
-                        {
-                            // Search for CodeLanguage token inside CodeInfo node
-                            for info_token in info_node.children_with_tokens() {
-                                if let NodeOrToken::Token(t) = info_token
-                                    && t.kind() == SyntaxKind::CODE_LANGUAGE
-                                {
-                                    let raw_language = t.text();
-                                    let normalized = raw_language
-                                        .strip_prefix('.')
-                                        .unwrap_or(raw_language)
-                                        .to_string();
-                                    language = Some(normalized);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                SyntaxKind::CODE_CONTENT => {
-                    (content, line_starts) = dedented_text_with_line_starts(&n);
-                    // Track where the actual code content starts and ends (not the fence)
-                    let range = n.text_range();
-                    content_start_offset = Some(range.start().into());
-                    content_end_offset = Some(range.end().into());
-                }
-                _ => {}
+    let block = CodeBlock::cast(node.clone())?;
+    let language = block.language()?.trim_start_matches('.').to_string();
+    let kind = match block.executable_cell() {
+        Some(cell) => {
+            let disabled = cell.resolved_options().iter().any(|option| {
+                option.key() == "eval"
+                    && matches!(option.resolution(), CellOptionResolution::Resolved(value)
+                        if !value.is_quoted()
+                            && !matches!(value.yaml_tag(), Some("!expr" | "!r"))
+                            && value.cooked_value().is_some_and(|text| text.trim().eq_ignore_ascii_case("false")))
+            });
+            if disabled {
+                SnippetKind::DisplayBlock
+            } else {
+                SnippetKind::Block
             }
         }
+        None => SnippetKind::DisplayBlock,
+    };
+    let mut content = String::new();
+    let mut line_starts = Vec::new();
+    let mut at_line_start = true;
+    let mut end = 0;
+    for segment in block.code_source_segments() {
+        let base: usize = segment.text_range().start().into();
+        for (offset, byte) in segment.text().bytes().enumerate() {
+            if at_line_start {
+                line_starts.push(base + offset);
+            }
+            at_line_start = byte == b'\n';
+        }
+        content.push_str(segment.text());
+        end = usize::from(segment.text_range().end());
     }
-
-    // Extract language - now from CodeLanguage token inside CodeInfo node
-    let language = language?;
-
-    // Skip if language is empty or content is empty
     if language.is_empty() || content.is_empty() {
         return None;
     }
-
-    // Calculate start line from where content actually starts (after the fence line)
-    let (start_line, original_range) =
-        if let (Some(start), Some(end)) = (content_start_offset, content_end_offset) {
-            (offset_to_line(input, start), start..end)
-        } else {
-            // Fallback to block range if we can't find content offset
-            let start: usize = node.text_range().start().into();
-            let end: usize = node.text_range().end().into();
-            (offset_to_line(input, start), start..end)
-        };
+    // Retain the first line's prefix so even a one-line container block is
+    // recognized as dedented when deciding whether a fix preserves structure.
+    let start = input[..*line_starts.first()?]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
 
     Some(CodeSnippet {
-        kind: crate::linter::code_block_collector::SnippetKind::Block,
+        kind,
         language,
         content,
-        start_line,
-        original_range,
+        start_line: offset_to_line(input, start),
+        original_range: start..end,
         line_starts,
     })
 }

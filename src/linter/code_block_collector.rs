@@ -3,11 +3,14 @@
 //! Explicit source mappings keep diagnostics and fixes aligned even when inline
 //! framing shifts later snippets away from their original line numbers.
 
+use crate::config::Flavor;
 use crate::utils::CodeSnippet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnippetKind {
     Block,
+    /// A displayed fence or a chunk with evaluation disabled.
+    DisplayBlock,
     Inline,
 }
 
@@ -38,18 +41,45 @@ pub struct ConcatenatedBlocks {
     pub mappings: Vec<BlockMapping>,
 }
 
+/// Keep Quarto examples independent while sharing executable document state.
+pub fn concatenate_for_lint(blocks: &[CodeSnippet], flavor: Flavor) -> Vec<ConcatenatedBlocks> {
+    if flavor != Flavor::Quarto {
+        return if blocks.is_empty() {
+            Vec::new()
+        } else {
+            vec![concatenate_with_blanks_and_mapping(blocks)]
+        };
+    }
+
+    let mut groups = Vec::new();
+    let executable = concatenate_snippets(
+        blocks
+            .iter()
+            .filter(|block| block.kind != SnippetKind::DisplayBlock),
+    );
+    if !executable.mappings.is_empty() {
+        groups.push(executable);
+    }
+    groups.extend(
+        blocks
+            .iter()
+            .filter(|block| block.kind == SnippetKind::DisplayBlock)
+            .map(|block| concatenate_with_blanks_and_mapping(std::slice::from_ref(block))),
+    );
+    groups
+}
+
 /// Concatenate code blocks with blank line preservation and return mapping info.
 ///
 /// Pads to original line numbers where possible. Inline framing may shift later
 /// snippets; mappings, rather than line-number equality, locate source content.
 pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeSnippet]) -> ConcatenatedBlocks {
-    if blocks.is_empty() {
-        return ConcatenatedBlocks {
-            content: String::new(),
-            mappings: Vec::new(),
-        };
-    }
+    concatenate_snippets(blocks.iter())
+}
 
+fn concatenate_snippets<'a>(
+    blocks: impl Iterator<Item = &'a CodeSnippet> + Clone,
+) -> ConcatenatedBlocks {
     let mut content = String::new();
     let mut mappings = Vec::new();
     let mut current_line = 1;
@@ -57,7 +87,7 @@ pub fn concatenate_with_blanks_and_mapping(blocks: &[CodeSnippet]) -> Concatenat
     // Reserve a namespace once instead of scanning every snippet per expression.
     let mut binding_prefix = "panache_inline_".to_string();
     while blocks
-        .iter()
+        .clone()
         .any(|snippet| snippet.content.contains(&binding_prefix))
     {
         binding_prefix.push('_');
@@ -152,6 +182,62 @@ mod tests {
         let tree = parse(input, Some(config));
         let blocks = collect_code_snippets(&tree, input);
         concatenate_with_blanks_and_mapping(&blocks["r"])
+    }
+
+    #[test]
+    fn quarto_lint_groups_follow_cell_options_and_preserve_execution_order() {
+        let cases = [
+            ("r", false),
+            ("{.r}", false),
+            ("{r}", true),
+            (
+                "{r}\n#| label: example\n#| eval: false # Display only.",
+                false,
+            ),
+            ("{r, eval=FALSE}", false),
+            ("{r, eval=TRUE}\n#| eval: false", false),
+            ("{r, eval=FALSE}\n#| eval: true", true),
+            ("{r}\n#| echo: false\n#| include: false", true),
+            ("{r}\n#| eval: true", true),
+            ("{r}\n#| eval: 'false'", true),
+            ("{r}\n#| eval: !expr condition", true),
+            ("{r}\n#| eval: !expr false", true),
+            ("{r, eval=FALSE}\n#| eval: !expr false", true),
+        ];
+        for (fence, executes) in cases {
+            let input = format!("```{{r}}\nbefore\n```\n\n```{fence}\nexample\n```\n\n`r after`\n");
+            let config = Config {
+                flavor: Flavor::Quarto,
+                extensions: crate::config::Extensions::for_flavor(Flavor::Quarto),
+                ..Default::default()
+            };
+            let tree = parse(&input, Some(config));
+            let snippets = collect_code_snippets(&tree, &input);
+            let groups = concatenate_for_lint(&snippets["r"], Flavor::Quarto);
+            assert_eq!(groups.len(), if executes { 1 } else { 2 }, "{fence}");
+            assert!(
+                groups[0].content.find("before").unwrap()
+                    < groups[0].content.find("after").unwrap()
+            );
+            assert_eq!(groups[0].content.contains("example"), executes, "{fence}");
+            for group in &groups {
+                assert!(!group.content.contains("#|"), "{fence}");
+            }
+        }
+    }
+
+    #[test]
+    fn displayed_fences_are_independent_only_under_quarto() {
+        let input = "```r\nfirst\n```\n\n```r\nsecond\n```\n";
+        let snippets = collect_code_snippets(&parse(input, None), input);
+        let quarto = concatenate_for_lint(&snippets["r"], Flavor::Quarto);
+        assert_eq!(quarto.len(), 2);
+        assert_eq!(quarto[0].content.trim(), "first");
+        assert_eq!(quarto[1].content.trim(), "second");
+        assert_eq!(
+            concatenate_for_lint(&snippets["r"], Flavor::Pandoc).len(),
+            1
+        );
     }
 
     #[test]

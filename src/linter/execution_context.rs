@@ -17,7 +17,7 @@ use crate::config::Flavor;
 use crate::salsa::{Db, ExternalLintJob, FileConfig, FileText, SalsaDb};
 use crate::utils::CodeSnippet;
 
-use super::code_block_collector::concatenate_with_blanks_and_mapping;
+use super::code_block_collector::concatenate_for_lint;
 use super::diagnostics::{Diagnostic, DiagnosticNoteKind, Fix, Location};
 
 #[derive(Clone, Copy)]
@@ -107,13 +107,14 @@ pub fn execution_plan(db: &dyn Db, file: FileText, config: FileConfig) -> Execut
             let Some(blocks) = snippets.get(language) else {
                 continue;
             };
-            let joined = concatenate_with_blanks_and_mapping(blocks);
-            plan.jobs.push(ExternalLintJob {
-                language: language.clone(),
-                linter_name: linter.clone(),
-                content: joined.content,
-                mappings: joined.mappings,
-            });
+            for joined in concatenate_for_lint(blocks, config.config(db).flavor) {
+                plan.jobs.push(ExternalLintJob {
+                    language: language.clone(),
+                    linter_name: linter.clone(),
+                    content: joined.content,
+                    mappings: joined.mappings,
+                });
+            }
         }
     }
     plan
@@ -648,6 +649,29 @@ mod tests {
             cursor += job.content[cursor..].find(word).unwrap() + word.len();
         }
         assert_ne!(plan.sources[1].arena_range, plan.sources[3].arena_range);
+    }
+
+    #[test]
+    fn quarto_displayed_examples_are_separate_in_both_lint_plans() {
+        let mut db = SalsaDb::default();
+        let config = config(&db);
+        let parent = root(
+            &mut db,
+            config,
+            "/execution/main.qmd",
+            "```r\ndisplayed\n```\n\n```{r}\n#| eval: false\ndisabled\n```\n\n```{r}\nactive\n```\n\n`r use`\n",
+        );
+        let plan = execution_plan(&db, parent.file, config);
+        let local = crate::salsa::built_in_lint_plan(&db, parent.file, config);
+        for jobs in [&plan.jobs, &local.external_jobs] {
+            assert_eq!(jobs.len(), 3);
+            assert!(jobs[0].content.contains("active"));
+            assert!(jobs[0].content.contains("use"));
+            assert!(!jobs[0].content.contains("displayed"));
+            assert!(!jobs[0].content.contains("disabled"));
+            assert_eq!(jobs[1].content.trim(), "displayed");
+            assert_eq!(jobs[2].content.trim(), "disabled");
+        }
     }
 
     #[test]

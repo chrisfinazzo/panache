@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::config::Config;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::linter::code_block_collector::concatenate_with_blanks_and_mapping;
+use crate::linter::code_block_collector::{ConcatenatedBlocks, concatenate_for_lint};
 use crate::linter::diagnostics::Diagnostic;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::linter::external_linters::ExternalLinterRegistry;
@@ -142,7 +142,7 @@ impl LintRunner {
         // Resolve which (language, linter) pairs are actually runnable. This
         // pre-pass stays sequential: the skip/warn logging is cheap and its
         // order should be stable. The expensive subprocess work happens below.
-        let mut jobs: Vec<(&str, &str, &[crate::utils::CodeSnippet])> = Vec::new();
+        let mut jobs = Vec::new();
         for (language, linter_name) in &config.linters {
             let Some(linter_info) = self.external_linters.get(linter_name) else {
                 log::warn!(
@@ -177,7 +177,9 @@ impl LintRunner {
                 continue;
             }
 
-            jobs.push((language.as_str(), linter_name.as_str(), blocks));
+            for group in concatenate_for_lint(blocks, config.flavor) {
+                jobs.push((language.as_str(), linter_name.as_str(), group));
+            }
         }
 
         // Each job is an independent, subprocess-bound external linter run; the
@@ -190,20 +192,19 @@ impl LintRunner {
         // holds non-`Sync` `dyn Rule`s, but `ExternalLinterRegistry` is
         // shareable, so this keeps the closure `Sync` for rayon.
         let external_linters = &self.external_linters;
-        let run_one = |(language, linter_name, blocks): (
+        let run_one = |(language, linter_name, concatenated_result): (
             &str,
             &str,
-            &[crate::utils::CodeSnippet],
+            ConcatenatedBlocks,
         )|
          -> Vec<Diagnostic> {
             log::debug!(
                 "Running external linter '{}' for {} code blocks in language '{}'",
                 linter_name,
-                blocks.len(),
+                concatenated_result.mappings.len(),
                 language
             );
 
-            let concatenated_result = concatenate_with_blanks_and_mapping(blocks);
             // One job == one subprocess. Bound concurrency to the shared
             // external-tool budget (also held by the formatter path).
             let _permit = crate::external_tools_common::acquire_external_tool_permit();

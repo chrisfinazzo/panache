@@ -38,6 +38,172 @@ mod tests {
     }
 
     #[test]
+    fn quarto_displayed_definitions_do_not_conflict_with_execution() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        for fence in ["r", "{.r}", "{r}\n#| eval: false", "{r, eval=FALSE}"] {
+            let input = format!(
+                "```{fence}\nf <- function() 1\n```\n\n```{{r}}\n#| label: run\nstopifnot(!exists(\"f\"))\nf <- function() 2\nf()\n```\n"
+            );
+            let config = quarto_external_config("r", "arity");
+            let tree = parse(&input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.code == "duplicated-function-definition"),
+                "{fence}: {diagnostics:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quarto_displayed_assignments_do_not_satisfy_execution_references() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        for fence in ["r", "{r}\n#| eval: false", "{r, eval=FALSE}"] {
+            for use_site in ["```{r}\n#| label: run\nprint(x)\n```", "Value `r x`."] {
+                let input = format!("```{fence}\nx <- 1\n```\n\n{use_site}\n");
+                let config = quarto_external_config("r", "arity");
+                let tree = parse(&input, Some(config.clone()));
+                let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+                let missing = diagnostics
+                    .iter()
+                    .find(|d| d.code == "undefined-symbol")
+                    .unwrap_or_else(|| panic!("{fence}, {use_site}: {diagnostics:#?}"));
+                assert_eq!(
+                    usize::from(missing.location.range.start()),
+                    input.rfind('x').unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn quarto_displayed_examples_keep_diagnostics_and_fixes() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        let input = "> ```r\r\n> any(is.na(NA))\r\n> ```\r\n\r\n> ```{r}\r\n> #| eval: false\r\n> any(is.na(NA))\r\n> ```\r\n";
+        let config = quarto_external_config("r", "arity");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        let fixes: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "any-is-na")
+            .collect();
+        assert_eq!(fixes.len(), 2, "{diagnostics:#?}");
+        for (diag, (offset, _)) in fixes.iter().zip(input.match_indices("any(is.na(NA))")) {
+            assert_eq!(usize::from(diag.location.range.start()), offset);
+            let edit = &diag.fix.as_ref().unwrap().edits[0];
+            assert_eq!(
+                &input[usize::from(edit.range.start())..usize::from(edit.range.end())],
+                "any(is.na(NA))"
+            );
+            assert_eq!(edit.replacement, "anyNA(NA)");
+        }
+    }
+
+    #[test]
+    fn quarto_execution_shares_bindings_across_displayed_examples() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        let input = "```{r}\n#| label: setup\nx <- 42\n```\n\n```r\nf <- function() 1\nf()\n```\n\n```{r}\n#| label: example\n#| eval: false\nf <- function() 2\nf()\n```\n\n```{r}\n#| label: run\nprint(x)\n```\n\nValue `r x`.\n";
+        let config = quarto_external_config("r", "arity");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn quarto_hashpipe_eval_overrides_header_for_shared_bindings() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        for (header, hashpipe, executes) in [("FALSE", "true", true), ("TRUE", "false", false)] {
+            let input = format!(
+                "```{{r, eval={header}}}\n#| label: setup\n#| eval: {hashpipe}\nx <- 42\n```\n\n```{{r}}\n#| label: run\nprint(x)\n```\n"
+            );
+            let config = quarto_external_config("r", "arity");
+            let tree = parse(&input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+            assert_eq!(
+                diagnostics
+                    .iter()
+                    .any(|diag| diag.code == "undefined-symbol"),
+                !executes,
+                "{input}: {diagnostics:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quarto_expression_eval_preserves_shared_bindings() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        let input = "```{r}\n#| label: setup\nfalse <- TRUE\n```\n\n```{r}\n#| label: define\n#| eval: !expr false\nx <- 42\n```\n\n```{r}\n#| label: run\nprint(x)\n```\n";
+        let config = quarto_external_config("r", "arity");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diag| diag.code == "undefined-symbol"),
+            "{diagnostics:#?}"
+        );
+    }
+
+    #[test]
+    fn quarto_ruff_keeps_single_line_container_fences_intact() {
+        if which::which("ruff").is_err() {
+            return;
+        }
+        for (opening, prefix) in [("> ", "> "), ("- ", "  ")] {
+            for fence in ["python", "{python}", "{python}\n#| eval: false"] {
+                for newline in ["\n", "\r\n"] {
+                    let fence = fence.replace('\n', &format!("{newline}{prefix}"));
+                    let input = format!(
+                        "{opening}```{fence}{newline}{prefix}import os{newline}{prefix}```{newline}"
+                    );
+                    let config = quarto_external_config("python", "ruff");
+                    let tree = parse(&input, Some(config.clone()));
+                    let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+                    let unused = diagnostics
+                        .iter()
+                        .find(|diag| diag.code == "F401")
+                        .unwrap_or_else(|| panic!("{input:?}: {diagnostics:#?}"));
+                    assert!(unused.fix.is_none(), "{input:?}: {unused:#?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn quarto_duplicate_definitions_within_one_context_are_still_reported() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        for input in [
+            "```r\nf <- function() 1\nf <- function() 2\nf()\n```\n",
+            "```{r}\n#| label: setup\nf <- function() 1\n```\n\n```{r}\n#| label: run\nf <- function() 2\nf()\n```\n",
+        ] {
+            let config = quarto_external_config("r", "arity");
+            let tree = parse(input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.code == "duplicated-function-definition"),
+                "{diagnostics:#?}"
+            );
+        }
+    }
+
+    #[test]
     fn inline_execution_r_fixes_target_only_expression_content() {
         if which::which("arity").is_err() {
             return;

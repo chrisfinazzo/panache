@@ -725,6 +725,12 @@ External linters
     Markdown, and unsafe fixes remain excluded from the aggregate fix-all
     action.
 
+    In Quarto documents, displayed fences and chunks with literal `eval: false`
+    options are linted independently. Their definitions do not supply bindings to
+    executable chunks or inline expressions, and they retain diagnostics and quick
+    fixes. Hashpipe options override the fence header, and expression-valued `eval`
+    options leave chunks in the executable context.
+
     Quarto includes share their parent document's execution context. When a partial
     is open, Panache also considers known parents among the project's render targets
     and open documents. Diagnostics appear on the file containing the code, even

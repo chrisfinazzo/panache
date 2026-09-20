@@ -383,6 +383,8 @@ impl ExecutableCell {
         declarations
     }
 
+    /// Resolve declarations with hashpipe YAML taking precedence over the
+    /// fence header. Duplicates within the winning source remain ambiguous.
     pub fn resolved_options(&self) -> Vec<ResolvedCellOption> {
         let mut grouped: BTreeMap<String, Vec<CellOptionDeclaration>> = BTreeMap::new();
         for declaration in self.option_declarations() {
@@ -396,11 +398,11 @@ impl ExecutableCell {
             .map(|(key, declarations)| {
                 let winning_source = if declarations
                     .iter()
-                    .any(|entry| entry.source() == ChunkOptionSource::InlineInfo)
+                    .any(|entry| entry.source() == ChunkOptionSource::HashpipeYaml)
                 {
-                    ChunkOptionSource::InlineInfo
-                } else {
                     ChunkOptionSource::HashpipeYaml
+                } else {
+                    ChunkOptionSource::InlineInfo
                 };
                 let winners = declarations
                     .into_iter()
@@ -438,6 +440,7 @@ pub struct CellOptionDeclaration {
     raw_value: Option<String>,
     cooked_value: Option<String>,
     yaml_value: Option<YamlNode>,
+    yaml_tag: Option<String>,
     key_range: Option<TextRange>,
     value_range: Option<TextRange>,
     declaration_range: TextRange,
@@ -452,6 +455,7 @@ impl CellOptionDeclaration {
             raw_value: entry.value(),
             cooked_value: entry.value(),
             yaml_value: None,
+            yaml_tag: None,
             key_range: entry.key_range(),
             value_range: entry.value_range(),
             declaration_range: entry.declaration_range(),
@@ -464,6 +468,10 @@ impl CellOptionDeclaration {
         let key_scalar = entry.key().and_then(|key| key.scalar());
         let value = entry.value();
         let yaml_value = value.as_ref().and_then(|value| value.as_node());
+        let yaml_tag = value
+            .as_ref()
+            .and_then(|value| value.tag())
+            .map(|tag| tag.text().to_string());
         let raw_value = yaml_value
             .as_ref()
             .map(|value| value.syntax().text().to_string());
@@ -488,6 +496,7 @@ impl CellOptionDeclaration {
             key_range: key_scalar.map(|scalar| scalar.text_range()),
             value_range: yaml_value.as_ref().map(YamlNode::text_range),
             yaml_value,
+            yaml_tag,
             declaration_range: entry.syntax().text_range(),
             source: ChunkOptionSource::HashpipeYaml,
             is_quoted,
@@ -518,6 +527,11 @@ impl CellOptionDeclaration {
 
     pub fn yaml_value(&self) -> Option<&YamlNode> {
         self.yaml_value.as_ref()
+    }
+
+    /// The explicit YAML tag decorating the value, such as `!expr`.
+    pub fn yaml_tag(&self) -> Option<&str> {
+        self.yaml_tag.as_deref()
     }
 
     pub fn key_range(&self) -> Option<TextRange> {

@@ -295,6 +295,47 @@ fn inline_execution_diagnostics_and_actions_use_utf16_positions() {
 }
 
 #[test]
+fn quarto_displayed_bindings_stay_out_of_execution_after_save_and_edit() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let path = dir.path().join("examples.qmd");
+    let source = "```r\nx <- 1\n```\n\n```{r}\n#| label: example\n#| eval: false\ny <- 1\n```\n\n```{r}\n#| label: run\nprint(x)\nprint(y)\n```\n";
+    std::fs::write(&path, source).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
+    let mut server = TestLspServer::new();
+    server.initialize(Uri::from_file_path(dir.path()).unwrap().as_str());
+    server.open_document(&uri, source, "quarto");
+    for (version, text, expected_lines) in [
+        (1, source.to_string(), vec![12, 13]),
+        (2, source.replace("eval: false", "eval: true"), vec![12]),
+    ] {
+        if version > 1 {
+            server.edit_document(&uri, vec![full_document_change(&text)]);
+        }
+        server.save_document(&uri);
+        server.pump(Duration::from_secs(5));
+        let publications = server.drain_publish_diagnostics(&uri);
+        let diagnostics = &publications
+            .last()
+            .expect("published diagnostics")
+            .diagnostics;
+        let missing_lines: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("undefined-symbol".into())))
+            .map(|d| d.range.start.line)
+            .collect();
+        assert_eq!(missing_lines, expected_lines, "{diagnostics:#?}");
+    }
+}
+
+#[test]
 fn test_diagnostics_on_heading_hierarchy_issue() {
     let mut server = TestLspServer::new();
 

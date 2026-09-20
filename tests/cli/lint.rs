@@ -10,6 +10,50 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 #[test]
+fn quarto_displayed_includes_keep_source_diagnostics_and_fixes() {
+    if which::which("arity").is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("_quarto.yml"),
+        "project:\n  type: default\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "[linters]\nr = \"arity\"\n",
+    )
+    .unwrap();
+    let parent = "{{< include _examples.qmd >}}\n\n```{r}\n#| label: run\nf <- function() 2\nf()\nprint(x)\n```\n";
+    let child = "> ```r\n> f <- function() 1\n> x <- 1\n> any(is.na(NA))\n> ```\n";
+    fs::write(dir.path().join("parent.qmd"), parent).unwrap();
+    fs::write(dir.path().join("_examples.qmd"), child).unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "parent.qmd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("undefined-symbol"))
+        .stdout(predicate::str::contains("parent.qmd:7:"))
+        .stdout(predicate::str::contains("_examples.qmd:4:"))
+        .stdout(predicate::str::contains("duplicated-function-definition").not());
+    cargo_bin_cmd!("panache")
+        .current_dir(dir.path())
+        .args(["lint", "--no-cache", "--fix", "_examples.qmd"])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("_examples.qmd")).unwrap(),
+        child.replace("any(is.na(NA))", "anyNA(NA)")
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("parent.qmd")).unwrap(),
+        parent
+    );
+}
+
+#[test]
 fn include_execution_uses_parent_context_for_partial_targets() {
     if which::which("arity").is_err() {
         eprintln!("Skipping include R CLI test: arity is not installed");

@@ -170,14 +170,14 @@ Available external linters:
 
 ### How External Linters Work
 
-External linters analyze code blocks and executable inline expressions together:
+External linters analyze code blocks and executable inline expressions:
 
 1. **Collection**: Code blocks and executable inline expressions of the target
    language are extracted in document order, with any enclosing container syntax
    (block quote markers, list item indentation) stripped so the linter sees
    valid code
-2. **Concatenation**: Code is joined, retaining blank-line padding where
-   possible
+2. **Concatenation**: Code that shares an execution context is joined, retaining
+   blank-line padding where possible
 3. **Analysis**: The external linter analyzes the combined code, treating inline
    expression results as used values
 4. **Mapping**: Diagnostics are mapped back to original document positions,
@@ -185,8 +185,8 @@ External linters analyze code blocks and executable inline expressions together:
 
 ::: {.callout-note}
 This approach correctly handles stateful code. If a variable is defined in one
-code block and used in another block or an inline expression, the linter sees
-both the definition and the use.
+executable code block and used in another executable block or an inline
+expression, the linter sees both the definition and the use.
 :::
 
 Under the Quarto flavor, inline analysis supports `` `r expression` ``,
@@ -195,6 +195,18 @@ Under the Quarto flavor, inline analysis supports `` `r expression` ``,
 the `rmarkdown-inline-code` and `quarto-inline-code` extension settings.
 Ordinary code spans and escaped examples using extra backticks or doubled braces
 are excluded.
+
+Under the Quarto flavor, executable chunks and inline expressions share a lint
+context for each language. Displayed fences such as ```` ```r ```` and
+```` ```{.r} ````, and chunks with a literal `eval: false` (or `eval=FALSE`),
+are each linted independently. Their assignments cannot satisfy references in
+executable code or conflict with its definitions. They still receive diagnostics
+and fixes. Hashpipe options override options in the fence header.
+Expression-valued options such as `eval: !expr false` leave the chunk in the
+executable context. Options such as `echo: false` and `include: false` hide
+output but leave the chunk in the executable context. Panache uses explicit cell
+options for this grouping; it does not evaluate option expressions or infer
+runtime changes to defaults.
 
 Under the Quarto flavor, external linters also analyze code from `include`
 shortcodes in inclusion order. Nested include paths resolve relative to the main

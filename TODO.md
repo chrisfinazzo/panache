@@ -229,7 +229,7 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   ```
   ````
 
-- [ ] Keep displayed R examples separate from executable Quarto chunk context in
+- [x] Keep displayed R examples separate from executable Quarto chunk context in
   external linting. Under `--flavor quarto` with `[linters] r = "arity"`,
   Panache reports `duplicated-function-definition` for the following, but
   Quarto prints `2`: the plain `r` fence never executes. An execution chunk

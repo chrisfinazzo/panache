@@ -126,9 +126,9 @@ fn executable_cell_retains_yaml_values_provenance_and_code_ranges() {
         .find(|option| option.key() == "echo")
         .expect("resolved echo");
     let CellOptionResolution::Resolved(echo) = echo.resolution() else {
-        panic!("inline echo should resolve unambiguously");
+        panic!("hashpipe echo should resolve unambiguously");
     };
-    assert_eq!(echo.cooked_value(), Some("true"));
+    assert_eq!(echo.cooked_value(), Some("false"));
 }
 
 #[test]
@@ -152,6 +152,26 @@ fn duplicate_winning_cell_options_remain_ambiguous() {
         echo.resolution(),
         CellOptionResolution::Ambiguous(options) if options.len() == 2
     ));
+}
+
+#[test]
+fn executable_cell_retains_expression_tags() {
+    let source = "```{r}\n#| eval: !expr false\nx <- 42\n```\n";
+    let parsed = parse_document(source, Some(ParserOptions::for_flavor(Flavor::Quarto)));
+    let cell = parsed
+        .document()
+        .syntax()
+        .descendants()
+        .find_map(CodeBlock::cast)
+        .and_then(|block| block.executable_cell())
+        .expect("executable cell");
+    let eval = cell
+        .option_declarations()
+        .into_iter()
+        .find(|option| option.key() == Some("eval"))
+        .expect("eval option");
+    assert_eq!(eval.cooked_value(), Some("false"));
+    assert_eq!(eval.yaml_tag(), Some("!expr"));
 }
 
 #[test]
