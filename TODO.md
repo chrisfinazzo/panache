@@ -44,6 +44,13 @@ This document tracks implementation status for Panache's features.
 
 ## Language Server
 
+### Issues
+
+- [ ] Reference links - Rename labels in `[text][ref]` and their `[ref]: url`
+  definitions. `prepareRename` accepts the label and linked editing finds
+  both occurrences, but `rename` returns `null`. The rename handler handles
+  `SymbolTarget::Reference` only for footnotes and omits ordinary links.
+
 ### Memory
 
 - [x] Stop interning labels in the definition-index build. Salsa 0.28 reclaims
@@ -61,6 +68,10 @@ This document tracks implementation status for Panache's features.
 
 ### Navigation & Symbols
 
+- [ ] Reference-link hover - Show the reference definition when hovering over
+  the label in `[text][ref]`, including external destinations such as
+  `[ref]: https://example.com`. Panache currently returns `null` for this
+  external-link case; Marksman displays the definition as Markdown.
 - [x] Find references - Find all uses of a reference link/footnote/citation
   - [x] Find references for citations - Find all `@cite` uses of a bibliography
     entry
@@ -99,7 +110,6 @@ support.
     `ATTRIBUTE`, so a dedicated token kind is needed first).
 - [ ] Rename
   - [x] Citations - Rename `@cite` keys and update bibliography
-  - [x] Reference links - Rename `[ref]` labels and update definitions
   - [x] Headings - Rename heading text and update internal links
   - [x] Footnotes - Rename footnote labels and update definitions/links
   - [x] Files - Rename linked markdown files and update links
