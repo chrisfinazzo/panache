@@ -46,10 +46,8 @@ This document tracks implementation status for Panache's features.
 
 ### Issues
 
-- [ ] Reference links - Rename labels in `[text][ref]` and their `[ref]: url`
-  definitions. `prepareRename` accepts the label and linked editing finds
-  both occurrences, but `rename` returns `null`. The rename handler handles
-  `SymbolTarget::Reference` only for footnotes and omits ordinary links.
+- [x] Reference links - Rename labels in `[text][ref]`, `![alt][ref]`, and their
+  `[ref]: url` definitions.
 
 ### Memory
 

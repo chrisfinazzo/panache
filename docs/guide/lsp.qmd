@@ -843,6 +843,10 @@ Smart completions for Markdown syntax (implementation varies by context):
 Rename references and their definitions together. Place cursor on a reference
 label or definition and trigger rename (F2 in many editors).
 
+For reference links, renaming updates the label in `[text][ref]`, `![alt][ref]`,
+and `[ref]: url` definitions in the current document. Matching ignores
+differences in label casing and whitespace.
+
 ### Linked Editing
 
 Edit a symbol and its linked occurrences in the current document at the same

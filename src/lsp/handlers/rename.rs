@@ -5,7 +5,7 @@ use crate::lsp::uri_ext::UriExt;
 use lsp_types::*;
 
 use crate::lsp::global_state::StateSnapshot;
-use crate::lsp::symbols::{SymbolTarget, resolve_symbol_target_at_offset};
+use crate::lsp::symbols::{SymbolTarget, collect_symbol_ranges, resolve_symbol_target_at_offset};
 use crate::metadata::{inline_bib_conflicts, inline_reference_map};
 
 use super::super::conversions::{offset_to_position, position_to_offset};
@@ -170,16 +170,9 @@ pub(crate) fn rename(snap: &StateSnapshot, params: RenameParams) -> Option<Works
         });
     }
 
-    if let Some(SymbolTarget::Reference {
-        label,
-        is_footnote: true,
-    }) = target.as_ref()
-    {
-        let symbol_index = {
-            let db = snap.db();
-            crate::salsa::symbol_usage_index(db, salsa_file, salsa_config).clone()
-        };
-        let ranges = symbol_index.footnote_rename_ranges(label);
+    if let Some(target @ SymbolTarget::Reference { .. }) = target.as_ref() {
+        let root = ctx.syntax_root();
+        let ranges = collect_symbol_ranges(snap, &ctx, &config, &root, target);
         let edits = text_edits_from_ranges(&ranges, &content, &new_name);
         if edits.is_empty() {
             return None;

@@ -1,6 +1,128 @@
 use super::helpers::*;
-use lsp_types::Uri;
+use lsp_types::{Position, Range, TextEdit, Uri};
 use std::fs;
+
+#[test]
+fn test_rename_reference_link_updates_links_images_and_definition() {
+    let mut server = TestLspServer::new();
+    let content = "[text][label]\n![alt][label]\n\n[label]: https://example.com \"Title\"\n";
+    server.open_document("file:///test.md", content, "markdown");
+    let doc_uri: Uri = "file:///test.md".parse().unwrap();
+    let expected = vec![
+        TextEdit::new(
+            Range::new(Position::new(0, 7), Position::new(0, 12)),
+            "renamed".into(),
+        ),
+        TextEdit::new(
+            Range::new(Position::new(1, 7), Position::new(1, 12)),
+            "renamed".into(),
+        ),
+        TextEdit::new(
+            Range::new(Position::new(3, 1), Position::new(3, 6)),
+            "renamed".into(),
+        ),
+    ];
+
+    for (line, character) in [(0, 9), (1, 9), (3, 3)] {
+        let edit = server
+            .rename(doc_uri.as_str(), line, character, "renamed")
+            .expect("rename from a link, image, or definition label");
+        let changes = edit.changes.expect("changes");
+        let mut edits = changes.get(&doc_uri).expect("doc edits").clone();
+        edits.sort_by_key(|edit| edit.range.start);
+        assert_eq!(edits, expected);
+    }
+}
+
+#[test]
+fn test_rename_reference_link_matches_case_and_whitespace_variants() {
+    let mut server = TestLspServer::new();
+    let content = "[text][Some Label]\n[more][some   label]\n\n[SOME LABEL]: https://example.com\n";
+    server.open_document("file:///test.md", content, "markdown");
+
+    let edit = server
+        .rename("file:///test.md", 0, 9, "renamed")
+        .expect("reference rename edit");
+    let changes = edit.changes.expect("changes");
+    let doc_uri: Uri = "file:///test.md".parse().unwrap();
+    let mut edits = changes.get(&doc_uri).expect("doc edits").clone();
+    edits.sort_by_key(|edit| edit.range.start);
+    assert_eq!(
+        edits,
+        vec![
+            TextEdit::new(
+                Range::new(Position::new(0, 7), Position::new(0, 17)),
+                "renamed".into()
+            ),
+            TextEdit::new(
+                Range::new(Position::new(1, 7), Position::new(1, 19)),
+                "renamed".into()
+            ),
+            TextEdit::new(
+                Range::new(Position::new(3, 1), Position::new(3, 11)),
+                "renamed".into()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn test_rename_reference_link_uses_utf16_ranges() {
+    let mut server = TestLspServer::new();
+    let content = "😀 [text][café]\n\n[café]: https://example.com\n";
+    server.open_document("file:///test.md", content, "markdown");
+
+    let edit = server
+        .rename("file:///test.md", 0, 12, "résumé")
+        .expect("reference rename edit");
+    let changes = edit.changes.expect("changes");
+    let doc_uri: Uri = "file:///test.md".parse().unwrap();
+    let mut edits = changes.get(&doc_uri).expect("doc edits").clone();
+    edits.sort_by_key(|edit| edit.range.start);
+    assert_eq!(
+        edits,
+        vec![
+            TextEdit::new(
+                Range::new(Position::new(0, 10), Position::new(0, 14)),
+                "résumé".into()
+            ),
+            TextEdit::new(
+                Range::new(Position::new(2, 1), Position::new(2, 5)),
+                "résumé".into()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn test_rename_reference_link_is_scoped_to_matching_links_in_current_document() {
+    let mut server = TestLspServer::new();
+    let content = "[text][label]\n\n[label]: https://example.com\n\n[other][keep]\n\n[keep]: https://keep.example\n\nSee[^label].\n\n[^label]: Footnote.\n";
+    server.open_document("file:///test.md", content, "markdown");
+    server.open_document("file:///other.md", content, "markdown");
+
+    let edit = server
+        .rename("file:///test.md", 0, 9, "renamed")
+        .expect("reference rename edit");
+    let changes = edit.changes.expect("changes");
+    let doc_uri: Uri = "file:///test.md".parse().unwrap();
+    assert_eq!(changes.len(), 1);
+    let mut edits = changes.get(&doc_uri).expect("doc edits").clone();
+    edits.sort_by_key(|edit| edit.range.start);
+    assert_eq!(
+        edits,
+        vec![
+            TextEdit::new(
+                Range::new(Position::new(0, 7), Position::new(0, 12)),
+                "renamed".into()
+            ),
+            TextEdit::new(
+                Range::new(Position::new(2, 1), Position::new(2, 6)),
+                "renamed".into()
+            ),
+        ]
+    );
+}
 
 #[test]
 fn test_rename_citation_updates_bib_and_dependents() {

@@ -78,7 +78,8 @@ pub(crate) fn resolve_symbol_target_at_offset(
 /// none of their usages.
 ///
 /// Shared by `linked_editing_range` (which then filters to identical source
-/// text) and `document_highlight` (which highlights the full set as-is).
+/// text), `document_highlight` (which highlights the full set as-is), and
+/// `rename` for reference links and footnotes.
 pub(crate) fn collect_symbol_ranges(
     snap: &StateSnapshot,
     ctx: &OpenDocumentContext,
