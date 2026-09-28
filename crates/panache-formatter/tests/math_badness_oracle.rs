@@ -1466,8 +1466,18 @@ fn malformed_embedded_environment_crosses_the_preservation_boundary() {
 }
 
 #[test]
+fn environment_leading_signs_match_badness() {
+    for body in ["1 \\\\\n+ 2", "1 \\\\\n+2", "1 \\\\\n- 2"] {
+        assert_formatter_parity(body, OracleContext::Environment);
+        let body = format!("\\begin{{multlined}}\n{body}\n\\end{{multlined}}");
+        assert_formatter_parity(&body, OracleContext::Display);
+    }
+}
+
+#[test]
 fn authored_line_break_migration_slice_matches_badness() {
     for body in [
+        "x&=1 \\\\\n&+ 2",
         "a\\\\*[2ex]\nb",
         "a\\\\b",
         "a \\\\*[2ex]\n-b",

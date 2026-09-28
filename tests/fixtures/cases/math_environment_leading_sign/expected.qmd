@@ -1,0 +1,6 @@
+$$
+  \begin{multlined}
+    1 \\
+    + 2
+  \end{multlined}
+$$

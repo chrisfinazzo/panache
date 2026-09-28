@@ -96,6 +96,50 @@ fn assert_math_host_body(
 }
 
 #[test]
+fn environment_leading_signs_preserve_authored_spacing() {
+    for mode in [MathMode::Preserve, MathMode::SingleLine, MathMode::Reflow] {
+        let config = math_mode_config(mode);
+        for environment in ["multlined", "multline", "aligned", "matrix", "cases"] {
+            for (body, expected) in [
+                ("1 \\\\\n+   2", "1 \\\\\n+ 2"),
+                ("1 \\\\\n+2", "1 \\\\\n+2"),
+                ("1 \\\\\n-   2", "1 \\\\\n- 2"),
+                ("1 \\\\\n-2", "1 \\\\\n-2"),
+                ("1\n+   2", "1\n+ 2"),
+                ("1 \\\\\n&+   2", "1 \\\\\n & + 2"),
+                ("1 \\\\\n+ {- x}", "1 \\\\\n+ {-x}"),
+                ("1 \\\\\nx = - y", "1 \\\\\nx = -y"),
+                ("1 \\\\\n+ \\frac{- x}{+ y}", "1 \\\\\n+ \\frac{-x}{+y}"),
+                (
+                    "1 \\\\\n+ \\begin{matrix}2\\end{matrix}",
+                    "1 \\\\\n+ \\begin{matrix}\n    2\n  \\end{matrix}",
+                ),
+            ] {
+                let input = format!("\\begin{{{environment}}}\n{body}\n\\end{{{environment}}}");
+                let expected = format!(
+                    "  \\begin{{{environment}}}\n{}\n  \\end{{{environment}}}",
+                    indent_math_body(&indent_math_body(expected))
+                );
+                assert_math_host_body(MathHost::DollarDisplay, &input, &expected, &config);
+            }
+        }
+    }
+}
+
+#[test]
+fn raw_environment_leading_signs_preserve_authored_spacing() {
+    for mode in [MathMode::Preserve, MathMode::SingleLine, MathMode::Reflow] {
+        for name in ["multline", "align"] {
+            let input = format!("\\begin{{{name}}}\n1 \\\\\n+ 2\n\\end{{{name}}}\n");
+            let config = math_mode_config(mode);
+            let output = format(&input, Some(config.clone()), None);
+            assert!(output.contains("\n  + 2\n"), "{output}");
+            assert_eq!(format(&output, Some(config), None), output);
+        }
+    }
+}
+
+#[test]
 fn verbatim_mode_preserves_math_content() {
     let input = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 22\n\\end{aligned}\n$$\n";
     let expected = "$$\n  \\begin{aligned}\n  x &= 1 \\\\\n  y &= 22\n  \\end{aligned}\n$$\n";

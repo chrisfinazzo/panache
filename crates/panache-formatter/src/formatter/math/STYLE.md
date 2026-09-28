@@ -262,6 +262,13 @@ This line hygiene does not otherwise normalize or reflow the preserved content.
    all keep their author space verbatim. The structural `MATH_DELIMITED` node,
    rather than the command table, identifies `\left`/`\right` framing.
 
+   At the start of an environment row or alignment cell, a sign can continue an
+   earlier expression. Preserve the authored gap after that leading sign (`1 \\`
+   followed by `+ 2` keeps `+ 2`, and `+2` stays `+2`), collapsing a whitespace
+   run to one space. Cell-local unary coercion alone does not prove that
+   tightening is appropriate. Nested groups and arguments still apply ordinary
+   unary spacing (`+ {- x}` → `+ {-x}`).
+
    A leading ASCII sign scanned by an unbraced TeX dimension command (`\hskip`,
    `\vskip`, `\kern`, `\mkern`, or `\mskip`) is not a binary operator. Its
    authored gap after the command is collapsed normally, while the sign stays

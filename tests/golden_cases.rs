@@ -452,6 +452,7 @@ golden_test_cases!(
     math_linebreak_indent_budget_experimental,
     math_linebreak_nested_experimental,
     math_operator_spacing_experimental,
+    math_environment_leading_sign,
     math_postfix_left_limit_sign,
     math_array_environment_argument,
     math_signed_tex_dimensions,

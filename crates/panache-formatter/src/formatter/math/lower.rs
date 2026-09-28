@@ -225,13 +225,22 @@ pub(super) fn try_lower_environment_composition(
     opts: &MathFormatOptions,
     hanging_offset: usize,
 ) -> Option<Ir> {
+    lower_environment_composition(elements, opts, hanging_offset, Spacing::Normal)
+}
+
+fn lower_environment_composition(
+    elements: Vec<SyntaxElement>,
+    opts: &MathFormatOptions,
+    hanging_offset: usize,
+    spacing: Spacing,
+) -> Option<Ir> {
     let mut pieces = try_lower_environment_pieces(elements, opts)?;
     for piece in &mut pieces {
         if piece.multiline_tail_width.is_some() {
             piece.document = Ir::align(hanging_offset, piece.document.clone());
         }
     }
-    Some(document_from_pieces(&pieces, Spacing::Normal))
+    Some(document_from_pieces(&pieces, spacing))
 }
 
 /// Lower a free display containing one top-level environment.
@@ -479,7 +488,7 @@ pub(super) fn try_lower_environment_content(
     lower_body(
         content.elements().collect(),
         scope,
-        Spacing::Normal,
+        Spacing::EnvironmentCell,
         true,
         true,
     )
@@ -766,13 +775,22 @@ fn lower_environment_cell_elements(
         .iter()
         .any(|element| display_environment(element).is_some())
     {
-        return try_lower_environment_composition(elements, opts, 0);
+        return lower_environment_composition(elements, opts, 0, Spacing::EnvironmentCell);
     }
+    let lower = |elements| {
+        lower_body(
+            elements,
+            &opts.signature_scope,
+            Spacing::EnvironmentCell,
+            true,
+            false,
+        )
+    };
     if !elements
         .iter()
         .any(|element| element.kind() == SyntaxKind::MATH_EQUATION_LABEL)
     {
-        return try_lower_elements(elements, &opts.signature_scope);
+        return lower(elements);
     }
 
     let mut documents = Vec::new();
@@ -783,10 +801,7 @@ fn lower_environment_cell_elements(
                 && segment.last().is_some_and(|element: &SyntaxElement| {
                     element.kind() == SyntaxKind::MATH_SPACE
                 });
-            documents.push(try_lower_elements(
-                std::mem::take(&mut segment),
-                &opts.signature_scope,
-            )?);
+            documents.push(lower(std::mem::take(&mut segment))?);
             if trailing_space {
                 documents.push(Ir::text(" "));
             }
@@ -795,7 +810,7 @@ fn lower_environment_cell_elements(
             segment.push(element);
         }
     }
-    documents.push(try_lower_elements(segment, &opts.signature_scope)?);
+    documents.push(lower(segment)?);
     Some(Ir::concat(documents))
 }
 
@@ -1542,13 +1557,17 @@ fn lower_pieces_with_atoms(
     let semantic_atoms = coalesce_scripted_relations(elements, semantic_atoms);
     let mut pieces = Vec::new();
     let mut previous_end = None;
+    let nested_spacing = match spacing {
+        Spacing::EnvironmentCell => Spacing::Normal,
+        _ => spacing,
+    };
 
     for atom in semantic_atoms {
         let atom_document = scripted_relation_document(
             atom,
             elements,
             scope,
-            spacing,
+            nested_spacing,
             preserve_comment_context,
             environment_rows,
         )
@@ -1557,7 +1576,7 @@ fn lower_pieces_with_atoms(
                 atom,
                 elements,
                 scope,
-                spacing,
+                nested_spacing,
                 preserve_comment_context,
                 environment_rows,
             )
@@ -2867,13 +2886,15 @@ fn gap_before(pieces: &[Piece], index: usize, spacing: Spacing) -> bool {
         return true;
     }
 
-    // A binary operator or relation always wins its space, even next to a
-    // unary sign (`a - -b`); otherwise a unary sign strips the authored space
-    // it would have kept as an ordinary atom (`f( - x)` -> `f(-x)`).
-    let tight = previous.unary || current.unary || previous.dimension_sign;
+    // An environment cell can continue an earlier expression. Keep the author's
+    // gap after its leading sign because cell-local coercion cannot prove unary
+    // intent. A neighboring binary operator or relation still wins its space.
+    let preserve_leading_sign = spacing == Spacing::EnvironmentCell && index == 1;
+    let tight =
+        previous.unary && !preserve_leading_sign || current.unary || previous.dimension_sign;
 
     match spacing {
-        Spacing::Normal => {
+        Spacing::Normal | Spacing::EnvironmentCell => {
             if current.role != Role::Operand || previous.role != Role::Operand {
                 true
             } else {
@@ -2896,7 +2917,7 @@ fn adjacent_operator(pieces: &[Piece], index: usize, spacing: Spacing) -> bool {
     let previous = index.checked_sub(1).and_then(|index| pieces.get(index));
     let next = pieces.get(index + 1);
     match spacing {
-        Spacing::Normal => previous
+        Spacing::Normal | Spacing::EnvironmentCell => previous
             .into_iter()
             .chain(next)
             .any(|piece| piece.role != Role::Operand),
@@ -2954,6 +2975,7 @@ fn is_control_word_letter(character: char) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Spacing {
     Normal,
+    EnvironmentCell,
     Script,
 }
 
