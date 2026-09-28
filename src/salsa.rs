@@ -1107,7 +1107,8 @@ pub fn project_document_contribution(
 }
 
 /// The project-wide symbol aggregate for the project rooted at `root`: the
-/// union of every project document's [`project_document_contribution`].
+/// union of every project document's [`project_document_contribution`],
+/// including documents reached through include edges.
 ///
 /// Keyed on the interned project *root* (not the current file), so every
 /// document in a project shares one memo — the project's files are enumerated
@@ -1126,16 +1127,23 @@ pub fn project_symbol_index_for<'db>(
     let _ = db.file_set().ids(db);
     let project_root = root.path(db);
     let mut aggregate = crate::linter::project_index::ProjectSymbolIndex::default();
-    for path in
-        crate::includes::find_project_documents(project_root, config.config(db), is_bookdown)
-    {
+    let mut pending =
+        crate::includes::find_project_documents(project_root, config.config(db), is_bookdown);
+    let mut visited = HashSet::new();
+    while let Some(path) = pending.pop() {
         db.unwind_if_revision_cancelled();
-        let Some(doc_file) = db.file_text(path.clone()) else {
+        if !visited.insert(path.clone()) {
+            continue;
+        }
+        let Some(doc_file) = db.file_text(path) else {
             continue;
         };
         if !file_is_present(db, doc_file) {
             continue;
         }
+        // Render exclusions keep partials from being standalone outputs, but
+        // their symbols still belong to the documents that include them.
+        pending.extend(project_edges(db, doc_file, config).includes.iter().cloned());
         aggregate.extend(project_document_contribution(db, doc_file, config));
     }
     aggregate
@@ -4721,6 +4729,44 @@ mod tests {
             "explicit anchor from a sibling must be aggregated: {:?}",
             aggregate.anchors
         );
+    }
+
+    #[test]
+    fn project_symbol_index_follows_nested_includes_and_tracks_edits() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("_quarto.yml"),
+            "project:\n  render:\n    - main.qmd\n",
+        )
+        .unwrap();
+        let main_path = root.join("main.qmd");
+        let group_path = root.join("_group.qmd");
+        let success_path = root.join("_success.qmd");
+        let main = "See [Definition of Done](#definition-of-done).\n\n{{< include _group.qmd >}}\n";
+        std::fs::write(&main_path, main).unwrap();
+        std::fs::write(&group_path, "{{< include _success.qmd >}}\n").unwrap();
+        std::fs::write(&success_path, "# Definition of Done\n").unwrap();
+
+        let (mut db, log) = db_with_exec_log();
+        let config = quarto_config(&db);
+        let main_file = db.update_file_text(main_path.clone(), main.to_string());
+        db.load_referenced_files(main_file, config, main_path);
+        let success_file = db.file_text(success_path.clone()).unwrap();
+
+        let aggregate = project_symbol_index(&db, main_file, config).unwrap();
+        assert!(aggregate.anchors.contains("definition-of-done"));
+        project_symbol_index(&db, success_file, config);
+        assert_eq!(executed(&log, "project_document_contribution"), 3);
+
+        db.update_file_text(success_path, "# Revised Criteria\n".to_string());
+        let aggregate = project_symbol_index(&db, main_file, config).unwrap();
+        assert!(!aggregate.anchors.contains("definition-of-done"));
+        assert!(aggregate.anchors.contains("revised-criteria"));
+
+        db.update_file_text(group_path, "No longer includes the criteria.\n".to_string());
+        let aggregate = project_symbol_index(&db, main_file, config).unwrap();
+        assert!(!aggregate.anchors.contains("revised-criteria"));
     }
 
     #[test]

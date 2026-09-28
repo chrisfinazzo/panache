@@ -367,6 +367,31 @@ mod tests {
     }
 
     #[test]
+    fn anchor_resolves_in_excluded_quarto_include() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("_quarto.yml"),
+            "project:\n  render:\n    - main.qmd\n",
+        )
+        .unwrap();
+        let path = root.join("main.qmd");
+        let input =
+            "See [Definition of Done](#definition-of-done).\n\n{{< include _success.qmd >}}\n";
+        fs::write(&path, input).unwrap();
+        fs::write(root.join("_success.qmd"), "# Definition of Done\n").unwrap();
+        let config = Config {
+            flavor: Flavor::Quarto,
+            extensions: crate::config::Extensions::for_flavor(Flavor::Quarto),
+            ..Default::default()
+        };
+        let tree = crate::parser::parse(input, Some(config.clone()));
+        let metadata = crate::metadata::extract_project_metadata(&tree, &path).unwrap();
+        let diagnostics = UndefinedAnchorRule.check_tree(&tree, input, &config, Some(&metadata));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
     fn cross_file_anchor_resolves_in_quarto_book() {
         let temp = TempDir::new().expect("tempdir");
         let root = temp.path();

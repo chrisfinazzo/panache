@@ -1294,6 +1294,52 @@ fn test_lint_includes_reports_child_diagnostics() {
 }
 
 #[test]
+fn test_lint_resolves_anchors_between_excluded_quarto_includes() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    fs::write(
+        root.join("_quarto.yml"),
+        "project:\n  render:\n    - '*.qmd'\n    - '!proposal/'\n",
+    )
+    .unwrap();
+    fs::create_dir(root.join("proposal")).unwrap();
+    fs::write(
+        root.join("main.qmd"),
+        "{{< include proposal/timeline.qmd >}}\n\n{{< include proposal/success.qmd >}}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("proposal/timeline.qmd"),
+        "See [Definition of Done](#definition-of-done).\n",
+    )
+    .unwrap();
+    fs::write(root.join("proposal/success.qmd"), "# Definition of Done\n").unwrap();
+
+    for target in [".", "main.qmd", "proposal/timeline.qmd"] {
+        cargo_bin_cmd!("panache")
+            .current_dir(root)
+            .args(["lint", "--no-cache", target])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("undefined-anchor").not());
+    }
+
+    fs::write(root.join("proposal/unrelated.qmd"), "# Missing\n").unwrap();
+    fs::write(
+        root.join("proposal/timeline.qmd"),
+        "See [missing](#missing).\n",
+    )
+    .unwrap();
+    cargo_bin_cmd!("panache")
+        .current_dir(root)
+        .args(["lint", "--no-cache", "proposal/timeline.qmd"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("[undefined-anchor]"))
+        .stdout(predicate::str::contains("Anchor '#missing'"));
+}
+
+#[test]
 fn test_lint_includes_duplicate_reference_definitions() {
     let temp_dir = TempDir::new().unwrap();
     let parent_path = temp_dir.path().join("parent.qmd");

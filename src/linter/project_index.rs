@@ -95,8 +95,8 @@ impl ProjectSymbolIndex {
     }
 }
 
-/// Build the aggregate for a project by reading every sibling document off
-/// disk. Used only by non-salsa callers (standalone `check_tree` and unit
+/// Build the aggregate for a project by reading every sibling document and its
+/// includes off disk. Used only by non-salsa callers (`check_tree` and unit
 /// tests); the production lint path uses the salsa-memoized
 /// [`crate::salsa::project_symbol_index`] instead so nothing is re-parsed per
 /// file. `doc_path` (the document being linted) is skipped: rules fold their own
@@ -109,12 +109,27 @@ pub fn build_from_fs(
 ) -> ProjectSymbolIndex {
     let mut aggregate = ProjectSymbolIndex::default();
     let db = crate::salsa::SalsaDb::default();
-    for path in crate::includes::find_project_documents(project_root, config, is_bookdown) {
-        if path == doc_path {
+    let mut pending = crate::includes::find_project_documents(project_root, config, is_bookdown);
+    let mut visited = HashSet::new();
+    while let Some(path) = pending.pop() {
+        if !visited.insert(path.clone()) {
             continue;
         }
         if let Ok(other_input) = std::fs::read_to_string(&path) {
             let tree = crate::parser::parse(&other_input, Some(config.clone()));
+            let resolution = crate::includes::collect_includes(
+                &tree,
+                &other_input,
+                path.parent().unwrap_or(project_root),
+                Some(project_root),
+                config,
+            );
+            pending.extend(resolution.includes.into_iter().map(|include| include.path));
+            // The caller owns the current document's symbols, but its include
+            // edges are still needed to reach partials that only it includes.
+            if path == doc_path {
+                continue;
+            }
             let index = crate::salsa::symbol_usage_index_from_tree(&db, &tree, &config.extensions);
             aggregate.fold_document(&tree, &index, config);
         }

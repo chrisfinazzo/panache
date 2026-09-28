@@ -508,9 +508,9 @@ Description
 
     Links with a path component (`other.qmd#frag`), absolute URLs
     (`https://example.com#frag`), and bare back-to-top links (`#`) are not flagged.
-    In bookdown projects, sibling chapters are scanned because bookdown's gitbook
-    renderer rewrites cross-chapter anchors. Quarto books render each chapter to a
-    separate HTML page and are not scanned cross-chapter.
+    In Quarto and bookdown projects, anchors are also collected from other project
+    documents and their includes. Files excluded from standalone rendering still
+    contribute anchors when a project document includes them.
 
     When the `citations` extension is enabled, links of the form
     `[text](#ref-citekey)` are recognized as overriding a citation's link text
