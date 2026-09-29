@@ -49,6 +49,28 @@ This document tracks implementation status for Panache's features.
 - [x] Reference links - Rename labels in `[text][ref]`, `![alt][ref]`, and their
   `[ref]: url` definitions.
 
+### Performance
+
+Start with the [incremental-editing gap](#cost-ceilings), which already has
+benchmarks and a recorded discrepancy to reproduce.
+
+- [ ] **Investigate first-open latency.** The q2 comparison recorded a 33 ms
+  open-to-diagnostics maximum for Panache, but its nine opens pool different
+  documents and process states. Record timings per document and opening
+  position, vary the opening order, and repeat across 30-50 fresh processes.
+  Separate the first analysis from later opens before profiling
+  configuration discovery, project loading, and lazy schema initialization.
+  These are candidates to measure, not established causes.
+
+- [ ] **Measure responsiveness under realistic editing load.** The q2 track
+  replaces one roughly 6 KB document and waits for diagnostics after every
+  change. Add workloads with rapid ranged edits, overlapping diagnostic and
+  navigation requests, larger documents, and many open chapters with shared
+  includes. Measure median and tail latency, main-thread stalls,
+  cancellation behavior, and time to fresh diagnostics after typing stops.
+  Reuse the existing LSP benchmarks to separate edit application, parsing,
+  and diagnostic publication costs.
+
 ### Memory
 
 - [x] Stop interning labels in the definition-index build. Salsa 0.28 reclaims
@@ -351,7 +373,12 @@ no reason.
   edit different positions --- 4/5 of the way through against line 60 --- so
   the gap is either a shape the region tier declines at that position or
   host-side work only the end-to-end bench includes. Worth finding out
-  which, because the end-to-end number is the one a user feels.
+  which, because the end-to-end number is the one a user feels. Reproduce
+  both measurements on the same revision, sweep edit positions, and profile
+  the slower cases. Record which reparse tier succeeds or why parsing falls
+  back, then separate parser cost from the surrounding LSP work before
+  choosing an optimization. Prioritize this investigation over further
+  tuning of the already-fast small-document request paths.
 
 #### Tier coverage
 
