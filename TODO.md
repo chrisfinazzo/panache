@@ -54,13 +54,13 @@ This document tracks implementation status for Panache's features.
 Start with the [incremental-editing gap](#cost-ceilings), which already has
 benchmarks and a recorded discrepancy to reproduce.
 
-- [ ] **Investigate first-open latency.** The q2 comparison recorded a 33 ms
-  open-to-diagnostics maximum for Panache, but its nine opens pool different
-  documents and process states. Record timings per document and opening
-  position, vary the opening order, and repeat across 30-50 fresh processes.
-  Separate the first analysis from later opens before profiling
-  configuration discovery, project loading, and lazy schema initialization.
-  These are candidates to measure, not established causes.
+- [x] **Investigate first-open latency.** Rotating all six opening orders across
+  48 fresh processes per binary isolated a shared first-analysis penalty in
+  the lazy Quarto schema loader. Decode schema fields directly to avoid
+  buffering nested subtrees: median first-open diagnostics fell from 10.54
+  to 8.80 ms (16.5%), with later opens unchanged within noise. The original
+  33 ms maximum did not recur. See the [benchmark and remaining
+  candidates](benches/README.md#quarto-first-open-latency).
 
 - [ ] **Measure responsiveness under realistic editing load.** The q2 track
   replaces one roughly 6 KB document and waits for diagnostics after every

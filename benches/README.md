@@ -241,6 +241,66 @@ Run the harness regression tests with:
 python3 -m unittest discover -s benches -p 'test_lsp*.py'
 ```
 
+### Quarto First-Open Latency
+
+`benches/lsp_first_open.py` isolates first-analysis cost from document cost. Use
+the three hash-verified authoring guides pinned in `compare_lsp_quarto.sh`, copied
+into a standalone directory:
+
+```bash
+CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release --bin panache
+python3 benches/lsp_first_open.py \
+  --server "taskset -c 0 $PWD/target/release/panache" \
+  --project /tmp/q2-authoring \
+  --files /tmp/q2-authoring/{computations,markdown-basics,title-blocks}.qmd \
+  --out /tmp/panache-first-open.json
+```
+
+The harness discards three warmup processes, then launches 48 fresh processes.
+It cycles through all six document orders, giving each document 16 samples at
+each opening position. Each process uses isolated user configuration and cache
+directories and an explicit Quarto configuration, as in the q2 comparison.
+Opens begin immediately after initialization and use serial pull diagnostics.
+The JSON retains individual timings, document positions, diagnostics, corpus
+hashes, initialization time, and process-launch-to-first-diagnostics time. Stderr
+logs live beside it in a `.logs` directory. Errors and incomplete reports fail
+the run. This measures fresh processes with warm filesystem caches, not cold
+disk startup or debounced push diagnostics.
+
+On September 29, 2026, an Intel Core Ultra 7 155U pinned to CPU 0 showed a shared
+first-analysis penalty for all three documents. The earlier q2 comparison's
+33 ms maximum did not recur in this setup. A `cpu_core/cycles/` profile instead
+identified the lazy Quarto schema loader: `SchemaNode::deserialize` accounted
+for about 6% of worker self time, Serde's temporary `ContentVisitor` for another
+6%, and allocation functions for about 16%. The tagged-enum decoder buffered
+nested schema subtrees before constructing their typed nodes. Decoding fields
+directly removes those temporary trees while preserving the vendored schema.
+
+The before/after comparison used four blocks of 12 fresh processes per binary,
+discarding three warmups per block and alternating which binary ran first.
+Both binaries used the same release build settings. Median open-to-diagnostics
+times in milliseconds were:
+
+| Document | First, before | First, after | Second, before | Second, after | Third, before | Third, after |
+|---|---:|---:|---:|---:|---:|---:|
+| computations | 10.51 | 8.59 | 1.44 | 1.45 | 1.29 | 1.24 |
+| markdown-basics | 10.76 | 8.89 | 1.45 | 1.41 | 1.23 | 1.26 |
+| title-blocks | 10.38 | 8.74 | 1.32 | 1.27 | 1.12 | 1.14 |
+
+Across the 48 first opens per binary, the median fell from 10.54 to 8.80 ms
+(16.5%), and p95 fell from 11.43 to 9.16 ms. Each twelve-process block improved
+by 15–20%. Process launch through first diagnostics fell from 13.67 to 11.70 ms;
+initialization stayed at about 2.7 ms. Later opens stayed within measurement
+noise, at 1.31 versus 1.28 ms. All 144 diagnostic results matched exactly.
+
+Workspace tests, the CommonMark allowlist, check, Clippy, rustfmt, and the Python
+LSP harness tests passed. No optimization was reverted. The next candidate is
+the same loader's JSON scanning and decompression: after this change, map-key
+scanning and `decompress_fast` account for about 8% and 7% of worker self time.
+Minifying the embedded JSON at build time may reduce both; that remains
+unmeasured. Configuration discovery outside this benchmark's explicit-config
+setup and loading a larger project need separate workloads.
+
 ### Yamark
 
 The formatting comparison scripts include

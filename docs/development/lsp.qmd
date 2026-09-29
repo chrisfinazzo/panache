@@ -29,6 +29,11 @@ consumer (request handlers, the linter, diagnostics) reads the tree from the
 revision and no way for a handler to see a tree that disagrees with the text it
 was handed.
 
+Quarto diagnostics also load the embedded validation schema once on first use.
+The schema decoder constructs nested nodes directly to avoid buffering temporary
+subtrees during the first analysis. The `benches/lsp_first_open.py` benchmark
+separates that shared initialization cost from each document's analysis time.
+
 ### One Line Index, Shared by Both Phases
 
 Positions are converted through a `LineIndex` (`src/lsp/line_index.rs`): line

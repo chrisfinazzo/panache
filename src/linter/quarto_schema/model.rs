@@ -55,7 +55,7 @@ pub struct Roots {
 /// `boolean`, `null`, `enum`, `array`, `object`, `anyOf`, `allOf`, `ref`).
 /// Anything we do not model (e.g. Quarto's editor-only `key` nodes) distills to
 /// [`SchemaNode::Any`], which never produces a diagnostic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum SchemaNode {
     /// Accepts any value; never diagnoses. Used for unmodeled Quarto nodes and
@@ -102,6 +102,78 @@ pub enum SchemaNode {
     },
 }
 
+impl<'de> Deserialize<'de> for SchemaNode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        // Deriving Deserialize for the internally tagged enum buffers each
+        // subtree as Serde Content, then walks and allocates it again at each
+        // nested node. Decode the fields directly so the first schema load
+        // constructs each child only once, regardless of field order.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "lowercase")]
+        enum Kind {
+            Any,
+            String,
+            Number,
+            Boolean,
+            Null,
+            Enum,
+            Array,
+            Object,
+            AnyOf,
+            AllOf,
+            Ref,
+        }
+
+        #[derive(Deserialize)]
+        struct Fields {
+            t: Kind,
+            values: Option<Vec<serde_json::Value>>,
+            items: Option<Box<SchemaNode>>,
+            #[serde(default)]
+            properties: BTreeMap<String, SchemaNode>,
+            #[serde(default)]
+            closed: bool,
+            #[serde(default)]
+            pattern: Vec<PatternProp>,
+            of: Option<Vec<SchemaNode>>,
+            id: Option<String>,
+        }
+
+        let fields = Fields::deserialize(deserializer)?;
+        Ok(match fields.t {
+            Kind::Any => Self::Any,
+            Kind::String => Self::String,
+            Kind::Number => Self::Number,
+            Kind::Boolean => Self::Boolean,
+            Kind::Null => Self::Null,
+            Kind::Enum => Self::Enum {
+                values: fields
+                    .values
+                    .ok_or_else(|| D::Error::missing_field("values"))?,
+            },
+            Kind::Array => Self::Array {
+                items: fields.items,
+            },
+            Kind::Object => Self::Object {
+                properties: fields.properties,
+                closed: fields.closed,
+                pattern: fields.pattern,
+            },
+            Kind::AnyOf => Self::AnyOf {
+                of: fields.of.ok_or_else(|| D::Error::missing_field("of"))?,
+            },
+            Kind::AllOf => Self::AllOf {
+                of: fields.of.ok_or_else(|| D::Error::missing_field("of"))?,
+            },
+            Kind::Ref => Self::Ref {
+                id: fields.id.ok_or_else(|| D::Error::missing_field("id"))?,
+            },
+        })
+    }
+}
+
 /// A `patternProperties` entry: a regex over key names and the schema matching
 /// keys must satisfy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,4 +186,52 @@ pub struct PatternProp {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn schema_nodes_round_trip_independently_of_field_order() {
+        // Field order is not part of the vendored JSON contract.
+        let nodes = [
+            json!({"t": "any"}),
+            json!({"t": "string"}),
+            json!({"t": "number"}),
+            json!({"t": "boolean"}),
+            json!({"t": "null"}),
+            json!({"values": ["a", 1, true, null], "t": "enum"}),
+            json!({"items": {"t": "string"}, "t": "array"}),
+            json!({"t": "array"}),
+            json!({"t": "object"}),
+            json!({"properties": {"a": {"t": "boolean"}}, "closed": true,
+                "pattern": [{"re": "^x", "schema": {"t": "number"}}], "t": "object"}),
+            json!({"of": [{"t": "string"}, {"t": "null"}], "t": "anyof"}),
+            json!({"of": [{"t": "object"}], "t": "allof"}),
+            json!({"id": "front-matter", "t": "ref"}),
+        ];
+        for value in nodes {
+            let node: SchemaNode = serde_json::from_str(&value.to_string()).unwrap();
+            assert_eq!(serde_json::to_value(node).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn schema_nodes_reject_missing_required_fields() {
+        for input in [
+            "{}",
+            r#"{"t":"unknown"}"#,
+            r#"{"t":"enum"}"#,
+            r#"{"t":"anyof"}"#,
+            r#"{"t":"allof"}"#,
+            r#"{"t":"ref"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<SchemaNode>(input).is_err(),
+                "{input}"
+            );
+        }
+    }
 }

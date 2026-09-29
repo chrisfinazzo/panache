@@ -75,6 +75,13 @@ mod tests {
     }
 
     #[test]
+    fn embedded_schema_preserves_every_vendored_field() {
+        let source: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/quarto-schema/schema.json")).unwrap();
+        assert_eq!(serde_json::to_value(schema()).unwrap(), source);
+    }
+
+    #[test]
     fn version_matches_panache_source() {
         let tag = SOURCE
             .lines()
