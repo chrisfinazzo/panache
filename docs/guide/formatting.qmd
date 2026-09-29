@@ -1312,7 +1312,10 @@ reflow wrapping is enabled.
 
 Text inside unresolved references follows the configured wrapping mode, just
 like other prose. Panache preserves the brackets and reference labels, along
-with inline markup such as emphasis and code spans.
+with inline markup such as emphasis and code spans. When
+`spaced-reference-links` is enabled, it also preserves whitespace between the
+bracket pairs of unresolved references, such as `[text] [missing]`, because that
+whitespace is part of the rendered text.
 
 Input
 

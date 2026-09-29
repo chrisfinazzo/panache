@@ -75,7 +75,7 @@ pub(crate) fn server_capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
-            trigger_characters: Some(vec!["(".into(), "/".into(), "<".into()]),
+            trigger_characters: Some(vec!["(".into(), "/".into(), "<".into(), "[".into()]),
             resolve_provider: Some(true),
             ..Default::default()
         }),

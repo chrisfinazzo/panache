@@ -555,6 +555,7 @@ golden_test_cases!(
     reference_links,
     unresolved_reference_intraword_underscore_pandoc,
     unresolved_reference_container_prefixes,
+    unresolved_spaced_reference_links,
     rmarkdown_math,
     simple_table,
     simple_table_alignment_widened_column,

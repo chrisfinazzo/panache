@@ -12,5 +12,12 @@ Image: ![alt] [bar] caption.
 
 Implicit not affected by spaces: [foo] [] keeps shape.
 
+Unresolved: [text] [missing].
+
+Unresolved image: ![alt]	[missing].
+
+Unresolved soft break: [text]
+[missing].
+
 [bar]: https://example.com
 [foo]: https://example.org

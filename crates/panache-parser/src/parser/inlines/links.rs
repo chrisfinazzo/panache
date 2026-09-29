@@ -1394,7 +1394,8 @@ pub fn emit_reference_image(
 /// `source` is `text[start..end]` — the full bracket-shape pattern.
 /// `text_content` is the inner text between the outer `[` and `]`
 /// (the bytes used for inline recursion). `label_suffix` carries the
-/// `[label]` / `[]` suffix bytes verbatim, or `None` for shortcut form.
+/// `[label]` / `[]` suffix bytes, including any preceding whitespace gap,
+/// verbatim, or `None` for shortcut form.
 pub fn emit_unresolved_reference(
     builder: &mut impl InlineSink,
     is_image: bool,
@@ -1424,6 +1425,9 @@ pub fn emit_unresolved_reference(
     builder.token(SyntaxKind::TEXT.into(), "]");
 
     if let Some(suffix) = label_suffix {
+        let label_suffix = suffix.trim_start_matches([' ', '\t', '\r', '\n']);
+        emit_reference_link_gap(builder, &suffix[..suffix.len() - label_suffix.len()]);
+        let suffix = label_suffix;
         debug_assert!(suffix.starts_with('[') && suffix.ends_with(']'));
         builder.token(SyntaxKind::TEXT.into(), "[");
         let label = &suffix[1..suffix.len() - 1];

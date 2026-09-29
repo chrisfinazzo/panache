@@ -2,7 +2,7 @@
 source: crates/panache-parser/tests/golden_parser_cases.rs
 expression: cst_output
 ---
-DOCUMENT@0..264
+DOCUMENT@0..374
   PARAGRAPH@0..27
     TEXT@0..14 "Single space: "
     LINK@14..25
@@ -105,27 +105,78 @@ DOCUMENT@0..264
     NEWLINE@208..209 "\n"
   BLANK_LINE@209..210
     BLANK_LINE@209..210 "\n"
-  REFERENCE_DEFINITION@210..237
-    LINK@210..215
-      LINK_START@210..211
-        LINK_START@210..211 "["
-      LINK_TEXT@211..214
-        TEXT@211..214 "bar"
-      TEXT@214..215 "]"
-    TEXT@215..216 ":"
-    WHITESPACE@216..217 " "
-    REFERENCE_URL@217..236
-      TEXT@217..236 "https://example.com"
-    NEWLINE@236..237 "\n"
-  REFERENCE_DEFINITION@237..264
-    LINK@237..242
-      LINK_START@237..238
-        LINK_START@237..238 "["
-      LINK_TEXT@238..241
-        TEXT@238..241 "foo"
-      TEXT@241..242 "]"
-    TEXT@242..243 ":"
-    WHITESPACE@243..244 " "
-    REFERENCE_URL@244..263
-      TEXT@244..263 "https://example.org"
-    NEWLINE@263..264 "\n"
+  PARAGRAPH@210..240
+    TEXT@210..222 "Unresolved: "
+    UNRESOLVED_REFERENCE@222..238
+      LINK_START@222..223
+        LINK_START@222..223 "["
+      LINK_TEXT@223..227
+        TEXT@223..227 "text"
+      TEXT@227..228 "]"
+      WHITESPACE@228..229 " "
+      TEXT@229..230 "["
+      LINK_REF@230..237
+        TEXT@230..237 "missing"
+      TEXT@237..238 "]"
+    TEXT@238..239 "."
+    NEWLINE@239..240 "\n"
+  BLANK_LINE@240..241
+    BLANK_LINE@240..241 "\n"
+  PARAGRAPH@241..277
+    TEXT@241..259 "Unresolved image: "
+    UNRESOLVED_REFERENCE@259..275
+      IMAGE_LINK_START@259..261
+        IMAGE_LINK_START@259..261 "!["
+      IMAGE_ALT@261..264
+        TEXT@261..264 "alt"
+      TEXT@264..265 "]"
+      WHITESPACE@265..266 "\t"
+      TEXT@266..267 "["
+      LINK_REF@267..274
+        TEXT@267..274 "missing"
+      TEXT@274..275 "]"
+    TEXT@275..276 "."
+    NEWLINE@276..277 "\n"
+  BLANK_LINE@277..278
+    BLANK_LINE@277..278 "\n"
+  PARAGRAPH@278..319
+    TEXT@278..301 "Unresolved soft break: "
+    UNRESOLVED_REFERENCE@301..317
+      LINK_START@301..302
+        LINK_START@301..302 "["
+      LINK_TEXT@302..306
+        TEXT@302..306 "text"
+      TEXT@306..307 "]"
+      NEWLINE@307..308 "\n"
+      TEXT@308..309 "["
+      LINK_REF@309..316
+        TEXT@309..316 "missing"
+      TEXT@316..317 "]"
+    TEXT@317..318 "."
+    NEWLINE@318..319 "\n"
+  BLANK_LINE@319..320
+    BLANK_LINE@319..320 "\n"
+  REFERENCE_DEFINITION@320..347
+    LINK@320..325
+      LINK_START@320..321
+        LINK_START@320..321 "["
+      LINK_TEXT@321..324
+        TEXT@321..324 "bar"
+      TEXT@324..325 "]"
+    TEXT@325..326 ":"
+    WHITESPACE@326..327 " "
+    REFERENCE_URL@327..346
+      TEXT@327..346 "https://example.com"
+    NEWLINE@346..347 "\n"
+  REFERENCE_DEFINITION@347..374
+    LINK@347..352
+      LINK_START@347..348
+        LINK_START@347..348 "["
+      LINK_TEXT@348..351
+        TEXT@348..351 "foo"
+      TEXT@351..352 "]"
+    TEXT@352..353 ":"
+    WHITESPACE@353..354 " "
+    REFERENCE_URL@354..373
+      TEXT@354..373 "https://example.org"
+    NEWLINE@373..374 "\n"

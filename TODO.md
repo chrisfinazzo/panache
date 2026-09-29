@@ -99,7 +99,7 @@ benchmarks and a recorded discrepancy to reproduce.
 
 ### Completion
 
-- [ ] Reference link completion - Complete `[text][ref]` from defined references
+- [x] Reference link completion - Complete `[text][ref]` from defined references
 - [ ] Heading link completion
 - [ ] Attribute completion - Complete class names and attributes in
   `{.class #id}`

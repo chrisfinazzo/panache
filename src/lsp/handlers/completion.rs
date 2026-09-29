@@ -4,8 +4,14 @@ use lsp_types::*;
 use std::path::{Path, PathBuf};
 
 use crate::lsp::global_state::StateSnapshot;
-use crate::syntax::{AstNode, ImageLink, Link, LinkDest, Shortcode, SyntaxKind, SyntaxNode};
-use crate::utils::normalize_anchor_label;
+use crate::syntax::{
+    AstNode, AttributeNode, AutoLink, Citation, CodeBlock, CodeSpan, DisplayMath,
+    FootnoteReference, HeadingContent, ImageAlt, ImageLink, InlineExecutable, InlineHtml,
+    InlineMath, LineBlockLine, Link, LinkDest, LinkRef, LinkText, Paragraph, Plain,
+    ReferenceDefinition, Shortcode, SyntaxKind, SyntaxNode, TableCell, TexBlock,
+    UnresolvedReference, WikiLink, YamlMetadata,
+};
+use crate::utils::{normalize_anchor_label, normalize_label};
 
 use super::super::conversions::offset_to_position;
 use super::super::helpers;
@@ -61,6 +67,15 @@ pub(crate) fn completion(
     let root = snap.parsed_tree(uri)?;
     let line_index = snap.line_index(uri)?;
     let offset = super::super::conversions::position_to_offset(&line_index, position)?;
+    if config.extensions.reference_links
+        && let Some(ctx) = reference_label_context(&root, &text, offset, &config.parser_options())
+    {
+        let state = snap.document_state(uri)?;
+        let index =
+            crate::salsa::symbol_usage_index(snap.db(), state.salsa_file, state.salsa_config);
+        let items = reference_label_items(&root, index, &line_index, ctx);
+        return (!items.is_empty()).then_some(CompletionResponse::Array(items));
+    }
     let link_ctx_opt = link_dest_context(&root, &text, offset);
     let shortcode_ctx_opt = if link_ctx_opt.is_none() && config.extensions.quarto_shortcodes {
         shortcode_arg_context(&root, &text, offset)
@@ -292,6 +307,218 @@ fn matches_query(candidate: &str, query: &str) -> bool {
 fn is_supported_crossref_completion_key(key: &str) -> bool {
     panache_parser::parser::inlines::citations::is_quarto_crossref_key(key)
         || panache_parser::parser::inlines::citations::has_bookdown_prefix(key)
+}
+
+struct ReferenceLabelContext {
+    query: String,
+    range: std::ops::Range<usize>,
+    needs_close: bool,
+}
+
+fn reference_label_context(
+    root: &SyntaxNode,
+    text: &str,
+    offset: usize,
+    options: &crate::config::ParserOptions,
+) -> Option<ReferenceLabelContext> {
+    use panache_parser::parser::inlines::links::{LinkScanContext, try_parse_reference_link};
+
+    // The token to the left keeps an EOF cursor and an empty second bracket
+    // attached to the prose the user is editing.
+    let node = root
+        .token_at_offset(rowan::TextSize::try_from(offset).ok()?)
+        .left_biased()?
+        .parent()?;
+    let container = reference_prose_container(&node)?;
+    for ancestor in node.ancestors() {
+        let reference = if let Some(link) = Link::cast(ancestor.clone()) {
+            link.reference()
+        } else if let Some(image) = ImageLink::cast(ancestor.clone()) {
+            image.reference()
+        } else if UnresolvedReference::can_cast(ancestor.kind()) {
+            ancestor.children().find_map(LinkRef::cast)
+        } else {
+            continue;
+        };
+        if let Some(reference) = reference {
+            let range = reference.syntax().text_range();
+            let start = usize::from(range.start());
+            let end = usize::from(range.end());
+            if start <= offset && offset <= end && !text[start..end].contains(['\r', '\n', '[']) {
+                return Some(ReferenceLabelContext {
+                    query: normalize_label(&text[start..offset]),
+                    range: start..end,
+                    needs_close: false,
+                });
+            }
+        }
+    }
+
+    // Unfinished references, and unresolved CommonMark references, need not
+    // have a LinkRef node. Reuse the link scanner with a temporary closing
+    // bracket, restricting the search to this inline container.
+    let base = usize::from(container.text_range().start());
+    let prefix = text.get(base..offset)?;
+    let probe = format!("{prefix}]");
+    for (relative, _) in prefix.match_indices('[').rev() {
+        let start = base + relative;
+        if escaped_bracket(text, start)
+            || text[start + 1..].starts_with(['^', '@'])
+            || text[start + 1..].starts_with("-@")
+        {
+            continue;
+        }
+        let Some((len, _, label, _, _)) = try_parse_reference_link(
+            &probe[relative..],
+            false,
+            false,
+            options.extensions.spaced_reference_links,
+            LinkScanContext::from_options(options),
+        ) else {
+            continue;
+        };
+        if relative + len != probe.len() {
+            continue;
+        }
+        let label_start = offset - label.len();
+        if escaped_bracket(text, label_start - 1) || label.contains(['\r', '\n', '[']) {
+            continue;
+        }
+
+        // A bracket inside code or an already complete link cannot start a
+        // new reference merely because nearby source has the right shape.
+        let opener = root
+            .token_at_offset(rowan::TextSize::try_from(start).ok()?)
+            .right_biased()?
+            .parent()?;
+        if reference_prose_container(&opener).is_none()
+            || opener.ancestors().any(|ancestor| {
+                Link::cast(ancestor.clone())
+                    .is_some_and(|link| link.dest().is_some() || link.reference().is_some())
+                    || ImageLink::cast(ancestor.clone())
+                        .is_some_and(|image| image.dest().is_some() || image.reference().is_some())
+            })
+        {
+            continue;
+        }
+        let line_end = text[offset..]
+            .find(['\r', '\n'])
+            .map_or(text.len(), |end| offset + end);
+        let closing = text[offset..line_end]
+            .find(['[', ']'])
+            .map(|end| offset + end)
+            .filter(|end| text.as_bytes()[*end] == b']');
+        return Some(ReferenceLabelContext {
+            query: normalize_label(&label),
+            range: label_start..closing.unwrap_or(offset),
+            needs_close: closing.is_none(),
+        });
+    }
+    None
+}
+
+fn escaped_bracket(text: &str, offset: usize) -> bool {
+    text.as_bytes()[..offset]
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'\\')
+        .count()
+        % 2
+        != 0
+}
+
+fn reference_prose_container(node: &SyntaxNode) -> Option<SyntaxNode> {
+    let mut container = None;
+    for ancestor in node.ancestors() {
+        let kind = ancestor.kind();
+        if ReferenceDefinition::can_cast(kind)
+            || CodeBlock::can_cast(kind)
+            || CodeSpan::can_cast(kind)
+            || InlineExecutable::can_cast(kind)
+            || InlineMath::can_cast(kind)
+            || DisplayMath::can_cast(kind)
+            || TexBlock::can_cast(kind)
+            || InlineHtml::can_cast(kind)
+            || YamlMetadata::can_cast(kind)
+            || Citation::can_cast(kind)
+            || FootnoteReference::can_cast(kind)
+            || LinkText::can_cast(kind)
+            || ImageAlt::can_cast(kind)
+            || LinkDest::can_cast(kind)
+            || AutoLink::can_cast(kind)
+            || WikiLink::can_cast(kind)
+            || Shortcode::can_cast(kind)
+            || AttributeNode::can_cast(kind)
+            || matches!(kind, SyntaxKind::RAW_INLINE | SyntaxKind::HTML_BLOCK_RAW)
+        {
+            return None;
+        }
+        if container.is_none()
+            && (Paragraph::can_cast(kind)
+                || Plain::can_cast(kind)
+                || HeadingContent::can_cast(kind)
+                || LineBlockLine::can_cast(kind)
+                || TableCell::can_cast(kind))
+        {
+            container = Some(ancestor);
+        }
+    }
+    container
+}
+
+fn reference_label_items(
+    root: &SyntaxNode,
+    index: &crate::salsa::SymbolUsageIndex,
+    line_index: &crate::lsp::line_index::LineIndex,
+    ctx: ReferenceLabelContext,
+) -> Vec<CompletionItem> {
+    let range = Range::new(
+        offset_to_position(line_index, ctx.range.start),
+        offset_to_position(line_index, ctx.range.end),
+    );
+    let mut definitions: Vec<_> = index
+        .reference_definition_entries()
+        .flat_map(|(_, ranges)| ranges.iter().copied())
+        .collect();
+    definitions.sort_by_key(|range| range.start());
+    let mut items = std::collections::BTreeMap::new();
+    for definition_range in definitions {
+        let Some(definition) = root
+            .covering_element(definition_range)
+            .into_node()
+            .and_then(ReferenceDefinition::cast)
+        else {
+            continue;
+        };
+        let Some(label) = definition.link().and_then(|link| link.text()).map(|text| {
+            text.raw_label()
+                .replace("\r\n", " ")
+                .replace(['\r', '\n'], " ")
+        }) else {
+            continue;
+        };
+        let key = normalize_label(&label);
+        if key.is_empty() || !key.starts_with(&ctx.query) {
+            continue;
+        }
+        items.entry(key).or_insert_with(|| CompletionItem {
+            detail: definition.url(),
+            kind: Some(CompletionItemKind::REFERENCE),
+            filter_text: Some(label.clone()),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range,
+                new_text: if ctx.needs_close {
+                    format!("{label}]")
+                } else {
+                    label.clone()
+                },
+            })),
+            label,
+            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+            ..Default::default()
+        });
+    }
+    items.into_values().collect()
 }
 
 /// Context for a cursor that sits inside an inline link or image destination.

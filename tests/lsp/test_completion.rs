@@ -1,9 +1,229 @@
-//! Tests for completion (citation completion).
+//! Tests for citation, reference label, and path completion.
 
 use super::helpers::*;
-use lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Documentation, Uri};
+use lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, Documentation,
+    Position, Range, Uri,
+};
 use std::fs;
 use tempfile::TempDir;
+
+fn reference_completions(marked: &str, config: &str) -> Vec<CompletionItem> {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir(tmp.path().join(".git")).unwrap();
+    fs::write(tmp.path().join("panache.toml"), config).unwrap();
+    let uri = Uri::from_file_path(tmp.path().join("doc.md")).unwrap();
+    let mut server = TestLspServer::new();
+    server.initialize(Uri::from_file_path(tmp.path()).unwrap().as_str());
+    let (before, after) = marked.split_once('|').expect("cursor marker");
+    server.open_document(uri.as_str(), &format!("{before}{after}"), "markdown");
+    let line = before.bytes().filter(|b| *b == b'\n').count() as u32;
+    let character = before.rsplit('\n').next().unwrap().encode_utf16().count() as u32;
+    match server.completion(uri.as_str(), line, character) {
+        Some(CompletionResponse::Array(items)) => items,
+        None => Vec::new(),
+        other => panic!("unexpected completion response: {other:?}"),
+    }
+}
+
+#[test]
+fn reference_completion_replaces_second_label() {
+    for flavor in ["pandoc", "commonmark"] {
+        for (usage, start, end, replacement) in [
+            ("[text][|]", 7, 7, "Reference"),
+            ("[text][re|]", 7, 9, "Reference"),
+            ("[text][re|mainder]", 7, 16, "Reference"),
+            ("[text][Reference|]", 7, 16, "Reference"),
+            ("[Reference][re|]", 12, 14, "Reference"),
+            ("[text][|", 7, 7, "Reference]"),
+            ("[text][re|", 7, 9, "Reference]"),
+            ("![alt][re|]", 7, 9, "Reference"),
+            ("![alt][re|", 7, 9, "Reference]"),
+            ("[a [nested] text][re|]", 18, 20, "Reference"),
+            ("[a `]` text][re|]", 13, 15, "Reference"),
+            ("[a \\] text][re|]", 12, 14, "Reference"),
+        ] {
+            let items = reference_completions(
+                &format!("[Reference]: https://example.com\n\n{usage}"),
+                &format!("flavor = \"{flavor}\"\n"),
+            );
+            assert_eq!(items.len(), 1, "{flavor}: {usage}");
+            let item = &items[0];
+            assert_eq!(item.label, "Reference");
+            assert_eq!(item.kind, Some(CompletionItemKind::REFERENCE));
+            assert_eq!(item.detail.as_deref(), Some("https://example.com"));
+            let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+                panic!("expected a text edit: {usage}");
+            };
+            assert_eq!(
+                edit.range,
+                Range::new(Position::new(2, start), Position::new(2, end)),
+                "{usage}"
+            );
+            assert_eq!(edit.new_text, replacement, "{usage}");
+        }
+    }
+}
+
+#[test]
+fn reference_completion_normalizes_and_deduplicates_labels() {
+    let definitions = "[Zebra]: /z\n[Research  Notes]: /first\n[research notes]: /duplicate\n[Résumé]: /unicode\n\n";
+    let items = reference_completions(&format!("{definitions}[text][|]"), "");
+    assert_eq!(
+        items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+        ["Research  Notes", "Résumé", "Zebra"]
+    );
+    assert_eq!(items[0].detail.as_deref(), Some("/first"));
+    for (prefix, expected) in [("RESEARCH\t n", "Research  Notes"), ("RÉ", "Résumé")] {
+        let items = reference_completions(&format!("{definitions}[text][{prefix}|]"), "");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].label, expected);
+    }
+    assert!(reference_completions(&format!("{definitions}[text][absent|]"), "").is_empty());
+}
+
+#[test]
+fn reference_completion_uses_utf16_edit_ranges() {
+    let items = reference_completions("[Résumé]: /url\n\n🦀 [é][RÉ|sumé]", "");
+    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+        panic!("expected a text edit");
+    };
+    assert_eq!(
+        edit.range,
+        Range::new(Position::new(2, 7), Position::new(2, 13))
+    );
+    assert_eq!(edit.new_text, "Résumé");
+}
+
+#[test]
+fn reference_completion_preserves_text_after_unfinished_label() {
+    let items = reference_completions("[ref]: /url\n\n[text][re| and [another]", "");
+    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+        panic!("expected a text edit");
+    };
+    assert_eq!(
+        edit.range,
+        Range::new(Position::new(2, 7), Position::new(2, 9))
+    );
+    assert_eq!(edit.new_text, "ref]");
+}
+
+#[test]
+fn reference_completion_flattens_multiline_definition_labels() {
+    let items = reference_completions(
+        "[Research\nNotes]: /url\n\n[text][re|]",
+        "flavor = \"commonmark\"\n",
+    );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].label, "Research Notes");
+}
+
+#[test]
+fn reference_completion_finds_later_definitions_from_prose_containers() {
+    for usage in [
+        "# [text][re|]",
+        "> [text][re|]",
+        "- [text][re|]",
+        "*[text][re|]*",
+    ] {
+        let items = reference_completions(&format!("{usage}\n\n[ref]: /url\n"), "");
+        assert_eq!(items.len(), 1, "{usage}");
+        assert_eq!(items[0].label, "ref");
+    }
+}
+
+#[test]
+fn reference_completion_excludes_other_contexts() {
+    for flavor in ["pandoc", "commonmark"] {
+        for usage in [
+            "plain re|",
+            "[re|]",
+            "![re|]",
+            "[text|][ref]",
+            "![alt|][ref]",
+            "[ref|]: /destination",
+            "`[text][re|]`",
+            "```\n[text][re|]\n```",
+            "    [text][re|]",
+            "<script>\n[text][re|]\n</script>",
+            "<span title=\"[text][re|]\">",
+            "[text](https://example.com/[text][re|])",
+            "[outer [text][re|]](url)",
+            "\\[text][re|]",
+            "[text]\\[re|]",
+            "`[text]`[re|]",
+            "[text][ref][re|]",
+            "[@cite][re|]",
+            "[^note][re|]",
+        ] {
+            let items = reference_completions(
+                &format!("[ref]: /url\n\n{usage}"),
+                &format!("flavor = \"{flavor}\"\n"),
+            );
+            assert!(items.is_empty(), "{flavor}: {usage}: {items:?}");
+        }
+    }
+    for usage in [
+        "$[text][re|]$",
+        "$$\n[text][re|]\n$$",
+        "[@cite [text][re|]]",
+    ] {
+        assert!(
+            reference_completions(&format!("[ref]: /url\n\n{usage}"), "").is_empty(),
+            "{usage}"
+        );
+    }
+    assert!(
+        reference_completions("---\ntitle: '[text][re|]'\n---\n\n[ref]: /url\n", "").is_empty()
+    );
+}
+
+#[test]
+fn reference_completion_respects_extension_settings() {
+    let marked = "[ref]: /url\n\n[text][re|]";
+    assert!(reference_completions(marked, "[extensions]\nreference-links = false\n").is_empty());
+    for gap in [" ", "\t", "\n"] {
+        let marked = format!("[ref]: /url\n\n[text]{gap}[re|]");
+        assert!(
+            reference_completions(&marked, "[extensions]\nspaced-reference-links = false\n")
+                .is_empty()
+        );
+        assert_eq!(
+            reference_completions(&marked, "[extensions]\nspaced-reference-links = true\n").len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn reference_completion_tracks_unsaved_definitions_in_current_document() {
+    let mut server = TestLspServer::new();
+    let uri = "untitled:reference-completion";
+    server.open_document(
+        "untitled:another-document",
+        "[elsewhere]: /other",
+        "markdown",
+    );
+    server.open_document(uri, "[first]: /first\n\n[text][", "markdown");
+    let Some(CompletionResponse::Array(items)) = server.completion(uri, 2, 7) else {
+        panic!("expected reference completion in an untitled document");
+    };
+    assert_eq!(
+        items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+        ["first"]
+    );
+    server.edit_document(
+        uri,
+        vec![full_document_change("[second]: /second\n\n[text][")],
+    );
+    let Some(CompletionResponse::Array(items)) = server.completion(uri, 2, 7) else {
+        panic!("expected updated reference completion");
+    };
+    assert_eq!(
+        items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+        ["second"]
+    );
+}
 
 #[test]
 fn test_completion_without_citation_context() {
@@ -450,6 +670,7 @@ fn test_completion_capability_registers_path_trigger_characters() {
     assert!(triggers.iter().any(|t| t == "/"), "triggers: {triggers:?}");
     assert!(triggers.iter().any(|t| t == "("), "triggers: {triggers:?}");
     assert!(triggers.iter().any(|t| t == "<"), "triggers: {triggers:?}");
+    assert!(triggers.iter().any(|t| t == "["), "triggers: {triggers:?}");
 }
 
 // --- Path completion inside Quarto shortcodes ---

@@ -1240,6 +1240,16 @@ fn process_node_recursive(
                         UnresolvedReference::cast(n.clone()).expect("checked unresolved reference");
                     sink.push_piece(if reference.is_image() { "![" } else { "[" });
                     let mut closing = String::from("]");
+                    // Unresolved references render as literal text, so removing
+                    // their bracket gap would change the document's content.
+                    for token in n
+                        .children_with_tokens()
+                        .filter_map(|child| child.into_token())
+                    {
+                        if matches!(token.kind(), SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) {
+                            closing.push_str(token.text());
+                        }
+                    }
                     for child in n.children() {
                         if LinkText::can_cast(child.kind()) || ImageAlt::can_cast(child.kind()) {
                             process_node_recursive(
