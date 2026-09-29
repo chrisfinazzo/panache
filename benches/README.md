@@ -14,7 +14,7 @@ cargo bench --bench formatting
 # Isolate the stable math formatter on a selected corpus document (`reflow` is
 # the default; set `PANACHE_BENCH_FORMAT_MATH=0` for a verbatim comparison)
 PANACHE_BENCH_DOC=math.qmd \
-  cargo bench --bench formatting
+    cargo bench --bench formatting
 
 # Run LSP incremental didChange benchmarks
 cargo bench --bench lsp_incremental
@@ -33,6 +33,9 @@ cargo bench --bench lsp_settle
 
 # Compare Panache and Marksman language-server speed and memory on Linux
 task bench:lsp
+
+# Compare Panache and q2 on Quarto diagnostics and document symbols
+task bench:lsp-quarto
 
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
@@ -184,6 +187,59 @@ valgrind --tool=cachegrind cargo bench --bench formatting
   - Generates `benches/benchmark_results.json` (machine-readable)
   - Renders `docs/benchmarks.qmd` from JSON
   - Deterministic output for CI checks
+
+### Quarto Language Server Comparison
+
+`task bench:lsp-quarto` runs the Quarto track in `benches/lsp_memory.py` against
+Panache and `q2 lsp`. It builds Panache in release mode and downloads the pinned
+q2 0.32.0 release for Linux x86-64 or ARM64, verifying the archive against a
+committed SHA-256 hash. The archive is cached under `benches/lsp-quarto-tools/`.
+Set `PANACHE_BIN` or `Q2_BIN` to use an existing executable instead.
+
+The corpus consists of q2's computations, Markdown basics, and title-block
+guides at revision `192a231d8da241f60368821b73c56edac5c5f0e7`. The runner checks
+their hashes and copies them into a temporary standalone project. It launches
+Panache with an isolated Quarto configuration and both servers with isolated
+user configuration and cache directories. It never renders documents or executes
+their code cells.
+
+Each of three alternating process runs measures:
+
+- Process launch through the `initialize` response.
+- Each file's open notification through its diagnostic result, opening files
+  serially without warmups.
+- Document symbols for all three files, with two warmup rounds and 20 measured
+  rounds per file.
+- 100 serial edits to the computations guide, each through its diagnostic
+  result. Both servers receive a full-document replacement that changes an
+  appended heading. The document does not grow across successive edits.
+- Process-tree RSS and PSS at the same milestones as the Markdown track.
+
+Diagnostics use each server's supported delivery mode: Panache receives an
+immediate pull request, while q2 pushes a notification. Timing includes the
+notification and, for pull, the diagnostic request. This measures delivery
+latency under those client policies; it does not compare equivalent rule sets or
+Panache's debounced push mode. Only one edit is in flight because q2 omits
+document versions from diagnostic notifications. Empty diagnostic sets are
+valid. Errors on opening a corpus document, empty symbol results, protocol
+errors, and timeouts abort the run. A final symbol request must observe the last
+edited heading.
+
+The runner writes `docs/guide/performance_lsp_quarto_data.json`. Override its
+defaults with `PANACHE_LSP_QUARTO_OUT`, `PANACHE_LSP_QUARTO_RUNS`,
+`PANACHE_LSP_QUARTO_EDITS`, `PANACHE_LSP_QUARTO_QUIET_SECONDS`,
+`PANACHE_LSP_QUARTO_SETTLE_TIMEOUT`, `PANACHE_LSP_QUARTO_STDERR_DIR`, and
+`PANACHE_LSP_QUARTO_TOOLS`. The shared `PANACHE_LSP_LATENCY_RUNS` and
+`PANACHE_LSP_LATENCY_WARMUPS` variables control symbol requests. Each run
+records the diagnostic mode, result counts, versions, and latency summaries;
+aggregation pools the request samples before computing the median and
+nearest-rank p95.
+
+Run the harness regression tests with:
+
+```bash
+python3 -m unittest discover -s benches -p 'test_lsp*.py'
+```
 
 ### Yamark
 

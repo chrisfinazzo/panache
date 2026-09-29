@@ -105,6 +105,11 @@ tasks:
     cmds:
       - bash benches/compare_lsp_memory.sh
 
+  bench:lsp-quarto:
+    desc: Compare Panache and q2 diagnostics, symbols, and memory on Linux
+    cmds:
+      - bash benches/compare_lsp_quarto.sh
+
   refresh-benchmarks:
     desc: Re-run benchmarks and rebuild the performance page (invalidates freeze cache)
     cmds:

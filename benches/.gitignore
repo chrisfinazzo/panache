@@ -7,6 +7,8 @@ callgrind.out.*
 benchmark_results.txt
 lsp-memory-corpus/
 lsp-memory-logs/
+lsp-quarto-tools/
+lsp-quarto-logs/
 __pycache__/
 
 # Downloaded documents (managed by documents/download.sh)

@@ -5,8 +5,8 @@ description: >
   formatting and linting speed against popular alternatives like Prettier,
   Pandoc, rumdl, mdformat, Yamark, mado, markdownlint, and markdownlint-cli2 on
   real Quarto and Markdown documents, and its language-server latency, runtime,
-  and memory use against Marksman. The benchmarks highlight Panache's efficiency
-  and suitability for editor and repository-wide work.
+  and memory use against Marksman and q2. The benchmarks highlight Panache's
+  efficiency and suitability for editor and repository-wide work.
 engine: knitr
 ---
 
@@ -1097,11 +1097,154 @@ same open, edit, and navigation sequence, while diagnostics use each server's
 advertised pull or push mode. Their memory totals reflect those different
 strategies.
 
+## Quarto Language Server
+
+This separate Linux benchmark compares Panache with
+[`q2 lsp`](https://github.com/quarto-dev/q2), the experimental Rust Quarto
+language server. It uses three authoring guides from a pinned q2 revision:
+computations, Markdown basics, and title blocks. The files live in a standalone
+project with no workspace index to discover. Both servers must accept every
+document without error diagnostics and return a nonempty outline.
+
+Each run opens the files serially, measures document-symbol requests, and
+performs 100 full-document replacements that change an appended heading in the
+computations guide. Full replacements accommodate q2's synchronization mode. A
+final outline request must contain the last edited heading. This track exercises
+diagnostics and symbols; q2 does not implement the navigation features used in
+the Markdown comparison above.
+
+Panache uses pull diagnostics, with a request immediately after each open or
+change. q2 pushes diagnostics after processing the notification. The timings
+include those different delivery paths. They compare editor-visible latency
+under these client policies, with each server's own checks, and do not measure
+Panache's debounced push mode. Empty diagnostic sets are successful analyses;
+empty symbol results, protocol errors, and timeouts fail the benchmark.
+
+```{ojs}
+//| label: load-lsp-quarto
+//| echo: false
+
+quartoLsp = FileAttachment("performance_lsp_quarto_data.json").json();
+
+quartoLspLatencies = quartoLsp.servers.flatMap((server) =>
+    server.aggregate.request_latencies.map((metric) => ({
+        server: server.label,
+        metric: metric.label,
+        median: metric.median_ms,
+        p95: metric.p95_ms,
+        samples: metric.samples,
+        results: metric.result_count_median,
+    })),
+);
+```
+
+```{ojs}
+//| label: render-lsp-quarto-environment
+//| echo: false
+
+html`<div class="callout-note">
+  <div class="callout-header" style="font-weight: 600">Test Environment</div>
+  <ul style="margin: 0">
+    <li>Generated: ${new Date(quartoLsp.meta.generated_at).toUTCString()}</li>
+    <li>Host: ${quartoLsp.meta.host.cpu} (${quartoLsp.meta.host.os}/${quartoLsp.meta.host.arch}, ${quartoLsp.meta.host.memory_gb} GiB RAM)</li>
+    <li>Corpus: ${quartoLsp.corpus.revision.slice(0, 12)}; ${quartoLsp.session.file_count} files (${(quartoLsp.session.opened_bytes / 1024).toFixed(1)} KiB)</li>
+    <li>Workload: ${quartoLsp.meta.edit_count} edits; ${quartoLsp.meta.runs} fresh processes per server</li>
+    <li>${quartoLsp.servers.map((server) => `${server.label}: ${server.version}; ${server.runs[0].diagnostic_mode} diagnostics`).join(". ")}</li>
+  </ul>
+</div>`;
+```
+
+@fig-lsp-quarto-latency pools samples across the three processes. File opens
+have no warmups. Symbol requests have two warmup rounds and 20 measured rounds
+per file per process. Each edit waits for diagnostics before the next begins.
+
+```{ojs}
+//| label: fig-lsp-quarto-latency
+//| echo: false
+//| fig-cap: "Quarto LSP latency. Dots show medians; lines extend to p95. Tooltips
+//|   include sample counts and the median number of returned diagnostics or symbols."
+
+Plot.plot({
+    width,
+    height: 230,
+    marginLeft: width < 500 ? 80 : 140,
+    marginRight: 30,
+    x: { type: "log", label: "Time (ms)", grid: true },
+    y: {
+        label: null,
+        domain: ["Open to diagnostics", "Document symbols", "Edit to diagnostics"],
+        tickFormat: (label) =>
+            width < 500
+                ? {
+                        "Open to diagnostics": "Open",
+                        "Document symbols": "Symbols",
+                        "Edit to diagnostics": "Edit",
+                    }[label]
+                : label,
+    },
+    color: { legend: true, scheme: "tableau10" },
+    marks: [
+        Plot.ruleY(quartoLspLatencies, {
+            y: "metric",
+            x1: "median",
+            x2: "p95",
+            stroke: "server",
+        }),
+        Plot.dot(quartoLspLatencies, {
+            y: "metric",
+            x: "median",
+            fill: "server",
+            r: 5,
+            channels: {
+                "p95 (ms)": "p95",
+                samples: "samples",
+                "results (median)": "results",
+            },
+            tip: true,
+        }),
+    ],
+});
+```
+
+Initialization measures process launch through the `initialize` response. Memory
+uses the same process-tree sampler and five-second quiet windows as the Markdown
+track. q2 performs open-document parsing and outline analysis; Panache also
+retains its syntax trees and analysis database. The table reports medians across
+processes. Neither server builds a whole-project index in this standalone
+workload.
+
+```{ojs}
+//| label: render-lsp-quarto-memory
+//| echo: false
+
+quartoLspResourceMetrics = [
+    [
+        "Initialize (ms)",
+        (s) => (s.aggregate.timings.init_seconds * 1000).toFixed(2),
+    ],
+    ["Baseline RSS (MB)", (s) => s.aggregate.milestones.baseline.rss_mb],
+    ["Files open RSS (MB)", (s) => s.aggregate.milestones.settled.rss_mb],
+    ["After edits RSS (MB)", (s) => s.aggregate.milestones.edited.rss_mb],
+    ["After edits PSS (MB)", (s) => s.aggregate.milestones.edited.pss_mb],
+    ["Peak RSS (MB)", (s) => s.aggregate.milestones.peak.rss_mb],
+];
+
+html`<table class="table">
+  <thead><tr><th>Metric</th>${quartoLsp.servers.map((s) => html`<th>${s.label}</th>`)}</tr></thead>
+  <tbody>${quartoLspResourceMetrics.map(
+        ([label, value]) =>
+            html`<tr><td>${label}</td>${quartoLsp.servers.map((s) => html`<td>${value(s)}</td>`)}</tr>`,
+    )}</tbody>
+</table>`;
+```
+
 ## Reproducing
 
 All benchmarks are reproducible. The formatting and linting comparisons require
 [`hyperfine`](https://github.com/sharkdp/hyperfine); the language-server memory
-and speed comparison requires Linux with `/proc` and Marksman. The scripts in
+and speed comparisons require Linux with `/proc`. The Markdown track needs
+Marksman; the Quarto track downloads a pinned q2 release and verifies its
+SHA-256 hash, or uses the executable specified by `Q2_BIN`. The scripts in
 `benches/` are designed to be run from the repository root:
 
 ```bash
@@ -1134,6 +1277,9 @@ bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_dat
 # Run the Linux language-server speed and memory benchmark
 # bench:lsp-memory remains an alias.
 task bench:lsp
+
+# Run the Quarto diagnostics, symbols, and memory comparison
+task bench:lsp-quarto
 
 # Or run the human-readable text variant
 bash benches/compare_all.sh

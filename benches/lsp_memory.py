@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure latency, runtime, and resident memory in a Markdown LSP session.
+"""Measure latency, runtime, and resident memory in a Markdown or Quarto LSP session.
 
 The harness launches each server over stdio, samples its complete process tree
 from ``/proc``, and records four milestones: initialized baseline, files-opened
@@ -37,6 +37,7 @@ SERVER_META = {
         "Marksman",
         "workspace-wide Markdown indexing and cross-reference analysis",
     ),
+    "q2": ("q2", "open-document parsing and Quarto outline analysis"),
 }
 
 
@@ -274,6 +275,35 @@ class Client:
                 for notification in self.notifications
             )
 
+    def notification_cursor(self):
+        with self.state:
+            return len(self.notifications)
+
+    def wait_diagnostics(self, cursor, uri, version, timeout):
+        """Wait for this serial operation's publish, including empty results.
+
+        q2 omits document versions. Only one edit is in flight, and the cursor
+        excludes publications consumed by earlier operations.
+        """
+        deadline = time.monotonic() + timeout
+        with self.state:
+            while True:
+                for message in self.notifications[cursor:]:
+                    params = message.get("params") or {}
+                    if (
+                        message.get("method") == "textDocument/publishDiagnostics"
+                        and params.get("uri") == uri
+                        and params.get("version") in (None, version)
+                    ):
+                        return params["diagnostics"]
+                cursor = len(self.notifications)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not self.alive:
+                    raise RuntimeError(
+                        f"diagnostics for {uri} timed out or the server exited"
+                    )
+                self.state.wait(min(1.0, remaining))
+
     def shutdown(self):
         if self.proc.poll() is None:
             response = self.request("shutdown", None, timeout=15)
@@ -356,12 +386,12 @@ def position_for_offset(text, offset):
     return {"line": line, "character": utf16_length(text[line_start:offset])}
 
 
-def prepare_documents(files):
+def prepare_documents(files, track="markdown"):
     documents = []
     edit_target = None
     for index, path in enumerate(files):
         text = Path(path).read_text(errors="replace")
-        if index == 0:
+        if index == 0 and track == "markdown":
             if not text.endswith("\n"):
                 text += "\n"
             initial_label = label_for_edit(0)
@@ -387,8 +417,10 @@ def prepare_documents(files):
                 "text": text,
             }
         )
-    if edit_target is None:
+    if not documents:
         raise RuntimeError("at least one document is required")
+    if track == "quarto":
+        edit_target = dict(documents[0])
     edit_target["uri"] = documents[0]["uri"]
     return documents, edit_target
 
@@ -433,6 +465,8 @@ def result_summary(method, result):
     """Count returned work so an empty response is visible in comparisons."""
     if result in (None, [], {}):
         return 0, None
+    if method in ("textDocument/diagnostic", "textDocument/publishDiagnostics"):
+        return len(result), None
     if method == "textDocument/documentSymbol":
 
         def count(symbol):
@@ -499,17 +533,22 @@ def finalize_request_record(record):
     return record
 
 
-def benchmark_requests(client, key, label, method, params, runs, warmups, timeout):
+def benchmark_requests(
+    client, key, label, method, params, runs, warmups, timeout, require_result=False
+):
     """Measure serial stdio round trips, excluding warmups and result summaries."""
     for _ in range(warmups):
         for target in params:
-            require_response(client.request(method, target, timeout=timeout), method)
+            require_response(
+                client.request(method, target, timeout=timeout), method, require_result
+            )
     record = request_record(key, label, method, len(params))
     for _ in range(runs):
         for target in params:
             started = time.perf_counter_ns()
             response = client.request(method, target, timeout=timeout)
             elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
+            require_response(response, method, require_result)
             record_response(record, response, elapsed_ms)
     return finalize_request_record(record)
 
@@ -595,6 +634,90 @@ def churn_reference_labels(client, target, edits, timeout):
     return finalize_request_record(record)
 
 
+def notify_and_diagnose(client, method, params, pull, timeout):
+    document = params["textDocument"]
+    cursor = client.notification_cursor()
+    started = time.perf_counter_ns()
+    client.notify(method, params)
+    if pull:
+        response = require_response(
+            client.request(
+                "textDocument/diagnostic",
+                {"textDocument": {"uri": document["uri"]}},
+                timeout=timeout,
+            ),
+            "textDocument/diagnostic",
+        )
+        result = response.get("result") or {}
+        # No previousResultId is sent, so an unchanged report cannot certify
+        # that this document was analyzed.
+        if result.get("kind") != "full" or not isinstance(result.get("items"), list):
+            raise RuntimeError("expected a full diagnostic report")
+        diagnostics = result["items"]
+    else:
+        diagnostics = client.wait_diagnostics(
+            cursor, document["uri"], document["version"], timeout
+        )
+    elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
+    return diagnostics, elapsed_ms
+
+
+def open_quarto_documents(client, documents, pull, timeout):
+    record = request_record(
+        "open_diagnostic",
+        "Open to diagnostics",
+        "textDocument/diagnostic" if pull else "textDocument/publishDiagnostics",
+        len(documents),
+    )
+    for document in documents:
+        diagnostics, elapsed = notify_and_diagnose(
+            client,
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": document["uri"],
+                    "languageId": "quarto",
+                    "version": 1,
+                    "text": document["text"],
+                }
+            },
+            pull,
+            timeout,
+        )
+        errors = [item for item in diagnostics if item.get("severity") == 1]
+        if errors:
+            raise RuntimeError(
+                f"corpus document {document['uri']} has errors: {errors}"
+            )
+        record_response(record, {"result": diagnostics}, elapsed)
+    return finalize_request_record(record)
+
+
+def churn_quarto_document(client, target, edits, pull, timeout):
+    record = request_record(
+        "edit_diagnostic",
+        "Edit to diagnostics",
+        "textDocument/diagnostic" if pull else "textDocument/publishDiagnostics",
+        1,
+    )
+    for edit in range(1, edits + 1):
+        # Full replacements are supported by both servers. Rebuild from the
+        # original text so the workload stays the same size across edits.
+        text = target["text"] + f"\n## Benchmark edit {edit:06d}\n"
+        diagnostics, elapsed = notify_and_diagnose(
+            client,
+            "textDocument/didChange",
+            {
+                "textDocument": {"uri": target["uri"], "version": edit + 1},
+                "contentChanges": [{"text": text}],
+            },
+            pull,
+            timeout,
+        )
+        record_response(record, {"result": diagnostics}, elapsed)
+    return finalize_request_record(record)
+
+
 def isolated_environment(directory):
     env = os.environ.copy()
     config_home = Path(directory) / "config"
@@ -618,6 +741,7 @@ def run_session(
     stderr_dir,
     latency_runs,
     latency_warmups,
+    track="markdown",
 ):
     key, command = spec
     print(f"==> speed and memory: {key} (run {run_number})", flush=True)
@@ -660,6 +784,15 @@ def run_session(
             init_seconds = round(time.monotonic() - started_at, 6)
             capabilities = (initialized.get("result") or {}).get("capabilities", {})
             pull = bool(capabilities.get("diagnosticProvider"))
+            if track == "quarto":
+                sync = capabilities.get("textDocumentSync")
+                change = sync.get("change") if isinstance(sync, dict) else sync
+                if change not in (1, 2) or not capabilities.get(
+                    "documentSymbolProvider"
+                ):
+                    raise RuntimeError(
+                        "Quarto track requires document sync and symbols"
+                    )
             client.notify("initialized", {})
 
             baseline_ready = wait_until_quiet(
@@ -675,25 +808,29 @@ def run_session(
             baseline_seconds = round(time.monotonic() - started_at, 2)
             print(f"    baseline {milestones['baseline']['rss_mb']} MB RSS", flush=True)
 
-            documents, edit_target = prepare_documents(files)
+            documents, edit_target = prepare_documents(files, track)
             uris = [document["uri"] for document in documents]
             documents_started_at = time.monotonic()
-            for document in documents:
-                client.notify(
-                    "textDocument/didOpen",
-                    {
-                        "textDocument": {
-                            "uri": document["uri"],
-                            "languageId": "markdown",
-                            "version": 1,
-                            "text": document["text"],
-                        }
-                    },
-                )
-
-            if pull:
-                pull_diagnostics(client, uris, settle_timeout)
-            exercise_shared_requests(client, uris)
+            if track == "quarto":
+                request_latencies = [
+                    open_quarto_documents(client, documents, pull, settle_timeout)
+                ]
+            else:
+                for document in documents:
+                    client.notify(
+                        "textDocument/didOpen",
+                        {
+                            "textDocument": {
+                                "uri": document["uri"],
+                                "languageId": "markdown",
+                                "version": 1,
+                                "text": document["text"],
+                            }
+                        },
+                    )
+                if pull:
+                    pull_diagnostics(client, uris, settle_timeout)
+                exercise_shared_requests(client, uris)
             documents_ready = wait_until_quiet(
                 client,
                 sampler,
@@ -707,16 +844,58 @@ def run_session(
             settled_seconds = round(time.monotonic() - started_at, 2)
             print(f"    settled  {milestones['settled']['rss_mb']} MB RSS", flush=True)
 
-            request_latencies = benchmark_shared_requests(
-                client, uris, edit_target, latency_runs, latency_warmups, settle_timeout
-            )
+            if track == "quarto":
+                request_latencies.append(
+                    benchmark_requests(
+                        client,
+                        "document_symbol",
+                        "Document symbols",
+                        "textDocument/documentSymbol",
+                        [{"textDocument": {"uri": uri}} for uri in uris],
+                        latency_runs,
+                        latency_warmups,
+                        settle_timeout,
+                        require_result=True,
+                    )
+                )
+            else:
+                request_latencies = benchmark_shared_requests(
+                    client,
+                    uris,
+                    edit_target,
+                    latency_runs,
+                    latency_warmups,
+                    settle_timeout,
+                )
             edit_started_at = time.monotonic()
-            request_latencies.append(
-                churn_reference_labels(client, edit_target, edits, timeout=30)
-            )
+            if track == "quarto":
+                request_latencies.append(
+                    churn_quarto_document(
+                        client, edit_target, edits, pull, settle_timeout
+                    )
+                )
+            else:
+                request_latencies.append(
+                    churn_reference_labels(client, edit_target, edits, timeout=30)
+                )
             edit_work_seconds = round(time.monotonic() - edit_started_at, 6)
-            if pull:
+            if pull and track == "markdown":
                 pull_diagnostics(client, uris, settle_timeout)
+            if track == "quarto":
+                response = require_response(
+                    client.request(
+                        "textDocument/documentSymbol",
+                        {"textDocument": {"uri": uris[0]}},
+                        timeout=settle_timeout,
+                    ),
+                    "textDocument/documentSymbol",
+                    require_result=True,
+                )
+                expected = f"Benchmark edit {edits:06d}"
+                if expected not in json.dumps(response["result"]):
+                    raise RuntimeError(
+                        "document symbols did not observe the final edit"
+                    )
             wait_until_quiet(
                 client,
                 sampler,
@@ -745,15 +924,22 @@ def run_session(
                 "total_seconds": total_seconds,
                 "diagnostic_mode": "pull" if pull else "push",
                 "diagnostics_published": client.count_published_diagnostics(),
-                "diagnostic_requests": len(uris) * 2 if pull else 0,
-                "definition_requests": edits,
+                "diagnostic_requests": (
+                    (len(uris) + edits if track == "quarto" else len(uris) * 2)
+                    if pull
+                    else 0
+                ),
+                "definition_requests": edits if track == "markdown" else 0,
                 "samples": len(sampler.samples),
                 "request_latencies": request_latencies,
             }
             for record in request_latencies:
+                empty_label = (
+                    "clean" if record["key"].endswith("_diagnostic") else "empty"
+                )
                 print(
                     f"    {record['label']}: {record['median_ms']:.3f} ms median, "
-                    f"{record['p95_ms']:.3f} ms p95 ({record['empty_results']} empty)",
+                    f"{record['p95_ms']:.3f} ms p95 ({record['empty_results']} {empty_label})",
                     flush=True,
                 )
             print(
@@ -906,12 +1092,14 @@ def parse_servers(values):
     return servers
 
 
-def display_command(command):
+def display_command(command, track="markdown"):
     display = [Path(command[0]).name]
     hide_next = False
     for argument in command[1:]:
         if hide_next:
-            display.append("<isolated-gfm-config>")
+            display.append(
+                f"<isolated-{'quarto' if track == 'quarto' else 'gfm'}-config>"
+            )
             hide_next = False
         else:
             display.append(argument)
@@ -921,6 +1109,7 @@ def display_command(command):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--track", choices=("markdown", "quarto"), default="markdown")
     parser.add_argument("--project", required=True)
     parser.add_argument("--files", nargs="+", required=True)
     parser.add_argument("--out", required=True)
@@ -961,8 +1150,11 @@ def main():
     specs = parse_servers(args.server)
     versions = parse_key_values(args.server_version, "--server-version")
     keys = [key for key, _ in specs]
-    if set(keys) != {"panache", "marksman"}:
-        parser.error("exactly panache and marksman server commands are required")
+    expected = {"panache", "q2" if args.track == "quarto" else "marksman"}
+    if set(keys) != expected or len(keys) != 2:
+        parser.error(
+            f"exactly {', '.join(sorted(expected))} server commands are required"
+        )
 
     runs_by_server = {key: [] for key in keys}
     session_index = 0
@@ -983,6 +1175,7 @@ def main():
                     stderr_dir,
                     args.latency_runs,
                     args.latency_warmups,
+                    args.track,
                 )
             )
             if session_index < args.runs * len(specs):
@@ -998,17 +1191,19 @@ def main():
                 "label": label,
                 "doing": doing,
                 "version": versions.get(key, "unknown"),
-                "command": display_command(command),
+                "command": display_command(command, args.track),
                 "runs": public_record(runs),
                 "aggregate": aggregate_runs(runs),
             }
         )
     add_panache_ratios(servers)
 
-    documents, _ = prepare_documents(files)
+    documents, _ = prepare_documents(files, args.track)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "meta": {
+            "track": args.track,
+            "change_mode": "full" if args.track == "quarto" else "incremental",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "host": host_metadata(),
             "runs": args.runs,

@@ -1,0 +1,768 @@
+{
+  "schema_version": 2,
+  "meta": {
+    "track": "quarto",
+    "change_mode": "full",
+    "generated_at": "2026-09-29T08:22:24.567995+00:00",
+    "host": {
+      "os": "Linux",
+      "arch": "x86_64",
+      "cpu": "Intel(R) Core(TM) Ultra 7 155U",
+      "memory_gb": 30
+    },
+    "runs": 3,
+    "quiet_seconds": 5.0,
+    "settle_timeout_seconds": 120.0,
+    "edit_count": 100,
+    "latency_runs": 20,
+    "latency_warmups": 2,
+    "sample_interval_seconds": 0.15
+  },
+  "corpus": {
+    "name": "q2 authoring guides",
+    "repo": "https://github.com/quarto-dev/q2",
+    "revision": "192a231d8da241f60368821b73c56edac5c5f0e7"
+  },
+  "session": {
+    "project": "q2-authoring",
+    "files": [
+      "computations.qmd",
+      "markdown-basics.qmd",
+      "title-blocks.qmd"
+    ],
+    "file_count": 3,
+    "disk_bytes": 15991,
+    "opened_bytes": 15991,
+    "edited_file": "computations.qmd"
+  },
+  "servers": [
+    {
+      "key": "panache",
+      "label": "Panache",
+      "doing": "open-document analysis with lazily discovered project relationships",
+      "version": "panache 3.12.0",
+      "command": "panache --config <isolated-quarto-config> lsp",
+      "runs": [
+        {
+          "run": 1,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 8.6,
+              "pss_mb": 6.8,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 16.0,
+              "pss_mb": 14.2,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 20.2,
+              "pss_mb": 18.4,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 20.2,
+              "pss_mb": 18.4,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.017372,
+          "workspace_ready_seconds": 0.155851,
+          "documents_ready_seconds": 0.181417,
+          "edit_work_seconds": 0.132987,
+          "baseline_seconds": 5.12,
+          "settled_seconds": 10.27,
+          "edit_seconds": 5.09,
+          "total_seconds": 15.4,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 103,
+          "definition_requests": 0,
+          "samples": 102,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 4.21,
+              "p95_ms": 33.068,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 0.39,
+              "p95_ms": 1.208,
+              "result_count_min": 8,
+              "result_count_median": 11.0,
+              "result_count_max": 12,
+              "payload_bytes_min": 1741,
+              "payload_bytes_median": 2500.0,
+              "payload_bytes_max": 2554
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 1.26,
+              "p95_ms": 2.03,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        },
+        {
+          "run": 2,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 8.9,
+              "pss_mb": 7.2,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 16.1,
+              "pss_mb": 14.3,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 20.3,
+              "pss_mb": 18.6,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 20.3,
+              "pss_mb": 18.6,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.004472,
+          "workspace_ready_seconds": 0.154508,
+          "documents_ready_seconds": 0.042949,
+          "edit_work_seconds": 0.106225,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.09,
+          "edit_seconds": 5.06,
+          "total_seconds": 15.21,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 103,
+          "definition_requests": 0,
+          "samples": 101,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 3.927,
+              "p95_ms": 17.348,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 0.649,
+              "p95_ms": 1.303,
+              "result_count_min": 8,
+              "result_count_median": 11.0,
+              "result_count_max": 12,
+              "payload_bytes_min": 1741,
+              "payload_bytes_median": 2500.0,
+              "payload_bytes_max": 2554
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 0.869,
+              "p95_ms": 2.13,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        },
+        {
+          "run": 3,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 8.8,
+              "pss_mb": 7.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 15.9,
+              "pss_mb": 14.2,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 20.1,
+              "pss_mb": 18.4,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 20.1,
+              "pss_mb": 18.4,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.004622,
+          "workspace_ready_seconds": 0.154992,
+          "documents_ready_seconds": 0.046184,
+          "edit_work_seconds": 0.162581,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.09,
+          "edit_seconds": 5.12,
+          "total_seconds": 15.25,
+          "diagnostic_mode": "pull",
+          "diagnostics_published": 0,
+          "diagnostic_requests": 103,
+          "definition_requests": 0,
+          "samples": 101,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 2.868,
+              "p95_ms": 16.544,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 0.561,
+              "p95_ms": 1.12,
+              "result_count_min": 8,
+              "result_count_median": 11.0,
+              "result_count_max": 12,
+              "payload_bytes_min": 1741,
+              "payload_bytes_median": 2500.0,
+              "payload_bytes_max": 2554
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/diagnostic",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 1.341,
+              "p95_ms": 2.743,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "milestones": {
+          "baseline": {
+            "rss_mb": 8.8,
+            "pss_mb": 7.0,
+            "processes": 1
+          },
+          "settled": {
+            "rss_mb": 16.0,
+            "pss_mb": 14.2,
+            "processes": 1
+          },
+          "edited": {
+            "rss_mb": 20.2,
+            "pss_mb": 18.4,
+            "processes": 1
+          },
+          "peak": {
+            "rss_mb": 20.2,
+            "pss_mb": 18.4,
+            "processes": 1
+          }
+        },
+        "timings": {
+          "init_seconds": 0.004622,
+          "workspace_ready_seconds": 0.154992,
+          "documents_ready_seconds": 0.046184,
+          "edit_work_seconds": 0.132987,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.09,
+          "edit_seconds": 5.09,
+          "total_seconds": 15.25
+        },
+        "request_latencies": [
+          {
+            "key": "open_diagnostic",
+            "label": "Open to diagnostics",
+            "method": "textDocument/diagnostic",
+            "targets": 3,
+            "empty_results": 9,
+            "samples": 9,
+            "median_ms": 3.927,
+            "p95_ms": 33.068,
+            "result_count_min": 0,
+            "result_count_median": 0,
+            "result_count_max": 0,
+            "payload_bytes_min": 2,
+            "payload_bytes_median": 2,
+            "payload_bytes_max": 2
+          },
+          {
+            "key": "document_symbol",
+            "label": "Document symbols",
+            "method": "textDocument/documentSymbol",
+            "targets": 3,
+            "empty_results": 0,
+            "samples": 180,
+            "median_ms": 0.519,
+            "p95_ms": 1.215,
+            "result_count_min": 8,
+            "result_count_median": 11.0,
+            "result_count_max": 12,
+            "payload_bytes_min": 1741,
+            "payload_bytes_median": 2500.0,
+            "payload_bytes_max": 2554
+          },
+          {
+            "key": "edit_diagnostic",
+            "label": "Edit to diagnostics",
+            "method": "textDocument/diagnostic",
+            "targets": 1,
+            "empty_results": 300,
+            "samples": 300,
+            "median_ms": 1.259,
+            "p95_ms": 2.585,
+            "result_count_min": 0,
+            "result_count_median": 0.0,
+            "result_count_max": 0,
+            "payload_bytes_min": 2,
+            "payload_bytes_median": 2.0,
+            "payload_bytes_max": 2
+          }
+        ],
+        "samples": 101,
+        "relative_to_panache": {
+          "baseline_rss": 1.0,
+          "settled_rss": 1.0,
+          "edited_rss": 1.0,
+          "peak_rss": 1.0
+        }
+      }
+    },
+    {
+      "key": "q2",
+      "label": "q2",
+      "doing": "open-document parsing and Quarto outline analysis",
+      "version": "q2 (quarto 2) 0.32.0",
+      "command": "q2 lsp",
+      "runs": [
+        {
+          "run": 1,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 14.0,
+              "pss_mb": 14.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 20.0,
+              "pss_mb": 20.0,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 26.0,
+              "pss_mb": 26.0,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 28.3,
+              "pss_mb": 28.1,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.00627,
+          "workspace_ready_seconds": 0.154692,
+          "documents_ready_seconds": 0.041754,
+          "edit_work_seconds": 1.377551,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.1,
+          "edit_seconds": 6.35,
+          "total_seconds": 17.23,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 103,
+          "diagnostic_requests": 0,
+          "definition_requests": 0,
+          "samples": 114,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 10.241,
+              "p95_ms": 16.777,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 12.694,
+              "p95_ms": 15.37,
+              "result_count_min": 7,
+              "result_count_median": 9.0,
+              "result_count_max": 10,
+              "payload_bytes_min": 1414,
+              "payload_bytes_median": 1969.0,
+              "payload_bytes_max": 2010
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 13.753,
+              "p95_ms": 14.826,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        },
+        {
+          "run": 2,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 14.0,
+              "pss_mb": 14.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 20.0,
+              "pss_mb": 20.0,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 26.0,
+              "pss_mb": 26.0,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 28.2,
+              "pss_mb": 28.1,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.008057,
+          "workspace_ready_seconds": 0.154999,
+          "documents_ready_seconds": 0.045341,
+          "edit_work_seconds": 1.382942,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.1,
+          "edit_seconds": 6.35,
+          "total_seconds": 17.23,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 103,
+          "diagnostic_requests": 0,
+          "definition_requests": 0,
+          "samples": 114,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 10.322,
+              "p95_ms": 17.791,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 12.931,
+              "p95_ms": 15.228,
+              "result_count_min": 7,
+              "result_count_median": 9.0,
+              "result_count_max": 10,
+              "payload_bytes_min": 1414,
+              "payload_bytes_median": 1969.0,
+              "payload_bytes_max": 2010
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 13.693,
+              "p95_ms": 14.489,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        },
+        {
+          "run": 3,
+          "milestones": {
+            "baseline": {
+              "rss_mb": 14.0,
+              "pss_mb": 14.0,
+              "processes": 1
+            },
+            "settled": {
+              "rss_mb": 20.0,
+              "pss_mb": 20.0,
+              "processes": 1
+            },
+            "edited": {
+              "rss_mb": 26.0,
+              "pss_mb": 26.0,
+              "processes": 1
+            },
+            "peak": {
+              "rss_mb": 28.3,
+              "pss_mb": 28.2,
+              "processes": 1
+            }
+          },
+          "init_seconds": 0.007757,
+          "workspace_ready_seconds": 0.155016,
+          "documents_ready_seconds": 0.038964,
+          "edit_work_seconds": 1.405824,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.1,
+          "edit_seconds": 6.38,
+          "total_seconds": 17.27,
+          "diagnostic_mode": "push",
+          "diagnostics_published": 103,
+          "diagnostic_requests": 0,
+          "definition_requests": 0,
+          "samples": 115,
+          "request_latencies": [
+            {
+              "key": "open_diagnostic",
+              "label": "Open to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 3,
+              "empty_results": 3,
+              "samples": 3,
+              "median_ms": 10.812,
+              "p95_ms": 15.117,
+              "result_count_min": 0,
+              "result_count_median": 0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2,
+              "payload_bytes_max": 2
+            },
+            {
+              "key": "document_symbol",
+              "label": "Document symbols",
+              "method": "textDocument/documentSymbol",
+              "targets": 3,
+              "empty_results": 0,
+              "samples": 60,
+              "median_ms": 12.966,
+              "p95_ms": 15.901,
+              "result_count_min": 7,
+              "result_count_median": 9.0,
+              "result_count_max": 10,
+              "payload_bytes_min": 1414,
+              "payload_bytes_median": 1969.0,
+              "payload_bytes_max": 2010
+            },
+            {
+              "key": "edit_diagnostic",
+              "label": "Edit to diagnostics",
+              "method": "textDocument/publishDiagnostics",
+              "targets": 1,
+              "empty_results": 100,
+              "samples": 100,
+              "median_ms": 13.901,
+              "p95_ms": 15.242,
+              "result_count_min": 0,
+              "result_count_median": 0.0,
+              "result_count_max": 0,
+              "payload_bytes_min": 2,
+              "payload_bytes_median": 2.0,
+              "payload_bytes_max": 2
+            }
+          ]
+        }
+      ],
+      "aggregate": {
+        "milestones": {
+          "baseline": {
+            "rss_mb": 14.0,
+            "pss_mb": 14.0,
+            "processes": 1
+          },
+          "settled": {
+            "rss_mb": 20.0,
+            "pss_mb": 20.0,
+            "processes": 1
+          },
+          "edited": {
+            "rss_mb": 26.0,
+            "pss_mb": 26.0,
+            "processes": 1
+          },
+          "peak": {
+            "rss_mb": 28.3,
+            "pss_mb": 28.1,
+            "processes": 1
+          }
+        },
+        "timings": {
+          "init_seconds": 0.007757,
+          "workspace_ready_seconds": 0.154999,
+          "documents_ready_seconds": 0.041754,
+          "edit_work_seconds": 1.382942,
+          "baseline_seconds": 5.11,
+          "settled_seconds": 10.1,
+          "edit_seconds": 6.35,
+          "total_seconds": 17.23
+        },
+        "request_latencies": [
+          {
+            "key": "open_diagnostic",
+            "label": "Open to diagnostics",
+            "method": "textDocument/publishDiagnostics",
+            "targets": 3,
+            "empty_results": 9,
+            "samples": 9,
+            "median_ms": 10.322,
+            "p95_ms": 17.791,
+            "result_count_min": 0,
+            "result_count_median": 0,
+            "result_count_max": 0,
+            "payload_bytes_min": 2,
+            "payload_bytes_median": 2,
+            "payload_bytes_max": 2
+          },
+          {
+            "key": "document_symbol",
+            "label": "Document symbols",
+            "method": "textDocument/documentSymbol",
+            "targets": 3,
+            "empty_results": 0,
+            "samples": 180,
+            "median_ms": 12.915,
+            "p95_ms": 15.505,
+            "result_count_min": 7,
+            "result_count_median": 9.0,
+            "result_count_max": 10,
+            "payload_bytes_min": 1414,
+            "payload_bytes_median": 1969.0,
+            "payload_bytes_max": 2010
+          },
+          {
+            "key": "edit_diagnostic",
+            "label": "Edit to diagnostics",
+            "method": "textDocument/publishDiagnostics",
+            "targets": 1,
+            "empty_results": 300,
+            "samples": 300,
+            "median_ms": 13.746,
+            "p95_ms": 14.859,
+            "result_count_min": 0,
+            "result_count_median": 0.0,
+            "result_count_max": 0,
+            "payload_bytes_min": 2,
+            "payload_bytes_median": 2.0,
+            "payload_bytes_max": 2
+          }
+        ],
+        "samples": 114,
+        "relative_to_panache": {
+          "baseline_rss": 1.6,
+          "settled_rss": 1.2,
+          "edited_rss": 1.3,
+          "peak_rss": 1.4
+        }
+      }
+    }
+  ]
+}

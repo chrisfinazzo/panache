@@ -1,4 +1,6 @@
 import importlib.util
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -46,6 +48,132 @@ class ProcParsingTests(unittest.TestCase):
 
 
 class LatencyTests(unittest.TestCase):
+    def test_push_diagnostics_ignore_old_versions_and_other_documents(self):
+        harness = load_harness()
+        client = harness.Client.__new__(harness.Client)
+        client.state = threading.Condition()
+        client.alive = True
+        client.notifications = [
+            {"method": "textDocument/publishDiagnostics", "params": params}
+            for params in [
+                {"uri": "file:///a.qmd", "diagnostics": [{"message": "old"}]},
+                {"uri": "file:///b.qmd", "diagnostics": [{"message": "other"}]},
+                {"uri": "file:///a.qmd", "version": 1, "diagnostics": [{}]},
+                {"uri": "file:///a.qmd", "version": 2, "diagnostics": []},
+            ]
+        ]
+        self.assertEqual(client.wait_diagnostics(1, "file:///a.qmd", 2, 1), [])
+
+    def test_unversioned_push_diagnostics_are_accepted_after_the_cursor(self):
+        harness = load_harness()
+        client = harness.Client.__new__(harness.Client)
+        client.state = threading.Condition()
+        client.alive = True
+        client.notifications = [
+            {
+                "method": "textDocument/publishDiagnostics",
+                "params": {"uri": "file:///a.qmd", "diagnostics": []},
+            }
+        ]
+        self.assertEqual(client.wait_diagnostics(0, "file:///a.qmd", 2, 1), [])
+        with self.assertRaisesRegex(RuntimeError, "diagnostics.*timed out"):
+            client.wait_diagnostics(1, "file:///a.qmd", 2, 0)
+
+    def test_quarto_edits_send_the_whole_document_and_wait_for_diagnostics(self):
+        harness = load_harness()
+        client = Mock()
+        client.notification_cursor.return_value = 7
+        client.wait_diagnostics.return_value = []
+        target = {"uri": "file:///a.qmd", "text": "# Café 😀\n\nBody.\n"}
+        record = harness.churn_quarto_document(client, target, 2, False, 30)
+        changes = [call.args[1] for call in client.notify.call_args_list]
+        self.assertEqual(
+            [change["textDocument"]["version"] for change in changes], [2, 3]
+        )
+        self.assertEqual(
+            changes[0]["contentChanges"],
+            [
+                {
+                    "text": target["text"] + "\n## Benchmark edit 000001\n",
+                }
+            ],
+        )
+        self.assertEqual(client.wait_diagnostics.call_count, 2)
+        self.assertEqual(record["samples"], 2)
+        self.assertEqual(record["result_count_max"], 0)
+
+    def test_pull_diagnostics_measure_notification_and_request(self):
+        harness = load_harness()
+        client = Mock()
+        clock_ns = [0]
+
+        def notify(*args):
+            clock_ns[0] += 2_000_000
+
+        def request(*args, **kwargs):
+            clock_ns[0] += 5_000_000
+            return {"result": {"kind": "full", "items": [{"severity": 2}]}}
+
+        client.notify.side_effect = notify
+        client.request.side_effect = request
+        with patch.object(
+            harness.time, "perf_counter_ns", side_effect=lambda: clock_ns[0]
+        ):
+            record = harness.churn_quarto_document(
+                client, {"uri": "file:///a.qmd", "text": "# Header\n"}, 1, True, 30
+            )
+        self.assertEqual(record["median_ms"], 7.0)
+        self.assertEqual(record["result_count_min"], 1)
+        client.wait_diagnostics.assert_not_called()
+
+    def test_quarto_corpus_does_not_append_reference_links(self):
+        harness = load_harness()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.qmd"
+            path.write_text("# Header\n")
+            documents, target = harness.prepare_documents([path], track="quarto")
+        self.assertEqual(documents[0]["text"], "# Header\n")
+        self.assertEqual(target["text"], documents[0]["text"])
+
+    def test_parse_errors_cannot_be_timed_as_successful_file_opens(self):
+        harness = load_harness()
+        client = Mock()
+        client.wait_diagnostics.return_value = [
+            {"severity": 1, "message": "parse error"}
+        ]
+        with self.assertRaisesRegex(RuntimeError, "corpus document.*has errors"):
+            harness.open_quarto_documents(
+                client, [{"uri": "file:///a.qmd", "text": "bad input"}], False, 30
+            )
+
+    def test_pull_requires_a_complete_report_for_the_current_text(self):
+        harness = load_harness()
+        client = Mock()
+        client.request.return_value = {
+            "result": {"kind": "unchanged", "resultId": "old"}
+        }
+        with self.assertRaisesRegex(RuntimeError, "expected a full diagnostic report"):
+            harness.churn_quarto_document(
+                client, {"uri": "file:///a.qmd", "text": "# Header\n"}, 1, True, 30
+            )
+
+    def test_empty_symbols_cannot_pass_the_quarto_benchmark(self):
+        harness = load_harness()
+        client = Mock()
+        client.request.return_value = {"result": []}
+        with self.assertRaisesRegex(RuntimeError, "returned no result"):
+            harness.benchmark_requests(
+                client,
+                "document_symbol",
+                "Document symbols",
+                "textDocument/documentSymbol",
+                [{}],
+                runs=1,
+                warmups=0,
+                timeout=30,
+                require_result=True,
+            )
+
     def test_edit_latency_includes_the_change_notification(self):
         harness = load_harness()
         clock_ns = [0]
