@@ -1,10 +1,60 @@
 ---
 title: "Integrations"
 description: >
-  This section provides instructions for integrating Panache with other tools,
-  such as pre-commit hooks and GitHub actions, to automatically format and lint
-  your documents on commit or pull request.
+  Use Panache with dprint, pre-commit hooks, and GitHub Actions to format and
+  lint your documents.
 ---
+
+## dprint
+
+The [Panache dprint plugin](https://github.com/jolars/dprint-plugin-panache)
+runs the Panache formatter through [dprint](https://dprint.dev/). Add it to your
+project's `dprint.json` with:
+
+```bash
+dprint config add jolars/panache
+```
+
+This command adds a versioned, checksummed plugin URL. Configure the plugin
+under the `panache` key, then run `dprint fmt` to format files or `dprint check`
+to check them without changing them:
+
+```jsonc
+{
+  "panache": {
+    "wrap": "sentence",
+    "lineWidth": 88
+  },
+  "plugins": [
+    "https://plugins.dprint.dev/jolars/panache-x.x.x.wasm@<checksum>"
+  ]
+}
+```
+
+Keep the plugin URL and checksum written by `dprint config add`; the URL above
+only illustrates the resulting configuration. The plugin handles `.md`, `.qmd`,
+`.Rmd`, `.rmd`, `.Rmarkdown`, `.rmarkdown`, `.markdown`, `.mdown`, and `.mkd`
+files. It uses Quarto rules for `.qmd` files and R Markdown rules for `.rmd` and
+`.rmarkdown` files, regardless of the configured `flavor`. Other extensions use
+`flavor`, which defaults to `pandoc`.
+
+The plugin accepts these settings under `panache`:
+
+  | Key                  | Values                                                                | Default     |
+  | -------------------- | --------------------------------------------------------------------  | ----------- |
+  | `flavor`             | `pandoc`, `quarto`, `rmarkdown`, `gfm`, `commonmark`, `multimarkdown` | `pandoc`    |
+  | `wrap`               | `reflow`, `preserve`, `sentence`, `semantic`                          | `reflow`    |
+  | `blankLines`         | `collapse`, `preserve`                                                | `collapse`  |
+  | `mathIndent`         | Integer number of spaces                                              | `2`         |
+  | `mathDelimiterStyle` | `preserve`, `dollars`, `backslash`                                    | `preserve`  |
+  | `tabStops`           | `normalize`, `preserve`                                               | `normalize` |
+  | `lineEnding`         | `auto`, `lf`, `crlf`                                                  | `auto`      |
+  | `lineWidth`          | Integer; uses dprint's global `lineWidth` when set                    | `80`        |
+  | `tabWidth`           | Integer; uses dprint's global `indentWidth` when set                  | `4`         |
+
+Set these options in `dprint.json`; the plugin does not read Panache's CLI
+configuration file. It provides formatting through dprint. To run Panache's
+linter, use the [CLI](linting.qmd#cli-usage) or one of the integrations below.
 
 ## Pre-Commit
 
