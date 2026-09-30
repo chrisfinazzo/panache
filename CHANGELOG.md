@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Highlights
+
+You can now configure code style options per document and per code block:
+
+```yaml
+code-style:
+  line-width: 80
+  indent-width: 2
+```
+
+Or, for a code block:
+
+````qmd
+```{{r}}
+#| code-style:
+#|   line-width: 40
+#|   indent-width: 2
+
+result <- some_function(first_argument, second_argument)
+```
+````
+
+Setting code block options will override the document-level options, which in turn override global options.
+
+Currently only formatters Arity, Black, Prettier, and Ruff are supported, but eventually this will be extended to all formatters that support code style options.
+
+At the moment, this also supports only `line-width` and `indent-width`, but more options will be added in the future.
+
 ## [3.12.0](https://github.com/jolars/panache/compare/v3.11.0...v3.12.0) (2026-09-22)
 
 ### Highlights
