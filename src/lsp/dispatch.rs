@@ -846,6 +846,7 @@ impl GlobalState {
                         }
                     }
                 }
+                merged.retain(|uri, _| !handlers::diagnostics::is_diagnostic_excluded(&snap, uri));
                 merged
                     .into_iter()
                     .map(|(uri, mut diags)| {

@@ -4,7 +4,97 @@
 use super::helpers::*;
 use lsp_server::{ErrorCode, Message};
 use lsp_types::*;
+use std::fs;
 use std::time::Duration;
+use tempfile::TempDir;
+
+#[test]
+fn excluded_files_have_empty_document_and_workspace_pull_reports() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::write(
+        dir.path().join("panache.toml"),
+        "extend-exclude = [\"*.md\", \"vendor/**\"]\n",
+    )
+    .unwrap();
+    let vendor = dir.path().join("vendor");
+    fs::create_dir_all(&vendor).unwrap();
+    let excluded_md = Uri::from_file_path(dir.path().join("notes.md")).unwrap();
+    let excluded_directory = Uri::from_file_path(vendor.join("other.qmd")).unwrap();
+    let included = Uri::from_file_path(dir.path().join("chapter.qmd")).unwrap();
+    let root = Uri::from_file_path(dir.path()).unwrap();
+    let text = "# H1\n\n### H3 skip\n";
+
+    let mut server = TestLspServer::new();
+    server.initialize_pull(root.as_str());
+    server.open_document(excluded_md.as_str(), text, "markdown");
+    server.open_document(excluded_directory.as_str(), text, "quarto");
+    server.open_document(included.as_str(), text, "quarto");
+    server.pump(Duration::from_secs(5));
+
+    for uri in [&excluded_md, &excluded_directory] {
+        assert!(full_items(&server.document_diagnostic(uri.as_str(), None)).is_empty());
+    }
+    assert!(has_heading_hierarchy(full_items(
+        &server.document_diagnostic(included.as_str(), None)
+    )));
+    let workspace = server.workspace_diagnostic(vec![]);
+    let reports = workspace_full_reports(&workspace);
+    assert!(
+        reports
+            .iter()
+            .all(|(uri, _)| { uri != excluded_md.as_str() && uri != excluded_directory.as_str() })
+    );
+    assert!(
+        reports
+            .iter()
+            .any(|(uri, items)| uri == included.as_str() && has_heading_hierarchy(items))
+    );
+}
+
+#[test]
+fn workspace_pull_clears_a_file_newly_excluded_by_config() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    let config = dir.path().join("panache.toml");
+    fs::write(&config, "").unwrap();
+    let uri = Uri::from_file_path(dir.path().join("notes.md")).unwrap();
+    let root = Uri::from_file_path(dir.path()).unwrap();
+    let mut server = TestLspServer::new();
+    server.initialize_pull(root.as_str());
+    server.open_document(uri.as_str(), "# H1\n\n### H3 skip\n", "markdown");
+    server.pump(Duration::from_secs(5));
+
+    let WorkspaceDiagnosticReportResult::Report(initial) = server.workspace_diagnostic(vec![])
+    else {
+        panic!("expected workspace report")
+    };
+    let (prior_id, prior_items) = initial
+        .items
+        .iter()
+        .find_map(|item| match item {
+            WorkspaceDocumentDiagnosticReport::Full(full) if full.uri == uri => Some((
+                full.full_document_diagnostic_report
+                    .result_id
+                    .as_deref()
+                    .unwrap(),
+                &full.full_document_diagnostic_report.items,
+            )),
+            _ => None,
+        })
+        .expect("initial report for notes.md");
+    assert!(has_heading_hierarchy(prior_items));
+
+    fs::write(&config, "exclude = [\"*.md\"]\n").unwrap();
+    server.did_change_configuration(serde_json::Value::Null);
+    server.pump(Duration::from_secs(5));
+    let updated = server.workspace_diagnostic(vec![(uri.as_str(), prior_id)]);
+    assert!(
+        workspace_full_reports(&updated)
+            .iter()
+            .any(|(target, items)| target == uri.as_str() && items.is_empty())
+    );
+}
 
 /// The `id`'d response among drained client messages, if one has been sent.
 fn response_for<'a>(
@@ -483,6 +573,22 @@ fn document_pull_carries_related_cross_file_diagnostics() {
         }
         other => panic!("expected a full related report, got: {other:?}"),
     }
+}
+
+#[test]
+fn excluded_related_document_is_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fs::write(root.join("panache.toml"), "exclude = [\"a.qmd\"]\n").unwrap();
+    let mut server = TestLspServer::new();
+    server.initialize_pull(Uri::from_file_path(root).unwrap().as_str());
+    let (excluded_uri, included_uri) = open_cross_file_duplicate_project(&mut server, root);
+
+    let report = server.document_diagnostic(&included_uri, None);
+    let related = full_report(&report).related_documents.as_ref();
+    let excluded: Uri = excluded_uri.parse().unwrap();
+    assert!(related.is_none_or(|entries| !entries.contains_key(&excluded)));
+    assert!(full_items(&server.document_diagnostic(&excluded_uri, None)).is_empty());
 }
 
 /// Without `related_document_support`, the same cross-file scenario leaves

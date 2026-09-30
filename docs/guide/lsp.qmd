@@ -549,6 +549,13 @@ invoke "format selection", so it's treated as the LSP equivalent of the CLI's
 file in its entirety, select the whole buffer first or temporarily remove the
 exclude pattern.
 
+The same patterns suppress diagnostics reported on excluded files, including
+files open in the editor and diagnostics attributed to them through an include
+or project graph. This applies to both push and pull diagnostics. The server
+still reads excluded files when other documents need them for navigation or
+cross-document analysis. Changing the configuration clears diagnostics that were
+already shown on newly excluded files.
+
 ### On-Type Indentation
 
 When you press Enter inside a list item, the server can indent the new line to

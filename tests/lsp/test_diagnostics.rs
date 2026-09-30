@@ -2,7 +2,59 @@
 
 use super::helpers::*;
 use lsp_types::*;
+use std::fs;
 use std::time::Duration;
+use tempfile::TempDir;
+
+#[test]
+fn excluded_files_do_not_publish_diagnostics_and_clear_after_config_reload() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    let config = dir.path().join("panache.toml");
+    fs::write(&config, "").unwrap();
+    let excluded = Uri::from_file_path(dir.path().join("notes.md")).unwrap();
+    let included = Uri::from_file_path(dir.path().join("chapter.qmd")).unwrap();
+    let root = Uri::from_file_path(dir.path()).unwrap();
+    let text = "# H1\n\n### H3 skip\n";
+
+    let mut server = TestLspServer::new();
+    server.initialize(root.as_str());
+    server.open_document(excluded.as_str(), text, "markdown");
+    server.open_document(included.as_str(), text, "quarto");
+    server.pump(Duration::from_secs(5));
+    let initial = server.drain_all_publish_diagnostics();
+    assert!(
+        initial
+            .iter()
+            .any(|p| p.uri == excluded && !p.diagnostics.is_empty())
+    );
+
+    fs::write(&config, "exclude = [\"*.md\"]\n").unwrap();
+    server.did_change_configuration(serde_json::Value::Null);
+    server.pump(Duration::from_secs(5));
+    let updated = server.drain_all_publish_diagnostics();
+    assert!(
+        updated
+            .iter()
+            .any(|p| p.uri == excluded && p.diagnostics.is_empty())
+    );
+    assert!(
+        !updated
+            .iter()
+            .any(|p| p.uri == excluded && !p.diagnostics.is_empty())
+    );
+    assert!(server.get_symbols(excluded.as_str()).is_some());
+
+    fs::write(&config, "").unwrap();
+    server.did_change_configuration(serde_json::Value::Null);
+    server.pump(Duration::from_secs(5));
+    let restored = server.drain_all_publish_diagnostics();
+    assert!(
+        restored
+            .iter()
+            .any(|p| p.uri == excluded && !p.diagnostics.is_empty())
+    );
+}
 
 #[test]
 fn include_execution_discovers_parent_configuration_for_open_markdown_partial() {

@@ -22,12 +22,22 @@ use lsp_types::{
 use serde::Serialize;
 
 use super::super::conversions::{convert_diagnostic, offset_to_position};
+use super::super::helpers::is_uri_excluded;
 use crate::lsp::global_state::{GlobalState, StateSnapshot};
 use crate::lsp::line_index::LineIndex;
 use crate::lsp::uri_ext::UriExt;
 
 /// A single `publishDiagnostics` payload: target URI, optional version, diags.
 pub(crate) type Publish = (Uri, Option<i32>, Vec<Diagnostic>);
+
+/// Exclusions apply to the URI receiving a diagnostic, including diagnostics
+/// attributed to it by another open document's project graph.
+pub(crate) fn is_diagnostic_excluded(snap: &StateSnapshot, uri: &Uri) -> bool {
+    let (config, source) =
+        crate::lsp::config::load_config_with_source(&snap.workspace_folders, Some(uri));
+    let workspace_root = snap.workspace_root_for(uri);
+    is_uri_excluded(uri, &config, &source, workspace_root.as_deref())
+}
 
 /// How many per-document reports ride in a single `workspace/diagnostic` chunk
 /// when the client requests partial results.
@@ -424,11 +434,15 @@ pub(crate) fn document_diagnostic(
     // returns one entry per affected URI; the requested URI's entry carries its
     // built-in + own cross-file diagnostics. The salsa reads here can be cancelled
     // by a concurrent write, unwinding this pooled job into a `ContentModified`.
-    let items = compute_publishes(snap, &uri, false)
-        .into_iter()
-        .find(|(target, _, _)| *target == uri)
-        .map(|(_, _, items)| items)
-        .unwrap_or_default();
+    let items = if is_diagnostic_excluded(snap, &uri) {
+        Vec::new()
+    } else {
+        compute_publishes(snap, &uri, false)
+            .into_iter()
+            .find(|(target, _, _)| *target == uri)
+            .map(|(_, _, items)| items)
+            .unwrap_or_default()
+    };
     let result_id = result_id_for(&items);
 
     // Computed for both arms: an unchanged main document can still have related
@@ -546,6 +560,9 @@ fn related_documents(
         if target == *uri {
             continue;
         }
+        if is_diagnostic_excluded(snap, &target) {
+            continue;
+        }
         let Some(stored) = snap.diagnostics.get(&target) else {
             continue;
         };
@@ -588,7 +605,8 @@ fn project_closure(graph: &crate::salsa::ProjectGraph, root: &PathBuf) -> HashSe
 ///
 /// Returns one report per URI in the pull store, emitting `unchanged` where the
 /// client already holds the current `result_id` (matched against
-/// `previous_result_ids`).
+/// `previous_result_ids`). Previously reported URIs that have left the store
+/// receive an empty report so the client can clear their diagnostics.
 pub(crate) fn workspace_diagnostic(
     gs: &GlobalState,
     params: WorkspaceDiagnosticParams,
@@ -606,7 +624,7 @@ pub(crate) fn workspace_diagnostic(
         .map(|prev| (&prev.uri, prev.value.as_str()))
         .collect();
 
-    let items: Vec<WorkspaceDocumentDiagnosticReport> = gs
+    let mut items: Vec<WorkspaceDocumentDiagnosticReport> = gs
         .diagnostics
         .iter()
         .map(|(uri, stored)| {
@@ -632,6 +650,22 @@ pub(crate) fn workspace_diagnostic(
             }
         })
         .collect();
+
+    for uri in known
+        .keys()
+        .filter(|uri| !gs.diagnostics.iter().any(|(current, _)| current == **uri))
+    {
+        items.push(WorkspaceDocumentDiagnosticReport::Full(
+            WorkspaceFullDocumentDiagnosticReport {
+                uri: (*uri).clone(),
+                version: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: Some(result_id_for(&[])),
+                    items: Vec::new(),
+                },
+            },
+        ));
+    }
 
     // With a `partialResultToken` the first batch rides in the response and the
     // rest stream as `$/progress` notifications; otherwise the whole report is
