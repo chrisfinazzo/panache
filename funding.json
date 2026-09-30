@@ -71,7 +71,8 @@
         "currency": "USD",
         "frequency": "one-time",
         "channels": [
-          "bank-transfer"
+          "bank-transfer",
+          "paypal"
         ]
       },
       {
