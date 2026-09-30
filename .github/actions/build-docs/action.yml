@@ -56,3 +56,9 @@ runs:
         cmp scripts/panache-installer.sh docs/_site/install
         cmp scripts/panache-installer.ps1 docs/_site/install.ps1
         sh -n docs/_site/install
+
+    - name: Publish funding manifest
+      shell: bash
+      run: |
+        install -m 0644 funding.json docs/_site/funding.json
+        cmp funding.json docs/_site/funding.json

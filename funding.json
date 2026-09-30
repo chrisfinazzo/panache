@@ -1,0 +1,103 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "individual",
+    "role": "maintainer",
+    "name": "Johan Larsson",
+    "email": "johan@jolars.co",
+    "description": "Johan Larsson is a postdoctoral researcher in statistics and machine learning and an open-source developer. He develops and maintains Panache, an authoring tool for Markdown and its flavors.",
+    "webpageUrl": {
+      "url": "https://jolars.co",
+      "wellKnown": "https://jolars.co/.well-known/funding-manifest-urls"
+    }
+  },
+  "projects": [
+    {
+      "guid": "panache",
+      "name": "Panache",
+      "description": "Panache is a language server, formatter, and linter for Markdown and many of its flavors, including Quarto, MyST, mdsvex, R Markdown, and Pandoc Markdown. It combines a lossless parser with editor, command-line, and CI tooling. Panache is distributed through Cargo, Homebrew, Nixpkgs, npm, and PyPI, and offers a VS Code extension. Funding would support external language servers for code blocks, bringing language-aware editor features to code embedded in documents.",
+      "webpageUrl": {
+        "url": "https://panache.bz"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/jolars/panache",
+        "wellKnown": "https://github.com/jolars/panache/blob/main/.well-known/funding-manifest-urls"
+      },
+      "licenses": [
+        "spdx:MIT"
+      ],
+      "tags": [
+        "markdown",
+        "quarto",
+        "r-markdown",
+        "rust",
+        "formatter",
+        "myst",
+        "pandoc",
+        "linter",
+        "language-server",
+        "developer-tools"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "bank-transfer",
+        "type": "bank",
+        "description": "Contact johan@jolars.co to arrange a bank transfer."
+      },
+      {
+        "guid": "github-sponsors",
+        "type": "payment-provider",
+        "address": "https://github.com/sponsors/jolars",
+        "description": "Support ongoing development through GitHub Sponsors."
+      },
+      {
+        "guid": "paypal",
+        "type": "payment-provider",
+        "address": "https://paypal.me/johlarsson",
+        "description": "Send one-time support through PayPal using this PayPal.me link."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "development-grant",
+        "status": "active",
+        "name": "External language servers for code blocks",
+        "description": "Implement support for attaching external language servers to fenced code blocks, including mapping positions and diagnostics between embedded code and the host document so editors can provide language-aware features within Markdown, Quarto, MyST, mdsvex, and R Markdown.",
+        "amount": 10000,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "bank-transfer"
+        ]
+      },
+      {
+        "guid": "ongoing-sponsorship",
+        "status": "active",
+        "name": "Ongoing sponsorship",
+        "description": "Contribute any amount toward the ongoing maintenance of Panache.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "monthly",
+        "channels": [
+          "github-sponsors"
+        ]
+      },
+      {
+        "guid": "one-time-support",
+        "status": "active",
+        "name": "One-time support",
+        "description": "Contribute any amount toward the ongoing maintenance of Panache.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "paypal"
+        ]
+      }
+    ]
+  }
+}
