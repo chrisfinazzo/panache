@@ -3,7 +3,6 @@ use crate::formatter::Formatter;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 
-use super::code_blocks;
 use super::math;
 
 impl Formatter {
@@ -136,8 +135,10 @@ impl Formatter {
         }
 
         if let Some(body_node) = verbatim_body {
-            let body_text = code_blocks::extract_myst_directive_parts(node)
-                .and_then(|(language, body)| self.formatted_code.get(&(language, body)).cloned())
+            let body_text = self
+                .formatted_code
+                .get(&usize::from(node.text_range().start()))
+                .cloned()
                 .unwrap_or_else(|| body_node.text().to_string());
             self.output.push_str(body_text.trim_end_matches('\n'));
             self.output.push('\n');

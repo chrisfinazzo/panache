@@ -118,6 +118,20 @@
             "null"
           ]
         },
+        "code-style-args": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": null,
+          "description": "Map of code-style keys to formatter-specific arguments.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "prepend-args": {
           "default": null,
           "description": "Arguments prepended to the base arguments.",

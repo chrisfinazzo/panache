@@ -19,6 +19,9 @@ pub struct FormatterConfig {
     pub args: Vec<String>,
     /// Whether the formatter reads from standard input.
     pub stdin: bool,
+    /// Arguments appended when a `code-style` key is present on a code block.
+    /// `{value}` in each argument is replaced with that key's scalar value.
+    pub code_style_args: BTreeMap<String, Vec<String>>,
 }
 
 /// One formatter or a sequence of formatters for a language.
@@ -61,6 +64,8 @@ pub struct FormatterDefinition {
     pub append_args: Option<Vec<String>>,
     /// Whether the formatter reads from standard input.
     pub stdin: Option<bool>,
+    /// Map of code-style keys to formatter-specific arguments.
+    pub code_style_args: Option<BTreeMap<String, Vec<String>>>,
 }
 
 /// Internal struct for deserializing FormatterConfig with preset support.
@@ -71,6 +76,7 @@ struct RawFormatterConfig {
     cmd: Option<String>,
     args: Option<Vec<String>>,
     stdin: bool,
+    code_style_args: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for RawFormatterConfig {
@@ -80,6 +86,7 @@ impl Default for RawFormatterConfig {
             cmd: None,
             args: None,
             stdin: true,
+            code_style_args: BTreeMap::new(),
         }
     }
 }
@@ -98,30 +105,34 @@ impl<'de> Deserialize<'de> for FormatterConfig {
         }
 
         if let Some(preset_name) = raw.preset {
-            let preset = get_formatter_preset(&preset_name).ok_or_else(|| {
+            let mut preset = get_formatter_preset(&preset_name).ok_or_else(|| {
                 let available = formatter_preset_names().join(", ");
                 serde::de::Error::custom(format!(
                     "Unknown formatter preset: '{}'. Available presets: {}",
                     preset_name, available
                 ))
             })?;
+            preset.code_style_args.extend(raw.code_style_args);
 
             Ok(FormatterConfig {
                 cmd: preset.cmd,
                 args: preset.args,
                 stdin: preset.stdin,
+                code_style_args: preset.code_style_args,
             })
         } else if let Some(cmd) = raw.cmd {
             Ok(FormatterConfig {
                 cmd,
                 args: raw.args.unwrap_or_default(),
                 stdin: raw.stdin,
+                code_style_args: raw.code_style_args,
             })
         } else {
             Ok(FormatterConfig {
                 cmd: String::new(),
                 args: raw.args.unwrap_or_default(),
                 stdin: raw.stdin,
+                code_style_args: raw.code_style_args,
             })
         }
     }
@@ -133,6 +144,7 @@ impl Default for FormatterConfig {
             cmd: String::new(),
             args: Vec::new(),
             stdin: true,
+            code_style_args: BTreeMap::new(),
         }
     }
 }
@@ -662,6 +674,9 @@ fn resolve_formatter_name(
                 if let Some(stdin) = definition.stdin {
                     base_config.stdin = stdin;
                 }
+                if let Some(args) = &definition.code_style_args {
+                    base_config.code_style_args.extend(args.clone());
+                }
 
                 apply_arg_modifiers(&mut base_config.args, definition);
 
@@ -675,6 +690,7 @@ fn resolve_formatter_name(
                     cmd: cmd.clone(),
                     args,
                     stdin: definition.stdin.unwrap_or(true),
+                    code_style_args: definition.code_style_args.clone().unwrap_or_default(),
                 })
             }
             (None, None) => Err(format!(

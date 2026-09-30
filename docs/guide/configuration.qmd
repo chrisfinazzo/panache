@@ -905,16 +905,16 @@ inline-code-attributes = true
     flavors).
 
 `rmarkdown-inline-code`
-:   Parse classic R inline expressions such as `` `r x` `` and R Markdown
-    nested-backtick tails (default: disabled, enabled for Quarto and RMarkdown
-    flavors). Executable expressions participate in external linting.
+:   Parse classic R inline expressions such as <code>&#96;r x&#96;</code> and R
+    Markdown nested-backtick tails (default: disabled, enabled for Quarto and
+    RMarkdown flavors). Executable expressions participate in external linting.
 
 `quarto-inline-code`
-:   Parse braced inline expressions such as `` `{r} x` ``, `` `{python} x` ``,
-    and `` `{julia} x` ``, as well as braced R nested-backtick tails (default:
-    disabled, enabled for Quarto flavor). Executable expressions participate in
-    external linting. Formatting preserves ordinary expressions and extra
-    backticks used to escape them.
+:   Parse braced inline expressions such as `` `{{r}} x` ``,
+    `` `{{python}} x` ``, and `` `{{julia}} x` ``, as well as braced R
+    nested-backtick tails (default: disabled, enabled for Quarto flavor).
+    Executable expressions participate in external linting. Formatting preserves
+    ordinary expressions and extra backticks used to escape them.
 
 `inline-code-attributes`
 :   Attributes on inline code `` `code`{.class} `` (default: enabled)
@@ -1387,6 +1387,116 @@ The formatter definition supports the following fields:
 
 `stdin`
 :   Use stdin/stdout mode (default: `true`) or file-based mode (`false`)
+
+`code-style-args`
+:   Map each supported [code style option](#code-style) to arguments appended
+    when a code block supplies that option. Use `{value}` in an argument to
+    insert the block's scalar value.
+
+### Code Style Metadata {#code-style}
+
+`code-style` is a tool-independent metadata mapping for formatting source code
+in fenced blocks. A formatter may translate supported keys into its own
+settings. The metadata does not control code execution or the appearance of
+rendered code. This is a Panache convention proposed for use by other source
+formatters. Recognition in Quarto's cell-option schema is still under
+discussion.
+
+For an executable Quarto cell, write the mapping in the hashpipe preamble:
+
+````qmd
+```{r}
+#| eval: false
+#| code-style:
+#|   line-width: 40
+#|   indent-width: 2
+
+result <- some_function(first_argument, second_argument)
+```
+````
+
+For an ordinary fenced block, encode the same mapping as a YAML flow mapping in
+a Pandoc code-block attribute:
+
+````qmd
+```{.r code-style="{line-width: 40, indent-width: 2}"}
+result <- some_function(first_argument, second_argument)
+```
+````
+
+Both forms have the same scope and meaning. The ordinary fence syntax uses an
+attribute because its body is displayed code, so a `#|` line there would become
+part of the example. Pandoc preserves the attribute on the code block.
+
+To set defaults for every code block in a document, put `code-style` in its YAML
+front matter:
+
+```yaml
+---
+code-style:
+  line-width: 88
+  indent-width: 2
+---
+```
+
+These defaults apply to executable cells and displayed code blocks. A block's
+own `code-style` mapping overrides individual keys from the front matter. For
+example, a block with `#| code-style: {line-width: 40}` keeps the document's
+`indent-width: 2`.
+
+Pandoc permits multiple YAML metadata blocks. When more than one sets
+`code-style`, the last mapping replaces the earlier mapping for the entire
+document, including code blocks before it. The mappings do not merge, and the
+setting does not switch midway through the document. Repeating a YAML key in one
+metadata block makes Pandoc warn and use the last value; write each key once to
+avoid ambiguity.
+
+Option names use lowercase kebab-case. The first defined keys are:
+
+  | Key            | Value            | Meaning                                                                                                                          |
+  | ---            | ---              | ---                                                                                                                              |
+  | `line-width`   | Positive integer | Preferred maximum source line width, in display columns. A language formatter may exceed it when a line cannot be broken safely. |
+  | `indent-width` | Positive integer | Preferred indentation width in columns, where the formatter supports this choice.                                                |
+
+The mapping is open to additional keys. Consumers should ignore keys they do not
+support. Without document or block metadata, a formatter uses its configured
+defaults. Block options apply only to their own block. Panache ignores
+non-scalar values and nonpositive values for the two width keys. Keys should be
+unique within a mapping. If an executable cell has both an inline and a hashpipe
+`code-style` mapping, the hashpipe mapping takes precedence.
+
+Panache supplies built-in translations for Arity (`line-width`, `indent-width`),
+Black (`line-width`), Prettier (`line-width`, `indent-width`), and Ruff
+(`line-width`). Other presets keep their usual behavior until an adapter is
+configured. The width is passed to the external formatter, so that formatter's
+own wrapping rules still decide the output.
+
+Custom formatter definitions can translate any scalar key with
+`code-style-args`. Arguments are appended only when the block contains the
+corresponding key. `{value}` is replaced within each argument, and arguments are
+passed directly to the process without a shell:
+
+```toml
+[formatters]
+r = "my-r-formatter"
+
+[formatters.my-r-formatter]
+cmd = "arity"
+args = ["format"]
+stdin = true
+
+[formatters.my-r-formatter.code-style-args]
+line-width = ["--line-width", "{value}"]
+indent-width = ["--indent-width", "{value}"]
+```
+
+Named definitions inherit a preset's translations when they share its name.
+Entries in `code-style-args` replace the inherited entry with the same key; an
+empty argument list disables that translation. Panache formats each block using
+its own metadata, even when another block has identical source text.
+
+This convention grew out of the [Quarto discussion on per-cell source
+width](https://github.com/orgs/quarto-dev/discussions/14898).
 
 ### Preset Inheritance
 

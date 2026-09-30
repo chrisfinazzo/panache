@@ -3,7 +3,7 @@
 //! This module handles spawning external formatter processes using standard threads
 //! instead of async/await. Suitable for CLI and WASM contexts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -232,7 +232,7 @@ fn format_with_file(
 /// * `timeout` - Timeout per formatter invocation
 ///
 /// # Returns
-/// HashMap of original code -> formatted code (only successful formats)
+/// Map of source block offsets to formatted code (only successful formats).
 pub fn run_formatters_parallel(
     blocks: Vec<ExternalCodeBlock>,
     formatters: &HashMap<String, Vec<FormatterConfig>>,
@@ -246,19 +246,22 @@ pub fn run_formatters_parallel(
 
     let max_parallel = max_parallel.max(1);
 
-    // Dedup: group blocks by the exact formatter input (language +
-    // pre-formatting body). Every block in a group produces the same subprocess
-    // output, so the formatter chain runs once per group instead of once per
-    // block. Blocks in a group can still differ in `original`/`hashpipe_prefix`,
-    // so each group fans back out to one map entry per block.
-    let mut groups: HashMap<(String, String), Vec<ExternalCodeBlock>> = HashMap::new();
+    // The formatter chain depends on the block's metadata as well as its
+    // language and body. Group only blocks with identical inputs and options.
+    // Each group fans back out to one map entry per source offset.
+    let mut groups: HashMap<(String, String, BTreeMap<String, String>), Vec<ExternalCodeBlock>> =
+        HashMap::new();
     for block in blocks {
         groups
-            .entry((block.language.clone(), block.formatter_input.clone()))
+            .entry((
+                block.language.clone(),
+                block.formatter_input.clone(),
+                block.code_style.clone(),
+            ))
             .or_default()
             .push(block);
     }
-    let groups: Vec<((String, String), Vec<ExternalCodeBlock>)> = groups.into_iter().collect();
+    let groups: Vec<(_, _)> = groups.into_iter().collect();
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(max_parallel)
@@ -268,10 +271,15 @@ pub fn run_formatters_parallel(
     pool.install(|| {
         groups
             .into_par_iter()
-            .flat_map(|((lang, input), blocks)| {
-                let Some(formatted) =
-                    run_formatter_chain(&lang, &input, formatters, &missing_formatters, timeout)
-                else {
+            .flat_map(|((lang, input, code_style), blocks)| {
+                let Some(formatted) = run_formatter_chain(
+                    &lang,
+                    &input,
+                    &code_style,
+                    formatters,
+                    &missing_formatters,
+                    timeout,
+                ) else {
                     return Vec::new();
                 };
 
@@ -285,7 +293,7 @@ pub fn run_formatters_parallel(
                             Some(prefix) => format!("{}{}", prefix, formatted),
                             None => formatted.clone(),
                         };
-                        Some(((lang.clone(), block.original), output))
+                        Some((block.offset, output))
                     })
                     .collect::<Vec<_>>()
             })
@@ -303,16 +311,30 @@ pub fn run_formatters_parallel(
 fn run_formatter_chain(
     lang: &str,
     input: &str,
+    code_style: &BTreeMap<String, String>,
     formatters: &HashMap<String, Vec<FormatterConfig>>,
     missing_formatters: &HashSet<String>,
     timeout: Duration,
 ) -> Option<String> {
-    let formatter_configs = resolve_formatter_configs(formatters, lang)?;
+    let formatter_configs = resolve_formatter_configs(formatters, lang)?
+        .iter()
+        .map(|config| {
+            let mut config = config.clone();
+            for (key, value) in code_style {
+                if let Some(args) = config.code_style_args.get(key) {
+                    config
+                        .args
+                        .extend(args.iter().map(|arg| arg.replace("{value}", value)));
+                }
+            }
+            config
+        })
+        .collect::<Vec<_>>();
     if formatter_configs.is_empty() {
         return None;
     }
 
-    let chain_fp = chain_fingerprint(formatter_configs);
+    let chain_fp = chain_fingerprint(&formatter_configs);
     if let Some(cached) = chain_cache_get(&chain_fp, lang, input) {
         return Some(cached);
     }
@@ -383,22 +405,26 @@ static FORMATTER_CHAIN_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLoc
 /// the working set of a typical editor session stays well under this.
 const FORMATTER_CHAIN_CACHE_CAP: usize = 8192;
 
-/// Fingerprint the formatter chain so a config change (different cmd/args/flags)
-/// produces a fresh cache key instead of returning stale output. `\u{1}` and
-/// `\u{2}` separate fields/entries to keep the encoding unambiguous.
+/// Fingerprint the effective formatter chain, including arguments derived from
+/// `code-style`, so changing one block's options cannot reuse stale output.
 fn chain_fingerprint(configs: &[FormatterConfig]) -> String {
     let mut fp = String::new();
+    push_fingerprint_field(&mut fp, &configs.len().to_string());
     for cfg in configs {
-        fp.push_str(cfg.cmd.trim());
-        fp.push('\u{1}');
+        push_fingerprint_field(&mut fp, cfg.cmd.trim());
+        push_fingerprint_field(&mut fp, &cfg.args.len().to_string());
         for arg in &cfg.args {
-            fp.push_str(arg);
-            fp.push('\u{1}');
+            push_fingerprint_field(&mut fp, arg);
         }
         fp.push(if cfg.stdin { 'S' } else { 'F' });
-        fp.push('\u{2}');
     }
     fp
+}
+
+fn push_fingerprint_field(output: &mut String, field: &str) {
+    output.push_str(&field.len().to_string());
+    output.push(':');
+    output.push_str(field);
 }
 
 fn chain_cache_key(chain_fp: &str, lang: &str, input: &str) -> String {
@@ -436,6 +462,7 @@ mod tests {
             cmd: cmd.to_string(),
             args: args.iter().map(|a| a.to_string()).collect(),
             stdin,
+            code_style_args: Default::default(),
         }
     }
 
@@ -446,6 +473,10 @@ mod tests {
         // a config change never returns a stale cached result.
         assert_ne!(base, chain_fingerprint(&[cfg("blue", &["-"], true)]));
         assert_ne!(base, chain_fingerprint(&[cfg("black", &["-q", "-"], true)]));
+        assert_ne!(
+            chain_fingerprint(&[cfg("black", &["a\u{1}", "b"], true)]),
+            chain_fingerprint(&[cfg("black", &["a", "", "b"], true)])
+        );
         assert_ne!(base, chain_fingerprint(&[cfg("black", &["-"], false)]));
         // A two-step chain differs from either single step.
         assert_ne!(

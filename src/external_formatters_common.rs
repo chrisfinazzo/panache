@@ -357,11 +357,13 @@ mod tests {
                     cmd: "definitely-not-a-real-formatter-123".to_string(),
                     args: vec![],
                     stdin: true,
+                    code_style_args: Default::default(),
                 },
                 FormatterConfig {
                     cmd: "definitely-not-a-real-formatter-123".to_string(),
                     args: vec![],
                     stdin: true,
+                    code_style_args: Default::default(),
                 },
             ],
         );
@@ -380,6 +382,7 @@ mod tests {
                 cmd: "   ".to_string(),
                 args: vec![],
                 stdin: true,
+                code_style_args: Default::default(),
             }],
         );
 
@@ -557,6 +560,7 @@ mod tests {
             cmd: "fatou".to_string(),
             args: vec![],
             stdin: true,
+            code_style_args: Default::default(),
         }]
     }
 
@@ -582,6 +586,7 @@ mod tests {
                 cmd: "runic".to_string(),
                 args: vec![],
                 stdin: true,
+                code_style_args: Default::default(),
             }],
         );
         formatters.insert("julia".to_string(), fatou_like_chain());

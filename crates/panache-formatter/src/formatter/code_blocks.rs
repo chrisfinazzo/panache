@@ -1,8 +1,11 @@
 use crate::config::{Config, Flavor};
-use crate::syntax::{AstNode, SyntaxKind, SyntaxNode};
+use crate::syntax::{
+    AstNode, CellOptionResolution, CodeBlock, SyntaxKind, SyntaxNode, YamlMetadata, YamlNode,
+    parse_yaml_document,
+};
 use panache_parser::parser::blocks::code_blocks::{CodeBlockType, InfoString};
 use rowan::NodeOrToken;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::Formatter;
 use super::hashpipe;
@@ -21,14 +24,16 @@ impl Formatter {
     }
 }
 
-pub type FormattedCodeMap = HashMap<(String, String), String>;
+pub type FormattedCodeMap = HashMap<usize, String>;
 
 #[derive(Debug, Clone)]
 pub struct ExternalCodeBlock {
+    pub offset: usize,
     pub language: String,
     pub original: String,
     pub formatter_input: String,
     pub hashpipe_prefix: Option<String>,
+    pub code_style: BTreeMap<String, String>,
 }
 
 /// Format a code block, normalizing fence markers and attributes based on config
@@ -43,15 +48,9 @@ pub(super) fn format_code_block(
         return;
     }
 
-    let (info_node, language, extracted_content) = extract_code_block_parts(node);
+    let (info_node, _, extracted_content) = extract_code_block_parts(node);
     let mut content = extracted_content;
-    let language_key = language.unwrap_or_default();
-
-    if let Some(formatted) = formatted_code.get(&(language_key.clone(), content.clone())) {
-        content = expand_tabs_with_width(formatted, config.tab_width);
-    } else if let Some(raw_content) = extract_raw_code_block_content(node)
-        && let Some(formatted) = formatted_code.get(&(language_key, raw_content))
-    {
+    if let Some(formatted) = formatted_code.get(&usize::from(node.text_range().start())) {
         content = expand_tabs_with_width(formatted, config.tab_width);
     }
 
@@ -129,12 +128,6 @@ fn is_unclosed_fenced_code_block(node: &SyntaxNode) -> bool {
         .any(|child| child.kind() == SyntaxKind::CODE_FENCE_CLOSE);
 
     has_open && !has_close
-}
-
-fn extract_raw_code_block_content(node: &SyntaxNode) -> Option<String> {
-    node.children()
-        .find(|child| child.kind() == SyntaxKind::CODE_CONTENT)
-        .map(|child| child.text().to_string())
 }
 
 fn expand_tabs_with_width(text: &str, tab_width: usize) -> String {
@@ -784,15 +777,14 @@ pub(crate) fn extract_myst_directive_parts(node: &SyntaxNode) -> Option<(String,
     body.map(|body| (language, body))
 }
 
-/// Collect all code blocks and their info strings from the syntax tree.
 /// Collect all code blocks from the syntax tree for external formatting.
-/// Returns a flat list of (language, content) pairs.
 pub fn collect_code_blocks(
     tree: &SyntaxNode,
     _input: &str,
     config: &Config,
 ) -> Vec<ExternalCodeBlock> {
     let mut result = Vec::new();
+    let document_code_style = document_code_style(tree);
     for node in tree.descendants() {
         if node.kind() == SyntaxKind::MYST_DIRECTIVE {
             if let Some((language, content)) = extract_myst_directive_parts(&node) {
@@ -803,10 +795,12 @@ pub fn collect_code_blocks(
                     continue;
                 }
                 result.push(ExternalCodeBlock {
+                    offset: usize::from(node.text_range().start()),
                     language,
                     original: content.clone(),
                     formatter_input: content,
                     hashpipe_prefix: None,
+                    code_style: document_code_style.clone(),
                 });
             }
             continue;
@@ -826,9 +820,9 @@ pub fn collect_code_blocks(
             .map(|n| InfoString::parse(&n.text().to_string()))
             .unwrap_or_else(|| InfoString::parse(""));
 
-        let language = language.unwrap_or_else(|| match info.block_type {
+        let language = language.unwrap_or_else(|| match &info.block_type {
             CodeBlockType::DisplayShortcut { language }
-            | CodeBlockType::Executable { language } => language,
+            | CodeBlockType::Executable { language } => language.clone(),
             CodeBlockType::DisplayExplicit { classes } => {
                 classes.first().cloned().unwrap_or_default()
             }
@@ -839,75 +833,219 @@ pub fn collect_code_blocks(
             continue;
         }
 
-        result.push(ExternalCodeBlock {
-            language,
-            original: content.clone(),
-            formatter_input: content,
-            hashpipe_prefix: None,
-        });
-    }
-
-    if !matches!(config.flavor, Flavor::Quarto | Flavor::RMarkdown) {
-        return result;
-    }
-
-    let mut updated = Vec::with_capacity(result.len());
-    for block in result {
-        let mut formatter_input = block.formatter_input.clone();
-        let mut prefix = None;
-
-        for node in tree.descendants() {
-            if node.kind() != SyntaxKind::CODE_BLOCK {
-                continue;
-            }
-
-            let (info_node, language, content) = extract_code_block_parts(&node);
-            if content != block.original {
-                continue;
-            }
-
-            let info_node = match info_node {
-                Some(node) => node,
-                None => break,
+        let mut code_style = document_code_style.clone();
+        code_style.extend(code_style_options(&node, &info));
+        let (formatter_input, hashpipe_prefix) =
+            if matches!(config.flavor, Flavor::Quarto | Flavor::RMarkdown)
+                && matches!(info.block_type, CodeBlockType::Executable { .. })
+                && hashpipe::get_comment_prefix(&language).is_some()
+            {
+                split_hashpipe_header(&content, &node)
+                    .map(|(header, body)| (body, Some(header)))
+                    .unwrap_or_else(|| (content.clone(), None))
+            } else {
+                (content.clone(), None)
             };
 
-            let info_raw = info_node.text().to_string();
-            let info = InfoString::parse(&info_raw);
-            let is_executable = matches!(info.block_type, CodeBlockType::Executable { .. });
-            if !is_executable {
-                break;
-            }
-
-            let language = language.unwrap_or_else(|| match info.block_type {
-                CodeBlockType::Executable { language } => language,
-                _ => String::new(),
-            });
-
-            if hashpipe::get_comment_prefix(&language).is_some()
-                && let Some((header, body)) = split_hashpipe_header(&content, &node)
-            {
-                formatter_input = body;
-                prefix = Some(header);
-            }
-            break;
-        }
-
-        updated.push(ExternalCodeBlock {
-            language: block.language,
-            original: block.original,
+        result.push(ExternalCodeBlock {
+            offset: usize::from(node.text_range().start()),
+            language,
+            original: content,
             formatter_input,
-            hashpipe_prefix: prefix,
+            hashpipe_prefix,
+            code_style,
         });
     }
 
-    updated
+    result
+}
+
+fn document_code_style(tree: &SyntaxNode) -> BTreeMap<String, String> {
+    tree.children()
+        .filter_map(YamlMetadata::cast)
+        .filter_map(|metadata| metadata.document())
+        .filter_map(|document| document.block_map())
+        .flat_map(|mapping| mapping.entries())
+        .filter(|entry| entry.key_text().as_deref() == Some("code-style"))
+        .map(|entry| {
+            entry
+                .value()
+                .and_then(|value| value.as_node())
+                .map(|value| code_style_map(&value))
+                .unwrap_or_default()
+        })
+        .last()
+        .unwrap_or_default()
+}
+
+fn code_style_options(node: &SyntaxNode, info: &InfoString) -> BTreeMap<String, String> {
+    if let Some(cell) = CodeBlock::cast(node.clone()).and_then(|block| block.executable_cell()) {
+        for option in cell.resolved_options() {
+            if option.key() != "code-style" {
+                continue;
+            }
+            if let CellOptionResolution::Resolved(declaration) = option.resolution() {
+                if let Some(value) = declaration.yaml_value() {
+                    return code_style_map(value);
+                }
+                if let Some(value) = declaration.cooked_value() {
+                    return parse_code_style_map(value);
+                }
+            }
+            return BTreeMap::new();
+        }
+    }
+
+    info.attributes
+        .iter()
+        .find(|(key, _)| key == "code-style")
+        .and_then(|(_, value)| value.as_deref())
+        .map(parse_code_style_map)
+        .unwrap_or_default()
+}
+
+fn parse_code_style_map(value: &str) -> BTreeMap<String, String> {
+    parse_yaml_document(value)
+        .and_then(|document| document.as_node())
+        .map(|node| code_style_map(&node))
+        .unwrap_or_default()
+}
+
+fn code_style_map(value: &YamlNode) -> BTreeMap<String, String> {
+    let entries: Vec<(Option<String>, Option<String>)> = match value {
+        YamlNode::BlockMap(map) => map
+            .entries()
+            .map(|entry| {
+                (
+                    entry.key_text(),
+                    entry
+                        .value()
+                        .and_then(|value| value.as_scalar())
+                        .map(|value| value.value()),
+                )
+            })
+            .collect(),
+        YamlNode::FlowMap(map) => map
+            .entries()
+            .map(|entry| {
+                (
+                    entry.key_text(),
+                    entry
+                        .value()
+                        .and_then(|value| value.as_scalar())
+                        .map(|value| value.value()),
+                )
+            })
+            .collect(),
+        _ => return BTreeMap::new(),
+    };
+
+    entries
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let (key, value) = (key?, value?);
+            let key = key.trim().to_ascii_lowercase().replace('_', "-");
+            if matches!(key.as_str(), "line-width" | "indent-width")
+                && value
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|width| *width > 0)
+                    .is_none()
+            {
+                return None;
+            }
+            Some((key, value))
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::split_hashpipe_header;
-    use crate::config::{Extensions, Flavor, ParserOptions};
+    use super::{collect_code_blocks, split_hashpipe_header};
+    use crate::config::{Config, Extensions, Flavor, ParserOptions};
     use crate::syntax::SyntaxKind;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn document_code_style_defaults_merge_with_each_block() {
+        let input = "---\ncode-style:\n  line-width: 40\n  indent-width: 2\n---\n\n```{r}\nx <- 1\n```\n\n```{r}\n#| code-style: {line-width: 80}\n\nx <- 2\n```\n\n```{.r code-style=\"{indent-width: 4}\"}\nx <- 3\n```\n";
+        let config = Config {
+            flavor: Flavor::Quarto,
+            parser_extensions: Extensions::for_flavor(Flavor::Quarto),
+            ..Default::default()
+        };
+        let tree = crate::parser::parse(
+            input,
+            Some(ParserOptions {
+                flavor: config.flavor,
+                extensions: config.parser_extensions.clone(),
+                ..Default::default()
+            }),
+        );
+
+        let blocks = collect_code_blocks(&tree, input, &config);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(
+            blocks[0].code_style,
+            BTreeMap::from([
+                ("line-width".to_string(), "40".to_string()),
+                ("indent-width".to_string(), "2".to_string()),
+            ])
+        );
+        assert_eq!(blocks[1].code_style["line-width"], "80");
+        assert_eq!(blocks[1].code_style["indent-width"], "2");
+        assert_eq!(blocks[2].code_style["line-width"], "40");
+        assert_eq!(blocks[2].code_style["indent-width"], "4");
+    }
+
+    #[test]
+    fn last_document_code_style_field_applies_to_every_block() {
+        let input = "---\ncode-style:\n  line-width: 40\n  indent-width: 2\n---\n\n```r\nx <- 1\n```\n\n---\ncode-style:\n  line-width: 80\n---\n\n```r\nx <- 2\n```\n";
+        let config = Config {
+            flavor: Flavor::Pandoc,
+            parser_extensions: Extensions::for_flavor(Flavor::Pandoc),
+            ..Default::default()
+        };
+        let tree = crate::parser::parse(
+            input,
+            Some(ParserOptions {
+                flavor: config.flavor,
+                extensions: config.parser_extensions.clone(),
+                ..Default::default()
+            }),
+        );
+
+        let blocks = collect_code_blocks(&tree, input, &config);
+        assert_eq!(blocks.len(), 2);
+        for block in blocks {
+            assert_eq!(
+                block.code_style,
+                BTreeMap::from([("line-width".to_string(), "80".to_string())])
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_code_style_key_in_one_metadata_block_uses_last_value() {
+        let input = "---\ncode-style: {line-width: 40}\ncode-style:\n  line-width: 60\n  line-width: 80\n---\n\n```r\nx <- 1\n```\n";
+        let config = Config {
+            flavor: Flavor::Pandoc,
+            parser_extensions: Extensions::for_flavor(Flavor::Pandoc),
+            ..Default::default()
+        };
+        let tree = crate::parser::parse(
+            input,
+            Some(ParserOptions {
+                flavor: config.flavor,
+                extensions: config.parser_extensions.clone(),
+                ..Default::default()
+            }),
+        );
+
+        let blocks = collect_code_blocks(&tree, input, &config);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].code_style["line-width"], "80");
+    }
 
     #[test]
     fn split_hashpipe_header_handles_empty_value_with_indented_list() {

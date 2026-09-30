@@ -1,4 +1,5 @@
 use crate::config::FormatterConfig;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy)]
 pub struct FormatterPresetMetadata {
@@ -13,10 +14,40 @@ pub struct FormatterPresetMetadata {
 
 impl FormatterPresetMetadata {
     pub fn to_formatter_config(self) -> FormatterConfig {
+        let code_style_args = match self.name {
+            "arity" => [
+                ("line-width", &["--line-width", "{value}"][..]),
+                ("indent-width", &["--indent-width", "{value}"][..]),
+            ]
+            .into_iter()
+            .collect(),
+            "black" => [("line-width", &["--line-length", "{value}"][..])]
+                .into_iter()
+                .collect(),
+            "prettier" => [
+                ("line-width", &["--print-width", "{value}"][..]),
+                ("indent-width", &["--tab-width", "{value}"][..]),
+            ]
+            .into_iter()
+            .collect(),
+            "ruff" => [("line-width", &["--line-length", "{value}"][..])]
+                .into_iter()
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         FormatterConfig {
             cmd: self.cmd.to_string(),
             args: self.args.iter().map(ToString::to_string).collect(),
             stdin: self.stdin,
+            code_style_args: code_style_args
+                .into_iter()
+                .map(|(key, args)| {
+                    (
+                        key.to_string(),
+                        args.iter().map(ToString::to_string).collect(),
+                    )
+                })
+                .collect(),
         }
     }
 }

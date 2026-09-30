@@ -3,6 +3,129 @@ use panache::{Config, format};
 use std::collections::HashMap;
 
 #[test]
+fn code_style_width_is_scoped_to_each_code_block() {
+    if which::which("arity").is_err() {
+        return;
+    }
+
+    let mut config = Config {
+        flavor: Flavor::Quarto,
+        extensions: Extensions::for_flavor(Flavor::Quarto),
+        ..Default::default()
+    };
+    config.formatters.insert(
+        "r".to_string(),
+        vec![panache::config::get_formatter_preset("arity").unwrap()],
+    );
+
+    let input = "```{r}\n#| code-style:\n#|   line-width: 40\n\nresult <- some_function(first_argument, second_argument)\n```\n\n```{.r code-style=\"{line-width: 80}\"}\nresult <- some_function(first_argument, second_argument)\n```\n\n```{r}\nresult <- some_function(first_argument, second_argument)\n```\n";
+    let output = format(input, Some(config.clone()), None);
+
+    assert!(
+        output.contains("result <- some_function(\n  first_argument,\n  second_argument\n)"),
+        "{output}"
+    );
+    assert_eq!(
+        output
+            .matches("result <- some_function(first_argument, second_argument)")
+            .count(),
+        2,
+        "{output}"
+    );
+    assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
+fn document_code_style_defaults_merge_with_block_options() {
+    if which::which("arity").is_err() {
+        return;
+    }
+
+    let mut config = Config {
+        flavor: Flavor::Quarto,
+        extensions: Extensions::for_flavor(Flavor::Quarto),
+        ..Default::default()
+    };
+    config.formatters.insert(
+        "r".to_string(),
+        vec![panache::config::get_formatter_preset("arity").unwrap()],
+    );
+
+    let input = "---\ncode-style:\n  line-width: 40\n  indent-width: 4\n---\n\n```{r}\nresult <- some_function(first_argument, second_argument)\n```\n\n```{r}\n#| code-style: {indent-width: 2}\n\nresult <- some_function(first_argument, second_argument)\n```\n\n```{.r code-style=\"{line-width: 80}\"}\nresult <- some_function(first_argument, second_argument)\n```\n";
+    let output = format(input, Some(config.clone()), None);
+
+    assert!(
+        output.contains("result <- some_function(\n    first_argument,\n    second_argument\n)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("result <- some_function(\n  first_argument,\n  second_argument\n)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("result <- some_function(first_argument, second_argument)"),
+        "{output}"
+    );
+    assert_eq!(format(&output, Some(config), None), output);
+}
+
+#[test]
+fn custom_formatter_translates_code_style_keys() {
+    if which::which("arity").is_err() {
+        return;
+    }
+
+    let mut config: Config = toml::from_str(
+        r#"
+[formatters]
+r = "local-r"
+
+[formatters.local-r]
+cmd = "arity"
+args = ["format"]
+
+[formatters.local-r.code-style-args]
+line-width = ["--line-width", "{value}"]
+indent-width = ["--indent-width", "{value}"]
+"#,
+    )
+    .unwrap();
+    config.flavor = Flavor::Quarto;
+    config.extensions = Extensions::for_flavor(Flavor::Quarto);
+
+    let input = "```{r}\n#| code-style: {line-width: 40, indent-width: 4}\n\nresult <- some_function(first_argument, second_argument)\n```\n";
+    let output = format(input, Some(config), None);
+    assert!(
+        output.contains("result <- some_function(\n    first_argument,\n    second_argument\n)"),
+        "{output}"
+    );
+}
+
+#[test]
+fn ruff_preset_translates_code_style_width() {
+    if which::which("ruff").is_err() {
+        return;
+    }
+
+    let mut config = Config {
+        flavor: Flavor::Quarto,
+        extensions: Extensions::for_flavor(Flavor::Quarto),
+        ..Default::default()
+    };
+    config.formatters.insert(
+        "python".to_string(),
+        vec![panache::config::get_formatter_preset("ruff").unwrap()],
+    );
+
+    let input = "```{python}\n#| code-style:\n#|   line-width: 40\n\nx = some_function(first_argument, second_argument)\n```\n";
+    let output = format(input, Some(config), None);
+    assert!(
+        output.contains("x = some_function(\n    first_argument, second_argument\n)"),
+        "{output}"
+    );
+}
+
+#[test]
 fn code_block_with_shfmt() {
     // Skip if shfmt not available
     if which::which("shfmt").is_err() {
@@ -17,6 +140,7 @@ fn code_block_with_shfmt() {
             cmd: "shfmt".to_string(),
             args: vec![],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -58,6 +182,7 @@ fn formatter_key_resolves_via_language_alias() {
             cmd: "shfmt".to_string(),
             args: vec![],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -100,6 +225,7 @@ fn identical_blocks_are_deduplicated_and_all_formatted() {
             cmd: "shfmt".to_string(),
             args: vec![],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -140,6 +266,7 @@ fn code_block_with_external_formatter() {
             cmd: "tr".to_string(),
             args: vec!["[:lower:]".to_string(), "[:upper:]".to_string()],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -177,6 +304,7 @@ fn myst_directive_body_with_external_formatter() {
             cmd: "tr".to_string(),
             args: vec!["[:lower:]".to_string(), "[:upper:]".to_string()],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -223,6 +351,7 @@ fn formatter_args_substitute_lang_placeholder() {
             cmd: "sed".to_string(),
             args: vec!["s/{lang}/REPL/g".to_string()],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -258,6 +387,7 @@ fn untagged_code_block_with_empty_string_formatter_key() {
             cmd: "tr".to_string(),
             args: vec!["[:lower:]".to_string(), "[:upper:]".to_string()],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -353,6 +483,7 @@ fn code_block_with_failing_formatter() {
             cmd: "false".to_string(), // Always fails
             args: vec![],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -384,6 +515,7 @@ fn python_hashpipe_prefix_preserved_with_external_formatter() {
             cmd: "tr".to_string(),
             args: vec!["[:lower:]".to_string(), "[:upper:]".to_string()],
             stdin: true,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -427,6 +559,7 @@ fn r_air_formats_equals_spacing_in_quarto_r_block() {
             cmd: "air".to_string(),
             args: vec!["format".to_string(), "{}".to_string()],
             stdin: false,
+            code_style_args: Default::default(),
         }],
     );
 
@@ -466,6 +599,7 @@ fn r_air_preserves_single_blank_line_between_hashpipe_options_and_code() {
             cmd: "air".to_string(),
             args: vec!["format".to_string(), "{}".to_string()],
             stdin: false,
+            code_style_args: Default::default(),
         }],
     );
 
