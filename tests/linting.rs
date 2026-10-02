@@ -31,6 +31,41 @@ fn lint_file_with_config(filename: &str, config_toml: &str) -> Vec<panache::lint
 }
 
 #[test]
+fn space_before_punctuation_is_opt_in() {
+    for config in ["", "[lint.rules]\nspace-before-punctuation = false"] {
+        let diagnostics = lint_file_with_config("space_before_punctuation.md", config);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.code != "space-before-punctuation")
+        );
+    }
+}
+
+#[test]
+fn space_before_punctuation_reports_precise_unsafe_edits() {
+    let input = include_str!("linting/space_before_punctuation.md");
+    let diagnostics = lint_file_with_config(
+        "space_before_punctuation.md",
+        "[lint.rules]\nspace-before-punctuation = true",
+    );
+    let hits: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == "space-before-punctuation")
+        .collect();
+    assert_eq!(hits.len(), 3, "{diagnostics:#?}");
+    for (diagnostic, gap) in hits.iter().zip(["   ", "    ", "    "]) {
+        assert_eq!(diagnostic.location.line, 1);
+        assert_eq!(&input[diagnostic.location.range], gap);
+        let fix = diagnostic.fix.as_ref().expect("punctuation spacing fix");
+        assert_eq!(fix.safety, panache::linter::FixSafety::Unsafe);
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].range, diagnostic.location.range);
+        assert!(fix.edits[0].replacement.is_empty());
+    }
+}
+
+#[test]
 fn test_ignore_directives() {
     let diagnostics = lint_file("ignore_directives.md");
     let hierarchy_issues: Vec<_> = diagnostics

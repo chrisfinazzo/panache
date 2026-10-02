@@ -1,0 +1,5 @@
+[format]
+wrap = "sentence"
+
+[lint.rules]
+space-before-punctuation = true

@@ -32,6 +32,7 @@ pub mod math_content;
 pub mod missing_chunk_labels;
 pub mod quarto_schema;
 pub mod reversed_footnote_marker;
+pub mod space_before_punctuation;
 pub mod stray_fenced_div_markers;
 pub mod swallowed_list_marker;
 pub mod table_column_count;

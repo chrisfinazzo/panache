@@ -7,9 +7,9 @@ description: >
 ---
 
 Panache includes a built-in linter that checks for correctness issues and best
-practice violations in your Markdown documents. Unlike the formatter which
-handles style consistency, the linter catches semantic problems like syntax
-errors, heading hierarchy issues, broken references, and citation problems.
+practice violations in your Markdown documents. It catches syntax errors,
+heading hierarchy issues, broken references, and citation problems. Optional
+rules also flag prose conventions that need the author's judgment.
 
 ::: {.callout-tip}
 For the full catalog of built-in lint rules, the diagnostic codes each rule
@@ -19,9 +19,13 @@ reference](../reference/linter-rules.qmd).
 
 ## Philosophy
 
-The linter focuses on semantic correctness rather than stylistic preferences,
-for which the formatter is responsible (and can act as a linter via
-`panache format --check`).
+The linter focuses on semantic correctness. The formatter handles routine style
+consistency, which you can check with `panache format --check`.
+
+Some prose edits depend on language or author intent. These belong in optional
+lint rules with fixes you can review. For example, `space-before-punctuation`
+flags spaces before punctuation without removing them during formatting. Its
+fixes are unsafe because the spacing may be intentional.
 
 ## CLI Usage
 
@@ -374,12 +378,25 @@ unknown-emoji-alias = true
 inline-math-line-break = true
 ```
 
-All rules are enabled by default when omitted. You can disable a specific rule:
+Most rules are enabled by default when omitted. You can disable a specific rule:
 
 ```toml
 [lint.rules]
 undefined-references = false
 ```
+
+Rules marked **Default: Off** in the [reference](../reference/linter-rules.qmd)
+must be enabled explicitly. To check spaces before `.`, `,`, and `;` in prose:
+
+```toml
+[lint.rules]
+space-before-punctuation = true
+```
+
+Review these warnings, then apply their fixes with
+`panache lint --fix --unsafe-fixes document.qmd`. A plain `--fix` leaves this
+spacing unchanged. French documents retain spaces before semicolons when
+identified by YAML `lang:` or the `[format].lang` fallback.
 
 ## LSP Integration
 

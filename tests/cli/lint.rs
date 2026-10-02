@@ -593,6 +593,39 @@ fn test_lint_fix_skips_unsafe_fixes_and_hints() {
 }
 
 #[test]
+fn punctuation_spacing_requires_opt_in_and_unsafe_fixes() {
+    let temp_dir = TempDir::new().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    let original = "Words   , more ; end .\n";
+    fs::write(&test_file, original).unwrap();
+    fs::write(
+        temp_dir.path().join("panache.toml"),
+        "[lint.rules]\nspace-before-punctuation = true\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("panache")
+        .current_dir(temp_dir.path())
+        .args(["lint", "--no-cache", "--fix", "test.md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("space-before-punctuation"))
+        .stdout(predicate::str::contains("--unsafe-fixes"));
+    assert_eq!(fs::read_to_string(&test_file).unwrap(), original);
+
+    cargo_bin_cmd!("panache")
+        .current_dir(temp_dir.path())
+        .args(["lint", "--no-cache", "--fix", "--unsafe-fixes", "test.md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Fixed 3 issue(s)"));
+    assert_eq!(
+        fs::read_to_string(&test_file).unwrap(),
+        "Words, more; end.\n"
+    );
+}
+
+#[test]
 fn test_lint_unsafe_fixes_removes_empty_key() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("test.qmd");

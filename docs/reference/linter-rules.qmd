@@ -83,6 +83,53 @@ The "Auto-fix" field of each rule below notes when its fix is unsafe.
 
 ## Rules
 
+### `space-before-punctuation` {#space-before-punctuation}
+
+Flags potentially unintended spaces before punctuation in paragraph prose.
+
+Severity
+:   Warning
+
+Auto-fix
+:   Yes (unsafe: spacing may reflect language conventions or author intent)
+
+Default
+:   Off; enable with `space-before-punctuation = true` under `[lint.rules]`
+
+Diagnostic codes
+:   [`space-before-punctuation`](#space-before-punctuation)
+
+Description
+
+:   Checks ordinary spaces and tabs before standalone `.`, `,`, and `;` in
+    paragraphs, including list items, block quotes, and emphasized text. The
+    formatter continues to preserve a space before punctuation.
+
+    The rule skips headings, link and image labels, tables, code, math, raw content,
+    escaped spaces, Unicode spaces, line breaks, and punctuation runs such as
+    `. . .`. It also skips suffixes such as `.md` and `.5`, and cases where removing
+    a space could create a list marker or an HTML entity.
+
+    Punctuation directly before inline code, emphasis, or a link can be a prefix, as
+    in `` .`column-margin` ``. The rule leaves that spacing alone.
+
+    French documents retain spaces before semicolons. YAML `lang:` takes precedence
+    over the `[format].lang` fallback; regional variants such as `fr-CA` count as
+    French. Other languages and intentional spacing may still need review, so fixes
+    require `--fix --unsafe-fixes` or an individual editor quick fix.
+
+**Example violation:**
+
+```markdown
+We have A   , and B    ; so we have C    .
+```
+
+**Auto-fix output:**
+
+```markdown
+We have A, and B; so we have C.
+```
+
 ### `heading-hierarchy` {#heading-hierarchy}
 
 Detects skipped heading levels that violate document structure best practices.
