@@ -1,7 +1,7 @@
 //! JSON Schema for `panache.toml`.
 //!
 //! Generates the schema from the host `Config` type and:
-//!   * keeps `docs/reference/panache.schema.json` in sync (set
+//!   * keeps `panache.schema.json` and its published copy in `docs/` in sync (set
 //!     `UPDATE_EXPECTED=1` to regenerate when the schema legitimately
 //!     drifts), and
 //!   * validates every fixture `panache.toml` against the schema so the
@@ -18,7 +18,7 @@ use panache::Config;
 use serde_json::Value;
 
 const SCHEMA_ID: &str = "https://panache.bz/panache.schema.json";
-const SCHEMA_PATH: &str = "panache.schema.json";
+const SCHEMA_PATHS: &[&str] = &["panache.schema.json", "docs/panache.schema.json"];
 
 fn generate_schema_json() -> Value {
     let schema = schemars::schema_for!(Config);
@@ -41,10 +41,6 @@ fn generate_schema_json() -> Value {
     json
 }
 
-fn schema_path() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(SCHEMA_PATH)
-}
-
 fn write_pretty(json: &Value) -> String {
     let mut out = serde_json::to_string_pretty(json).expect("serialize schema");
     out.push('\n');
@@ -55,30 +51,40 @@ fn write_pretty(json: &Value) -> String {
 fn schema_is_in_sync_with_config_types() {
     let generated = generate_schema_json();
     let pretty = write_pretty(&generated);
-    let path = schema_path();
+    for relative_path in SCHEMA_PATHS {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
 
-    if std::env::var_os("UPDATE_EXPECTED").is_some() {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("create docs/reference dir");
+        if std::env::var_os("UPDATE_EXPECTED").is_some() {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("create schema directory");
+            }
+            fs::write(&path, &pretty).expect("write schema");
+            continue;
         }
-        fs::write(&path, &pretty).expect("write schema");
-        return;
-    }
 
-    let on_disk = fs::read_to_string(&path).unwrap_or_else(|err| {
-        panic!(
-            "missing {}: {err}. Run `UPDATE_EXPECTED=1 cargo test config_schema` to create it.",
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap_or_else(|err| panic!("missing {}: {err}", path.display()))
+                .file_type()
+                .is_file(),
+            "{} must be a regular file in source archives",
             path.display()
-        )
-    });
+        );
+        let on_disk = fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!(
+                "missing {}: {err}. Run `UPDATE_EXPECTED=1 cargo test config_schema` to create it.",
+                path.display()
+            )
+        });
 
-    similar_asserts::assert_eq!(
-        on_disk,
-        pretty,
-        "{} is out of date with the host Config types. \
-         Run `UPDATE_EXPECTED=1 cargo test config_schema` to regenerate.",
-        path.display()
-    );
+        similar_asserts::assert_eq!(
+            on_disk,
+            pretty,
+            "{} is out of date with the host Config types. \
+             Run `UPDATE_EXPECTED=1 cargo test config_schema` to regenerate.",
+            path.display()
+        );
+    }
 }
 
 fn toml_to_json(toml_str: &str) -> Value {

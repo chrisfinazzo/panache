@@ -1,1 +1,889 @@
-../panache.schema.json
+{
+  "$defs": {
+    "ArgKind": {
+      "description": "The delimiter shape of an attached command argument.",
+      "enum": [
+        "brace",
+        "bracket"
+      ],
+      "type": "string"
+    },
+    "ArgumentDomain": {
+      "description": "The TeX domain a command argument is known to establish.",
+      "enum": [
+        "unknown",
+        "math",
+        "text"
+      ],
+      "type": "string"
+    },
+    "BlankLines": {
+      "oneOf": [
+        {
+          "const": "preserve",
+          "description": "Preserve original blank lines (any number)",
+          "type": "string"
+        },
+        {
+          "const": "collapse",
+          "description": "Collapse multiple consecutive blank lines to a single blank line",
+          "type": "string"
+        }
+      ]
+    },
+    "CompatConfig": {
+      "additionalProperties": false,
+      "description": "Compatibility targets for the upstream toolchain you author for.\n\nCo-locates the \"which version of the upstream tool do I target\" knobs.\n`pandoc` drives how the parser disambiguates ambiguous syntax; `quarto`\nselects the vendored schema the `quarto-schema` lint rule validates against.\nConfigured via the `[compat]` section:\n\n```toml\n[compat]\npandoc = \"3.9\"\nquarto = \"1.9\"\n```",
+      "properties": {
+        "pandoc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PandocCompat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pandoc release whose ambiguous-syntax behavior the parser emulates\n(`latest`, `3.7`, `3.9`). Supersedes the deprecated top-level\n`pandoc-compat` key."
+        },
+        "quarto": {
+          "default": null,
+          "description": "Quarto release whose vendored schema the `quarto-schema` rule validates\nagainst (e.g. `\"1.9\"`). Currently one version is bundled, so this is an\nadvisory pin; it reserves the key for selecting among bundled versions\nlater.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ExperimentalConfig": {
+      "additionalProperties": false,
+      "description": "Deprecated experimental configuration aliases.",
+      "properties": {
+        "format-math": {
+          "description": "Deprecated: use `[format] math` instead.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Flavor": {
+      "description": "Markdown flavor to parse and format against.",
+      "enum": [
+        "pandoc",
+        "quarto",
+        "rmarkdown",
+        "gfm",
+        "common-mark",
+        "commonmark",
+        "multimarkdown",
+        "mdsvex",
+        "myst"
+      ],
+      "type": "string"
+    },
+    "FormatterDefinition": {
+      "additionalProperties": false,
+      "description": "A named formatter definition from `[formatters.<name>]`.\n\nDefinitions named after a built-in preset inherit unspecified fields:\n\n```toml\n[formatters.air]\nargs = [\"format\", \"--custom\"]\n```\n\nArguments can also be modified with `prepend-args` and `append-args`:\n\n```toml\n[formatters.air]\nappend-args = [\"-i\", \"2\"]\n```",
+      "properties": {
+        "append-args": {
+          "default": null,
+          "description": "Arguments appended to the base arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "args": {
+          "default": null,
+          "description": "Arguments, or the preset arguments when omitted.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cmd": {
+          "default": null,
+          "description": "Custom command, or the preset command when omitted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code-style-args": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": null,
+          "description": "Map of code-style keys to formatter-specific arguments.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "prepend-args": {
+          "default": null,
+          "description": "Arguments prepended to the base arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "preset": {
+          "default": null,
+          "description": "Legacy reference to a built-in preset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin": {
+          "default": null,
+          "description": "Whether the formatter reads from standard input.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FormatterEntry": {
+      "anyOf": [
+        {
+          "description": "Single preset or named definition: `r = \"air\"`.",
+          "type": "string"
+        },
+        {
+          "description": "Sequential chain: `python = [\"isort\", \"black\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/FormatterDefinition",
+          "description": "Named definition table: `[formatters.air] args = [...]`."
+        }
+      ]
+    },
+    "HorizontalRuleStyle": {
+      "oneOf": [
+        {
+          "const": "line-width",
+          "description": "Expand horizontal rules to the configured line width (Pandoc-style)",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Emit a compact three-dash rule (`---`)",
+          "type": "string"
+        }
+      ]
+    },
+    "LineEnding": {
+      "enum": [
+        "auto",
+        "lf",
+        "crlf"
+      ],
+      "type": "string"
+    },
+    "LintConfig": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "Linter configuration.",
+      "properties": {
+        "rules": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Map of lint rule names to enabled/disabled. Preferred over the legacy flat `[lint]` shape.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "MathArgumentConfig": {
+      "additionalProperties": false,
+      "description": "One positional argument in a configured TeX math-command signature.",
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/ArgumentDomain",
+          "description": "Whether consumers may interpret the argument as math, text, or neither."
+        },
+        "kind": {
+          "$ref": "#/$defs/ArgKind",
+          "description": "Delimiter shape. Brackets are optional; braces are required."
+        }
+      },
+      "required": [
+        "kind",
+        "domain"
+      ],
+      "type": "object"
+    },
+    "MathDelimiterStyle": {
+      "description": "Style for formatting math delimiters",
+      "oneOf": [
+        {
+          "const": "preserve",
+          "description": "Preserve original delimiter style (\\(...\\) stays \\(...\\), $...$ stays $...$)",
+          "type": "string"
+        },
+        {
+          "const": "dollars",
+          "description": "Normalize all to dollar syntax ($...$ and $$...$$)",
+          "type": "string"
+        },
+        {
+          "const": "backslash",
+          "description": "Normalize all to backslash syntax (\\(...\\) and \\[...\\])",
+          "type": "string"
+        }
+      ]
+    },
+    "MathMode": {
+      "description": "How TeX math content is formatted.",
+      "oneOf": [
+        {
+          "const": "verbatim",
+          "description": "Keep math content on the formatter's verbatim preservation path.",
+          "type": "string"
+        },
+        {
+          "const": "preserve",
+          "description": "Normalize math while retaining authored top-level soft display lines.",
+          "type": "string"
+        },
+        {
+          "const": "single-line",
+          "description": "Normalize math and flatten free display rows without width wrapping.",
+          "type": "string"
+        },
+        {
+          "const": "reflow",
+          "description": "Normalize math and reflow over-width display formulas.",
+          "type": "string"
+        }
+      ]
+    },
+    "NoBreakAbbreviations": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "PandocCompat": {
+      "description": "Compatibility target for ambiguous Pandoc behavior.",
+      "enum": [
+        "latest",
+        "3.7",
+        "3-7",
+        "v3.7",
+        "v3-7",
+        "3.9",
+        "3-9",
+        "v3.9",
+        "v3-9",
+        "3.10",
+        "3-10",
+        "v3.10",
+        "v3-10"
+      ],
+      "type": "string"
+    },
+    "StyleConfig": {
+      "additionalProperties": false,
+      "description": "Formatting style configuration.\nGroups all style-related settings together.",
+      "properties": {
+        "blank-lines": {
+          "$ref": "#/$defs/BlankLines",
+          "description": "Blank line handling between blocks"
+        },
+        "built-in-greedy-wrap": {
+          "default": true,
+          "description": "Use panache-native greedy wrapping instead of textwrap.",
+          "type": "boolean"
+        },
+        "horizontal-rule-style": {
+          "$ref": "#/$defs/HorizontalRuleStyle",
+          "description": "Horizontal rule rendering: expanded to the line width or compact `---`"
+        },
+        "lang": {
+          "default": null,
+          "description": "Fallback document language for sentence wrapping when the document has no\nYAML `lang:`. A code such as `de` or `pt-BR`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line-ending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LineEnding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Line ending style. `None` falls back to the deprecated top-level\n`line-ending`, then `auto`."
+        },
+        "line-width": {
+          "default": null,
+          "description": "Maximum line width before wrapping. `None` falls back to the deprecated\ntop-level `line-width`, then the built-in default (80).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "math": {
+          "$ref": "#/$defs/MathMode",
+          "default": "reflow",
+          "description": "Math content formatting and display line-breaking policy. Defaults to\n`reflow`."
+        },
+        "math-delimiter-style": {
+          "$ref": "#/$defs/MathDelimiterStyle",
+          "description": "Math delimiter style preference"
+        },
+        "math-indent": {
+          "default": 2,
+          "description": "Math indentation (spaces)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "math-signatures": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/MathArgumentConfig"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Explicit positional signatures for TeX math commands. Keys omit the\nleading backslash and contain only ASCII letters or `@`.",
+          "type": "object"
+        },
+        "no-break-abbreviations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NoBreakAbbreviations"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Extra abbreviations whose trailing period must not end a sentence (used\nby `wrap = \"sentence\"`). Merged with the built-in per-language profile."
+        },
+        "tab-stops": {
+          "$ref": "#/$defs/TabStopMode",
+          "description": "Tab stop handling (normalize or preserve)"
+        },
+        "tab-width": {
+          "default": 4,
+          "description": "Tab width for expanding tabs when normalizing",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "table-indent": {
+          "default": 2,
+          "description": "Indentation (columns) for top-level pipe, simple, and multiline tables.\nAccepts 0--3; grid tables stay flush at column 0 regardless.",
+          "format": "uint",
+          "maximum": 3,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wrap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WrapMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Text wrapping mode"
+        }
+      },
+      "type": "object"
+    },
+    "TabStopMode": {
+      "description": "Tab stop handling for formatter output.",
+      "oneOf": [
+        {
+          "const": "normalize",
+          "description": "Normalize tabs to spaces (4-column tab stop).",
+          "type": "string"
+        },
+        {
+          "const": "preserve",
+          "description": "Preserve tabs in literal code spans/blocks.",
+          "type": "string"
+        }
+      ]
+    },
+    "WrapMode": {
+      "enum": [
+        "preserve",
+        "reflow",
+        "sentence",
+        "semantic"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://panache.bz/panache.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Schema for panache.toml. Generated from the host Config types; do not hand-edit — run `UPDATE_EXPECTED=1 cargo test config_schema` instead.",
+  "properties": {
+    "blank-lines": {
+      "$ref": "#/$defs/BlankLines",
+      "description": "DEPRECATED no-op: `blank-lines` is retained only so older configs keep\nparsing and `check_deprecated_blank_lines` can warn. When no `[format]`\nsection is present this top-level value still feeds `blank_lines`."
+    },
+    "cache": {
+      "default": null,
+      "description": "Enable the on-disk lint/format cache (default: true). Set to `false` to\ndisable cache reads and writes for the project.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "cache-dir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "compat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CompatConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Compatibility targets (`[compat]`): `pandoc` and `quarto` versions."
+    },
+    "crossref-prefixes": {
+      "default": [],
+      "description": "Extra cross-reference key prefixes for crossref-injecting extensions\n(e.g. pseudocode's `@algo-`). Keys with these prefixes parse as\ncross-references rather than citations.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "exclude": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "experimental": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExperimentalConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Deprecated aliases retained under `[experimental]` for migration."
+    },
+    "extend": {
+      "default": null,
+      "description": "Path to another config file to inherit from and override (Ruff-style).\nResolved relative to the file that declares it; a leading `~` expands to\nthe home directory. Chains transitively (`a` extends `b` extends `c`).\nThis key is consumed during the raw-TOML merge in the loader, so by the\ntime a `RawConfig` is deserialized it is already inert; the field exists\nonly so the key is accepted under `deny_unknown_fields` and appears in\nthe schema.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "extend-exclude": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "extend-include": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "extensions": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "enum": [
+                "alerts",
+                "all-symbols-escapable",
+                "auto-identifiers",
+                "autolink-bare-uris",
+                "autolinks",
+                "backtick-code-blocks",
+                "blank-before-blockquote",
+                "blank-before-header",
+                "bookdown-equation-references",
+                "bookdown-references",
+                "bracketed-spans",
+                "citations",
+                "definition-lists",
+                "east-asian-line-breaks",
+                "emoji",
+                "escaped-line-breaks",
+                "example-lists",
+                "executable-code",
+                "fancy-lists",
+                "fenced-code-attributes",
+                "fenced-code-blocks",
+                "fenced-divs",
+                "footnotes",
+                "four-space-rule",
+                "gfm-auto-identifiers",
+                "grid-tables",
+                "hard-line-breaks",
+                "header-attributes",
+                "implicit-figures",
+                "implicit-header-references",
+                "inline-code-attributes",
+                "inline-footnotes",
+                "inline-images",
+                "inline-links",
+                "intraword-underscores",
+                "line-blocks",
+                "link-attributes",
+                "lists-without-preceding-blankline",
+                "mark",
+                "markdown-in-html-blocks",
+                "mmd-header-identifiers",
+                "mmd-link-attributes",
+                "mmd-title-block",
+                "multiline-tables",
+                "myst-block-breaks",
+                "myst-colon-fence",
+                "myst-comments",
+                "myst-directives",
+                "myst-roles",
+                "myst-substitutions",
+                "myst-targets",
+                "native-divs",
+                "native-spans",
+                "pandoc-title-block",
+                "pipe-tables",
+                "pymdownx-details",
+                "python-markdown-admonitions",
+                "quarto-callouts",
+                "quarto-crossrefs",
+                "quarto-inline-code",
+                "quarto-shortcodes",
+                "raw-attribute",
+                "raw-html",
+                "raw-tex",
+                "reference-links",
+                "rmarkdown-inline-code",
+                "shortcut-reference-links",
+                "simple-tables",
+                "smart",
+                "smart-quotes",
+                "spaced-reference-links",
+                "startnum",
+                "strikeout",
+                "subscript",
+                "superscript",
+                "svelte-template",
+                "table-captions",
+                "task-lists",
+                "tex-math-dollars",
+                "tex-math-double-backslash",
+                "tex-math-gfm",
+                "tex-math-single-backslash",
+                "wikilinks-title-after-pipe",
+                "wikilinks-title-before-pipe",
+                "yaml-metadata-block"
+              ]
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "default": null,
+      "description": "Pandoc extension toggles. Each key is either an extension name (`fenced-divs = true`) or a flavor name whose table scopes overrides to one flavor (`[extensions.pandoc] fenced-divs = false`).",
+      "propertyNames": {
+        "enum": [
+          "alerts",
+          "all-symbols-escapable",
+          "auto-identifiers",
+          "autolink-bare-uris",
+          "autolinks",
+          "backtick-code-blocks",
+          "blank-before-blockquote",
+          "blank-before-header",
+          "bookdown-equation-references",
+          "bookdown-references",
+          "bracketed-spans",
+          "citations",
+          "common-mark",
+          "commonmark",
+          "definition-lists",
+          "east-asian-line-breaks",
+          "emoji",
+          "escaped-line-breaks",
+          "example-lists",
+          "executable-code",
+          "fancy-lists",
+          "fenced-code-attributes",
+          "fenced-code-blocks",
+          "fenced-divs",
+          "footnotes",
+          "four-space-rule",
+          "gfm",
+          "gfm-auto-identifiers",
+          "grid-tables",
+          "hard-line-breaks",
+          "header-attributes",
+          "implicit-figures",
+          "implicit-header-references",
+          "inline-code-attributes",
+          "inline-footnotes",
+          "inline-images",
+          "inline-links",
+          "intraword-underscores",
+          "line-blocks",
+          "link-attributes",
+          "lists-without-preceding-blankline",
+          "mark",
+          "markdown-in-html-blocks",
+          "mdsvex",
+          "mmd-header-identifiers",
+          "mmd-link-attributes",
+          "mmd-title-block",
+          "multi-markdown",
+          "multiline-tables",
+          "multimarkdown",
+          "myst",
+          "myst-block-breaks",
+          "myst-colon-fence",
+          "myst-comments",
+          "myst-directives",
+          "myst-roles",
+          "myst-substitutions",
+          "myst-targets",
+          "native-divs",
+          "native-spans",
+          "pandoc",
+          "pandoc-title-block",
+          "pipe-tables",
+          "pymdownx-details",
+          "python-markdown-admonitions",
+          "quarto",
+          "quarto-callouts",
+          "quarto-crossrefs",
+          "quarto-inline-code",
+          "quarto-shortcodes",
+          "r-markdown",
+          "raw-attribute",
+          "raw-html",
+          "raw-tex",
+          "reference-links",
+          "rmarkdown",
+          "rmarkdown-inline-code",
+          "shortcut-reference-links",
+          "simple-tables",
+          "smart",
+          "smart-quotes",
+          "spaced-reference-links",
+          "startnum",
+          "strikeout",
+          "subscript",
+          "superscript",
+          "svelte-template",
+          "table-captions",
+          "task-lists",
+          "tex-math-dollars",
+          "tex-math-double-backslash",
+          "tex-math-gfm",
+          "tex-math-single-backslash",
+          "wikilinks-title-after-pipe",
+          "wikilinks-title-before-pipe",
+          "yaml-metadata-block"
+        ]
+      },
+      "type": "object"
+    },
+    "external-max-parallel": {
+      "default": null,
+      "description": "Max parallel external tool invocations (formatters/linters) per document.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "flavor": {
+      "$ref": "#/$defs/Flavor",
+      "default": "pandoc"
+    },
+    "flavor-overrides": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Flavor"
+      },
+      "default": {},
+      "deprecated": true,
+      "description": "Deprecated: use `[flavors]`, which groups path patterns by flavor.\nThis alias may be removed in a major release on or after 2027-03-08.",
+      "type": "object"
+    },
+    "flavors": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "default": {},
+      "description": "Preferred flavor-to-path-pattern mapping.",
+      "propertyNames": {
+        "enum": [
+          "pandoc",
+          "quarto",
+          "rmarkdown",
+          "r-markdown",
+          "gfm",
+          "commonmark",
+          "common-mark",
+          "multimarkdown",
+          "multi-markdown",
+          "mdsvex",
+          "myst"
+        ]
+      },
+      "type": "object"
+    },
+    "format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StyleConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "formatters": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FormatterEntry"
+      },
+      "default": null,
+      "type": "object"
+    },
+    "include": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "line-ending": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LineEnding"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "DEPRECATED top-level alias: use `[format] line-ending` instead. Still\nread as a fallback when `[format]` omits it."
+    },
+    "line-width": {
+      "default": null,
+      "description": "DEPRECATED top-level alias: use `[format] line-width` instead. Still\nread as a fallback when `[format]` omits it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "lint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LintConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "linters": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "pandoc-compat": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PandocCompat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "DEPRECATED: use `[compat] pandoc` instead. Still read as an alias."
+    }
+  },
+  "title": "Panache configuration",
+  "type": "object"
+}
