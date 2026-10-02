@@ -1180,7 +1180,7 @@ fn code_content_text(node: &SyntaxNode, drop_indent: bool) -> String {
             }
             match token.kind() {
                 SyntaxKind::LINE_PREFIX | SyntaxKind::WHITESPACE => {
-                    let next_is_marker = elements.get(i + 1).is_some_and(&is_marker_piece);
+                    let next_is_marker = elements.get(i + 1).is_some_and(is_marker_piece);
                     let rest = if saw_bq {
                         expanded.strip_prefix(' ').unwrap_or(&expanded)
                     } else {
