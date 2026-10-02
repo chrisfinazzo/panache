@@ -17,7 +17,7 @@ impl Rule for SpaceBeforePunctuationRule {
     fn metadata(&self) -> RuleMeta {
         RuleMeta {
             name: "space-before-punctuation",
-            default_on: false,
+            default_on: true,
             requires: Requirement::Always,
             auto_fix: true,
             codes: const { &[DiagnosticCode::warning("space-before-punctuation")] },

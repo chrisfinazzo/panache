@@ -31,24 +31,22 @@ fn lint_file_with_config(filename: &str, config_toml: &str) -> Vec<panache::lint
 }
 
 #[test]
-fn space_before_punctuation_is_opt_in() {
-    for config in ["", "[lint.rules]\nspace-before-punctuation = false"] {
-        let diagnostics = lint_file_with_config("space_before_punctuation.md", config);
-        assert!(
-            diagnostics
-                .iter()
-                .all(|d| d.code != "space-before-punctuation")
-        );
-    }
+fn space_before_punctuation_can_be_disabled() {
+    let diagnostics = lint_file_with_config(
+        "space_before_punctuation.md",
+        "[lint.rules]\nspace-before-punctuation = false",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.code != "space-before-punctuation")
+    );
 }
 
 #[test]
-fn space_before_punctuation_reports_precise_unsafe_edits() {
+fn space_before_punctuation_reports_precise_unsafe_edits_by_default() {
     let input = include_str!("linting/space_before_punctuation.md");
-    let diagnostics = lint_file_with_config(
-        "space_before_punctuation.md",
-        "[lint.rules]\nspace-before-punctuation = true",
-    );
+    let diagnostics = lint_file("space_before_punctuation.md");
     let hits: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.code == "space-before-punctuation")

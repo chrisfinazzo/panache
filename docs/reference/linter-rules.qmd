@@ -93,9 +93,6 @@ Severity
 Auto-fix
 :   Yes (unsafe: spacing may reflect language conventions or author intent)
 
-Default
-:   Off; enable with `space-before-punctuation = true` under `[lint.rules]`
-
 Diagnostic codes
 :   [`space-before-punctuation`](#space-before-punctuation)
 
