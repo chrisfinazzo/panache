@@ -1005,6 +1005,7 @@ golden_test_cases!(
     simple_table_stops_at_div_closer_in_quote,
     single_column_table_needs_closer_before_div_closer,
     issue_467_attribute_unnumbered_shorthand,
+    issue_551_nested_list_div_closer,
     writer_autolinks,
     writer_blockquote_not,
     writer_definition_lists_multiblock,

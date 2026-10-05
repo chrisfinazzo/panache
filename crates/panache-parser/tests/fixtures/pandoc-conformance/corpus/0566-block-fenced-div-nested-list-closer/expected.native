@@ -1,0 +1,12 @@
+[ BulletList
+    [ [ BulletList
+          [ [ Para [ Str "item" ] ]
+          , [ Para [ Str "other" ]
+            , Div
+                ( "" , [ "small" ] , [] )
+                [ BulletList [ [ Plain [ Str "chapter" ] ] ] ]
+            ]
+          ]
+      ]
+    ]
+]

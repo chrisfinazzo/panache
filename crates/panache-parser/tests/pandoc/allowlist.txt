@@ -876,3 +876,7 @@
 563
 564
 565
+
+# A fenced div inside a nested list item closes at its opening indent,
+# even when its final child is another list.
+566

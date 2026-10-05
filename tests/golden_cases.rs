@@ -662,6 +662,7 @@ golden_test_cases!(
     issue_496_preserve_trims_trailing_whitespace,
     issue_497_definition_body_chunk_blank_line,
     issue_498_definition_body_indented_code,
+    issue_551_nested_list_div_closer,
     writer_autolinks,
     writer_blockquote_not,
     writer_definition_lists_multiblock,

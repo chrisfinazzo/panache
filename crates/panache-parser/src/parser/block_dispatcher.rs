@@ -2244,6 +2244,12 @@ impl BlockParser for FencedDivCloseParser {
             if indent_cols >= list_info.content_col {
                 return None;
             }
+            if ctx
+                .fenced_div_open_indent
+                .is_some_and(|open_indent| indent_cols > open_indent)
+            {
+                return None;
+            }
         }
 
         if ctx.list_indent_info.is_none()
@@ -2255,7 +2261,15 @@ impl BlockParser for FencedDivCloseParser {
             }
         }
 
-        if !is_div_closing_fence(content_for_fenced_div_detection(ctx, first)) {
+        let content = content_for_fenced_div_detection(ctx, first);
+        // A div wrapping a nested list can close at its original indentation,
+        // which may exceed the three spaces accepted by the fence recognizer.
+        let content = if ctx.fenced_div_wraps_list {
+            content.trim_start_matches([' ', '\t'])
+        } else {
+            content
+        };
+        if !is_div_closing_fence(content) {
             return None;
         }
 

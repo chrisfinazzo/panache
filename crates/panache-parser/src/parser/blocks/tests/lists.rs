@@ -281,6 +281,22 @@ fn list_item_with_valid_fenced_divs_parses_as_fenced_div_nodes() {
 }
 
 #[test]
+fn fenced_div_closer_after_nested_list_stays_outside_list_item() {
+    let input = "- - item\n  - other\n\n    ::: small\n    - chapter\n    :::\n";
+    let tree = parse_blocks(input);
+    let div = find_first(&tree, SyntaxKind::FENCED_DIV).expect("fenced div");
+    assert_eq!(count_children(&div, SyntaxKind::DIV_FENCE_CLOSE), 1);
+    assert_eq!(count_children(&div, SyntaxKind::LIST), 1);
+    assert_eq!(tree.text().to_string(), input);
+
+    let deeper_fence = input.replace("    :::\n", "     :::\n");
+    let deeper_tree = parse_blocks(&deeper_fence);
+    let deeper_div = find_first(&deeper_tree, SyntaxKind::FENCED_DIV).expect("fenced div");
+    assert_eq!(count_children(&deeper_div, SyntaxKind::DIV_FENCE_CLOSE), 0);
+    assert_eq!(deeper_tree.text().to_string(), deeper_fence);
+}
+
+#[test]
 fn fancy_list_lower_alpha_period() {
     use crate::options::{Extensions, ParserOptions};
     let config = ParserOptions {
