@@ -16,7 +16,7 @@ rust-version.workspace = true
 # `cargo run` resolving to the CLI for tooling like the pre-commit format hook.
 default-run = "panache"
 readme = "README.md"
-description = "Language server, formatter, and linter for Markdown, Quarto, and R Markdown"
+description = "Language server, formatter, and linter for Quarto and other Markdown flavors"
 license.workspace = true
 repository.workspace = true
 homepage = "https://panache.bz"
@@ -129,7 +129,7 @@ maintainer = "Johan Larsson <johan@jolars.co>"
 copyright = "2026, Johan Larsson <johan@jolars.co>"
 license-file = ["LICENSE", "4"]
 extended-description = """\
-A CLI formatter for Quarto, Pandoc, and Markdown files. Supports Quarto-specific \
+A CLI formatter and linter for Quarto and other Markdown flavors. Supports Quarto-specific \
 syntax like fenced divs, tables, and math formatting that other formatters struggle \
 with. Provides intelligent line wrapping, consistent formatting, and an integrated \
 language server for editor support."""

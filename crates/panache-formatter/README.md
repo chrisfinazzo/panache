@@ -1,3 +1,3 @@
 # panache-formatter
 
-Formatter for Pandoc, Quarto, and R Markdown.
+Formatter for Quarto and other Markdown flavors.

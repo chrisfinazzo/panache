@@ -2,15 +2,14 @@
 title: Language Server
 description: >
   Panache includes a built-in language server protocol (LSP) implementation that
-  provides a rich set of editor features for Pandoc Markdown, Quarto, and R
-  Markdown files.
+  provides a rich set of editor features for Quarto and other Markdown flavors.
 ---
 
 Panache includes a built-in language server protocol (LSP) implementation that
-provides a rich set of editor features for Pandoc Markdown, Quarto, and R
-Markdown files. The language server is designed to be editor-agnostic and
-configurations for popular editors like Neovim, VS Code, Helix, Zed, and Emacs
-are provided in [Editor Configuration](#editor-configuration).
+provides a rich set of editor features for Quarto and other Markdown flavors.
+The language server is designed to be editor-agnostic and configurations for
+popular editors like Neovim, VS Code, Helix, Zed, and Emacs are provided in
+[Editor Configuration](#editor-configuration).
 
 ## Features
 

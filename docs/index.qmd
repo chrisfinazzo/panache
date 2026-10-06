@@ -1,12 +1,11 @@
 ---
 title: "Panache"
 title-meta: >-
-  Panache: Language Server, Formatter, and Linter for Markdown, Quarto, and R
-  Markdown
+  Panache: Language Server, Formatter, and Linter for Quarto and Other Markdown
+  Flavors
 description-meta: >
-  Panache provides authoring tools for Markdown, Quarto, and R Markdown: a
-  language server, formatter, and linter to help you write better documents,
-  more efficiently.
+  Panache provides a language server, formatter, and linter for Quarto and other
+  Markdown flavors, including MyST and R Markdown.
 title-prefix: ""
 canonical-url: "https://panache.bz/"
 image: images/og.png
@@ -14,13 +13,13 @@ image-alt: "Panache logo"
 
 open-graph:
   title: >-
-    Panache: Language Server, Formatter, and Linter for Markdown, Quarto, and R
-    Markdown
+    Panache: Language Server, Formatter, and Linter for Quarto and Other
+    Markdown Flavors
 
 twitter-card:
   title: >-
-    Panache: Language Server, Formatter, and Linter for Markdown, Quarto, and R
-    Markdown
+    Panache: Language Server, Formatter, and Linter for Quarto and Other
+    Markdown Flavors
 
 format:
   html:
@@ -30,23 +29,23 @@ format:
 <img src="images/logo.svg" alt="Panache logo" class="float-end ms-3"
 width="330" height="375" style="max-width: 20%; height: auto;">
 
-Panache is a language server, formatter, and linter for Markdown, Quarto, and R
-Markdown. It is built for fast, reliable formatting, linting, and language
-services across syntax that many generic Markdown tools struggle with, including
-fenced divs, grid tables, definition lists, citations, and inline footnotes.
+Panache is a language server, formatter, and linter for Quarto and other
+Markdown flavors. It is built for fast, reliable formatting, linting, and
+language services across syntax that many generic Markdown tools struggle with,
+including fenced divs, grid tables, definition lists, citations, and inline
+footnotes.
 
-Panache is designed to follow Pandoc's syntax closely and cover its full range
-of Markdown dialects (flavors) and extensions, to be able to handle anything
-from simple CommonMark to complex Quarto documents with embedded code chunks and
-fenced divs. It is flexible and can be used in your editor, on the command line,
-and in CI, with consistent behavior across all environments.
+Panache supports CommonMark, GitHub Flavored Markdown, MyST, Pandoc, R Markdown,
+and Quarto. It handles everything from simple Markdown to documents with
+embedded code chunks and fenced divs. You can use it in your editor, on the
+command line, and in CI, with consistent behavior across all environments.
 
 <div style="clear: both;"></div>
 
 ## Why Panache
 
-- **Pandoc, R Markdown and Quarto aware**: understands syntax extensions
-  directly instead of flattening them into plain Markdown.
+- **Flavor-aware**: understands Quarto, Pandoc, R Markdown, MyST, and other
+  Markdown syntax directly.
 - **Formatter + linter + LSP in one tool**: consistent behavior in your CLI,
   editor, and CI.
 - **Configurable defaults**: tune wrapping, flavor, extensions, and linting to

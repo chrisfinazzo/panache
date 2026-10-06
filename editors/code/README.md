@@ -1,6 +1,6 @@
 # Panache
 
-A language server for Markdown, Quarto, and R Markdown.
+A language server for Quarto and other Markdown flavors.
 
 ## Quick start
 

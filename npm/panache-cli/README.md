@@ -1,7 +1,7 @@
 # @panache-cli/panache
 
-[Panache](https://panache.bz) is an LSP, formatter, and linter for Markdown,
-Quarto, and RMarkdown documents.
+[Panache](https://panache.bz) is a language server, formatter, and linter for
+Quarto and other Markdown flavors.
 
 ## Install
 

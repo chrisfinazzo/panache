@@ -8,7 +8,7 @@ include = [
     "/README.md",
     "/CHANGELOG.md",
 ]
-description = "Core formatting engine for Pandoc markdown, Quarto, and RMarkdown"
+description = "Core formatting engine for Quarto and other Markdown flavors"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

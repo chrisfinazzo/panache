@@ -1,5 +1,5 @@
-//! `panache-parser` is a lossless Concrete Syntax Tree (CST) parser for Pandoc
-//! Markdown, Quarto, and R Markdown documents.
+//! `panache-parser` is a lossless Concrete Syntax Tree (CST) parser for Quarto
+//! and other Markdown flavors.
 //!
 //! It preserves source structure and trivia (including markers and whitespace),
 //! making it suitable for editor tooling and formatting pipelines that require

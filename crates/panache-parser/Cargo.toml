@@ -11,7 +11,7 @@ include = [
     "/README.md",
     "/CHANGELOG.md",
 ]
-description = "Lossless CST parser and syntax wrappers for Pandoc markdown, Quarto, and RMarkdown"
+description = "Lossless CST parser and syntax wrappers for Quarto and other Markdown flavors"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

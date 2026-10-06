@@ -1,7 +1,7 @@
 # panache-parser
 
-Lossless CST parser and typed syntax wrappers for Pandoc Markdown, Quarto, and R
-Markdown.
+Lossless CST parser and typed syntax wrappers for Quarto and other Markdown
+flavors.
 
 ## Status
 

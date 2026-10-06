@@ -12,7 +12,7 @@ fn test_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Panache is a command-line formatter, linter, and language server",
+            "Panache is a language server, formatter, and linter for Quarto",
         ))
         .stdout(predicate::str::contains("Global options:"))
         .stdout(predicate::str::contains("--color <WHEN>"))

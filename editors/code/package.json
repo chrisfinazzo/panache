@@ -1,7 +1,7 @@
 {
   "name": "panache",
   "displayName": "Panache",
-  "description": "Language server for Pandoc, Quarto, and R Markdown documents",
+  "description": "Language server for Quarto and other Markdown flavors",
   "version": "3.14.0",
   "publisher": "jolars",
   "license": "MIT",

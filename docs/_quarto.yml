@@ -11,9 +11,8 @@ project:
 website:
   title: "Panache"
   description: >-
-    Panache provides authoring tools for Markdown, Quarto, and R Markdown: a
-    language server, formatter, and linter to help you write better documents,
-    more efficiently.
+    Panache provides a language server, formatter, and linter for Quarto and other
+    Markdown flavors, including MyST and R Markdown.
 
   site-url: "https://panache.bz"
   repo-url: "https://github.com/jolars/panache/docs"

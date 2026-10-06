@@ -3,7 +3,7 @@ title: CLI Reference
 description: Comprehensive reference for the Panache CLI, including all commands, options, and usage examples.
 ---
 
-Panache is a command-line formatter, linter, and language server (implementing the Language Server Protocol, LSP) for Quarto (.qmd), Pandoc, and Markdown files written in Rust. It understands Quarto/Pandoc-specific syntax that other formatters like Prettier and mdformat struggle with, including fenced divs, tables, and math formatting.
+Panache is a language server, formatter, and linter for Quarto and other Markdown flavors, including Pandoc, R Markdown, and MyST. It is written in Rust and understands syntax that generic Markdown tools often miss, including fenced divs, tables, and math.
 
 **Usage:** `panache [OPTIONS] <COMMAND>`
 
@@ -61,7 +61,7 @@ Panache is a command-line formatter, linter, and language server (implementing t
 
 ## `panache format`
 
-Format a Quarto, Pandoc, or R Markdown document according to Panache's formatting rules. By default, formats files in place. Use --check to verify formatting without making changes. Stdin input always outputs to stdout.
+Format a Quarto or other Markdown document according to Panache's formatting rules. By default, formats files in place. Use --check to verify formatting without making changes. Stdin input always outputs to stdout.
 
 **Usage:** `panache format [OPTIONS] [FILES]...`
 

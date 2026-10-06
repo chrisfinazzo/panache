@@ -13,15 +13,14 @@ const STYLES: Styles = Styles::styled()
 #[command(name = "panache")]
 #[command(author, version)]
 #[command(
-    about = "Panache: A language server, formatter, and linter for Pandoc, Quarto and R Markdown"
+    about = "Panache: A language server, formatter, and linter for Quarto and other Markdown flavors"
 )]
 #[command(styles = STYLES)]
 #[command(
-    long_about = "Panache is a command-line formatter, linter, and language server \
-    (implementing the Language Server Protocol, LSP) for Quarto (.qmd), Pandoc, and Markdown \
-    files written in Rust. It understands Quarto/Pandoc-specific syntax that other formatters \
-    like Prettier and mdformat struggle with, including fenced divs, tables, and math \
-    formatting."
+    long_about = "Panache is a language server, formatter, and linter for Quarto and other \
+    Markdown flavors, including Pandoc, R Markdown, and MyST. It is written in Rust and \
+    understands syntax that generic Markdown tools often miss, including fenced divs, \
+    tables, and math."
 )]
 #[command(after_help = "For help with a specific command, see: `panache help <command>`.")]
 #[command(
@@ -177,9 +176,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Format a Quarto, Pandoc, or Markdown document
+    /// Format a Quarto or other Markdown document
     #[command(
-        long_about = "Format a Quarto, Pandoc, or R Markdown document according to Panache's \
+        long_about = "Format a Quarto or other Markdown document according to Panache's \
         formatting rules. By default, formats files in place. Use --check to verify formatting \
         without making changes. Stdin input always outputs to stdout."
     )]
@@ -322,7 +321,7 @@ For editor configuration examples, see: https://github.com/jolars/panache#editor
         )]
         debug: bool,
     },
-    /// Lint a Quarto, Pandoc, or Markdown document
+    /// Lint a Quarto or other Markdown document
     #[command(
         long_about = "Lint a document to check for correctness issues and best practice \
         violations. Unlike the formatter which handles style, the linter catches semantic \

@@ -12,9 +12,9 @@ version](https://badge.fury.io/py/panache-cli.svg?icon=si%3Apython)](https://bad
 [![npm
 version](https://badge.fury.io/js/@panache-cli%2Fpanache.svg?icon=si%3Anpm)](https://badge.fury.io/js/@panache-cli%2Fpanache)
 
-Panache is a language server, formatter, and linter for Markdown, Quarto, and R
-Markdown, built in Rust with a lossless CST parser and support for external
-formatters and linters on code blocks.
+Panache is a language server, formatter, and linter for Quarto and other
+Markdown flavors, built in Rust with a lossless CST parser and support for
+external formatters and linters on code blocks.
 
 ## Installation
 
@@ -288,7 +288,7 @@ page](https://panache.bz/guide/performance).
 
 - Full LSP implementation with formatting, diagnostics, code actions, and more
 - Standalone CLI for both formatting and linting
-- Support for Quarto, Pandoc, and R Markdown syntax
+- Support for Quarto, Pandoc, R Markdown, MyST, and other Markdown flavors
 - Lossless CST-based parsing
 - Idempotent formatting
 - Semi-opinionated defaults with configurable style options for common

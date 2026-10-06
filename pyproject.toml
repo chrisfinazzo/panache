@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "panache-cli"
-description = "A language server, formatter, and linter for Markdown, Quarto, and R Markdown"
+description = "A language server, formatter, and linter for Quarto and other Markdown flavors"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"

@@ -27,8 +27,8 @@ description: >
   format and lint your documents on commit or pull request.
 
 - In [Comparison with Other Tools](comparison.qmd) we compare Panache to other
-  formatters, linters, and language servers in the Markdown/Pandoc/Quarto space,
-  to help you choose the right tool (or combination) for your project.
+  formatters, linters, and language servers for Quarto and other Markdown
+  flavors, to help you choose the right tool (or combination) for your project.
 
 - In [Performance](performance.qmd) we present benchmarks comparing Panache's
   formatting and linting speed against popular alternatives on real Markdown and
