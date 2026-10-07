@@ -98,3 +98,16 @@
 # `CodeBlock` in the item here; and a bare closed fence after a plain paragraph
 # (`a`/`   ``` `/`c`/`   ``` `) stays one inline-code paragraph by design. See
 # TODO.md.
+
+# html-block: quoted `>` in rejected self-closing divs now splits the CST
+# correctly. The remaining differences are standalone smart closing quotes
+# in the Markdown tail: Pandoc emits U+201D/U+2019, but the projector leaves
+# the source quote unchanged. This is a general smart-typography projection
+# gap, not an HTML parser-shape gap. Paired parser and formatter goldens pin
+# the corrected boundary; no previously allowlisted case was removed.
+573
+574
+575
+576
+577
+578

@@ -3609,6 +3609,27 @@ mod tests {
     }
 
     #[test]
+    fn symbol_usage_index_collects_links_after_raw_div_quoted_gt() {
+        let db = SalsaDb::default();
+        let tree = crate::parse(
+            "<div _bad=\"x\" id=\"hidden\" title=\"a>[link](#visible)b\"/>\n",
+            Some(crate::Config {
+                flavor: crate::config::Flavor::Pandoc,
+                ..Default::default()
+            }),
+        );
+        let index = symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+
+        assert!(index.crossref_declarations("hidden").is_none());
+        assert_eq!(
+            index
+                .heading_link_usages("visible")
+                .map(|ranges| ranges.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn heading_outline_collects_heading_title_level_and_range() {
         let mut db = SalsaDb::default();
         let path = PathBuf::from("/tmp/heading_outline.qmd");

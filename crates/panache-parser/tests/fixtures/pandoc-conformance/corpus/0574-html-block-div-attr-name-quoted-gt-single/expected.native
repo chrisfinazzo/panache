@@ -1,0 +1,11 @@
+[ RawBlock
+    (Format "html") "<div _bad='x' id='hidden' title='a>"
+, Para
+    [ Str "b\8217/>"
+    , Strong [ Str "Outside." ]
+    , SoftBreak
+    , Str "next"
+    , Space
+    , Str "line"
+    ]
+]

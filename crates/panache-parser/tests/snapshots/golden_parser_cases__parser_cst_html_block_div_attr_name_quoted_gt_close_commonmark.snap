@@ -1,0 +1,23 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..71
+  HTML_BLOCK@0..52
+    HTML_BLOCK_TAG@0..52
+      TEXT@0..51 "<div _bad=\"x\" id=\"hid ..."
+      NEWLINE@51..52 "\n"
+  BLANK_LINE@52..53
+    BLANK_LINE@52..53 "\n"
+  HTML_BLOCK@53..60
+    HTML_BLOCK_TAG@53..60
+      TEXT@53..59 "</div>"
+      NEWLINE@59..60 "\n"
+  BLANK_LINE@60..61
+    BLANK_LINE@60..61 "\n"
+  PARAGRAPH@61..71
+    STRONG@61..70
+      STRONG_MARKER@61..63 "**"
+      TEXT@63..68 "Tail."
+      STRONG_MARKER@68..70 "**"
+    NEWLINE@70..71 "\n"

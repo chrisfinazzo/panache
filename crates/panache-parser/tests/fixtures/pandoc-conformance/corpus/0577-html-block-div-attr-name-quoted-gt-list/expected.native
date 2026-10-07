@@ -1,0 +1,14 @@
+[ BulletList
+    [ [ RawBlock
+          (Format "html") "<div _bad=\"x\" id=\"hidden\" title=\"a>"
+      , Plain
+          [ Str "b\8221/>"
+          , Strong [ Str "Outside." ]
+          , SoftBreak
+          , Str "next"
+          , Space
+          , Str "line"
+          ]
+      ]
+    ]
+]

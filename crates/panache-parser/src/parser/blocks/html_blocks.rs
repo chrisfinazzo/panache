@@ -1009,8 +1009,9 @@ fn try_parse_div_with_invalid_attribute_names(
     };
     let mut remaining = if text[..open_gt].ends_with('/') {
         // Pandoc treats a rejected native div as raw HTML, whose slash closes
-        // the tag instead of opening a container for following Markdown.
-        open_gt + 1
+        // the tag instead of opening a container for following Markdown. Its
+        // raw tag reader ends at the first `>`, even inside a quoted value.
+        text.find('>')? + 1
     } else {
         let mut close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
         for line in &lines[open_end + 1..body_end] {

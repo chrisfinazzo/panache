@@ -1,0 +1,11 @@
+[ RawBlock
+    (Format "html")
+    "<div _bad=\"x\" id=\"hidden\" title=\"a/>b\">**Raw body.**</div>"
+, Para
+    [ Strong [ Str "Tail." ]
+    , SoftBreak
+    , Str "next"
+    , Space
+    , Str "line"
+    ]
+]

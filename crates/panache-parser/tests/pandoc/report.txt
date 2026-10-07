@@ -1,12 +1,12 @@
 Pandoc-native conformance report (pandoc 3.10.2)
-572 / 572 cases passing (100.0%)
-0 failing
-0 blocked-list entries
+574 / 580 cases passing (99.0%)
+6 failing
+6 blocked-list entries
 
 === Per-section pass / fail ===
   block: 69 pass / 0 fail
   citation: 1 pass / 0 fail
-  html: 323 pass / 0 fail
+  html: 325 pass / 6 fail
   imported: 162 pass / 0 fail
   inline: 17 pass / 0 fail
 
@@ -583,6 +583,8 @@ Pandoc-native conformance report (pandoc 3.10.2)
 570
 571
 572
+579
+580
 
 === Passing cases grouped by section ===
 # block
@@ -983,6 +985,8 @@ Pandoc-native conformance report (pandoc 3.10.2)
 570
 571
 572
+579
+580
 
 # imported
 26
@@ -1166,4 +1170,24 @@ Pandoc-native conformance report (pandoc 3.10.2)
 191
 457
 546
+
+=== Failing case slugs (with rendered diff hint) ===
+# 573 (html-block-div-attr-name-quoted-gt-double)
+  expected: [ RawBlock ( Format "html" ) "<DIV a&amp;b=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\8221/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+  got:      [ RawBlock ( Format "html" ) "<DIV a&amp;b=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\"/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+# 574 (html-block-div-attr-name-quoted-gt-single)
+  expected: [ RawBlock ( Format "html" ) "<div _bad='x' id='hidden' title='a>" , Para [ Str "b\8217/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+  got:      [ RawBlock ( Format "html" ) "<div _bad='x' id='hidden' title='a>" , Para [ Str "b'/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+# 575 (html-block-div-attr-name-quoted-gt-multiline)
+  expected: [ RawBlock ( Format "html" ) "<DIV\n  _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\8221/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+  got:      [ RawBlock ( Format "html" ) "<DIV\n  _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\"/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ]
+# 576 (html-block-div-attr-name-quoted-gt-blockquote)
+  expected: [ BlockQuote [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\8221/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ] ]
+  got:      [ BlockQuote [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\"/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ] ]
+# 577 (html-block-div-attr-name-quoted-gt-list)
+  expected: [ BulletList [ [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Plain [ Str "b\8221/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ] ] ]
+  got:      [ BulletList [ [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Plain [ Str "b\"/>" , Strong [ Str "Outside." ] , SoftBreak , Str "next" , Space , Str "line" ] ] ] ]
+# 578 (html-block-div-attr-name-quoted-gt-close)
+  expected: [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\8221/>" , Strong [ Str "Outside." ] ] , RawBlock ( Format "html" ) "</div>" , Para [ Strong [ Str "Tail." ] ] ]
+  got:      [ RawBlock ( Format "html" ) "<div _bad=\"x\" id=\"hidden\" title=\"a>" , Para [ Str "b\"/>" , Strong [ Str "Outside." ] ] , RawBlock ( Format "html" ) "</div>" , Para [ Strong [ Str "Tail." ] ] ]
 

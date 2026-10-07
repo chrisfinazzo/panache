@@ -890,3 +890,8 @@
 570
 571
 572
+
+# html-block: quoted `>` keeps matched raw divs opaque and valid native divs
+# structural. Raw self-closing boundary cases 573-578 await smart-quote parity.
+579
+580

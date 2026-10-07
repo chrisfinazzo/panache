@@ -156,6 +156,22 @@ fn html_block_div_invalid_self_closing_attribute_name_leaves_body_outside() {
 }
 
 #[test]
+fn html_block_div_invalid_self_closing_attribute_name_stops_at_quoted_gt() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input =
+        include_str!("fixtures/cases/html_block_div_attr_name_quoted_gt_double_pandoc/input.md");
+    let tree = parse(input, None);
+    assert_eq!(tree.text().to_string(), input);
+    let block = tree.children().next().unwrap();
+    assert_eq!(block.kind(), SyntaxKind::HTML_BLOCK_RAW);
+    assert_eq!(
+        block.text().to_string(),
+        &input[..input.find('>').unwrap() + 1]
+    );
+}
+
+#[test]
 fn html_block_div_slash_keeps_following_content_inside() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -613,6 +629,22 @@ golden_test_cases!(
     html_block_div_nested_pandoc,
     html_block_div_nested_trailing_commonmark,
     html_block_div_nested_trailing_pandoc,
+    html_block_div_attr_name_quoted_gt_double_commonmark,
+    html_block_div_attr_name_quoted_gt_double_pandoc,
+    html_block_div_attr_name_quoted_gt_single_commonmark,
+    html_block_div_attr_name_quoted_gt_single_pandoc,
+    html_block_div_attr_name_quoted_gt_multiline_commonmark,
+    html_block_div_attr_name_quoted_gt_multiline_pandoc,
+    html_block_div_attr_name_quoted_gt_blockquote_commonmark,
+    html_block_div_attr_name_quoted_gt_blockquote_pandoc,
+    html_block_div_attr_name_quoted_gt_list_commonmark,
+    html_block_div_attr_name_quoted_gt_list_pandoc,
+    html_block_div_attr_name_quoted_gt_close_commonmark,
+    html_block_div_attr_name_quoted_gt_close_pandoc,
+    html_block_div_attr_name_quoted_gt_matched_commonmark,
+    html_block_div_attr_name_quoted_gt_matched_pandoc,
+    html_block_div_attr_name_quoted_gt_native_commonmark,
+    html_block_div_attr_name_quoted_gt_native_pandoc,
     html_block_div_attr_name_invalid_commonmark,
     html_block_div_attr_name_self_closing_commonmark,
     html_block_div_attr_name_self_closing_pandoc,

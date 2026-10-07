@@ -1,0 +1,9 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..57
+  HTML_BLOCK@0..57
+    HTML_BLOCK_TAG@0..57
+      TEXT@0..56 "<div id=\"visible\" tit ..."
+      NEWLINE@56..57 "\n"

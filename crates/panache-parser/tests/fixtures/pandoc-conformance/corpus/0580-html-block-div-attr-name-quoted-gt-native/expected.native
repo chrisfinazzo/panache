@@ -1,0 +1,5 @@
+[ Div
+    ( "visible" , [] , [ ( "title" , "a>b" ) ] )
+    [ Plain [ Strong [ Str "Inside." ] ] ]
+, Para [ Strong [ Str "Tail." ] ]
+]
