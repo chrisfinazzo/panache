@@ -213,7 +213,7 @@ fn test_parse_to_pandoc_json_stdin() {
         // Compact JSON, pinned api-version, contains the expected node tags.
         .stdout(predicate::str::starts_with("{\"blocks\":"))
         .stdout(predicate::str::contains(
-            "\"pandoc-api-version\":[1,23,1,1]",
+            "\"pandoc-api-version\":[1,23,1,2]",
         ))
         .stdout(predicate::str::contains("\"t\":\"Header\""))
         .stdout(predicate::str::contains("\"t\":\"Para\""))

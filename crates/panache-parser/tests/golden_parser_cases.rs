@@ -60,6 +60,7 @@ fn load_test_parser_options(dir: &Path) -> Option<ParserOptions> {
             "3.7" => PandocCompat::V3_7,
             "3.9" => PandocCompat::V3_9,
             "3.10" => PandocCompat::V3_10,
+            "3.12" => PandocCompat::V3_12,
             "latest" => PandocCompat::Latest,
             other => panic!("unknown pandoc-compat in parser-options.toml: {other:?}"),
         };
@@ -812,6 +813,7 @@ golden_test_cases!(
     math_definition_colon,
     blockquote_list_item_grid_table_rowspan,
     grid_table,
+    grid_table_mixed_blocks_pandoc,
     grid_table_decomposed_hangul,
     grid_table_in_list_blockquote,
     grid_table_indented_is_paragraph,

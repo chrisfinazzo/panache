@@ -428,11 +428,12 @@ quarto = "1.9"
 :   Compatibility target for ambiguous Pandoc behavior, used where Pandoc
     behavior changed across releases.
 
-    - `3.10` (default): match Pandoc 3.10 behavior.
+    - `3.12` (default): match Pandoc 3.12 behavior.
+    - `3.10`: match Pandoc 3.10 behavior.
     - `3.9`: match Pandoc 3.9 behavior.
     - `3.7`: match Pandoc 3.7 behavior.
     - `latest`: alias for Panache's pinned newest verified target (currently
-      `3.10`).
+      `3.12`).
 
     This option is intentionally narrow in scope and only affects cases where Pandoc
     changed behavior across versions. It is global, so parser, formatter, and LSP
@@ -452,6 +453,12 @@ quarto = "1.9"
     the top level (including inside blockquotes and fenced divs) still accept any
     start number, as do sibling items continuing a list that is already open. Set
     `pandoc = "3.9"` if you author for an older Pandoc.
+
+    Pandoc 3.12 compacts table paragraphs only when every cell is empty or contains
+    a single paragraph. A cell containing a heading, code block, or multiple
+    paragraphs keeps the other cells' paragraphs as `Para` in the Pandoc AST.
+    Earlier targets compact each single-paragraph cell to `Plain` independently.
+    This affects AST export without changing table formatting.
 
 `quarto`
 

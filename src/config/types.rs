@@ -528,7 +528,7 @@ impl<'de> Deserialize<'de> for LintConfig {
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct CompatConfig {
     /// Pandoc release whose ambiguous-syntax behavior the parser emulates
-    /// (`latest`, `3.7`, `3.9`). Supersedes the deprecated top-level
+    /// (`latest`, `3.7`, `3.9`, `3.10`, `3.12`). Supersedes the deprecated top-level
     /// `pandoc-compat` key.
     pub pandoc: Option<PandocCompat>,
     /// Quarto release whose vendored schema the `quarto-schema` rule validates

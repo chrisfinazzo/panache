@@ -45,7 +45,7 @@
             }
           ],
           "default": null,
-          "description": "Pandoc release whose ambiguous-syntax behavior the parser emulates\n(`latest`, `3.7`, `3.9`). Supersedes the deprecated top-level\n`pandoc-compat` key."
+          "description": "Pandoc release whose ambiguous-syntax behavior the parser emulates\n(`latest`, `3.7`, `3.9`, `3.10`, `3.12`). Supersedes the deprecated top-level\n`pandoc-compat` key."
         },
         "quarto": {
           "default": null,
@@ -317,7 +317,11 @@
         "3.10",
         "3-10",
         "v3.10",
-        "v3-10"
+        "v3-10",
+        "3.12",
+        "3-12",
+        "v3.12",
+        "v3-12"
       ],
       "type": "string"
     },

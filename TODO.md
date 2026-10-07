@@ -460,6 +460,10 @@ the spec files in `assets/pandoc-spec/`.
 - [ ] Extension: `startnum` - Start ordered lists at arbitrary number (low
   priority, if we even should support this)
 - [x] Extension: `example_lists` - Example lists with `(@)` markers
+- [ ] Support Pandoc 3.11's `(1@label)` example-list counter resets, including
+  CST markers, numbering, and reference resolution. Gate recognition at 3.11
+  so older targets retain paragraph text. See the [3.11 release
+  notes](https://pandoc.org/releases.html#pandoc-3.11-2026-08-28).
 - [x] Extension: `task_lists` - GitHub-style `- [ ]` and `- [x]`
 - [x] Extension: `definition_lists` - Term/definition syntax
 
@@ -647,6 +651,15 @@ the spec files in `assets/pandoc-spec/`.
 
 These extensions are **not enabled by default** in Pandoc and are lower priority
 for initial implementation.
+
+#### Non-Default: Alerts
+
+- [ ] Match Pandoc 3.12's `alerts` changes: recognize marker keywords without
+  regard to case, and include the `alert` class in exported Divs. Gate these
+  changes at 3.12, preserve GFM's marker rules, and teach the AST projector
+  to export `ALERT` nodes. The default Pandoc corpus does not enable this
+  extension. See the [3.12 release
+  notes](https://pandoc.org/releases.html#pandoc-3.12-2026-09-27).
 
 #### Non-Default: Emphasis & Formatting
 

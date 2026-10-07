@@ -10,7 +10,7 @@
 //! `Unsupported "<KIND>"` so a failing case stays visibly failing rather
 //! than silently dropping content; expand coverage as the corpus grows.
 //!
-//! Output shape matches pandoc 3.9.0.2 with default-standalone-off behavior:
+//! Output shape matches pandoc 3.12 with default-standalone-off behavior:
 //! the document is rendered as a bare block list `[ <block>, ... ]`. The
 //! comparison normalizer collapses whitespace runs, so ppShow's pretty-print
 //! line breaks/indentation are not load-bearing.
@@ -33,14 +33,16 @@ use serde_json::{Value, json};
 const PANDOC_TAB_STOP: usize = 4;
 
 /// Pinned `pandoc-api-version` reported in `to_pandoc_json` output. Mirrors
-/// the version reported by pandoc 3.9.0.2 (the version pinned by the
+/// the version reported by pandoc 3.12 (the version pinned by the
 /// conformance corpus — see
 /// `tests/fixtures/pandoc-conformance/.panache-source`). Bump alongside
 /// any pandoc-version bump in that corpus.
-const PANDOC_API_VERSION: [u32; 4] = [1, 23, 1, 1];
+const PANDOC_API_VERSION: [u32; 4] = [1, 23, 1, 2];
 
 #[derive(Default)]
 struct RefsCtx {
+    /// Nested projections inherit the selected compatibility target.
+    pandoc_compat: crate::PandocCompat,
     /// Whether the reader derives an auto-id for headings that carry no
     /// explicit `{#id}`. Off for `commonmark` and `myst`, where pandoc leaves
     /// every heading with an empty id.
@@ -119,7 +121,8 @@ pub fn to_pandoc_ast(tree: &SyntaxNode) -> String {
     to_pandoc_ast_with_options(tree, &pandoc_flavor_options())
 }
 
-/// [`to_pandoc_ast`], honoring the extension set the tree was parsed under.
+/// [`to_pandoc_ast`], honoring the extensions and compatibility target the tree
+/// was parsed under.
 pub fn to_pandoc_ast_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
     let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
@@ -163,7 +166,8 @@ pub fn to_pandoc_json(tree: &SyntaxNode) -> String {
     to_pandoc_json_with_options(tree, &pandoc_flavor_options())
 }
 
-/// [`to_pandoc_json`], honoring the extension set the tree was parsed under.
+/// [`to_pandoc_json`], honoring the extensions and compatibility target the tree
+/// was parsed under.
 pub fn to_pandoc_json_with_options(tree: &SyntaxNode, options: &crate::ParserOptions) -> String {
     let ctx = build_refs_ctx(tree, options);
     REFS_CTX.with(|c| *c.borrow_mut() = ctx);
@@ -190,16 +194,23 @@ fn pandoc_flavor_options() -> crate::ParserOptions {
 }
 
 fn build_refs_ctx(tree: &SyntaxNode, options: &crate::ParserOptions) -> RefsCtx {
-    build_refs_ctx_inherited(tree, None, options.extensions.auto_identifiers)
+    build_refs_ctx_inherited(
+        tree,
+        None,
+        options.extensions.auto_identifiers,
+        options.effective_pandoc_compat(),
+    )
 }
 
 fn build_refs_ctx_inherited(
     tree: &SyntaxNode,
     parent: Option<&RefsCtx>,
     auto_identifiers: bool,
+    pandoc_compat: crate::PandocCompat,
 ) -> RefsCtx {
     let mut ctx = RefsCtx {
         auto_identifiers,
+        pandoc_compat,
         ..RefsCtx::default()
     };
     collect_cite_note_nums(tree, &mut ctx);
@@ -207,6 +218,7 @@ fn build_refs_ctx_inherited(
     collect_example_numbering(tree, &mut ctx, &mut example_counter);
     REFS_CTX.with(|c| {
         let mut borrowed = c.borrow_mut();
+        borrowed.pandoc_compat = ctx.pandoc_compat;
         borrowed.cite_note_num_by_offset = ctx.cite_note_num_by_offset.clone();
         borrowed.example_label_to_num = ctx.example_label_to_num.clone();
         borrowed.example_list_start_by_offset = ctx.example_list_start_by_offset.clone();
@@ -1924,9 +1936,16 @@ fn parse_pandoc_blocks(text: &str) -> Vec<Block> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let doc = crate::parse(text, Some(pandoc_flavor_options()));
+    let mut options = pandoc_flavor_options();
+    options.pandoc_compat = REFS_CTX.with(|c| c.borrow().pandoc_compat);
+    let doc = crate::parse(text, Some(options));
     let outer = REFS_CTX.with(|c| std::mem::take(&mut *c.borrow_mut()));
-    let inner_ctx = build_refs_ctx_inherited(&doc, Some(&outer), outer.auto_identifiers);
+    let inner_ctx = build_refs_ctx_inherited(
+        &doc,
+        Some(&outer),
+        outer.auto_identifiers,
+        outer.pandoc_compat,
+    );
     REFS_CTX.with(|c| *c.borrow_mut() = inner_ctx);
     let mut out = Vec::new();
     for child in doc.children() {
@@ -2880,7 +2899,7 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         let row: Vec<GridCell> = row_cells
             .into_iter()
             .map(|cell| {
-                let blocks = parse_grid_cell_text(&cell.content);
+                let blocks = parse_pandoc_blocks(&cell.content);
                 GridCell {
                     row_span: cell.row_span as u32,
                     col_span: cell.col_span as u32,
@@ -2913,7 +2932,7 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
     let (caption_inlines, caption_attr_from_node) = project_table_caption_from(node);
     let (attr, caption_inlines) = resolve_caption_attr(caption_inlines, caption_attr_from_node);
 
-    Some(TableData {
+    let mut table = TableData {
         attr,
         caption: caption_inlines,
         aligns,
@@ -2921,29 +2940,43 @@ fn grid_table(node: &SyntaxNode) -> Option<TableData> {
         head_rows,
         body_rows,
         foot_rows,
-    })
+    };
+    let compat = REFS_CTX.with(|c| c.borrow().pandoc_compat);
+    compactify_grid_table(&mut table, compat);
+    Some(table)
 }
 
-/// Parse a grid-table cell's extracted text as block-level markdown via
-/// panache, then convert top-level `Para`s to `Plain` (pandoc's
-/// grid-table cell rule).
-fn parse_grid_cell_text(text: &str) -> Vec<Block> {
-    if text.trim().is_empty() {
-        return Vec::new();
+fn compactify_grid_table(table: &mut TableData, compat: crate::PandocCompat) {
+    // Pandoc 3.12 keeps every paragraph loose when any cell has richer blocks.
+    // Earlier releases compacted each single-paragraph cell independently.
+    if compat.compacts_tables_as_whole()
+        && !table
+            .head_rows
+            .iter()
+            .chain(&table.body_rows)
+            .chain(&table.foot_rows)
+            .flatten()
+            .all(|cell| {
+                matches!(
+                    cell.blocks.as_slice(),
+                    [] | [Block::Para(_) | Block::Plain(_)]
+                )
+            })
+    {
+        return;
     }
-    let doc = crate::parse(text, Some(pandoc_flavor_options()));
-    let mut out = Vec::new();
-    for child in doc.children() {
-        if let Some(block) = block_from(&child) {
-            out.push(block);
+    for cell in table
+        .head_rows
+        .iter_mut()
+        .chain(&mut table.body_rows)
+        .chain(&mut table.foot_rows)
+        .flatten()
+    {
+        if let [Block::Para(inlines)] = cell.blocks.as_mut_slice() {
+            let inlines = std::mem::take(inlines);
+            cell.blocks[0] = Block::Plain(inlines);
         }
     }
-    if let [Block::Para(_)] = out.as_slice()
-        && let Some(Block::Para(inlines)) = out.pop()
-    {
-        out.push(Block::Plain(inlines));
-    }
-    out
 }
 
 /// Compute per-column widths from a grid-table separator like
@@ -5604,9 +5637,49 @@ mod tests {
     #[test]
     fn empty_doc_emits_envelope_with_no_blocks() {
         let v = parse_to_json("");
-        assert_eq!(v["pandoc-api-version"], serde_json::json!([1, 23, 1, 1]));
+        assert_eq!(v["pandoc-api-version"], serde_json::json!([1, 23, 1, 2]));
         assert_eq!(v["meta"], serde_json::json!({}));
         assert_eq!(v["blocks"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn mixed_grid_table_keeps_paragraph_cells_in_pandoc_3_12() {
+        let input = include_str!("../tests/fixtures/cases/grid_table_mixed_blocks_pandoc/input.md");
+        let native = to_pandoc_ast(&parse(input, Some(pandoc_options())));
+        assert!(native.contains("Para [ Str \"Header\" ]"), "{native}");
+        assert!(native.contains("Para [ Str \"text\" ]"), "{native}");
+        assert!(native.contains("Header 1"), "{native}");
+    }
+
+    #[test]
+    fn mixed_grid_table_compacts_paragraph_cells_before_pandoc_3_12() {
+        let input = include_str!("../tests/fixtures/cases/grid_table_mixed_blocks_pandoc/input.md");
+        for compat in [
+            crate::PandocCompat::V3_7,
+            crate::PandocCompat::V3_9,
+            crate::PandocCompat::V3_10,
+        ] {
+            let mut opts = pandoc_options();
+            opts.pandoc_compat = compat;
+            let native = to_pandoc_ast_with_options(&parse(input, Some(opts.clone())), &opts);
+            assert!(
+                native.contains("Plain [ Str \"Header\" ]"),
+                "{compat:?}: {native}"
+            );
+            assert!(
+                native.contains("Plain [ Str \"text\" ]"),
+                "{compat:?}: {native}"
+            );
+            assert!(native.contains("Header 1"), "{compat:?}: {native}");
+        }
+    }
+
+    #[test]
+    fn simple_grid_table_compacts_paragraph_cells_in_pandoc_3_12() {
+        let input = "+--------+--------+\n| Header | Other  |\n+========+========+\n| text   |        |\n+--------+--------+\n";
+        let native = to_pandoc_ast(&parse(input, Some(pandoc_options())));
+        assert!(native.contains("Plain [ Str \"Header\" ]"), "{native}");
+        assert!(native.contains("Plain [ Str \"text\" ]"), "{native}");
     }
 
     #[test]

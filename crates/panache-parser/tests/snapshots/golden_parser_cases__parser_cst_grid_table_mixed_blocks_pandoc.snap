@@ -1,0 +1,53 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..100
+  GRID_TABLE@0..100
+    TABLE_SEPARATOR@0..20
+      TABLE_SEP_DELIM@0..1 "+"
+      TABLE_SEP_DASHES@1..9 "--------"
+      TABLE_SEP_DELIM@9..10 "+"
+      TABLE_SEP_DASHES@10..18 "--------"
+      TABLE_SEP_DELIM@18..19 "+"
+      NEWLINE@19..20 "\n"
+    TABLE_HEADER@20..40
+      TEXT@20..21 "|"
+      WHITESPACE@21..22 " "
+      TABLE_CELL@22..28
+        TEXT@22..28 "Header"
+      WHITESPACE@28..29 " "
+      TEXT@29..30 "|"
+      WHITESPACE@30..31 " "
+      TABLE_CELL@31..36
+        TEXT@31..36 "Other"
+      WHITESPACE@36..38 "  "
+      TEXT@38..39 "|"
+      NEWLINE@39..40 "\n"
+    TABLE_SEPARATOR@40..60
+      TABLE_SEP_DELIM@40..41 "+"
+      TABLE_SEP_EQUALS@41..49 "========"
+      TABLE_SEP_DELIM@49..50 "+"
+      TABLE_SEP_EQUALS@50..58 "========"
+      TABLE_SEP_DELIM@58..59 "+"
+      NEWLINE@59..60 "\n"
+    TABLE_ROW@60..80
+      TEXT@60..61 "|"
+      WHITESPACE@61..62 " "
+      TABLE_CELL@62..66
+        TEXT@62..66 "text"
+      WHITESPACE@66..69 "   "
+      TEXT@69..70 "|"
+      WHITESPACE@70..71 " "
+      TABLE_CELL@71..77
+        TEXT@71..77 "# Head"
+      WHITESPACE@77..78 " "
+      TEXT@78..79 "|"
+      NEWLINE@79..80 "\n"
+    TABLE_SEPARATOR@80..100
+      TABLE_SEP_DELIM@80..81 "+"
+      TABLE_SEP_DASHES@81..89 "--------"
+      TABLE_SEP_DELIM@89..90 "+"
+      TABLE_SEP_DASHES@90..98 "--------"
+      TABLE_SEP_DELIM@98..99 "+"
+      NEWLINE@99..100 "\n"

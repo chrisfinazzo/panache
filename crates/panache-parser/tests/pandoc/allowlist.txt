@@ -895,3 +895,7 @@
 # structural. Raw self-closing boundary cases 573-578 await smart-quote parity.
 579
 580
+
+# Pandoc 3.12 table-wide compaction keeps paragraph cells loose when a cell
+# contains a heading. Earlier compatibility targets compact them independently.
+581

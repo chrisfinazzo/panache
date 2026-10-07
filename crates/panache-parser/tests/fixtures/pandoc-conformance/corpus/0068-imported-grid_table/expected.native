@@ -101,19 +101,19 @@
                AlignDefault
                (RowSpan 1)
                (ColSpan 1)
-               [ Plain [ Str "Left" ] ]
+               [ Para [ Str "Left" ] ]
            , Cell
                ( "" , [] , [] )
                AlignDefault
                (RowSpan 1)
                (ColSpan 1)
-               [ Plain [ Str "Right" ] ]
+               [ Para [ Str "Right" ] ]
            , Cell
                ( "" , [] , [] )
                AlignDefault
                (RowSpan 1)
                (ColSpan 1)
-               [ Plain [ Str "Center" ] ]
+               [ Para [ Str "Center" ] ]
            ]
        ])
     [ TableBody
@@ -127,7 +127,7 @@
                 AlignDefault
                 (RowSpan 1)
                 (ColSpan 1)
-                [ Plain [ Str "A" ] ]
+                [ Para [ Str "A" ] ]
             , Cell
                 ( "" , [] , [] )
                 AlignDefault
@@ -139,7 +139,7 @@
                 AlignDefault
                 (RowSpan 1)
                 (ColSpan 1)
-                [ Plain [ Str "C" ] ]
+                [ Para [ Str "C" ] ]
             ]
         , Row
             ( "" , [] , [] )
@@ -148,19 +148,19 @@
                 AlignDefault
                 (RowSpan 1)
                 (ColSpan 1)
-                [ Plain [ Str "Short" ] ]
+                [ Para [ Str "Short" ] ]
             , Cell
                 ( "" , [] , [] )
                 AlignDefault
                 (RowSpan 1)
                 (ColSpan 1)
-                [ Plain [ Str "Longer" ] ]
+                [ Para [ Str "Longer" ] ]
             , Cell
                 ( "" , [] , [] )
                 AlignDefault
                 (RowSpan 1)
                 (ColSpan 1)
-                [ Plain [ Str "Mid" ] ]
+                [ Para [ Str "Mid" ] ]
             ]
         ]
     ]

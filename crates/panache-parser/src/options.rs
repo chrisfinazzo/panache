@@ -945,17 +945,23 @@ pub enum PandocCompat {
     )]
     V3_9,
     /// Match Pandoc 3.10 behavior for ambiguous syntax edge cases.
-    #[default]
     #[cfg_attr(
         feature = "serde",
         serde(rename = "3.10", alias = "3-10", alias = "v3.10", alias = "v3-10")
     )]
     V3_10,
+    /// Match Pandoc 3.12 behavior for ambiguous syntax edge cases.
+    #[default]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "3.12", alias = "3-12", alias = "v3.12", alias = "v3-12")
+    )]
+    V3_12,
 }
 
 impl PandocCompat {
     /// Pinned target for `latest`.
-    pub const PINNED_LATEST: Self = Self::V3_10;
+    pub const PINNED_LATEST: Self = Self::V3_12;
 
     pub fn effective(self) -> Self {
         match self {
@@ -978,7 +984,14 @@ impl PandocCompat {
     /// `Latest` variant sorts first, so deriving an ordering on this enum
     /// would silently give the wrong answer.
     pub fn restricts_ordered_sublist_start(self) -> bool {
-        matches!(self.effective(), Self::V3_10)
+        matches!(self.effective(), Self::V3_10 | Self::V3_12)
+    }
+
+    /// Whether table paragraphs compact only when every cell is empty or
+    /// contains a single paragraph. Pandoc 3.12 replaced per-cell compaction
+    /// with this table-wide rule (jgm/pandoc#11864).
+    pub fn compacts_tables_as_whole(self) -> bool {
+        matches!(self.effective(), Self::V3_12)
     }
 }
 
@@ -1126,7 +1139,8 @@ impl schemars::JsonSchema for PandocCompat {
                 "latest",
                 "3.7", "3-7", "v3.7", "v3-7",
                 "3.9", "3-9", "v3.9", "v3-9",
-                "3.10", "3-10", "v3.10", "v3-10"
+                "3.10", "3-10", "v3.10", "v3-10",
+                "3.12", "3-12", "v3.12", "v3-12"
             ]
         })
     }
