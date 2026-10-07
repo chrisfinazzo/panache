@@ -3,7 +3,7 @@
 //! This module centralizes the logic for determining how list items should be indented,
 //! including marker alignment, spacing, and checkbox handling.
 
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::{ExampleListMarker, SyntaxKind, SyntaxNode};
 
 /// Column a lazy continuation line should start at to stay aligned with the
 /// list item containing `offset`.
@@ -155,10 +155,10 @@ pub(super) fn calculate_list_item_indent(
 ///
 /// Not alignable:
 /// - Bullet markers (-, *, +)
-/// - Example lists ((@) or (@label))
+/// - Example lists ((@), (@label), or (1@label))
 /// - Numeric markers (unless they contain letters)
 pub(super) fn is_alignable_marker(marker: &str) -> bool {
-    if marker.starts_with("(@") {
+    if ExampleListMarker::parse(marker).is_some() {
         return false;
     }
 

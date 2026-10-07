@@ -1,5 +1,5 @@
 use crate::options::ParserOptions;
-use crate::syntax::SyntaxKind;
+use crate::syntax::{ExampleListMarker, SyntaxKind};
 use rowan::GreenNodeBuilder;
 use smallvec::SmallVec;
 
@@ -53,6 +53,7 @@ pub(crate) enum OrderedMarker {
         style: ListDelimiter,
     },
     Example {
+        start_number: Option<usize>,
         label: Option<String>,
     },
 }
@@ -259,6 +260,7 @@ fn single_char_roman_shadowed_by_alpha(
 pub(crate) struct ListMarkerDetect {
     pub(crate) fancy_lists: bool,
     pub(crate) example_lists: bool,
+    pub(crate) example_list_resets: bool,
     pub(crate) dialect: crate::Dialect,
 }
 
@@ -267,6 +269,7 @@ impl ListMarkerDetect {
         Self {
             fancy_lists: config.extensions.fancy_lists,
             example_lists: config.extensions.example_lists,
+            example_list_resets: config.pandoc_compat.supports_example_list_resets(),
             dialect: config.dialect,
         }
     }
@@ -346,36 +349,29 @@ pub(crate) fn try_parse_list_marker_with(
     }
 
     if detect.example_lists
-        && let Some(rest) = trimmed.strip_prefix("(@")
+        && trimmed.starts_with('(')
+        && let Some(marker_end) = trimmed.find(')')
+        && let Some(example) = ExampleListMarker::parse(&trimmed[..=marker_end])
+        && (detect.example_list_resets || trimmed.starts_with("(@"))
     {
-        let label_end = rest
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-            .count();
-
-        if rest.len() > label_end && rest.chars().nth(label_end) == Some(')') {
-            let label = if label_end > 0 {
-                Some(rest[..label_end].to_string())
-            } else {
-                None
-            };
-
-            let after_marker = &rest[label_end + 1..];
-            if after_marker.starts_with(' ')
-                || after_marker.starts_with('\t')
-                || after_marker.is_empty()
-            {
-                let marker_len = 2 + label_end + 1; // "(@" + label + ")"
-                let (spaces_after_cols, spaces_after_bytes, virtual_marker_space) =
-                    marker_spaces_after(after_marker, _indent_cols + marker_len);
-                return Some(ListMarkerMatch {
-                    marker: ListMarker::Ordered(OrderedMarker::Example { label }),
-                    marker_len,
-                    spaces_after_cols,
-                    spaces_after_bytes,
-                    virtual_marker_space,
-                });
-            }
+        let marker_len = marker_end + 1;
+        let after_marker = &trimmed[marker_len..];
+        if after_marker.starts_with(' ')
+            || after_marker.starts_with('\t')
+            || after_marker.is_empty()
+        {
+            let (spaces_after_cols, spaces_after_bytes, virtual_marker_space) =
+                marker_spaces_after(after_marker, _indent_cols + marker_len);
+            return Some(ListMarkerMatch {
+                marker: ListMarker::Ordered(OrderedMarker::Example {
+                    start_number: example.start_number,
+                    label: (!example.label.is_empty()).then(|| example.label.to_string()),
+                }),
+                marker_len,
+                spaces_after_cols,
+                spaces_after_bytes,
+                virtual_marker_space,
+            });
         }
     }
 
@@ -1397,22 +1393,24 @@ pub(in crate::parser) fn innermost_content_col(containers: &ContainerStack) -> O
 }
 
 /// The start number a marker declares, or `None` for auto-numbered markers
-/// (`#.` and example lists) that pandoc always reports as starting at 1.
+/// (`#.` and example lists without a reset).
 ///
 /// Bullets have no start number and return `None` as well — the sublist
 /// restriction only constrains ordered lists.
-pub(in crate::parser) fn marker_start_number(marker: &ListMarker) -> Option<u32> {
+pub(in crate::parser) fn marker_start_number(marker: &ListMarker) -> Option<usize> {
     let ordered = match marker {
         ListMarker::Ordered(o) => o,
         ListMarker::Bullet(_) => return None,
     };
     match ordered {
-        OrderedMarker::Hash | OrderedMarker::Example { .. } => None,
+        OrderedMarker::Hash => None,
+        OrderedMarker::Example { start_number, .. } => *start_number,
         OrderedMarker::Decimal { number, .. } => number.parse().ok(),
-        OrderedMarker::LowerAlpha { letter, .. } => Some(*letter as u32 - 'a' as u32 + 1),
-        OrderedMarker::UpperAlpha { letter, .. } => Some(*letter as u32 - 'A' as u32 + 1),
-        OrderedMarker::LowerRoman { numeral, .. } => roman_to_number(numeral),
-        OrderedMarker::UpperRoman { numeral, .. } => roman_to_number(numeral),
+        OrderedMarker::LowerAlpha { letter, .. } => Some(*letter as usize - 'a' as usize + 1),
+        OrderedMarker::UpperAlpha { letter, .. } => Some(*letter as usize - 'A' as usize + 1),
+        OrderedMarker::LowerRoman { numeral, .. } | OrderedMarker::UpperRoman { numeral, .. } => {
+            roman_to_number(numeral).map(|number| number as usize)
+        }
     }
 }
 

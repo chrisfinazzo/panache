@@ -21,8 +21,9 @@ use std::collections::{HashMap, HashSet};
 use crate::SyntaxNode;
 use crate::parser::utils::attributes::decode_html_attr_entities;
 use crate::syntax::{
-    AstNode, LinkDest, SyntaxKind, SyntaxToken, code_span_payload, separator_column_segments,
-    separator_marker_tokens, text_without_line_prefixes,
+    AstNode, ExampleListMarker, LinkDest, List, ListItem, SyntaxKind, SyntaxToken,
+    code_span_payload, separator_column_segments, separator_marker_tokens,
+    text_without_line_prefixes,
 };
 use rowan::NodeOrToken;
 use serde_json::{Value, json};
@@ -214,7 +215,7 @@ fn build_refs_ctx_inherited(
         ..RefsCtx::default()
     };
     collect_cite_note_nums(tree, &mut ctx);
-    let mut example_counter: usize = 0;
+    let mut example_counter: usize = 1;
     collect_example_numbering(tree, &mut ctx, &mut example_counter);
     REFS_CTX.with(|c| {
         let mut borrowed = c.borrow_mut();
@@ -315,77 +316,52 @@ fn visit_for_cite_nums(
 /// Walk every `LIST` in document order and assign Example-list numbers.
 /// Pandoc tracks one counter across all `OrderedList(_, Example, _)` lists
 /// in a document, so each subsequent Example list picks up where the prior
-/// one left off. Labeled items (`(@label)`) get a label → number mapping
-/// for inline `@label` reference resolution.
+/// one left off. Reset markers change the next number, and repeated labels
+/// reuse their first number without advancing the counter.
 fn collect_example_numbering(node: &SyntaxNode, ctx: &mut RefsCtx, counter: &mut usize) {
     for child in node.children() {
         if child.kind() == SyntaxKind::LIST && list_is_example(&child) {
             let list_offset: u32 = child.text_range().start().into();
-            ctx.example_list_start_by_offset
-                .insert(list_offset, *counter + 1);
-            for item in child
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::LIST_ITEM)
-            {
-                *counter += 1;
-                if let Some(label) = example_item_label(&item) {
-                    ctx.example_label_to_num.entry(label).or_insert(*counter);
+            let list = List::cast(child.clone()).expect("list node");
+            for (index, item) in list.items().enumerate() {
+                let marker = item.marker().unwrap_or_default();
+                let Some(example) = ExampleListMarker::parse(&marker) else {
+                    continue;
+                };
+                if let Some(start) = example.start_number {
+                    *counter = start;
                 }
+                let number = if let Some(number) = ctx.example_label_to_num.get(example.label) {
+                    *number
+                } else {
+                    let number = *counter;
+                    *counter += 1;
+                    if !example.label.is_empty() {
+                        ctx.example_label_to_num
+                            .insert(example.label.to_string(), number);
+                    }
+                    number
+                };
+                if index == 0 {
+                    ctx.example_list_start_by_offset.insert(list_offset, number);
+                }
+                // Nested examples consume numbers before the next sibling item.
+                collect_example_numbering(item.syntax(), ctx, counter);
             }
-            collect_example_numbering(&child, ctx, counter);
         } else {
             collect_example_numbering(&child, ctx, counter);
         }
     }
 }
 
-/// `(@)` / `(@label)` markers identify Example list items. Returns true
+/// `(@)` / `(@label)` / `(1@label)` markers identify Example list items. Returns true
 /// iff the LIST's first item carries such a marker (pandoc decides the
 /// list style from the first marker only).
 fn list_is_example(list: &SyntaxNode) -> bool {
-    let Some(item) = list.children().find(|c| c.kind() == SyntaxKind::LIST_ITEM) else {
-        return false;
-    };
-    let marker = list_item_marker_text(&item);
-    let trimmed = marker.trim();
-    let body = if let Some(inner) = trimmed.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-        inner
-    } else if let Some(inner) = trimmed.strip_suffix(')') {
-        inner
-    } else if let Some(inner) = trimmed.strip_suffix('.') {
-        inner
-    } else {
-        trimmed
-    };
-    body.starts_with('@')
-        && body[1..]
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
-
-fn list_item_marker_text(item: &SyntaxNode) -> String {
-    item.children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find(|t| t.kind() == SyntaxKind::LIST_MARKER)
-        .map(|t| t.text().to_string())
-        .unwrap_or_default()
-}
-
-fn example_item_label(item: &SyntaxNode) -> Option<String> {
-    let marker = list_item_marker_text(item);
-    let trimmed = marker.trim();
-    let body = trimmed
-        .strip_prefix('(')
-        .and_then(|s| s.strip_suffix(')'))
-        .or_else(|| trimmed.strip_suffix(')'))
-        .or_else(|| trimmed.strip_suffix('.'))
-        .unwrap_or(trimmed);
-    let label = body.strip_prefix('@')?;
-    if label.is_empty() {
-        None
-    } else {
-        Some(label.to_string())
-    }
+    list.children()
+        .find_map(ListItem::cast)
+        .and_then(|item| item.marker())
+        .is_some_and(|marker| ExampleListMarker::parse(&marker).is_some())
 }
 
 fn collect_refs_and_headings(
@@ -3236,8 +3212,8 @@ fn ordered_list_attrs(node: &SyntaxNode) -> (usize, &'static str, &'static str) 
 /// in `Text/Pandoc/Parsing/Lists.hs`: try `decimal`, then `exampleNum` (`@`),
 /// then `defaultNum` (`#`), then `romanOne` (single `i`/`I`), then alpha,
 /// then multi-char roman, in that order; the first matching form wins. The
-/// start value for Example lists is left at 1 — pandoc tracks numbering
-/// across lists at the document level, which we don't model.
+/// Example-list starts are resolved across the document by
+/// `collect_example_numbering`.
 fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str) {
     let (body, delim) =
         if let Some(inner) = trimmed.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
@@ -3259,12 +3235,8 @@ fn classify_ordered_marker(trimmed: &str) -> (usize, &'static str, &'static str)
         return (1, "DefaultStyle", "DefaultDelim");
     }
 
-    if let Some(rest) = body.strip_prefix('@')
-        && rest
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return (1, "Example", delim);
+    if let Some(example) = ExampleListMarker::parse(trimmed) {
+        return (example.start_number.unwrap_or(1), "Example", delim);
     }
 
     if body == "i" {
@@ -5658,6 +5630,7 @@ mod tests {
             crate::PandocCompat::V3_7,
             crate::PandocCompat::V3_9,
             crate::PandocCompat::V3_10,
+            crate::PandocCompat::V3_11,
         ] {
             let mut opts = pandoc_options();
             opts.pandoc_compat = compat;
@@ -5732,6 +5705,54 @@ mod tests {
 
     fn native(input: &str, opts: crate::options::ParserOptions) -> String {
         to_pandoc_ast(&parse(input, Some(opts)))
+    }
+
+    #[test]
+    fn example_list_counter_reset_numbering_and_references() {
+        let out = native(
+            "(@first) First\n(5@reset) Reset\n(@next) Next\n\nText.\n\n(@last) Last\n\nSee (@first), (@reset), (@next), (@last).\n",
+            pandoc_options(),
+        );
+        assert!(out.contains("( 1 , Example , TwoParens )"), "{out}");
+        assert!(out.contains("( 7 , Example , TwoParens )"), "{out}");
+        for reference in ["(1),", "(5),", "(6),", "(7)."] {
+            assert!(out.contains(&format!("Str \"{reference}\"")), "{out}");
+        }
+    }
+
+    #[test]
+    fn example_list_counter_reset_duplicate_keeps_first_label_number() {
+        let out = native(
+            "(4@same) First\n(1@same) Duplicate\n(@next) Next\n\nSee (@same), (@next).\n",
+            pandoc_options(),
+        );
+        assert!(out.contains("( 4 , Example , TwoParens )"), "{out}");
+        assert!(out.contains("Str \"(4),\""), "{out}");
+        assert!(out.contains("Str \"(1).\""), "{out}");
+    }
+
+    #[test]
+    fn example_list_counter_reset_nested_numbering_follows_source_order() {
+        let out = native(
+            "(@o) Outer\n\n     (1@inner) Inner\n\n(@next) Next\n\nSee (@o), (@inner), (@next).\n",
+            pandoc_options(),
+        );
+        assert_eq!(
+            out.matches("( 1 , Example , TwoParens )").count(),
+            2,
+            "{out}"
+        );
+        assert!(out.contains("Str \"(2).\""), "{out}");
+    }
+
+    #[test]
+    fn example_list_counter_reset_zero_and_unlabeled() {
+        let out = native(
+            "(0@) Zero\n(@next) Next\n\nSee (@next).\n",
+            pandoc_options(),
+        );
+        assert!(out.contains("( 0 , Example , TwoParens )"), "{out}");
+        assert!(out.contains("Str \"(1).\""), "{out}");
     }
 
     #[test]

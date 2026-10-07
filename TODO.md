@@ -460,7 +460,7 @@ the spec files in `assets/pandoc-spec/`.
 - [ ] Extension: `startnum` - Start ordered lists at arbitrary number (low
   priority, if we even should support this)
 - [x] Extension: `example_lists` - Example lists with `(@)` markers
-- [ ] Support Pandoc 3.11's `(1@label)` example-list counter resets, including
+- [x] Support Pandoc 3.11's `(1@label)` example-list counter resets, including
   CST markers, numbering, and reference resolution. Gate recognition at 3.11
   so older targets retain paragraph text. See the [3.11 release
   notes](https://pandoc.org/releases.html#pandoc-3.11-2026-08-28).

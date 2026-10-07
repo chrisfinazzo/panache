@@ -214,6 +214,16 @@ fn schema_marks_flavor_overrides_as_deprecated() {
 }
 
 #[test]
+fn schema_accepts_pandoc_3_11_and_its_aliases() {
+    let validator = build_validator();
+    for spelling in ["3.11", "3-11", "v3.11", "v3-11"] {
+        let json = toml_to_json(&format!("[compat]\npandoc = \"{spelling}\"\n"));
+        let errors: Vec<_> = validator.iter_errors(&json).collect();
+        assert!(errors.is_empty(), "{spelling:?}: {errors:?}");
+    }
+}
+
+#[test]
 fn schema_accepts_pandoc_3_12_and_its_aliases() {
     let validator = build_validator();
     for spelling in ["3.12", "3-12", "v3.12", "v3-12"] {

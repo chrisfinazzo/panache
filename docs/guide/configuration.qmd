@@ -429,6 +429,7 @@ quarto = "1.9"
     behavior changed across releases.
 
     - `3.12` (default): match Pandoc 3.12 behavior.
+    - `3.11`: match Pandoc 3.11 behavior.
     - `3.10`: match Pandoc 3.10 behavior.
     - `3.9`: match Pandoc 3.9 behavior.
     - `3.7`: match Pandoc 3.7 behavior.
@@ -453,6 +454,27 @@ quarto = "1.9"
     the top level (including inside blockquotes and fenced divs) still accept any
     start number, as do sibling items continuing a list that is already open. Set
     `pandoc = "3.9"` if you author for an older Pandoc.
+
+    Pandoc 3.11 adds `(1@label)` to reset the example-list counter. With the
+    `example-lists` extension enabled, targets `3.11`, `3.12`, and `latest`
+    recognize the reset, preserve its marker during formatting, and resolve
+    references such as `(@label)` to the assigned number. For example,
+
+    ```markdown
+    (@first) First example.
+
+    A new chapter begins.
+
+    (1@chapter) Restart at one.
+    (@next) Continue at two.
+
+    See (@chapter) and (@next).
+    ```
+
+    A reset may specify another number, such as `(10@label)`, or omit the label, as
+    in `(1@)`. Earlier targets keep reset-shaped text in paragraphs. The
+    ordered-sublist rule still applies: a new nested example list must start at one,
+    though a reset may change the counter within an open list.
 
     Pandoc 3.12 compacts table paragraphs only when every cell is empty or contains
     a single paragraph. A cell containing a heading, code block, or multiple

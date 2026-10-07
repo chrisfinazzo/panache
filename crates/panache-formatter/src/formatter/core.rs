@@ -1,6 +1,6 @@
 use crate::config::{Config, HorizontalRuleStyle, WrapMode};
 use crate::directives::DirectiveTracker;
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::{ExampleListMarker, SyntaxKind, SyntaxNode};
 use panache_parser::parser::blocks::definition_lists::try_parse_definition_marker;
 use panache_parser::parser::blocks::headings::try_parse_atx_heading;
 use panache_parser::parser::blocks::horizontal_rules::try_parse_horizontal_rule;
@@ -209,6 +209,10 @@ impl Formatter {
             || text.starts_with("* ")
             || text.starts_with("+ ")
             || text.starts_with("(@")
+            || text
+                .split_whitespace()
+                .next()
+                .is_some_and(|piece| ExampleListMarker::parse(piece).is_some())
             || {
                 let mut chars = text.chars().peekable();
                 let mut saw_digit = false;

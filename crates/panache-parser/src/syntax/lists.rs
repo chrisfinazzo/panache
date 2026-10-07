@@ -7,6 +7,43 @@
 use super::ast::{AstChildren, support};
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode};
 
+/// The source parts of an example-list marker, including an optional reset.
+#[derive(Debug, Clone, Copy)]
+pub struct ExampleListMarker<'a> {
+    pub start_number: Option<usize>,
+    pub label: &'a str,
+    pub label_offset: usize,
+}
+
+impl<'a> ExampleListMarker<'a> {
+    pub fn parse(text: &'a str) -> Option<Self> {
+        let body = text.strip_prefix('(')?.strip_suffix(')')?;
+        let (number, label) = body.split_once('@')?;
+        if !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        // Pandoc allows separators only when followed by an alphanumeric run.
+        let mut needs_alphanumeric = false;
+        for ch in label.chars() {
+            if ch.is_alphanumeric() {
+                needs_alphanumeric = false;
+            } else if matches!(ch, '_' | '-') && !needs_alphanumeric {
+                needs_alphanumeric = true;
+            } else {
+                return None;
+            }
+        }
+        if needs_alphanumeric {
+            return None;
+        }
+        Some(Self {
+            start_number: number.parse().ok(),
+            label,
+            label_offset: number.len() + 2,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListKind {
     Bullet,
@@ -114,6 +151,22 @@ impl ListItem {
                 .filter(|token| token.kind() == SyntaxKind::LIST_MARKER)
                 .map(|token| token.text().to_string())
         })
+    }
+
+    /// Returns the example label and its source range, excluding the reset.
+    pub fn example_label(&self) -> Option<(String, rowan::TextRange)> {
+        let token = self.0.children_with_tokens().find_map(|element| {
+            element
+                .into_token()
+                .filter(|token| token.kind() == SyntaxKind::LIST_MARKER)
+        })?;
+        let marker = ExampleListMarker::parse(token.text())?;
+        if marker.label.is_empty() {
+            return None;
+        }
+        let start = token.text_range().start() + rowan::TextSize::from(marker.label_offset as u32);
+        let end = start + rowan::TextSize::from(marker.label.len() as u32);
+        Some((marker.label.to_string(), rowan::TextRange::new(start, end)))
     }
 
     pub fn is_task(&self) -> bool {

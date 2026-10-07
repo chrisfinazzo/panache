@@ -1,0 +1,8 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..102
+  PARAGRAPH@0..102
+    TEXT@0..101 "(1@legacy)   This mar ..."
+    NEWLINE@101..102 "\n"

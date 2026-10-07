@@ -950,6 +950,12 @@ pub enum PandocCompat {
         serde(rename = "3.10", alias = "3-10", alias = "v3.10", alias = "v3-10")
     )]
     V3_10,
+    /// Match Pandoc 3.11 behavior for ambiguous syntax edge cases.
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "3.11", alias = "3-11", alias = "v3.11", alias = "v3-11")
+    )]
+    V3_11,
     /// Match Pandoc 3.12 behavior for ambiguous syntax edge cases.
     #[default]
     #[cfg_attr(
@@ -984,7 +990,13 @@ impl PandocCompat {
     /// `Latest` variant sorts first, so deriving an ordering on this enum
     /// would silently give the wrong answer.
     pub fn restricts_ordered_sublist_start(self) -> bool {
-        matches!(self.effective(), Self::V3_10 | Self::V3_12)
+        matches!(self.effective(), Self::V3_10 | Self::V3_11 | Self::V3_12)
+    }
+
+    /// Whether example-list markers may reset the counter with `(1@label)`.
+    /// Pandoc introduced this syntax in 3.11 (jgm/pandoc#10940).
+    pub fn supports_example_list_resets(self) -> bool {
+        matches!(self.effective(), Self::V3_11 | Self::V3_12)
     }
 
     /// Whether table paragraphs compact only when every cell is empty or
@@ -1140,6 +1152,7 @@ impl schemars::JsonSchema for PandocCompat {
                 "3.7", "3-7", "v3.7", "v3-7",
                 "3.9", "3-9", "v3.9", "v3-9",
                 "3.10", "3-10", "v3.10", "v3-10",
+                "3.11", "3-11", "v3.11", "v3-11",
                 "3.12", "3-12", "v3.12", "v3-12"
             ]
         })

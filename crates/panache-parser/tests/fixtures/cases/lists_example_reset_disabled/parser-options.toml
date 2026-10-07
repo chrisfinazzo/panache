@@ -1,0 +1,3 @@
+flavor = "pandoc"
+[extensions]
+example-lists = false

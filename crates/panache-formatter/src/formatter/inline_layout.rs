@@ -5,7 +5,7 @@ use crate::formatter::sentence_wrap::{
 };
 use crate::formatter::smart::normalize_smart_punctuation;
 use crate::syntax::{
-    ImageAlt, LatexCommand, LinkRef, LinkText, ListItem, SyntaxKind, SyntaxNode,
+    ExampleListMarker, ImageAlt, LatexCommand, LinkRef, LinkText, ListItem, SyntaxKind, SyntaxNode,
     UnresolvedReference, text_without_line_prefixes,
 };
 use panache_parser::parser::inlines::subscript::try_parse_subscript;
@@ -330,16 +330,7 @@ fn is_unsafe_block_line_start_piece(piece: &str) -> bool {
 }
 
 fn is_example_list_marker_piece(piece: &str) -> bool {
-    let Some(rest) = piece.strip_prefix("(@") else {
-        return false;
-    };
-    let Some(label) = rest.strip_suffix(')') else {
-        return false;
-    };
-    !label.is_empty()
-        && label
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    ExampleListMarker::parse(piece).is_some()
 }
 
 fn is_decimal_ordered_list_marker_piece(piece: &str) -> bool {
@@ -1776,6 +1767,8 @@ mod tests {
     #[test]
     fn unsafe_line_start_rule_matches_ambiguous_markers() {
         assert!(is_example_list_marker_piece("(@foo-bar-123)"));
+        assert!(is_example_list_marker_piece("(1@foo-bar-123)"));
+        assert!(is_example_list_marker_piece("(0@)"));
         assert!(is_unsafe_list_line_start_piece("(@foo-bar-123)"));
         assert!(is_decimal_ordered_list_marker_piece("2018."));
         assert!(is_decimal_ordered_list_marker_piece("2)"));

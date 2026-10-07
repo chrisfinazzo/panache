@@ -511,6 +511,8 @@ golden_test_cases!(
     lists_bullet,
     lists_code,
     lists_example,
+    lists_example_reset,
+    lists_example_reset_3_10,
     lists_fancy,
     lists_indented_code,
     lists_nested,

@@ -1,0 +1,5 @@
+flavor = "pandoc"
+[format]
+line-width = 40
+[compat]
+pandoc = "3.11"

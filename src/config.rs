@@ -1946,6 +1946,16 @@ mod tests {
     }
 
     #[test]
+    fn compat_pandoc_accepts_3_11_and_its_aliases() {
+        for spelling in ["3.11", "3-11", "v3.11", "v3-11"] {
+            let toml = format!("[compat]\npandoc = \"{spelling}\"\n");
+            let cfg = parse_config_str(&toml, Path::new("panache.toml"))
+                .unwrap_or_else(|e| panic!("[compat] pandoc = {spelling:?} must parse: {e}"));
+            assert_eq!(cfg.parser, PandocCompat::V3_11, "spelling: {spelling:?}");
+        }
+    }
+
+    #[test]
     fn compat_pandoc_accepts_3_12_and_its_aliases() {
         for spelling in ["3.12", "3-12", "v3.12", "v3-12"] {
             let toml = format!("[compat]\npandoc = \"{spelling}\"\n");

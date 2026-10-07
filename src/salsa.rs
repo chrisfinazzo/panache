@@ -2148,31 +2148,8 @@ fn example_label_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
     })
 }
 
-fn parse_example_label(marker: &str) -> Option<&str> {
-    let rest = marker.strip_prefix("(@")?;
-    let label = rest.strip_suffix(')')?;
-    if label.is_empty()
-        || !label
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return None;
-    }
-    Some(label)
-}
-
 fn extract_example_label_definition(item: &ListItem) -> Option<(String, rowan::TextRange)> {
-    let token = item.syntax().children_with_tokens().find_map(|element| {
-        element
-            .into_token()
-            .filter(|token| token.kind() == SyntaxKind::LIST_MARKER)
-    })?;
-    let marker = token.text();
-    let label = parse_example_label(marker)?;
-    let token_start: usize = token.text_range().start().into();
-    let start = rowan::TextSize::from((token_start + 2) as u32);
-    let end = rowan::TextSize::from((token_start + 2 + label.len()) as u32);
-    Some((label.to_string(), rowan::TextRange::new(start, end)))
+    item.example_label()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

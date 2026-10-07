@@ -877,6 +877,10 @@ Smart completions for Markdown syntax (implementation varies by context):
 Rename references and their definitions together. Place cursor on a reference
 label or definition and trigger rename (F2 in many editors).
 
+Example-list labels also support navigation and rename. With `[compat] pandoc`
+set to `3.11` or newer and `example-lists` enabled, `(@label)` resolves to a
+definition such as `(1@label)`. Renaming the label preserves the reset number.
+
 For reference links, renaming updates the label in `[text][ref]`, `![alt][ref]`,
 and `[ref]: url` definitions in the current document. Matching ignores
 differences in label casing and whitespace.

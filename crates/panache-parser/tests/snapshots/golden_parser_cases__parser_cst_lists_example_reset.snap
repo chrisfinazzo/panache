@@ -1,0 +1,107 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..623
+  LIST@0..152
+    LIST_ITEM@0..25
+      LIST_MARKER@0..9 "(@before)"
+      WHITESPACE@9..10 " "
+      PLAIN@10..25
+        TEXT@10..24 "First example."
+        NEWLINE@24..25 "\n"
+    LIST_ITEM@25..129
+      LIST_MARKER@25..37 "(10@chapter)"
+      WHITESPACE@37..40 "   "
+      PLAIN@40..129
+        TEXT@40..128 "Reset to ten with eno ..."
+        NEWLINE@128..129 "\n"
+    LIST_ITEM@129..152
+      LIST_MARKER@129..137 "(@after)"
+      WHITESPACE@137..138 " "
+      PLAIN@138..152
+        TEXT@138..151 "Next example."
+        NEWLINE@151..152 "\n"
+  BLANK_LINE@152..153
+    BLANK_LINE@152..153 "\n"
+  PARAGRAPH@153..184
+    TEXT@153..183 "Some text separates t ..."
+    NEWLINE@183..184 "\n"
+  BLANK_LINE@184..185
+    BLANK_LINE@184..185 "\n"
+  LIST@185..250
+    LIST_ITEM@185..215
+      LIST_MARKER@185..189 "(1@)"
+      WHITESPACE@189..192 "   "
+      PLAIN@192..215
+        TEXT@192..214 "Reset without a label."
+        NEWLINE@214..215 "\n"
+    LIST_ITEM@215..250
+      LIST_MARKER@215..222 "(@tail)"
+      WHITESPACE@222..223 " "
+      PLAIN@223..250
+        TEXT@223..249 "After the unlabeled r ..."
+        NEWLINE@249..250 "\n"
+  BLANK_LINE@250..251
+    BLANK_LINE@250..251 "\n"
+  LIST@251..390
+    LIST_ITEM@251..390
+      LIST_MARKER@251..252 "-"
+      WHITESPACE@252..253 " "
+      PLAIN@253..265
+        TEXT@253..264 "Outer item."
+        NEWLINE@264..265 "\n"
+      BLANK_LINE@265..266
+        BLANK_LINE@265..266 "\n"
+      LIST@266..390
+        LIST_ITEM@266..295
+          WHITESPACE@266..268 "  "
+          LIST_MARKER@268..278 "(1@nested)"
+          WHITESPACE@278..281 "   "
+          PLAIN@281..295
+            TEXT@281..294 "Nested reset."
+            NEWLINE@294..295 "\n"
+        LIST_ITEM@295..353
+          WHITESPACE@295..297 "  "
+          LIST_MARKER@297..313 "(12@nested-next)"
+          WHITESPACE@313..314 " "
+          PLAIN@314..353
+            TEXT@314..352 "Another reset in the  ..."
+            NEWLINE@352..353 "\n"
+        LIST_ITEM@353..390
+          WHITESPACE@353..355 "  "
+          LIST_MARKER@355..369 "(@nested-last)"
+          WHITESPACE@369..370 " "
+          PLAIN@370..390
+            TEXT@370..389 "Continue numbering."
+            NEWLINE@389..390 "\n"
+  BLANK_LINE@390..391
+    BLANK_LINE@390..391 "\n"
+  PARAGRAPH@391..419
+    TEXT@391..418 "The quoted examples f ..."
+    NEWLINE@418..419 "\n"
+  BLANK_LINE@419..420
+    BLANK_LINE@419..420 "\n"
+  BLOCK_QUOTE@420..538
+    BLOCK_QUOTE_MARKER@420..421 ">"
+    WHITESPACE@421..422 " "
+    LIST@422..538
+      LIST_ITEM@422..498
+        LIST_MARKER@422..432 "(3@quoted)"
+        WHITESPACE@432..435 "   "
+        PLAIN@435..498
+          TEXT@435..497 "A quoted reset with e ..."
+          NEWLINE@497..498 "\n"
+      BLOCK_QUOTE_MARKER@498..499 ">"
+      WHITESPACE@499..500 " "
+      LIST_ITEM@500..538
+        LIST_MARKER@500..514 "(@quoted-next)"
+        WHITESPACE@514..515 " "
+        PLAIN@515..538
+          TEXT@515..537 "Continue in the quote."
+          NEWLINE@537..538 "\n"
+  BLANK_LINE@538..539
+    BLANK_LINE@538..539 "\n"
+  PARAGRAPH@539..623
+    TEXT@539..622 "A paragraph has enoug ..."
+    NEWLINE@622..623 "\n"

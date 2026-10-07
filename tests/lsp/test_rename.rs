@@ -351,6 +351,37 @@ plot(1:10)
 }
 
 #[test]
+fn test_rename_example_counter_reset_preserves_number() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let root = temp_dir.path();
+    let doc_path = root.join("doc.md");
+    std::fs::write(root.join("panache.toml"), "flavor = \"pandoc\"\n").unwrap();
+    let content = "(12@good) First example.\n\nSee (@good).\n";
+    std::fs::write(&doc_path, content).unwrap();
+    let mut server = TestLspServer::new();
+    let root_uri = Uri::from_file_path(root).unwrap();
+    let doc_uri = Uri::from_file_path(&doc_path).unwrap();
+    server.initialize(root_uri.as_str());
+    server.open_document(doc_uri.as_str(), content, "markdown");
+
+    for (line, character) in [(0, 5), (2, 7)] {
+        let edit = server
+            .rename(doc_uri.as_str(), line, character, "better")
+            .expect("rename from definition or reference");
+        let changes = edit.changes.unwrap();
+        let edits = changes.get(&doc_uri).unwrap();
+        assert_eq!(edits.len(), 2);
+        let definition = edits
+            .iter()
+            .find(|edit| edit.range.start.line == 0)
+            .unwrap();
+        assert_eq!(definition.range.start.character, 4);
+        assert_eq!(definition.range.end.character, 8);
+        assert_eq!(definition.new_text, "better");
+    }
+}
+
+#[test]
 fn test_rename_numbered_example_label_updates_definition_and_reference() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let root = temp_dir.path();

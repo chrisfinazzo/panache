@@ -1,0 +1,2 @@
+flavor = "pandoc"
+pandoc-compat = "3.10"

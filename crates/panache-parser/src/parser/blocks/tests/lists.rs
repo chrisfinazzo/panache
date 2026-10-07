@@ -556,6 +556,80 @@ fn fancy_list_complex_roman() {
 }
 
 #[test]
+fn example_list_counter_reset_markers_are_lossless() {
+    let input = "(12@reset) Reset\n(@next) Next\n(0@) Zero\n";
+    for compat in [
+        crate::PandocCompat::V3_11,
+        crate::PandocCompat::V3_12,
+        crate::PandocCompat::Latest,
+    ] {
+        let options = crate::ParserOptions {
+            pandoc_compat: compat,
+            ..Default::default()
+        };
+        let tree = crate::parse(input, Some(options));
+        assert_eq!(tree.text().to_string(), input);
+        let list = find_first(&tree, SyntaxKind::LIST).expect("example list");
+        assert_eq!(count_children(&list, SyntaxKind::LIST_ITEM), 3);
+        let markers: Vec<_> = tree
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| token.kind() == SyntaxKind::LIST_MARKER)
+            .map(|token| token.text().to_string())
+            .collect();
+        assert_eq!(markers, ["(12@reset)", "(@next)", "(0@)"]);
+    }
+}
+
+#[test]
+fn example_list_counter_resets_respect_compat_and_extension() {
+    use crate::{Flavor, PandocCompat, ParserOptions};
+    let input = "(1@reset) Reset\n";
+    for compat in [PandocCompat::V3_7, PandocCompat::V3_9, PandocCompat::V3_10] {
+        let mut options = ParserOptions::for_flavor(Flavor::Pandoc);
+        options.pandoc_compat = compat;
+        let tree = crate::parse(input, Some(options));
+        assert_eq!(tree.text().to_string(), input);
+        assert!(find_first(&tree, SyntaxKind::LIST).is_none());
+    }
+    for flavor in [Flavor::Pandoc, Flavor::CommonMark] {
+        let mut options = ParserOptions::for_flavor(flavor);
+        options.extensions.example_lists = false;
+        let tree = crate::parse(input, Some(options));
+        assert!(find_first(&tree, SyntaxKind::LIST).is_none());
+    }
+}
+
+#[test]
+fn example_list_counter_resets_follow_sublist_start_rule() {
+    let accepted = crate::parse("- Outer\n\n  (1@nested) Nested\n", None);
+    assert_eq!(find_all(&accepted, SyntaxKind::LIST).len(), 2);
+    let rejected = crate::parse("- Outer\n\n  (5@nested) Nested\n", None);
+    assert_eq!(find_all(&rejected, SyntaxKind::LIST).len(), 1);
+}
+
+#[test]
+fn example_list_counter_reset_requires_a_valid_marker() {
+    for input in ["(1@label)text\n", "(-1@label) Text\n", "(1@label-) Text\n"] {
+        let tree = crate::parse(input, None);
+        assert_eq!(tree.text().to_string(), input);
+        assert!(find_first(&tree, SyntaxKind::LIST).is_none(), "{input}");
+    }
+    let input = "(01@label)\tText\r\n";
+    let tree = crate::parse(input, None);
+    assert_eq!(tree.text().to_string(), input);
+    assert!(find_first(&tree, SyntaxKind::LIST).is_some());
+}
+
+#[test]
+fn example_list_counter_reset_unicode_label() {
+    let input = "(1@étiquette) Accent\n";
+    let tree = crate::parse(input, None);
+    assert_eq!(tree.text().to_string(), input);
+    assert!(find_first(&tree, SyntaxKind::LIST).is_some());
+}
+
+#[test]
 fn example_list_basic() {
     use crate::options::{Extensions, ParserOptions};
     let config = ParserOptions {

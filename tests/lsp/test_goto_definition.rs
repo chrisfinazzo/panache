@@ -528,6 +528,38 @@ fn test_goto_definition_shortcut_label_matching_explicit_heading_id_returns_none
 }
 
 #[test]
+fn test_goto_definition_example_counter_reset_label() {
+    for compat in ["3.12", "3.10"] {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let root = temp_dir.path();
+        let doc_path = root.join("doc.md");
+        std::fs::write(
+            root.join("panache.toml"),
+            format!("flavor = \"pandoc\"\n[compat]\npandoc = \"{compat}\"\n"),
+        )
+        .unwrap();
+        let content = "(12@good) First example.\n\nSee (@good).\n";
+        std::fs::write(&doc_path, content).unwrap();
+        let mut server = TestLspServer::new();
+        let root_uri = Uri::from_file_path(root).unwrap();
+        let doc_uri = Uri::from_file_path(&doc_path).unwrap();
+        server.initialize(root_uri.as_str());
+        server.open_document(doc_uri.as_str(), content, "markdown");
+        let result = server.goto_definition(doc_uri.as_str(), 2, 7);
+        if compat == "3.10" {
+            assert!(result.is_none(), "older targets have no reset definition");
+        } else {
+            let Some(GotoDefinitionResponse::Scalar(location)) = result else {
+                panic!("expected reset label definition");
+            };
+            assert_eq!(location.range.start.line, 0);
+            assert_eq!(location.range.start.character, 4);
+            assert_eq!(location.range.end.character, 8);
+        }
+    }
+}
+
+#[test]
 fn test_goto_definition_numbered_example_label() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let root = temp_dir.path();

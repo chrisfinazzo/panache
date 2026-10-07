@@ -7,7 +7,7 @@ use crate::config::ConfigSource;
 use crate::lsp::uri_ext::UriExt;
 use crate::syntax::{
     AstNode, AttributeNode, Citation, CodeBlock, CodeSpan, Crossref, FootnoteDefinition,
-    FootnoteReference, ImageLink, InlineMath, Link, LinkRef, ParsedYamlRegionSnapshot,
+    FootnoteReference, ImageLink, InlineMath, Link, LinkRef, ListItem, ParsedYamlRegionSnapshot,
     ReferenceDefinition, SyntaxKind, SyntaxNode, UnresolvedReference,
 };
 use crate::utils::{normalize_anchor_label, normalize_label};
@@ -317,6 +317,9 @@ pub(crate) fn extract_example_label_target_at_offset(
     root: &SyntaxNode,
     offset: usize,
 ) -> Option<String> {
+    if let Some((label, _)) = example_definition_label_at_offset(root, offset) {
+        return Some(normalize_label(&label));
+    }
     let text = root.text().to_string();
     if offset > text.len() {
         return None;
@@ -469,6 +472,9 @@ pub(crate) fn extract_symbol_text_range(node: &SyntaxNode) -> Option<TextRange> 
 }
 
 pub(crate) fn example_label_range_at_offset(root: &SyntaxNode, offset: usize) -> Option<TextRange> {
+    if let Some((_, range)) = example_definition_label_at_offset(root, offset) {
+        return Some(range);
+    }
     let text = root.text().to_string();
     if offset > text.len() {
         return None;
@@ -520,6 +526,18 @@ fn heading_target_from_link(link: &Link) -> Option<String> {
     }
 
     None
+}
+
+fn example_definition_label_at_offset(
+    root: &SyntaxNode,
+    offset: usize,
+) -> Option<(String, TextRange)> {
+    let node = find_node_at_offset(root, offset)?;
+    let item = node.ancestors().find_map(ListItem::cast)?;
+    let (label, range) = item.example_label()?;
+    let start: usize = range.start().into();
+    let end: usize = range.end().into();
+    (start <= offset && offset <= end).then_some((label, range))
 }
 
 fn example_label_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
