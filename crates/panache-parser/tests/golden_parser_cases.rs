@@ -124,6 +124,38 @@ fn html_block_div_invalid_attribute_name_keeps_body_raw() {
 }
 
 #[test]
+fn html_block_div_invalid_self_closing_attribute_name_leaves_body_outside() {
+    use panache_parser::syntax::SyntaxKind;
+
+    for input in [
+        include_str!(
+            "fixtures/cases/html_block_div_attr_name_self_closing_trailing_pandoc/input.md"
+        ),
+        include_str!(
+            "fixtures/cases/html_block_div_attr_name_self_closing_multiline_pandoc/input.md"
+        ),
+        include_str!("fixtures/cases/html_block_div_attr_name_self_closing_close_pandoc/input.md"),
+    ] {
+        let tree = parse(input, None);
+        assert_eq!(tree.text().to_string(), input);
+        let block = tree.children().next().unwrap();
+        assert_eq!(block.kind(), SyntaxKind::HTML_BLOCK_RAW);
+        assert!(
+            !block.descendants().any(|child| matches!(
+                child.kind(),
+                SyntaxKind::HTML_ATTRS | SyntaxKind::STRONG | SyntaxKind::HTML_BLOCK_DIV
+            )),
+            "a rejected self-closing div must not expose attributes or contain following Markdown"
+        );
+        assert!(
+            tree.children()
+                .any(|child| child.kind() == SyntaxKind::PARAGRAPH),
+            "following Markdown belongs outside the raw tag"
+        );
+    }
+}
+
+#[test]
 fn html_block_div_slash_keeps_following_content_inside() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -582,6 +614,18 @@ golden_test_cases!(
     html_block_div_nested_trailing_commonmark,
     html_block_div_nested_trailing_pandoc,
     html_block_div_attr_name_invalid_commonmark,
+    html_block_div_attr_name_self_closing_commonmark,
+    html_block_div_attr_name_self_closing_pandoc,
+    html_block_div_attr_name_self_closing_trailing_commonmark,
+    html_block_div_attr_name_self_closing_trailing_pandoc,
+    html_block_div_attr_name_self_closing_multiline_commonmark,
+    html_block_div_attr_name_self_closing_multiline_pandoc,
+    html_block_div_attr_name_self_closing_blockquote_commonmark,
+    html_block_div_attr_name_self_closing_blockquote_pandoc,
+    html_block_div_attr_name_self_closing_list_commonmark,
+    html_block_div_attr_name_self_closing_list_pandoc,
+    html_block_div_attr_name_self_closing_close_commonmark,
+    html_block_div_attr_name_self_closing_close_pandoc,
     html_block_div_attr_name_invalid_pandoc,
     html_block_div_attr_name_multiline_commonmark,
     html_block_div_attr_name_multiline_pandoc,

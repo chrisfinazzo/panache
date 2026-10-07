@@ -1,0 +1,10 @@
+[ RawBlock
+    (Format "html") "<DIV\n a&amp;b=\"x\"\n id=\"anchor\"/>"
+, Para
+    [ Strong [ Str "Outside." ]
+    , SoftBreak
+    , Str "next"
+    , Space
+    , Str "line"
+    ]
+]

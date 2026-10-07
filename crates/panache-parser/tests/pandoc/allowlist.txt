@@ -880,3 +880,13 @@
 # A fenced div inside a nested list item closes at its opening indent,
 # even when its final child is another list.
 566
+
+# html-block: self-closing divs with invalid attribute names are raw tags.
+# Following Markdown stays outside, including multiline opens, containers,
+# same-line trailing text, and a later closing div tag.
+567
+568
+569
+570
+571
+572

@@ -1,0 +1,4 @@
+[ RawBlock
+    (Format "html") "<div a&amp;b=\"x\" id=\"anchor\"/>"
+, Para [ Strong [ Str "Outside." ] ]
+]

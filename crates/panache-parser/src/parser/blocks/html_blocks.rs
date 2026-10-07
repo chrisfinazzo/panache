@@ -972,8 +972,8 @@ fn parse_raw_html_block_with_trailing(
     close_line_idx + 1
 }
 
-/// A balanced div rejected by Pandoc's attribute-name check is one raw
-/// block. Its body must not create Markdown nodes or indexed attributes.
+/// A balanced or self-closing div rejected by Pandoc's attribute-name check
+/// is one raw block. It must not expose native attributes or Markdown children.
 fn try_parse_div_with_invalid_attribute_names(
     builder: &mut GreenNodeBuilder<'static>,
     lines: &[&str],
@@ -1007,19 +1007,25 @@ fn try_parse_div_with_invalid_attribute_names(
     } else {
         lines.len()
     };
-    let mut close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
-    for line in &lines[open_end + 1..body_end] {
-        if close_offset.is_some() {
-            break;
+    let mut remaining = if text[..open_gt].ends_with('/') {
+        // Pandoc treats a rejected native div as raw HTML, whose slash closes
+        // the tag instead of opening a container for following Markdown.
+        open_gt + 1
+    } else {
+        let mut close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
+        for line in &lines[open_end + 1..body_end] {
+            if close_offset.is_some() {
+                break;
+            }
+            let inner = prefix.strip(line);
+            text.to_mut().push_str(inner);
+            if inner.contains('>') {
+                close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
+            }
         }
-        let inner = prefix.strip(line);
-        text.to_mut().push_str(inner);
-        if inner.contains('>') {
-            close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
-        }
-    }
-    let (_, close_end) = close_offset?;
-    let mut remaining = open_gt + 1 + close_end;
+        let (_, close_end) = close_offset?;
+        open_gt + 1 + close_end
+    };
     for (line_idx, line) in lines.iter().enumerate().take(body_end).skip(start_pos) {
         let inner = if line_idx == start_pos {
             first_inner

@@ -969,6 +969,9 @@ native-divs = true
     must start with a Unicode letter and continue with letters, numbers, `:`, `-`,
     or `_`. Entities in attribute values remain supported.
 
+    A self-closing `<div .../>` with an invalid attribute name stays one raw tag.
+    Following content is parsed as Markdown outside it.
+
 #### Other Blocks
 
 ```toml
