@@ -178,85 +178,110 @@ instructions below.
 
 ### Neovim
 
-Neovim does not recognize the mdsvex extensions (`.svx`, `.svelte.md`) out of
-the box, so map them to a filetype first (skip this if you only edit
-`.qmd`/`.md`/`.rmd`):
+Install Panache through [Mason](https://github.com/mason-org/mason.nvim) with
+`:MasonInstall panache`, or use one of the [CLI installation
+methods](../getting-started.qmd#installation). The executable must be available
+to Neovim on `PATH`.
+
+With Neovim 0.11 or later and a current
+[nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) installed, enable its
+built-in Panache configuration in your `init.lua`:
+
+```lua
+vim.lsp.enable("panache")
+```
+
+The configuration recognizes the `markdown`, `quarto`, and `rmd` filetypes and
+starts `panache lsp`. Mason installs the binary; enabling the LSP configuration
+connects it to your buffers.
+
+Without nvim-lspconfig, define the configuration directly before enabling it:
+
+```lua
+vim.lsp.config("panache", {
+  cmd = { "panache", "lsp" },
+  filetypes = { "markdown", "quarto", "rmd" },
+  root_markers = {
+    ".panache.toml",
+    "panache.toml",
+    "_quarto.yml",
+    "_bookdown.yml",
+    ".git",
+  },
+})
+vim.lsp.enable("panache")
+```
+
+For mdsvex files, register their filetype and add it to the server configuration
+before enabling the server:
 
 ```lua
 vim.filetype.add({
   extension = { svx = "mdsvex" },
   pattern = { [".*%.svelte%.md"] = "mdsvex" },
 })
+vim.lsp.config("panache", {
+  filetypes = { "markdown", "quarto", "rmd", "mdsvex" },
+})
 ```
 
-In Neovim +0.11, you can use the built-in LSP client:
-
-```lua
--- .config/nvim/lsp/panache.lua
-
-return {
-  cmd = { "panache", "lsp" },
-  filetypes = { "quarto", "markdown", "rmarkdown", "mdsvex" },
-  root_markers = { ".panache.toml", "panache.toml", ".git" },
-  settings = {},
-}
-
--- Enable it
-vim.lsp.enable({"panache"})
-```
-
-For earlier Neovim releases, use `nvim-lspconfig`:
-
-```lua
--- Add to your LSP config
-local lspconfig = require("lspconfig")
-local configs = require("lspconfig.configs")
-
--- Define panache LSP
-if not configs.panache then
-  configs.panache = {
-    default_config = {
-      cmd = { "panache", "lsp" },
-      filetypes = { "quarto", "markdown", "rmarkdown", "mdsvex" },
-      root_dir = lspconfig.util.root_pattern(
-        ".panache.toml",
-        "panache.toml",
-        ".git"
-      ),
-      settings = {},
-    },
-  }
-end
-
--- Enable it
-lspconfig.panache.setup({})
-```
-
-Note that you need to have `panache` in your PATH for the above configurations
-to work.
-
-To format on save, add an autocmd:
+To format on save:
 
 ```lua
 vim.api.nvim_create_autocmd("BufWritePre", {
-  pattern = { "*.qmd", "*.md", "*.rmd", "*.svx", "*.svelte.md" },
+  pattern = { "*.qmd", "*.md", "*.Rmd", "*.rmd", "*.svx", "*.svelte.md" },
   callback = function()
-    vim.lsp.buf.format({ async = false })
+    vim.lsp.buf.format({ name = "panache", async = false })
   end,
 })
 ```
 
-Format the current buffer with:
+Format the current buffer with `:lua vim.lsp.buf.format({ name = "panache" })`.
 
-```vim
-:lua vim.lsp.buf.format()
-```
+#### Conform
 
-Or map it to a key:
+[conform.nvim](https://github.com/stevearc/conform.nvim) includes a Panache
+formatter. With Panache installed on `PATH`, add it to your Conform setup:
 
 ```lua
-vim.keymap.set("n", "<leader>f", vim.lsp.buf.format, { desc = "Format buffer" })
+require("conform").setup({
+  formatters_by_ft = {
+    markdown = { "panache" },
+    quarto = { "panache" },
+    rmd = { "panache" },
+    mdsvex = { "panache" },
+  },
+  format_on_save = { timeout_ms = 3000 },
+})
 ```
+
+Conform sends the buffer and filename to Panache, so flavor detection and
+project configuration apply. If you enable Conform's format-on-save option, omit
+the LSP formatting autocmd above to avoid formatting twice. The language server
+can still provide diagnostics and navigation.
+
+### RStudio
+
+The [Panache R package](https://github.com/jolars/panache-r) provides an
+in-process formatter and RStudio addins. It is in early development. Install the
+development version from GitHub; building from source requires Cargo and Rust
+1.89 or newer:
+
+```r
+install.packages(c("remotes", "rstudioapi"))
+remotes::install_github("jolars/panache-r")
+```
+
+Choose **Format with Panache** or **Format Selection with Panache** from
+RStudio's **Addins** menu to format the active document or selected blocks. The
+addins work on editor contents and discover `panache.toml` from the document's
+directory. They leave the edits for you to save.
+
+The package formats R code blocks through the Arity R package by default.
+Explicitly configured external formatter commands must be installed on `PATH`.
+It provides formatting; use the CLI or an LSP editor for Panache's lint checks.
+See the [R package documentation](https://jolars.github.io/panache-r/) for
+function arguments, configuration overrides, and addin options.
 
 ### VS Code
 

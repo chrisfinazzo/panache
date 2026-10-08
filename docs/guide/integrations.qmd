@@ -1,209 +1,231 @@
 ---
 title: "Integrations"
 description: >
-  Use Panache with dprint, pre-commit hooks, and GitHub Actions to format and
+  Use Panache with GitHub Actions, pre-commit hooks, and dprint to format and
   lint your documents.
 ---
 
-## dprint
-
-The [Panache dprint plugin](https://github.com/jolars/dprint-plugin-panache)
-runs the Panache formatter through [dprint](https://dprint.dev/). Add it to your
-project's `dprint.json` with:
-
-```bash
-dprint config add jolars/panache
-```
-
-This command adds a versioned, checksummed plugin URL. Configure the plugin
-under the `panache` key, then run `dprint fmt` to format files or `dprint check`
-to check them without changing them:
-
-```jsonc
-{
-  "panache": {
-    "wrap": "sentence",
-    "lineWidth": 88
-  },
-  "plugins": [
-    "https://plugins.dprint.dev/jolars/panache-x.x.x.wasm@<checksum>"
-  ]
-}
-```
-
-Keep the plugin URL and checksum written by `dprint config add`; the URL above
-only illustrates the resulting configuration. The plugin handles `.md`, `.qmd`,
-`.Rmd`, `.rmd`, `.Rmarkdown`, `.rmarkdown`, `.markdown`, `.mdown`, and `.mkd`
-files. It uses Quarto rules for `.qmd` files and R Markdown rules for `.rmd` and
-`.rmarkdown` files, regardless of the configured `flavor`. Other extensions use
-`flavor`, which defaults to `pandoc`.
-
-The plugin accepts these settings under `panache`:
-
-  | Key                  | Values                                                                | Default     |
-  | -------------------- | --------------------------------------------------------------------  | ----------- |
-  | `flavor`             | `pandoc`, `quarto`, `rmarkdown`, `gfm`, `commonmark`, `multimarkdown` | `pandoc`    |
-  | `wrap`               | `reflow`, `preserve`, `sentence`, `semantic`                          | `reflow`    |
-  | `blankLines`         | `collapse`, `preserve`                                                | `collapse`  |
-  | `mathIndent`         | Integer number of spaces                                              | `2`         |
-  | `mathDelimiterStyle` | `preserve`, `dollars`, `backslash`                                    | `preserve`  |
-  | `tabStops`           | `normalize`, `preserve`                                               | `normalize` |
-  | `lineEnding`         | `auto`, `lf`, `crlf`                                                  | `auto`      |
-  | `lineWidth`          | Integer; uses dprint's global `lineWidth` when set                    | `80`        |
-  | `tabWidth`           | Integer; uses dprint's global `indentWidth` when set                  | `4`         |
-
-Set these options in `dprint.json`; the plugin does not read Panache's CLI
-configuration file. It provides formatting through dprint. To run Panache's
-linter, use the [CLI](linting.qmd#cli-usage) or one of the integrations below.
-
-## Pre-Commit
-
-[pre-commit](https://pre-commit.com/) is a framework for managing and
-maintaining multi-language pre-commit hooks. It runs checks on your code before
-each commit to ensure quality and consistency.
-
-The hooks are published from
-[`jolars/panache-pre-commit`](https://github.com/jolars/panache-pre-commit), a
-shim repo that carries only `vX.Y.Z` tags so `pre-commit autoupdate` resolves
-correctly. (The main panache repo also tags sub-packages like `panache-code-*`,
-which would otherwise confuse autoupdate.)
-
-Create a `.pre-commit-config.yaml` file in your repository root:
-
-```yaml
-repos:
-  - repo: https://github.com/jolars/panache-pre-commit
-    rev: v{{< meta version >}}
-    hooks:
-      - id: panache-format
-      - id: panache-lint
-```
-
-Then install the hooks:
-
-```bash
-pre-commit install
-```
-
-Panache provides two hook IDs:
-
-`panache-format`
-:   Automatically formats files according to Panache's formatting rules
-
-`panache-lint`
-:   Lints files and automatically applies fixes where possible
-
-Pass additional arguments to Panache:
-
-```yaml
-repos:
-  - repo: https://github.com/jolars/panache-pre-commit
-    rev: v{{< meta version >}}
-    hooks:
-      - id: panache-format
-        args: [--config, custom-config.toml]
-```
-
-### File Patterns
-
-By default, hooks run on `.qmd`, `.md`, `.markdown`, `.mdown`, `mkd`, and `.Rmd`
-files. You can override this with `files`, for instance to only run on `.qmd`
-and `.Rmd`:
-
-```yaml
-repos:
-  - repo: https://github.com/jolars/panache-pre-commit
-    rev: v{{< meta version >}}
-    hooks:
-      - id: panache-format
-        files: '\.(qmd|Rmd)$'
-```
+Use Panache in CI, Git hooks, and other formatting tools. For editor setup,
+including RStudio, Mason, and Conform, see [Editor
+Configuration](lsp.qmd#editor-configuration).
 
 ## GitHub Actions
 
-Use the dedicated Panache action for a one-line setup:
+Use [panache-action](https://github.com/jolars/panache-action) to check
+formatting and lint documents in CI. It installs a prebuilt Panache binary on
+GitHub-hosted Linux, macOS, and Windows runners. Create
+`.github/workflows/panache.yml`:
 
 ```yaml
-name: panache
+name: Panache
+
 on:
   pull_request:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  format-and-lint:
+  panache:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: jolars/panache-action@v1
+        with:
+          version: v3.14.0
 ```
 
-This workflow:
+By default, the action checks formatting and runs the linter over the
+repository's supported documents without changing files. Formatting differences
+or lint findings fail the check. It uses the CLI's [configuration
+discovery](configuration.qmd) and [file
+selection](configuration.qmd#file-selection-directory-traversal), including
+`.gitignore` and configured exclusions. Install any external formatters or
+linters selected in `panache.toml` before running the action.
 
-1. Installs Panache from official releases
-2. Checks that all files are formatted (`--check` mode)
-3. Runs the linter in CI mode (`--check` mode)
+The `@v1` tag selects the action version; `version` selects the Panache CLI
+release. Keep the latter aligned with your local installation and pre-commit
+revision. Omitting `version` selects `latest`.
 
-Both steps will fail (exit code 1) if issues are found, causing the workflow to
-fail.
-
-### Common options
-
-Pin a specific Panache CLI release:
+For a formatting-only check under `docs/`:
 
 ```yaml
 - uses: jolars/panache-action@v1
   with:
-    panache-version: v2.23.0
+    version: v3.14.0
+    path: docs/
+    lint: "false"
 ```
 
-Run only one check:
+Set `format: "false"` to run only linting, or `config: path/to/panache.toml` to
+select a configuration file. See the [action
+reference](https://github.com/jolars/panache-action/tree/v1#inputs) for the
+inputs and outputs supported by `@v1`.
 
-```yaml
-- uses: jolars/panache-action@v1
-  with:
-    lint: "false" # format only
-```
-
-```yaml
-- uses: jolars/panache-action@v1
-  with:
-    format: "false" # lint only
-```
+The published `@v1` action invokes `panache format --check` and
+`panache lint --check`. The latter flag is a deprecated compatibility alias;
+when writing your own CI commands, use `panache lint .`.
 
 ### Manual setup (advanced)
 
-If you prefer installing via Rust directly, you can keep using a manual
-workflow:
+You can also install through Cargo and invoke the checks yourself:
 
 ```yaml
-name: panache
+name: Panache
+
 on:
   pull_request:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  format-and-lint:
+  panache:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-panache-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install panache
-        run: cargo install --locked panache
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Panache
+        run: cargo install --locked panache --version 3.14.0
       - name: Check formatting
         run: panache format --check .
       - name: Run linter
         run: panache lint .
 ```
+
+## pre-commit
+
+[panache-pre-commit](https://github.com/jolars/panache-pre-commit) runs Panache
+on staged documents. The hooks install a prebuilt binary wheel from PyPI, so no
+separate Panache or Rust installation is needed. Any configured external tools
+must be installed separately and available on `PATH`.
+
+[Install pre-commit](https://pre-commit.com/#installation), then add this entry
+to `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/jolars/panache-pre-commit
+    rev: v3.14.0
+    hooks:
+      - id: panache-lint
+      - id: panache-format
+```
+
+Install the Git hook and run it once over all tracked files:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+On subsequent commits, both hooks select staged `.qmd`, `.Rmd`, `.md`,
+`.markdown`, `.mdown`, and `.mkd` files. `panache-lint` reports findings, and
+`panache-format` formats files in place. When a hook changes a file, review and
+stage the changes, then commit again.
+
+To apply safe lint fixes, add `--fix` to the lint hook and keep it before
+formatting:
+
+```yaml
+hooks:
+  - id: panache-lint
+    args: [--fix]
+  - id: panache-format
+```
+
+To check formatting without changing files, add `args: [--check]` to
+`panache-format`.
+
+Both hooks pass `--force-exclude`, so configured exclusions apply even though
+pre-commit supplies filenames explicitly. They discover `panache.toml` as the
+CLI does. To select another config, add `args: [--config, custom-config.toml]`
+to each hook.
+
+### File Patterns
+
+The hook patterns are case-sensitive. For example, they do not select `.rmd`,
+`.Rmarkdown`, or `.rmarkdown` by default, although Panache supports those files.
+Override `files` on both hooks to cover them:
+
+```yaml
+repos:
+  - repo: https://github.com/jolars/panache-pre-commit
+    rev: v3.14.0
+    hooks:
+      - id: panache-lint
+        files: '\.(qmd|md|markdown|mdown|mkd|[Rr]md|[Rr]markdown)$'
+      - id: panache-format
+        files: '\.(qmd|md|markdown|mdown|mkd|[Rr]md|[Rr]markdown)$'
+```
+
+The `rev` selects the Panache release: `v3.14.0` installs Panache 3.14.0. Run
+`pre-commit autoupdate` to update hook revisions, then review and commit the
+changes to `.pre-commit-config.yaml`.
+
+## dprint
+
+Format Markdown and Quarto documents alongside other languages with
+[dprint](https://dprint.dev/) and the [Panache dprint
+plugin](https://github.com/jolars/dprint-plugin-panache). The plugin bundles
+Panache's formatter as WebAssembly, so no Panache CLI installation is needed.
+
+[Install dprint](https://dprint.dev/install/). If your project has no
+`dprint.json`, create one with `dprint init`, then add Panache:
+
+```bash
+dprint config add jolars/panache
+```
+
+Commit the versioned, checksummed plugin URL that the command adds to
+`dprint.json`. Run `dprint fmt` to format files in place or `dprint check` to
+check without changing files. The check fails when files need formatting. Both
+commands run all configured plugins; Panache handles `.md`, `.qmd`, `.Rmd`,
+`.rmd`, `.Rmarkdown`, `.rmarkdown`, `.markdown`, `.mdown`, and `.mkd` files.
+
+Add settings under `panache`, keeping the `plugins` array created above:
+
+```json
+{
+  "panache": {
+    "wrap": "sentence",
+    "lineWidth": 88
+  }
+}
+```
+
+The plugin uses Quarto rules for `.qmd` files and R Markdown rules for `.rmd`
+and `.rmarkdown` files, regardless of the configured `flavor`. Other extensions
+use `flavor`, which defaults to `pandoc`.
+
+The plugin accepts these settings under `panache`:
+
+  | Key                  | Values                                                                    | Default     |
+  | -------------------- | ---------------------------------------------------------------------     | ----------- |
+  | `flavor`             | `pandoc`, `quarto`, `rmarkdown`, `gfm`, `commonmark`, `multimarkdown`     | `pandoc`    |
+  | `wrap`               | `reflow`, `preserve`, `sentence`, `semantic`                              | `reflow`    |
+  | `blankLines`         | `collapse`, `preserve`                                                    | `collapse`  |
+  | `mathIndent`         | Integer number of spaces                                                  | `2`         |
+  | `mathDelimiterStyle` | `preserve`, `dollars`, `backslash`                                        | `preserve`  |
+  | `tabStops`           | `normalize`, `preserve`                                                   | `normalize` |
+  | `lineEnding`         | `auto`, `lf`, `crlf`                                                      | `auto`      |
+  | `lineWidth`          | Integer; uses dprint's global `lineWidth` when set                        | `80`        |
+  | `tabWidth`           | Integer; uses dprint's global `indentWidth` when set                      | `4`         |
+
+The plugin reads `dprint.json` and does not load `panache.toml`. Use dprint's
+top-level `includes` and `excludes` for file selection; Panache's TOML
+exclusions do not apply. dprint also respects `.gitignore`. See [dprint's
+configuration guide](https://dprint.dev/config/).
+
+The plugin provides document formatting and cannot launch Panache's external
+formatters or linters. Use the CLI integrations above when code blocks need
+external tools or you need lint checks.
+
+The plugin is released independently of the CLI. Run `dprint config update`,
+then review and commit the configuration changes. Matching CLI output requires
+the same `panache-formatter` version and equivalent settings, with external
+formatting disabled on the CLI side.

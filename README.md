@@ -24,7 +24,8 @@ Panache is available from several sources:
 - **Homebrew**: `brew install panache`
 - **npm**: `npm install -g @panache-cli/panache` (or `npx @panache-cli/panache`)
 - **PyPI**: `uv tool install panache-cli`/`pipx install panache-cli`
-- **Aqua**: `aqua install jolars/panache`
+- **mise/Aqua**: see the [installation
+  guide](https://panache.bz/getting-started.html#mise-and-aqua)
 - **NixOS**: the `panache` package on
   [Nixpkgs](https://search.nixos.org/packages?channel=unstable&show=panache&from=0&size=50&sort=relevance&type=packages)
 - **Arch Linux**: from the AUR:
@@ -171,6 +172,10 @@ The list of LSP features supported by Panache includes, among others:
 - Go to definition for references and footnotes
 - Quarto and Bookdown project awareness
 
+The development R package also provides [RStudio
+addins](https://panache.bz/guide/lsp.html#rstudio) for formatting documents and
+selected blocks.
+
 ## Configuration
 
 Panache looks for a configuration in:
@@ -249,10 +254,10 @@ Then add Panache to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jolars/panache-pre-commit
-    rev: v3.4.0 # Use the latest version
+    rev: v3.14.0
     hooks:
-      - id: panache-format # Format files
-      - id: panache-lint # Lint and auto-fix issues
+      - id: panache-lint
+      - id: panache-format
 ```
 
 > **Note:** The hooks live in
@@ -265,8 +270,10 @@ Install the hooks:
 pre-commit install
 ```
 
-Panache will now automatically run on your staged `.qmd`, `.md`, and `.Rmd`
-files before each commit.
+The lint hook reports findings; add `args: [--fix]` to apply safe fixes before
+formatting. The format hook rewrites files in place. See the [integration
+guide](https://panache.bz/guide/integrations.html#pre-commit) for file patterns,
+check-only mode, and updates.
 
 See [examples/pre-commit-config.yaml](examples/pre-commit-config.yaml) for more
 configuration options.

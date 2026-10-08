@@ -1,20 +1,11 @@
-# Example pre-commit configuration for using panache
-# Save this as .pre-commit-config.yaml in your project root
-
+# Save this as .pre-commit-config.yaml in your project root.
 repos:
   - repo: https://github.com/jolars/panache-pre-commit
-    rev: v2.43.1 # Use the latest version from releases
+    rev: v3.14.0
     hooks:
-      # Format Quarto and other Markdown flavors
+      - id: panache-lint
       - id: panache-format
 
-      # Lint files and auto-fix issues
-      - id: panache-lint
-
-# You can pass additional arguments to panache:
-# repos:
-#   - repo: https://github.com/jolars/panache-pre-commit
-#     rev: v2.43.1
-#     hooks:
-#       - id: panache-format
-#         args: [--config, custom-config.toml]
+# To apply safe lint fixes before formatting, add args: [--fix] to panache-lint.
+# For a formatting check that leaves files unchanged, add args: [--check] to
+# panache-format. Both hooks accept args: [--config, custom-config.toml].

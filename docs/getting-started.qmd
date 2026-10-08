@@ -24,13 +24,27 @@ Install `panache` with Cargo:
 cargo install --locked panache
 ```
 
-### Aqua
+### mise and Aqua
 
-If you use [Aqua](https://aquaproj.github.io/), install `panache` with:
+[mise](https://mise.jdx.dev/dev-tools/backends/aqua.html) can install Panache
+through its Aqua backend:
 
 ```bash
-aqua install jolars/panache
+mise use aqua:jolars/panache
 ```
+
+Commit the resulting `mise.toml` to share the selected version. With
+[Aqua](https://aquaproj.github.io/docs/tutorial/) directly, run `aqua init` if
+the project has no `aqua.yaml`, then add and install Panache:
+
+```bash
+aqua g -i jolars/panache
+aqua install
+```
+
+Commit `aqua.yaml` to share the selected version. Both tools use the
+[`jolars/panache` registry
+entry](https://github.com/aquaproj/aqua-registry/tree/main/pkgs/jolars/panache).
 
 ### Pre-built Binaries
 
@@ -164,25 +178,22 @@ The extension starts the language server automatically for supported files.
 
 ### Neovim and other editors
 
-In Neovim (version 0.11 or later), add the following to your LSP configuration:
+In Neovim 0.11 or later with a current nvim-lspconfig installed, install Panache
+through `:MasonInstall panache` or a CLI installation method above, then enable
+the server in your `init.lua`:
 
 ```lua
--- .config/nvim/lsp/panache.lua
-
-return {
-  cmd = { "panache", "lsp" },
-  filetypes = { "quarto", "markdown", "rmarkdown" },
-    root_markers = { ".panache.toml", "panache.toml", ".git" },
-  settings = {},
-}
-
--- Enable it
-vim.lsp.enable({"panache"})
+vim.lsp.enable("panache")
 ```
 
-See the [Language Server guide](guide/lsp.qmd#editor-integration) for more
-detailed instructions on configuring the Panache language server in Neovim,
-Emacs, Helix, Emacs, Helix, and other LSP-capable editors.
+See [Editor Configuration](guide/lsp.qmd#editor-configuration) for the complete
+Neovim setup, Conform, Emacs, Helix, Zed, and other LSP clients.
+
+### RStudio
+
+The development R package provides addins for formatting the active document or
+selected blocks. See [RStudio setup](guide/lsp.qmd#rstudio) for installation and
+configuration.
 
 ## Basic Usage
 
