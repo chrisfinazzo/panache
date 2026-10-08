@@ -972,16 +972,18 @@ fn parse_raw_html_block_with_trailing(
     close_line_idx + 1
 }
 
-/// A balanced or self-closing div rejected by Pandoc's attribute-name check
-/// is one raw block. It must not expose native attributes or Markdown children.
-fn try_parse_div_with_invalid_attribute_names(
-    builder: &mut GreenNodeBuilder<'static>,
+enum RejectedDivBoundary {
+    Raw { line: usize, end: usize },
+    Markdown,
+}
+
+/// Pandoc preserves rejected divs as raw HTML only when a balanced pair or
+/// self-closing tag exists. An unclosed rejected div stays Markdown text.
+fn rejected_div_boundary(
     lines: &[&str],
     start_pos: usize,
     prefix: &ContainerPrefix,
-    fusion: SoftbreakFusion,
-    config: &ParserOptions,
-) -> Option<usize> {
+) -> Option<RejectedDivBoundary> {
     use std::borrow::Cow;
 
     let first_inner = prefix.strip_line_0_for_emission(lines[start_pos]);
@@ -1024,7 +1026,9 @@ fn try_parse_div_with_invalid_attribute_names(
                 close_offset = matched_close_offset(&text[open_gt + 1..], "div", false);
             }
         }
-        let (_, close_end) = close_offset?;
+        let Some((_, close_end)) = close_offset else {
+            return Some(RejectedDivBoundary::Markdown);
+        };
         open_gt + 1 + close_end
     };
     for (line_idx, line) in lines.iter().enumerate().take(body_end).skip(start_pos) {
@@ -1034,17 +1038,10 @@ fn try_parse_div_with_invalid_attribute_names(
             prefix.strip(line)
         };
         if remaining <= inner.len() {
-            return Some(parse_raw_html_block_with_trailing(
-                builder,
-                lines,
-                start_pos,
-                first_inner,
-                (line_idx, remaining),
-                SyntaxKind::HTML_BLOCK_RAW,
-                prefix.bq_depth(),
-                fusion,
-                config,
-            ));
+            return Some(RejectedDivBoundary::Raw {
+                line: line_idx,
+                end: remaining,
+            });
         }
         remaining -= inner.len();
     }
@@ -1202,13 +1199,31 @@ pub(crate) fn parse_html_block_with_wrapper(
     config: &ParserOptions,
 ) -> usize {
     let bq_depth = prefix.bq_depth();
-    if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV
-        && config.dialect == crate::options::Dialect::Pandoc
-        && let Some(consumed) = try_parse_div_with_invalid_attribute_names(
-            builder, lines, start_pos, prefix, fusion, config,
-        )
+    if config.dialect == crate::options::Dialect::Pandoc
+        && matches!(&block_type, HtmlBlockType::BlockTag {
+            tag_name, is_closing: false, ..
+        } if tag_name == "div")
+        && let Some(boundary) = rejected_div_boundary(lines, start_pos, prefix)
     {
-        return consumed;
+        match boundary {
+            RejectedDivBoundary::Markdown => return start_pos,
+            RejectedDivBoundary::Raw { line, end }
+                if wrapper_kind == SyntaxKind::HTML_BLOCK_DIV =>
+            {
+                return parse_raw_html_block_with_trailing(
+                    builder,
+                    lines,
+                    start_pos,
+                    prefix.strip_line_0_for_emission(lines[start_pos]),
+                    (line, end),
+                    SyntaxKind::HTML_BLOCK_RAW,
+                    bq_depth,
+                    fusion,
+                    config,
+                );
+            }
+            _ => {}
+        }
     }
     if config.dialect == crate::options::Dialect::Pandoc
         && matches!(
@@ -2894,6 +2909,32 @@ pub(crate) fn pandoc_html_open_tag_closes(
         }
     }
     false
+}
+
+/// Apply the same Pandoc HTML start gate to dispatch and lazy interruption.
+/// Rejecting an unclosed div before dispatch keeps paragraph and container
+/// boundaries intact, rather than repairing a lifted div after emission.
+pub(crate) fn pandoc_html_block_start_is_valid(
+    lines: &[&str],
+    start_pos: usize,
+    prefix: &ContainerPrefix,
+    block_type: &HtmlBlockType,
+) -> bool {
+    let HtmlBlockType::BlockTag {
+        tag_name,
+        is_closing,
+        ..
+    } = block_type
+    else {
+        return true;
+    };
+    pandoc_html_open_tag_closes(lines, start_pos, prefix)
+        && (*is_closing
+            || tag_name != "div"
+            || !matches!(
+                rejected_div_boundary(lines, start_pos, prefix),
+                Some(RejectedDivBoundary::Markdown)
+            ))
 }
 
 /// Emit a multi-line open tag spanning `lines[start_pos..=end_line_idx]` as

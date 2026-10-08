@@ -39,8 +39,8 @@ use super::blocks::headings::{
 use super::blocks::horizontal_rules::{emit_horizontal_rule, try_parse_horizontal_rule};
 use super::blocks::html_blocks::{
     HtmlBlockType, SoftbreakFusion, is_pandoc_inline_block_tag_name, is_pandoc_void_block_tag_name,
-    pandoc_html_open_tag_closes, parse_html_block_with_wrapper, probe_open_tag_line_has_close_gt,
-    try_parse_html_block_start,
+    pandoc_html_block_start_is_valid, pandoc_html_open_tag_closes, parse_html_block_with_wrapper,
+    probe_open_tag_line_has_close_gt, try_parse_html_block_start,
 };
 use super::blocks::indented_code::{is_indented_code_line, parse_indented_code_block};
 use super::blocks::latex_envs::LatexEnvInfo;
@@ -1813,7 +1813,7 @@ impl BlockParser for HtmlBlockParser {
 
         if !is_commonmark
             && matches!(block_type, HtmlBlockType::BlockTag { .. })
-            && !pandoc_html_open_tag_closes(lines, line_pos, prefix)
+            && !pandoc_html_block_start_is_valid(lines, line_pos, prefix, &block_type)
         {
             return None;
         }

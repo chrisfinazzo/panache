@@ -998,6 +998,10 @@ native-divs = true
     must start with a Unicode letter and continue with letters, numbers, `:`, `-`,
     or `_`. Entities in attribute values remain supported.
 
+    Without a matching `</div>` or a self-closing slash, a `<div>` with an invalid
+    attribute name stays Markdown text. Its body parses as Markdown, and the
+    rejected opener does not declare an anchor.
+
     A self-closing `<div .../>` with an invalid attribute name stays one raw tag.
     The raw tag ends at the first `>`, even inside a quoted value. Following content
     is parsed as Markdown outside it.

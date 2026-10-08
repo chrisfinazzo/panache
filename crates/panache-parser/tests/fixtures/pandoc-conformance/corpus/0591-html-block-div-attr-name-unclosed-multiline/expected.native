@@ -1,0 +1,9 @@
+[ Para
+    [ Str "<div"
+    , SoftBreak
+    , Str "bad.name=x"
+    , SoftBreak
+    , Str "id=hidden>"
+    , Strong [ Str "hi" ]
+    ]
+]

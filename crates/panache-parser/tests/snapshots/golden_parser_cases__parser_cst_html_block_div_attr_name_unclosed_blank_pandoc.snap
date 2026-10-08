@@ -1,0 +1,16 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..31
+  PARAGRAPH@0..23
+    TEXT@0..22 "<div 1bad=x id=hidden>"
+    NEWLINE@22..23 "\n"
+  BLANK_LINE@23..24
+    BLANK_LINE@23..24 "\n"
+  PARAGRAPH@24..31
+    STRONG@24..30
+      STRONG_MARKER@24..26 "**"
+      TEXT@26..28 "hi"
+      STRONG_MARKER@28..30 "**"
+    NEWLINE@30..31 "\n"

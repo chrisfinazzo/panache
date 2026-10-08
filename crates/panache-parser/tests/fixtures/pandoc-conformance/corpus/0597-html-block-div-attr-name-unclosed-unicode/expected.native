@@ -1,0 +1,9 @@
+[ Para
+    [ Str "<div"
+    , Space
+    , Str "\769bad=x"
+    , Space
+    , Str "id=hidden>"
+    , Strong [ Str "hi" ]
+    ]
+]

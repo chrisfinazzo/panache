@@ -148,6 +148,32 @@ fn html_inline_span_rejected_opener_allows_emphasis_to_cross() {
 }
 
 #[test]
+fn html_block_div_invalid_unclosed_stays_markdown() {
+    use panache_parser::syntax::SyntaxKind;
+
+    for input in [
+        include_str!("fixtures/cases/html_block_div_attr_name_unclosed_same_line_pandoc/input.md"),
+        include_str!("fixtures/cases/html_block_div_attr_name_unclosed_multiline_pandoc/input.md"),
+        include_str!("fixtures/cases/html_block_div_attr_name_unclosed_blockquote_pandoc/input.md"),
+        include_str!("fixtures/cases/html_block_div_attr_name_unclosed_list_pandoc/input.md"),
+    ] {
+        let tree = parse(input, None);
+        assert_eq!(tree.text().to_string(), input);
+        assert!(
+            !tree.descendants().any(|node| matches!(
+                node.kind(),
+                SyntaxKind::HTML_BLOCK_DIV | SyntaxKind::HTML_BLOCK_RAW | SyntaxKind::HTML_ATTRS
+            )),
+            "a rejected unclosed div must stay Markdown text: {input:?}"
+        );
+        assert!(
+            tree.descendants()
+                .any(|node| node.kind() == SyntaxKind::STRONG)
+        );
+    }
+}
+
+#[test]
 fn html_block_div_invalid_attribute_name_keeps_body_raw() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -304,6 +330,22 @@ macro_rules! golden_test_cases {
 }
 
 golden_test_cases!(
+    html_block_div_attr_name_unclosed_same_line_pandoc,
+    html_block_div_attr_name_unclosed_same_line_commonmark,
+    html_block_div_attr_name_unclosed_multiline_pandoc,
+    html_block_div_attr_name_unclosed_multiline_commonmark,
+    html_block_div_attr_name_unclosed_blank_pandoc,
+    html_block_div_attr_name_unclosed_blank_commonmark,
+    html_block_div_attr_name_unclosed_list_pandoc,
+    html_block_div_attr_name_unclosed_list_commonmark,
+    html_block_div_attr_name_unclosed_blockquote_pandoc,
+    html_block_div_attr_name_unclosed_blockquote_commonmark,
+    html_block_div_attr_name_unclosed_lazy_pandoc,
+    html_block_div_attr_name_unclosed_lazy_commonmark,
+    html_block_div_attr_name_unclosed_nested_pandoc,
+    html_block_div_attr_name_unclosed_nested_commonmark,
+    html_block_div_attr_name_unclosed_unicode_pandoc,
+    html_block_div_attr_name_unclosed_unicode_commonmark,
     html_inline_span_attr_name_invalid_pandoc,
     html_inline_span_attr_name_invalid_commonmark,
     html_inline_span_attr_name_entity_pandoc,

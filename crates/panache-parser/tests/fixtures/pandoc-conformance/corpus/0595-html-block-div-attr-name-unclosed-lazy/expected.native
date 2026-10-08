@@ -1,0 +1,14 @@
+[ BlockQuote
+    [ Para
+        [ Str "lead"
+        , SoftBreak
+        , Str "<div"
+        , Space
+        , Str "bad.name=x"
+        , Space
+        , Str "id=hidden>"
+        , SoftBreak
+        , Strong [ Str "hi" ]
+        ]
+    ]
+]

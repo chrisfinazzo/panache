@@ -563,7 +563,7 @@ impl<'a> Parser<'a> {
         }
         let prefix = ContainerPrefix::from_stack(&self.containers.stack, false, self.config)
             .without_innermost_list_advance();
-        html_blocks::pandoc_html_open_tag_closes(&self.lines, self.pos, &prefix)
+        html_blocks::pandoc_html_block_start_is_valid(&self.lines, self.pos, &prefix, &block_type)
     }
 
     /// Pandoc's `notFollowedByHtmlCloser` on the quote gobble: inside

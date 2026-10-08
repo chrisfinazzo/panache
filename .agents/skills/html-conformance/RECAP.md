@@ -1,10 +1,8 @@
 # HTML conformance — running session recap
 
-Rolling, terse handoff between `html-conformance` sessions. Read the
-Persistent traps + Phase status + Latest session's "next sub-targets"
-at start. At end: **rewrite** the Latest session entry, demote the old
-one to the Earlier log, fold still-relevant traps into Persistent. Keep
-≤ 400 lines (see `SKILL.md`).
+Read Persistent traps, Phase progress, and Suggested next sub-targets first.
+Rewrite Latest session, demote its predecessor, and fold durable traps into
+Persistent at session end. Keep ≤ 400 lines (see `SKILL.md`).
 
 --------------------------------------------------------------------------------
 
@@ -98,13 +96,10 @@ load-bearing; the code holds the full detail.
   (`closes_at_open_tag:true`). `HtmlBlockType::BlockTag` is
   `Box<dyn Any>`-roundtripped — adding a field auto-works (E0063 flags
   literal sites).
-- **Block-level tags mid-paragraph force a boundary in pandoc; panache
-  inlines them.** Same-line inter-tag text between NON-DIV matched-pair
-  strict-block tags (`<p>a</p> b <p>c</p>`, 0472/0475-0477) is FIXED via
-  `same_line_trailing_forces_opaque` (keep line opaque → projector
-  `split_html_block_by_tags` does the flat RawBlock/Plain split). Still
-  divergent: paragraph-LEADS-tag (`foo <p>bar</p>`, broad inline-parser
-  boundary — deferred).
+- **Mid-paragraph block tags:** NON-DIV inter-tag text (0472/0475-0477)
+  is fixed by `same_line_trailing_forces_opaque` → projector RawBlock/Plain
+  split. Paragraph-leads-tag (`foo <p>bar</p>`) still stays inline here;
+  a broad parser boundary fix is deferred.
 
 ### Projector tag splitting
 
@@ -169,13 +164,17 @@ load-bearing; the code holds the full detail.
   broader `is_alphabetic`. Reuse `pandoc_html_attribute_names_valid` when
   extending the gate. Span rejection must gate both native recognition (IR
   and emitter) and raw-inline fallback, or invalid openers become opaque HTML.
-  Pandoc leaves those openers as Markdown, so emphasis can cross them. A valid
-  outer span containing an invalid inner opener falls back to raw tags in
-  Pandoc; Panache still lifts the outer span (deferred).
-  `parse_raw_html_block_with_trailing` receives the
-  stripped first line explicitly: stripping only bq markers duplicates
-  `- > ` in bq-in-list input. Raw-block formatting drops whole LINE_PREFIX
-  tokens, including indent before `>`; enclosing containers emit them again.
+  Pandoc leaves those openers as Markdown, so emphasis can cross them.
+  Unclosed invalid divs stay Markdown too: `rejected_div_boundary` classifies
+  raw pairs/self-closing tags vs Markdown before dispatch and lazy interruption.
+  **Nested-span rejection is not uniformly raw fallback.** Invalid `bad.name`,
+  `1bad`, `bad&name`, and `:bad` openers do not add native depth; the valid
+  outer span ends at the FIRST `</span>`. `_bad` instead triggers unmatched
+  emphasis failure and raw outer tags. Code, comments, and quoted values must
+  hide tag-like bytes from native matching (all deferred).
+  `parse_raw_html_block_with_trailing` needs the stripped first line (bq-only
+  stripping duplicates `- > `). Raw formatting drops whole LINE_PREFIX tokens;
+  enclosing containers emit their indent and markers again.
 - **Lifted `HTML_BLOCK[_DIV]` MUST route structural, not byte.**
   `collect_block`→`html_div_block`; `emit_html_block`→
   `emit_html_block_structural` (NOT `split_html_block_by_tags`, whose
@@ -292,11 +291,9 @@ load-bearing; the code holds the full detail.
   code/raw HTML. Residual: `[x](#a&amp;b)` false-positives
   `undefined-anchor` until *link URLs* decode too (declaration side is now
   correct). Smaller known gaps: semicolon-less legacy refs (`id="a&amp b"`
-  → `a& b`); invalid names in unclosed divs and nested-span fallback
-  (matched divs fixed 09-16, self-closing divs 10-07, span openers 10-08); `&#0;` prints `\0`
-  where pandoc prints `\NUL`. Standalone closing quotes in Markdown tails
-  remain a general projection gap (0573-0578): Pandoc curls the quote, while
-  the projector preserves it. HTML boundaries are now correct in those cases.
+  → `a& b`), nested-span matching/emphasis, and `&#0;` (`\0` vs `\NUL`).
+  Standalone closing quotes in Markdown tails (0573-0578) remain a general
+  projection gap: Pandoc curls the quote; HTML boundaries are correct here.
 - **Definition-list-in-blockquote broad gap**: `> Term\n>\n> :   text` →
   pandoc `DefinitionList [([Term],[[Para text]])]`; panache emits
   `Para [Term]` + empty-term `DefinitionList` with `Plain [text]`.
@@ -305,9 +302,9 @@ load-bearing; the code holds the full detail.
 - **Def-body list-adjacent trailing looseness** (`:   <!-- --> t\n    -
    item` → pandoc `Plain [t]`, panache `Para [t]`) — pre-existing def
   looseness gap, in the plain path too.
-- **Multi-line-SECOND-div inter-tag** (`<div>a</div> y <div>\nz\n</div>`):
-  content-scan depth model treats `</div>…<div>` on the close line as
-  depth-neutral → one div; pandoc = fresh block. Needs depth-model rework.
+- **Multi-line-SECOND-div** (`<div>a</div> y <div>\nz\n</div>`):
+  depth-neutral `</div>…<div>` keeps one div here; Pandoc starts a fresh
+  block. Needs depth-model rework.
 - Ref-conflict + cross-boundary cite numbering (pandoc doc-order,
   panache inner-wins); `<!ENTITY x "y">` smart-quote gap; tab-indented
   list-item `Div [Para]`→`Div [CodeBlock]` formatter non-idempotency — all
@@ -334,66 +331,70 @@ load-bearing; the code holds the full detail.
 | C | Comment/PI trailing softbreak fusion | **Landed** 07-02; fenced-div + bq containers 07-08. `SoftbreakFusion` enum. Corpus 0390/0481/0482. List/content-indent containers deferred. |
 | D | Definition-body marker-line HTML (`:   <div>…`) | **Landed** 07-08. `try_dispatch_definition_html_block`; multi-line body + comment-trailing fusion. Corpus 0483/0484/0487/0488. |
 | E | Footnote-body marker-line HTML (`[^1]: <div>…`) | **Landed** 07-08. `try_dispatch_footnote_html_block`, gated `!html_block_cannot_interrupt`. Corpus 0485/0486. |
-| G | HTML attribute values and name eligibility | Values **landed** 08-05; matched-div name validation **landed** 09-16 (0556-0565); self-closing invalid divs **landed** 10-07 (0567-0572); quoted-`>` boundaries **fixed** 10-07 (0573-0580, six typography mismatches blocked). Invalid-name span openers **fixed** 10-08 (0582-0589). Semicolon-less values, nested-span fallback, and unclosed divs deferred. |
+| G | HTML attribute values and name eligibility | Values **landed** 08-05; matched-div name validation **landed** 09-16 (0556-0565); self-closing invalid divs **landed** 10-07 (0567-0572); quoted-`>` boundaries **fixed** 10-07 (0573-0580, six typography mismatches blocked). Invalid-name span openers **fixed** 10-08 (0582-0589); unclosed invalid divs **fixed** 10-08 (0590-0597). Semicolon-less values and nested-span matching/emphasis deferred. |
 | F | Later-line HTML in a content-container body | **Landed** 07-08 + variants 08-02. `try_dispatch_content_indent_html_block` (bq0) + `try_dispatch_bq_content_indent_html_block` (bq>0). Unclosed-div (later-line 0494, list-item 0495/0496). bq-nested-def **fully fixed** 08-02 (goldens only, no corpus — def-list-in-bq gap). Corpus 0489. |
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-10-08 (Phase G: invalid span attribute names)
+## Latest session — 2026-10-08 (Phase G: invalid unclosed divs)
 
-Conformance: **html-block 292/298 → 292/298; html-inline 33/33 → 41/41**.
-Total **575/581 → 583/589** (baseline already uses Pandoc 3.12).
-Workspace **6465 → 6495 passing**, zero failures. All required checks pass.
-No red tests remain.
+Conformance: **html-block 292/298 → 300/306; html-inline 41/41 → 41/41**.
+Total **583/589 → 591/597** (Pandoc 3.12); six existing smart-quote cases
+remain blocked. Workspace **6495 → 6521 passing**; all required checks pass.
+No red tests remain. Changes are committed with the session fix.
 
 ### What landed
 
-- **Parser-shape gap:** native spans reject invalid attribute names under
-  Pandoc. The IR and emitter share the dialect-aware recognizer. Raw-inline
-  fallback rejects those names too, leaving the opener as Markdown text.
-- Eight html-inline cases (0582-0589), eight paired Pandoc/CommonMark parser
-  fixtures, and eight formatter goldens cover rejected names, emphasis,
-  multiline openers, lists, blockquotes, Unicode names, and quoted values.
-  Pandoc 3.12 generated every expectation; both dialects were probed.
-- Test-first CST regression, emphasis boundary assertions, and Salsa anchor/link
-  coverage pass. Goldens are lossless and idempotent; formatted output preserves
-  Pandoc meaning after normalizing reflowed soft breaks. CommonMark stays green.
-- **Deferred parser-shape gap:** a valid outer span with an invalid inner opener
-  still lifts the outer wrapper; Pandoc emits raw outer tags. Verified by CLI.
+- **Parser-shape gap:** divs with invalid attribute names and no raw matched
+  pair or self-closing slash stay Markdown. `rejected_div_boundary` shares the
+  existing quote-aware raw matcher between detection and emission.
+- The start gate also reaches lazy blockquote interruption and synthetic
+  content-container probes. Invalid openers neither split paragraphs nor expose
+  `HTML_ATTRS`; a valid div below one still lifts independently.
+- Eight html-block cases (0590-0597), eight paired Pandoc/CommonMark parser
+  fixtures, and eight formatter goldens cover same-line/multiline openers,
+  blanks, lists, blockquotes, lazy continuation, nested valid divs, and Unicode.
+  Every expectation comes from Pandoc 3.12; both dialects were probed.
+- Test-first CST regression and Salsa anchor/link coverage pass. All new goldens
+  are lossless/idempotent; Pandoc JSON confirms formatting preserves meaning
+  after normalizing paragraph reflow. No projector compensation was added.
+- **Deferred span target refined:** most invalid inner openers change the native
+  close boundary; `_bad` additionally fails through emphasis. A blanket outer
+  raw fallback would encode the wrong behavior. No span code changed.
 
 ### Files in committable diff
 
-- `crates/panache-parser/src/parser/inlines/` — recognition gate (parser-shape).
-- `crates/panache-parser/tests/` — parser regressions, snapshots, corpus,
+- `crates/panache-parser/src/parser/` — boundary classification and dispatch
+  (parser-shape).
+- `crates/panache-parser/tests/` — regression, paired snapshots, corpus,
   allowlist, and generated reports.
 - `src/salsa.rs`, `tests/` — consumer regression and formatter goldens.
-- `docs/guide/`, `.agents/skills/html-conformance/` — docs and recap.
+- `docs/guide/`, `.agents/skills/html-conformance/` — docs and rolling recap.
 
 ### Suggested next sub-targets (ranked)
 
-1. **Nested spans with invalid inner openers** — outer raw fallback.
-2. **Invalid-name unclosed divs** — Markdown text fallback.
+1. **Nested spans with rejected inner openers** — valid native depth only;
+   skip code/comments/quoted values while matching the close.
+2. **Unmatched emphasis inside native spans** — `_bad` outer raw fallback;
+   investigate recursive inline termination rather than all-name rejection.
 3. **Standalone smart closing quotes** — unblock 0573-0578.
 4. **Semicolon-less legacy value refs** (`id="a&amp b"` → `a& b`).
 5. **Multi-line-second-div inter-tag** — depth-model gap.
 
 ### New trap
 
-- Rejection must reach native recognition AND raw fallback; a valid outer
-  wrapper can still hide a nested rejection. Folded into Persistent.
+- A rejected nested opener does not always reject the outer native span.
+  The name's Markdown delimiters affect termination. Folded into Persistent.
 
 --------------------------------------------------------------------------------
 
 ## Earlier sessions (compact log)
 
-Newest first. date — sub-target — pass delta — lever.
-- 2026-10-07 — Phase G quoted `>` in rejected divs — html 323 → 325 — raw tag ends at first `>`; six tail typography cases deferred.
-- 2026-10-07 — Phase G self-closing invalid divs — html 317 → 323 — raw self-closing boundary and Markdown sibling placement.
-- 2026-09-16 — Phase G matched-div names — html 307 → 317 — Unicode name gate, opaque raw bodies, and container-prefix handling.
-- 2026-09-15 — Phase 6 slash-suffixed div openers — html 300 → 307 — both depth scanners count native `<div/>`.
-- 2026-08-05 — Phase G attribute values — html 295 → 300 — read-time decoding in all attribute readers; source-byte id spans.
-- 2026-08-02 — Phase F unclosed-div + bq-nested-def — html 292 → 295 — container-aware lossless lift; corpus 0494-0496.
-- 2026-07-08 — D/E/F container HTML — html 282 → 292 — definition, footnote, and content-indent dispatch; corpus 0480-0489.
-- 2026-07-02 — A/B/C + 7e — html 262 → 282 — softbreak fusion, inter-tag peel, fence depth, opaque trailing text, void strict-block.
-- 2026-06-17→07-02 — 7a/7b/7c — html 259 → 271 — raw retag, standalone-tag splitting, and blockquote lifts.
+- 2026-10-08 — Phase G invalid span names — html-inline 33 → 41 — shared native/raw name gate; nested close/emphasis matching deferred.
+- 2026-10-07 — Phase G invalid self-closing divs + quoted `>` — html 317 → 325 — raw boundary; six tail typography cases deferred.
+- 2026-09-16 — Phase G matched-div names — html 307 → 317 — Unicode name gate, opaque raw bodies, and container prefixes.
+- 2026-09-15 — Phase 6 slash-suffixed openers — html 300 → 307 — native `<div/>` depth in both scanners.
+- 2026-08-05 — Phase G attribute values — html 295 → 300 — decoding in all readers; source-byte id spans.
+- 2026-07-08→08-02 — D/E/F content containers + unclosed divs — html 282 → 295 — shared prefix-aware lift.
+- 2026-06-17→07-08 — 7a/b/c/e + A/B/C — html 259 → 282 — raw retag, tag splits, inter-tag peel, fence depth, and softbreak fusion.
 - 2026-05-08→18 — Phases 1-6 — html 0 → 257 — structural div/span/attribute lifts, tag categories, and blockquote dispatch.
