@@ -5,8 +5,7 @@ description: >
   Panache.
 ---
 
-Read the [Configuration Guide](../guide/configuration.qmd#external-code-linters)
-for instructions on how to configure external linters for code chunks in
-Panache.
+Read the [Configuration Reference](configuration.qmd#external-code-linters) for
+instructions on how to configure external linters for code chunks in Panache.
 
 {{< include _linter-presets-details.qmd >}}

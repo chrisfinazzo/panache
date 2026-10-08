@@ -28,7 +28,7 @@ echo
 
 # Local realistic doc + upstream fixture
 echo "📄 Copying configuration.qmd..."
-cp ../../docs/guide/configuration.qmd configuration.qmd
+cp ../../docs/reference/configuration.qmd configuration.qmd
 
 echo "📄 Downloading pandoc_testsuite.md..."
 curl -sL --fail -o pandoc_testsuite.md \

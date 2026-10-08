@@ -228,7 +228,7 @@ fn parse_config_detailed(s: &str, path: &Path) -> Result<Config, ConfigError> {
 /// Migration hint for config surface removed in 3.0, matched against the
 /// `unknown field` text of `toml`'s error. Configs from older releases (e.g.
 /// a `[style]` section) otherwise fail with a bare serde error that gives no
-/// pointer to the replacement key. See `docs/guide/configuration.qmd`.
+/// pointer to the replacement key. See `docs/reference/configuration.qmd`.
 fn removed_surface_hint(message: &str) -> Option<&'static str> {
     const HINTS: &[(&str, &str)] = &[
         (

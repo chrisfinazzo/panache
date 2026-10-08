@@ -1,5 +1,5 @@
 ---
-title: Language Server
+title: Editor Setup
 description: >
   Panache includes a built-in language server protocol (LSP) implementation that
   provides a rich set of editor features for Quarto and other Markdown flavors.
@@ -377,9 +377,9 @@ To format on save, add to `settings.json`:
 ```
 
 Formatting and linting options come from `panache.toml` (see
-[Configuration](configuration.qmd)). Zed's `lsp` settings block cannot supply
-them: the server reads its configuration from disk and accepts no formatting
-settings over LSP.
+[Configuration](../reference/configuration.qmd)). Zed's `lsp` settings block
+cannot supply them: the server reads its configuration from disk and accepts no
+formatting settings over LSP.
 
 To point Zed at a particular binary, set `binary.path`:
 

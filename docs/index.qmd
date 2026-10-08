@@ -94,5 +94,5 @@ to do that.
   into your editor.
 - [User Guide](guide/index.qmd): detailed docs for formatting, linting, CLI, and
   editor integration.
-- [Configuration](guide/configuration.qmd): tune behavior with `panache.toml`.
+- [Configuration](guide/configure.qmd): tune behavior with `panache.toml`.
 - [Playground](playground/index.html): try formatting directly in the browser.

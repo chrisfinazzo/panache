@@ -14,7 +14,7 @@ The benchmark suite includes:
 
 1. **Pandoc testsuite fixture** (\~9KB) - downloaded from upstream pandoc
    `test/testsuite.txt` as `pandoc_testsuite.md`
-2. **Configuration guide** (\~24KB) - copied from `docs/guide/configuration.qmd`
+2. **Configuration reference** (\~24KB) - copied from `docs/reference/configuration.qmd`
 3. **Table-heavy** (\~19KB) - Quarto tables documentation
 4. **Math-heavy** (\~29KB) - Quarto computational document with extensive math
 5. **Large authoring guide** (\~30KB) - Quarto markdown authoring guide
@@ -64,7 +64,7 @@ cargo bench --bench formatting
 benches/documents/
 ├── README.md           # This file
 ├── download.sh         # Download script
-├── configuration.qmd   # Copied from docs/guide/configuration.qmd
+├── configuration.qmd   # Copied from docs/reference/configuration.qmd
 ├── pandoc_testsuite.md # Downloaded from upstream pandoc testsuite
 ├── large_authoring.qmd # Downloaded - not in git
 ├── tables.qmd          # Downloaded - not in git

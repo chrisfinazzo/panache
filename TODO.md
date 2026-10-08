@@ -826,3 +826,19 @@ dollar-math, deflists, ...) stay opt-in.
 
   - [ ] Make semantic break wrap mode line width-aware. Current users would need
     `line-width = 0` to preserve the old behavior.
+
+## Documentation site
+
+- [ ] Split the layout catalog in `docs/guide/formatting.qmd` into focused
+  reference pages, leaving the formatting workflow in the guide. Preserve
+  existing URLs and anchors.
+- [ ] Separate editor recipes in `docs/guide/lsp.qmd` from its capability and
+  protocol catalog. Keep editor setup in Guide and detailed capability
+  lookup in Reference; retain implementation discussions in Development.
+- [ ] Consolidate the configuration walkthrough in `docs/guide/configure.qmd`
+  and the detailed reference in `docs/reference/configuration.qmd`. Keep
+  discovery and setup recipes in the guide, and option specifications in the
+  reference, preserving the existing section links when moving content.
+- [ ] Consolidate external-tool examples across formatting, linting, and
+  configuration pages. Link to the generated preset references for command
+  and language lists instead of maintaining duplicate catalogs.

@@ -85,14 +85,16 @@ website:
           style: floating
           href: guide/index.qmd
           contents:
+            - href: getting-started.qmd
+              text: Getting Started
             - href: guide/formatting.qmd
               text: Formatting
             - href: guide/linting.qmd
               text: Linting
-            - href: guide/lsp.qmd
-              text: Language Server
-            - href: guide/configuration.qmd
+            - href: guide/configure.qmd
               text: Configuration
+            - href: guide/lsp.qmd
+              text: Editor Setup
             - href: guide/integrations.qmd
               text: Integrations
             - href: guide/performance.qmd
@@ -104,7 +106,9 @@ website:
           href: reference/index.qmd
           contents:
             - href: reference/cli.qmd
-              text: Command Line Interface
+              text: CLI Reference
+            - href: reference/configuration.qmd
+              text: Configuration Reference
             - href: reference/linter-rules.qmd
               text: Lint Rules
             - href: reference/formatter-presets.qmd

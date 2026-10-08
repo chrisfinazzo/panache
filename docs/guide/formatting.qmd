@@ -23,12 +23,42 @@ output after the first run. To make this work, Panache therefore needs to escape
 certain characters that might otherwise cause semantic drift on subsequent
 runs^[This is precisely what Pandoc's writer also does.]
 
+## Format and Check Files
+
+Format a document in place, or pass a directory to format its supported files:
+
+```sh
+panache format document.qmd
+panache format docs/
+```
+
+To check formatting without writing changes:
+
+```sh
+panache format --check .
+```
+
+The check exits nonzero when files need formatting. Both modes use project
+configuration and file exclusions; see [Configuration](configure.qmd). External
+formatters configured for code blocks must be installed on `PATH`.
+
+To read from standard input and write the formatted document to standard output,
+supply a filename so Panache can select the document's flavor:
+
+```sh
+cat document.qmd | panache --stdin-filename document.qmd format
+```
+
+See [Editor Setup](lsp.qmd) for formatting while editing and
+[Integrations](integrations.qmd) for CI, pre-commit, and dprint. The sections
+below explain how Panache lays out each kind of content.
+
 ## Text Wrapping
 
 ### Paragraphs
 
 Panache supports four modes of text wrapping for paragraphs, which are
-controlled via the [configuration](configuration.qmd) file:
+controlled via the [configuration](../reference/configuration.qmd) file:
 
 ```toml
 [format]
@@ -39,10 +69,10 @@ The default is `reflow`, which reformats paragraphs to fit within the number of
 columns specified by the `line-width` configuration option (default 80). Columns
 are Unicode display columns, not characters or bytes: East Asian wide characters
 count as two, so `x宮` is 3 columns wide (see [Line
-Width](configuration.qmd#line-width)). If `wrap` is set to `preserve`, Panache
-will keep existing line breaks and not reflow paragraphs. If `wrap` is set to
-`sentence`, Panache will break lines at sentence boundaries, ensuring that each
-sentence starts on a new line.
+Width](../reference/configuration.qmd#line-width)). If `wrap` is set to
+`preserve`, Panache will keep existing line breaks and not reflow paragraphs. If
+`wrap` is set to `sentence`, Panache will break lines at sentence boundaries,
+ensuring that each sentence starts on a new line.
 
 If `wrap` is set to `semantic`, Panache enforces [semantic line
 breaks](https://sembr.org/): it keeps the line breaks you already placed (for
@@ -84,8 +114,8 @@ The abbreviation list follows the document language. When metadata provides
 for it; profiles ship for English, Czech, German, Spanish, and French, and
 unknown languages fall back to English. You can also set a project-wide fallback
 language and extend the list with your own tokens---see [Sentence-Wrapping
-Abbreviations](configuration.qmd#no-break-abbreviations) in the configuration
-guide.
+Abbreviations](../reference/configuration.qmd#no-break-abbreviations) in the
+configuration reference.
 
 Input
 
@@ -639,14 +669,14 @@ Output
 
 ### Four-Space Indentation
 
-With the [`four-space-rule`](configuration.qmd#lists) extension enabled, nested
-lists and continuation paragraphs (blocks that follow a blank line) are indented
-a flat four columns (one tab stop) per nesting level instead of lining up with
-the marker. Markers keep their normal trailing space, and a wrapped paragraph's
-own continuation lines still align with its first-line content---only nesting
-and new blocks move to the tab stop. This produces output that strict Markdown
-parsers like Python-Markdown accept (they treat two-space-indented nesting as
-flat sibling items).
+With the [`four-space-rule`](../reference/configuration.qmd#lists) extension
+enabled, nested lists and continuation paragraphs (blocks that follow a blank
+line) are indented a flat four columns (one tab stop) per nesting level instead
+of lining up with the marker. Markers keep their normal trailing space, and a
+wrapped paragraph's own continuation lines still align with its first-line
+content---only nesting and new blocks move to the tab stop. This produces output
+that strict Markdown parsers like Python-Markdown accept (they treat
+two-space-indented nesting as flat sibling items).
 
 Input
 
@@ -721,8 +751,8 @@ accepts an integer from 0 to 3 (default 2) and applies to pipe, simple, and
 multiline tables alike. Setting `table-indent = 0` keeps them flush at column 0.
 Grid tables always stay flush regardless, since Pandoc does not yet recognize an
 indented grid border. See [Table
-Indentation](configuration.qmd#table-indentation) for details. The examples
-below show the default indent of 2.
+Indentation](../reference/configuration.qmd#table-indentation) for details. The
+examples below show the default indent of 2.
 
 ### Pipe Tables
 
@@ -1104,11 +1134,11 @@ prefix.
 
 ### Content-Aware Math Formatting
 
-By default, Panache uses [`math = "reflow"`](configuration.qmd#math) for the
-*content* between math delimiters. It applies structural formatting---including
-inline whitespace collapse, tight sub/superscripts, math-mode group-interior
-trimming, environment-body indentation, `\\` normalization, and `&`-column
-alignment:
+By default, Panache uses
+[`math = "reflow"`](../reference/configuration.qmd#math) for the *content*
+between math delimiters. It applies structural formatting---including inline
+whitespace collapse, tight sub/superscripts, math-mode group-interior trimming,
+environment-body indentation, `\\` normalization, and `&`-column alignment:
 
 ```toml
 [format]
@@ -1181,9 +1211,9 @@ Text-mode arguments are exempt, so `\text{ a }` keeps its spaces.
 Built-in signatures identify the math and text arguments of commands such as
 `\frac`, `\sqrt`, and `\text`. Project-specific commands can declare the same
 positional information with
-[`format.math-signatures`](configuration.qmd#math-command-signatures). Only an
-argument proven to contain math is reformatted; text, unknown, unmatched, and
-redefined command arguments retain their authored bytes.
+[`format.math-signatures`](../reference/configuration.qmd#math-command-signatures).
+Only an argument proven to contain math is reformatted; text, unknown,
+unmatched, and redefined command arguments retain their authored bytes.
 
 In `reflow` mode, a display equation (`$$…$$`) wider than `line-width` is broken
 at its top-level relations, with each continuation aligned under the first
@@ -1452,14 +1482,15 @@ formatted recursively like ordinary content.
 
 ## Admonitions
 
-When the [`python-markdown-admonitions`](configuration.qmd#admonitions)
+When the
+[`python-markdown-admonitions`](../reference/configuration.qmd#admonitions)
 extension is enabled, Panache recognizes [python-markdown
 admonitions](https://python-markdown.github.io/extensions/admonition/)
 (`!!! type "title"` followed by 4-space-indented content). The companion
-[`pymdownx-details`](configuration.qmd#admonitions) extension adds the
-collapsible `???` (collapsed) and `???+` (expanded) variants. Both are disabled
-by default for every flavor, since the indented body would otherwise parse as an
-indented code block.
+[`pymdownx-details`](../reference/configuration.qmd#admonitions) extension adds
+the collapsible `???` (collapsed) and `???+` (expanded) variants. Both are
+disabled by default for every flavor, since the indented body would otherwise
+parse as an indented code block.
 
 The marker line is kept on a single line (never wrapped or sentence-split), with
 the type, any extra classes, and the optional quoted title normalized to single

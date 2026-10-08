@@ -1,24 +1,19 @@
 ---
 title: Reference
 description: >
-  This section provides reference documentation for Panache, including detailed
-  instructions and examples for using the formatter, linter, language server,
-  configuration, and integrations.
+  Look up Panache's commands, configuration options, lint rules, and external
+  formatter and linter presets.
 ---
 
-- In [Command Line Reference](cli.qmd) you can find detailed documentation for
-  the Panache command line interface, including all available commands, options,
-  and examples for using the formatter and linter from the terminal.
+Use these pages to look up specific commands, settings, and rules. For setup and
+everyday workflows, start with the [Guide](../guide/index.qmd).
 
-- In [Lint Rules](linter-rules.qmd) you can find the catalog of every built-in
-  lint rule, the diagnostic codes each rule emits, severity, auto-fix support,
-  and any configuration requirements.
-
-- In [External Formatter Presets](formatter-presets.qmd) you can find
-  documentation for using external formatter presets with Panache, such as
-  Prettier and Blackfriday, to customize the formatting behavior to match your
-  preferred style or project conventions.
-
-- In [External Linter Presets](linter-presets.qmd) you can find documentation
-  for built-in external linter presets, including supported languages and the
-  commands Panache invokes for each linter.
+- [CLI Reference](cli.qmd): commands, arguments, and flags.
+- [Configuration Reference](configuration.qmd): available settings, defaults,
+  discovery, and precedence.
+- [Lint Rules](linter-rules.qmd): rule IDs, examples, severity, fixes, and
+  configuration requirements.
+- [External Formatter Presets](formatter-presets.qmd): supported languages and
+  the formatter commands Panache invokes.
+- [External Linter Presets](linter-presets.qmd): supported languages and the
+  linter commands Panache invokes.

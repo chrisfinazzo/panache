@@ -40,10 +40,10 @@ jobs:
 By default, the action checks formatting and runs the linter over the
 repository's supported documents without changing files. Formatting differences
 or lint findings fail the check. It uses the CLI's [configuration
-discovery](configuration.qmd) and [file
-selection](configuration.qmd#file-selection-directory-traversal), including
-`.gitignore` and configured exclusions. Install any external formatters or
-linters selected in `panache.toml` before running the action.
+discovery](../reference/configuration.qmd) and [file
+selection](../reference/configuration.qmd#file-selection-directory-traversal),
+including `.gitignore` and configured exclusions. Install any external
+formatters or linters selected in `panache.toml` before running the action.
 
 The `@v1` tag selects the action version; `version` selects the Panache CLI
 release. Keep the latter aligned with your local installation and pre-commit

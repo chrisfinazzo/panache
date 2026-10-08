@@ -1,0 +1,118 @@
+---
+title: Configuration
+description: >
+  Configure formatting, linting, file selection, and external tools for a
+  Panache project.
+---
+
+Put a `panache.toml` at the root of your project to share settings between the
+CLI and language server. Every key is optional. This guide covers common setup
+tasks; the [configuration reference](../reference/configuration.qmd) describes
+the full configuration format, defaults, and discovery rules.
+
+## Create a Project Config
+
+Start with the settings your project needs:
+
+```toml
+extend-exclude = ["vendor/**", "_site/**"]
+
+[format]
+line-width = 88
+wrap = "sentence"
+```
+
+Commit `panache.toml` so contributors use the same settings. Unknown keys are
+errors. Add `#:schema https://panache.bz/panache.schema.json` at the top for
+completion and validation in editors that support TOML schema directives. See
+[editor support](../reference/configuration.qmd#editor-support) for other ways
+to associate the schema.
+
+For a project of plain Markdown files, set the flavor at the top level. For
+example, a repository using GitHub-Flavored Markdown can use:
+
+```toml
+flavor = "gfm"
+```
+
+See [flavors](../reference/configuration.qmd#flavor) for Quarto, R Markdown,
+MyST, and other formats, including filename-based selection.
+
+## Choose the Configuration Source
+
+Panache looks for the nearest project config while walking from the input file's
+directory up to the repository root. It accepts `panache.toml`, `.panache.toml`,
+and `.config/panache.toml`. If it finds none, it uses `PANACHE_CONFIG` when set,
+then the platform's user config.
+
+To select a file explicitly or try the built-in defaults:
+
+```sh
+panache --config path/to/panache.toml format document.qmd
+panache --isolated lint document.qmd
+```
+
+For one formatting run, override a setting with
+`panache format -o line-width=100 document.qmd`. Put persistent choices in the
+project config. The [configuration reference](../reference/configuration.qmd)
+describes precedence, global config locations, and how the language server
+reloads them.
+
+## Share Settings Between Projects
+
+Discovery selects a single config. Use `extend` to inherit another file:
+
+```toml
+extend = "../shared/panache.toml"
+
+[format]
+line-width = 100
+```
+
+The path is relative to the file declaring it. The project's values override
+inherited values, and tables merge by key. See
+[inheritance](../reference/configuration.qmd#extend) for how lists and flavor
+overrides merge.
+
+## Choose Files to Process
+
+Use `extend-exclude` to skip additional paths during directory walks while
+retaining the built-in exclusions:
+
+```toml
+extend-exclude = ["vendor/**", "generated/**"]
+```
+
+These patterns apply to formatting and linting. An explicitly named file is
+processed unless you also pass `--force-exclude`:
+
+```sh
+panache format --force-exclude generated/example.md
+```
+
+See [file
+selection](../reference/configuration.qmd#file-selection-directory-traversal)
+for include patterns, `.gitignore`, and the directory that anchors each pattern.
+
+## Configure Linting and Embedded Code
+
+Use the [linting guide](linting.qmd#configuration) to enable or disable document
+rules. Formatting and linting of embedded code are opt-in. For example, with the
+Arity CLI installed on `PATH`:
+
+```toml
+[formatters]
+r = "arity"
+
+[linters]
+r = "arity"
+```
+
+`panache format` now formats R code blocks, and `panache lint` checks them.
+External linters use built-in presets; external formatters also accept custom
+commands. See the [formatter presets](../reference/formatter-presets.qmd),
+[linter presets](../reference/linter-presets.qmd), and their configuration
+details in the reference.
+
+The [dprint plugin](integrations.qmd#dprint) uses `dprint.json` and does not
+load `panache.toml` or launch external tools.

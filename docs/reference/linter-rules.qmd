@@ -512,8 +512,8 @@ warning[undefined-footnote-id]: Footnote '[^missing]' not found
 
 Emitted when a reference-style link or cross-reference points to a label that
 has no matching definition. Cross-references using an extension prefix listed in
-[`crossref-prefixes`](../guide/configuration.qmd#cross-reference-prefixes) are
-not validated, since their targets are defined by a mechanism Panache does not
+[`crossref-prefixes`](configuration.qmd#cross-reference-prefixes) are not
+validated, since their targets are defined by a mechanism Panache does not
 model.
 
 #### `undefined-footnote-id` {#undefined-footnote-id}
@@ -890,8 +890,8 @@ that fail to parse.
 Emitted when a `@cite` reference does not match any key in the loaded
 bibliography. Built-in Quarto cross-references (`@fig-`, `@tbl-`, ...) are
 exempt; for extension-injected prefixes such as pseudocode's `@algo-`, list them
-under [`crossref-prefixes`](../guide/configuration.qmd#cross-reference-prefixes)
-so they are treated as cross-references rather than citations.
+under [`crossref-prefixes`](configuration.qmd#cross-reference-prefixes) so they
+are treated as cross-references rather than citations.
 
 #### `duplicate-bibliography-key` {#duplicate-bibliography-key}
 

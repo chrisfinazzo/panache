@@ -324,14 +324,15 @@ Create `panache.toml` in your project root with your preferred settings:
 
 ```toml
 flavor = "quarto"
-line-width = 80
 
 [format]
+line-width = 80
 wrap = "reflow"
 ```
 
-To see all the available configuration options, check the [Configuration
-guide](guide/configuration.qmd).
+Follow the [configuration guide](guide/configure.qmd) to share settings across a
+project, or consult the [configuration reference](reference/configuration.qmd)
+for every option and its default.
 
 Panache looks for configuration files in this order:
 
@@ -389,6 +390,10 @@ See the [Formatting](guide/formatting.qmd) and [Linting](guide/linting.qmd)
 guides for more details.
 
 ## Getting Help
+
+Continue with [Formatting](guide/formatting.qmd), [Linting](guide/linting.qmd),
+[Configuration](guide/configure.qmd), [Editor Setup](guide/lsp.qmd), and
+[Integrations](guide/integrations.qmd) for day-to-day workflows.
 
 - **GitHub Issues**:
   [github.com/jolars/panache/issues](https://github.com/jolars/panache/issues)

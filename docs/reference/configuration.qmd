@@ -1,10 +1,14 @@
 ---
-title: Configuration
+title: Configuration Reference
+aliases:
+  - /guide/configuration.html
 description: >
-  This guide describes how to configure Panache, both globally and on a
-  per-project basis, and how to use configuration files to customize the
-  formatting and linting rules.
+  Configuration options, defaults, discovery rules, and external-tool settings
+  for Panache.
 ---
+
+For a walkthrough of creating and sharing a project config, see the
+[configuration guide](../guide/configure.qmd).
 
 Panache's configuration system is built around a TOML configuration file, which
 allows you to customize a range of options, including formatting preferences,
@@ -129,8 +133,8 @@ This is true regardless of how the config was found: a typo in a *discovered*
 `panache.toml` fails the run just like a broken `--config` path, rather than
 being silently ignored in favor of the user config or built-in defaults.
 
-In the [language server](lsp.qmd) the same parse failure is surfaced rather than
-swallowed:
+In the [language server](../guide/lsp.qmd) the same parse failure is surfaced
+rather than swallowed:
 
 - a diagnostic is published on the offending `panache.toml`, anchored at the bad
   key (so it shows even when the config file isn't open), and
@@ -262,11 +266,10 @@ The available flavors are:
     `flavor = "myst"`, use `--flavor myst`, or a [`[flavors]`](#flavors)
     pattern); it is never auto-detected from the file extension.
 
-The `--flavor` CLI flag (see the [CLI reference](../reference/cli.qmd))
-overrides this setting for a single invocation. It also overrides
-[`[flavors]`](#flavors) and the flavor inferred from the file extension.
-`[extensions]` overrides from `panache.toml` still merge on top of the selected
-flavor's defaults.
+The `--flavor` CLI flag (see the [CLI reference](cli.qmd)) overrides this
+setting for a single invocation. It also overrides [`[flavors]`](#flavors) and
+the flavor inferred from the file extension. `[extensions]` overrides from
+`panache.toml` still merge on top of the selected flavor's defaults.
 
 ### Line Width
 
@@ -484,10 +487,10 @@ quarto = "1.9"
 
 `quarto`
 
-:   Quarto release whose vendored schema the
-    [`quarto-schema`](../reference/linter-rules.qmd) lint rule validates against
-    (e.g. `"1.9"`). One version is currently bundled, so this is an advisory pin
-    that reserves the key for selecting among bundled versions later.
+:   Quarto release whose vendored schema the [`quarto-schema`](linter-rules.qmd)
+    lint rule validates against (e.g. `"1.9"`). One version is currently
+    bundled, so this is an advisory pin that reserves the key for selecting
+    among bundled versions later.
 
 ::: callout-note
 The top-level `pandoc-compat` key is deprecated in favor of `[compat] pandoc`
@@ -504,7 +507,7 @@ inject *additional* prefixes that Panache cannot discover on its own---for
 example the [pseudocode](https://github.com/leovan/quarto-pseudocode) extension
 makes `@algo-` a cross-reference. Without help, Panache parses `@algo-cd` as a
 citation and the linter reports it as a [missing bibliography
-key](../reference/linter-rules.qmd#missing-bibliography-key).
+key](linter-rules.qmd#missing-bibliography-key).
 
 List those extra prefixes under the top-level `crossref-prefixes` key:
 
@@ -519,8 +522,7 @@ crossref-prefixes = ["algo"]
     cross-references, so the linter no longer flags them as citations. Because
     their targets are defined by an extension mechanism Panache does not model,
     such cross-references are also exempt from the
-    [`undefined-references`](../reference/linter-rules.qmd#undefined-references)
-    check.
+    [`undefined-references`](linter-rules.qmd#undefined-references) check.
 
 ### CLI Cache
 
@@ -697,8 +699,8 @@ Macros are never rewritten: Panache does not canonicalize `\frac`/`\dfrac`,
 insert alignment markers, or expand user definitions. Alignment measures source
 characters rather than rendered glyphs, so `\alpha` counts as six columns.
 Malformed math, a lone unescaped `$`, and structures whose semantics Panache
-cannot establish safely are preserved. See [Math](formatting.qmd#math) for the
-complete style and preservation boundary.
+cannot establish safely are preserved. See [Math](../guide/formatting.qmd#math)
+for the complete style and preservation boundary.
 
 The option is stable and independent of Markdown flavor and parser extensions.
 The parser always builds the lossless math CST; this option controls only the
@@ -1752,8 +1754,8 @@ Here is a list of the current built-in formatter presets in Panache. **Command**
 and **Arguments** are the defaults for `cmd` and `args` when you specify the
 preset name in `[formatters]`.
 
-See [Formatter Presets](../reference/formatter-presets) for a list of all the
-presets available in Panache.
+See [Formatter Presets](formatter-presets.qmd) for a list of all the presets
+available in Panache.
 
 ## External Code Linters
 
