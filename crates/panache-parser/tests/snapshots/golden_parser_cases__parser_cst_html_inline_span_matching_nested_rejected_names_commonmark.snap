@@ -1,0 +1,54 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..304
+  PARAGRAPH@0..74
+    INLINE_HTML@0..17
+      INLINE_HTML_CONTENT@0..17 "<span id=outer-0>"
+    TEXT@17..53 "before <span 1bad=x i ..."
+    INLINE_HTML@53..60
+      INLINE_HTML_CONTENT@53..60 "</span>"
+    TEXT@60..66 " after"
+    INLINE_HTML@66..73
+      INLINE_HTML_CONTENT@66..73 "</span>"
+    NEWLINE@73..74 "\n"
+  BLANK_LINE@74..75
+    BLANK_LINE@74..75 "\n"
+  PARAGRAPH@75..153
+    INLINE_HTML@75..92
+      INLINE_HTML_CONTENT@75..92 "<span id=outer-1>"
+    TEXT@92..132 "before <span bad&name ..."
+    INLINE_HTML@132..139
+      INLINE_HTML_CONTENT@132..139 "</span>"
+    TEXT@139..145 " after"
+    INLINE_HTML@145..152
+      INLINE_HTML_CONTENT@145..152 "</span>"
+    NEWLINE@152..153 "\n"
+  BLANK_LINE@153..154
+    BLANK_LINE@153..154 "\n"
+  PARAGRAPH@154..228
+    INLINE_HTML@154..171
+      INLINE_HTML_CONTENT@154..171 "<span id=outer-2>"
+    TEXT@171..178 "before "
+    INLINE_HTML@178..201
+      INLINE_HTML_CONTENT@178..201 "<span :bad=x id=hidden>"
+    TEXT@201..207 "inside"
+    INLINE_HTML@207..214
+      INLINE_HTML_CONTENT@207..214 "</span>"
+    TEXT@214..220 " after"
+    INLINE_HTML@220..227
+      INLINE_HTML_CONTENT@220..227 "</span>"
+    NEWLINE@227..228 "\n"
+  BLANK_LINE@228..229
+    BLANK_LINE@228..229 "\n"
+  PARAGRAPH@229..304
+    INLINE_HTML@229..246
+      INLINE_HTML_CONTENT@229..246 "<span id=outer-3>"
+    TEXT@246..283 "before <span \u{301}bad=x  ..."
+    INLINE_HTML@283..290
+      INLINE_HTML_CONTENT@283..290 "</span>"
+    TEXT@290..296 " after"
+    INLINE_HTML@296..303
+      INLINE_HTML_CONTENT@296..303 "</span>"
+    NEWLINE@303..304 "\n"

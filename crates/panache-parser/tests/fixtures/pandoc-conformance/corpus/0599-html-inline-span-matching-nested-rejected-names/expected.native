@@ -1,0 +1,61 @@
+[ Para
+    [ Span
+        ( "outer-0" , [] , [] )
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str "1bad=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , Space
+    , Str "after"
+    , RawInline (Format "html") "</span>"
+    ]
+, Para
+    [ Span
+        ( "outer-1" , [] , [] )
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str "bad&name=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , Space
+    , Str "after"
+    , RawInline (Format "html") "</span>"
+    ]
+, Para
+    [ Span
+        ( "outer-2" , [] , [] )
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str ":bad=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , Space
+    , Str "after"
+    , RawInline (Format "html") "</span>"
+    ]
+, Para
+    [ Span
+        ( "outer-3" , [] , [] )
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str "\769bad=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , Space
+    , Str "after"
+    , RawInline (Format "html") "</span>"
+    ]
+]

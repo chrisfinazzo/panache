@@ -152,6 +152,14 @@ macro_rules! golden_test_cases {
 // 1. Create a new directory under tests/fixtures/cases/
 // 2. Add the directory name to this list
 golden_test_cases!(
+    html_inline_span_matching_nested_rejected,
+    html_inline_span_matching_nested_rejected_names,
+    html_inline_span_matching_code,
+    html_inline_span_matching_comments,
+    html_inline_span_matching_quoted_raw,
+    html_inline_span_matching_quoted_native,
+    html_inline_span_matching_processing_instruction,
+    html_inline_span_matching_escapes,
     html_block_div_attr_name_unclosed_same_line,
     html_block_div_attr_name_unclosed_multiline,
     html_block_div_attr_name_unclosed_blank,

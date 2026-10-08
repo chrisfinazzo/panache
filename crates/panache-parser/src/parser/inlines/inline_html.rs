@@ -48,7 +48,7 @@ pub fn try_parse_inline_html(text: &str, dialect: Dialect) -> Option<usize> {
                 None
             }
         })
-        .or_else(|| parse_processing_instruction(text))
+        .or_else(|| parse_processing_instruction(text, dialect))
         .or_else(|| parse_close_tag(text))
         .or_else(|| {
             let len = parse_open_tag(text)?;
@@ -89,11 +89,14 @@ fn parse_html_comment(text: &str) -> Option<usize> {
     Some(4 + end + 3)
 }
 
-fn parse_processing_instruction(text: &str) -> Option<usize> {
+fn parse_processing_instruction(text: &str, dialect: Dialect) -> Option<usize> {
     if !text.starts_with("<?") {
         return None;
     }
     let after = &text[2..];
+    if dialect == Dialect::Pandoc {
+        return after.find('>').map(|end| 2 + end + 1);
+    }
     let end = after.find("?>")?;
     Some(2 + end + 2)
 }
@@ -380,6 +383,18 @@ mod tests {
     #[test]
     fn processing_instruction() {
         matches("<?php $x; ?>", 12);
+    }
+
+    #[test]
+    fn processing_instruction_ends_at_first_gt_in_pandoc() {
+        let input = "<?test </span> ?>";
+        assert_eq!(try_parse_inline_html(input, Dialect::Pandoc), Some(14));
+        assert_eq!(
+            try_parse_inline_html(input, Dialect::CommonMark),
+            Some(input.len())
+        );
+        assert_eq!(try_parse_inline_html("<?test >", Dialect::Pandoc), Some(8));
+        assert_eq!(try_parse_inline_html("<?test >", Dialect::CommonMark), None);
     }
 
     #[test]

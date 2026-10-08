@@ -1,0 +1,25 @@
+[ Para
+    [ Span
+        ( "outer" , [] , [] )
+        [ Str "before"
+        , Space
+        , Span
+            ( "inner" , [] , [ ( "title" , "<span>" ) ] )
+            [ Str "inside" ]
+        , Space
+        , Str "after"
+        ]
+    ]
+, Para
+    [ Span
+        ( "other" , [] , [] )
+        [ Str "before"
+        , Space
+        , Span
+            ( "inner-close" , [] , [ ( "title" , "</span>" ) ] )
+            [ Str "inside" ]
+        , Space
+        , Str "after"
+        ]
+    ]
+]

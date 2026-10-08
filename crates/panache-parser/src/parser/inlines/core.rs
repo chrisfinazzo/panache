@@ -394,7 +394,7 @@ fn parse_inline_range_impl(
                 ConstructDispo::NativeSpan { end: dispo_end } => {
                     if dispo_end <= end
                         && let Some((len, content, _attributes)) =
-                            try_parse_native_span(&text[pos..], config.dialect)
+                            try_parse_native_span(&text[pos..], config)
                         && pos + len == dispo_end
                     {
                         if pos > text_start {
@@ -1241,8 +1241,7 @@ fn parse_inline_range_impl(
         if byte == b'<'
             && config.dialect == Dialect::CommonMark
             && config.extensions.native_spans
-            && let Some((len, content, _attributes)) =
-                try_parse_native_span(&text[pos..], config.dialect)
+            && let Some((len, content, _attributes)) = try_parse_native_span(&text[pos..], config)
         {
             if pos > text_start {
                 builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos]);

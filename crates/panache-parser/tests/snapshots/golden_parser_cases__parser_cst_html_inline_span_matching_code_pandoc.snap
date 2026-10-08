@@ -1,0 +1,46 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..120
+  PARAGRAPH@0..70
+    INLINE_HTML_SPAN@0..69
+      TEXT@0..5 "<span"
+      WHITESPACE@5..6 " "
+      HTML_ATTRS@6..14
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      TEXT@14..15 ">"
+      SPAN_CONTENT@15..62
+        TEXT@15..22 "before "
+        INLINE_CODE@22..31
+          INLINE_CODE_MARKER@22..23 "`"
+          INLINE_CODE_CONTENT@23..30 "</span>"
+          INLINE_CODE_MARKER@30..31 "`"
+        TEXT@31..36 " and "
+        INLINE_CODE@36..56
+          INLINE_CODE_MARKER@36..38 "``"
+          INLINE_CODE_CONTENT@38..54 "<span> ` </span>"
+          INLINE_CODE_MARKER@54..56 "``"
+        TEXT@56..62 " after"
+      SPAN_BRACKET_CLOSE@62..69 "</span>"
+    NEWLINE@69..70 "\n"
+  BLANK_LINE@70..71
+    BLANK_LINE@70..71 "\n"
+  PARAGRAPH@71..120
+    INLINE_HTML_SPAN@71..119
+      TEXT@71..76 "<span"
+      WHITESPACE@76..77 " "
+      HTML_ATTRS@77..90
+        TEXT@77..80 "id="
+        ATTR_ID@80..90 "outer-open"
+      TEXT@90..91 ">"
+      SPAN_CONTENT@91..112
+        TEXT@91..98 "before "
+        INLINE_CODE@98..106
+          INLINE_CODE_MARKER@98..99 "`"
+          INLINE_CODE_CONTENT@99..105 "<span>"
+          INLINE_CODE_MARKER@105..106 "`"
+        TEXT@106..112 " after"
+      SPAN_BRACKET_CLOSE@112..119 "</span>"
+    NEWLINE@119..120 "\n"

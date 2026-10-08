@@ -5,6 +5,9 @@
 //! When the `native_spans` extension is enabled, HTML `<span>` tags are
 //! treated as native Pandoc Span elements instead of raw HTML.
 
+use super::code_spans::try_parse_code_span;
+use super::escapes::try_parse_escape;
+use super::inline_html::try_parse_inline_html;
 use super::sink::InlineSink;
 use crate::options::{Dialect, ParserOptions};
 use crate::parser::utils::attributes::{
@@ -19,7 +22,66 @@ use super::core::parse_inline_text;
 ///
 /// Native spans have the form: <span attrs...>content</span>
 /// The content can contain markdown that will be parsed recursively.
-pub(crate) fn try_parse_native_span(text: &str, dialect: Dialect) -> Option<(usize, &str, String)> {
+pub(crate) fn try_parse_native_span<'a>(
+    text: &'a str,
+    config: &ParserOptions,
+) -> Option<(usize, &'a str, String)> {
+    let (content_start, attributes) = span_open_tag(text, config.dialect)?;
+    let mut pos = content_start;
+    let bytes = text.as_bytes();
+    let mut depth = 1;
+
+    while pos < text.len() {
+        let rest = &text[pos..];
+        if config.dialect == Dialect::Pandoc {
+            // Only parsed native openers contribute depth. Other inlines hide
+            // their source bytes from the surrounding span's close matcher.
+            if let Some((len, _, _)) = try_parse_escape(rest) {
+                pos += len;
+                continue;
+            }
+            if let Some((len, ..)) = try_parse_code_span(rest) {
+                pos += len;
+                continue;
+            }
+            if let Some((len, _)) = span_open_tag(rest, config.dialect) {
+                depth += 1;
+                pos += len;
+                continue;
+            }
+        } else if rest.starts_with("<span")
+            && bytes
+                .get(pos + 5)
+                .is_some_and(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'>'))
+        {
+            depth += 1;
+            pos += 5;
+            continue;
+        }
+
+        if rest.starts_with("</span>") {
+            depth -= 1;
+            if depth == 0 {
+                return Some((pos + 7, &text[content_start..pos], attributes.to_string()));
+            }
+            pos += 7;
+            continue;
+        }
+
+        if config.dialect == Dialect::Pandoc
+            && config.extensions.raw_html
+            && let Some(len) = try_parse_inline_html(rest, config.dialect)
+        {
+            pos += len;
+            continue;
+        }
+        pos += rest.chars().next().map_or(1, char::len_utf8);
+    }
+
+    None
+}
+
+fn span_open_tag(text: &str, dialect: Dialect) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
 
     if !text.starts_with("<span") {
@@ -61,50 +123,12 @@ pub(crate) fn try_parse_native_span(text: &str, dialect: Dialect) -> Option<(usi
         return None;
     }
 
-    let attributes = text[attr_start..pos].trim().to_string();
-    if dialect == Dialect::Pandoc && !pandoc_html_attribute_names_valid(&attributes) {
+    let attributes = text[attr_start..pos].trim();
+    if dialect == Dialect::Pandoc && !pandoc_html_attribute_names_valid(attributes) {
         return None;
     }
 
-    pos += 1;
-
-    let content_start = pos;
-    let mut depth = 1;
-
-    while pos < text.len() && depth > 0 {
-        if bytes
-            .get(pos..)
-            .is_some_and(|tail| tail.starts_with(b"<span"))
-        {
-            let check_pos = pos + 5;
-            if check_pos < text.len() {
-                let ch = bytes[check_pos] as char;
-                if matches!(ch, ' ' | '\t' | '\n' | '\r' | '>') {
-                    depth += 1;
-                    pos += 5;
-                    continue;
-                }
-            }
-        }
-
-        if bytes
-            .get(pos..)
-            .is_some_and(|tail| tail.starts_with(b"</span>"))
-        {
-            depth -= 1;
-            if depth == 0 {
-                let content = &text[content_start..pos];
-                let total_len = pos + 7; // Include </span>
-                return Some((total_len, content, attributes));
-            }
-            pos += 7;
-            continue;
-        }
-
-        pos += text[pos..].chars().next().map_or(1, char::len_utf8);
-    }
-
-    None
+    Some((pos + 1, attributes))
 }
 
 /// Emit a native span node to the builder.
@@ -199,12 +223,25 @@ fn emit_span_open_tag_tokens(builder: &mut impl InlineSink, open_tag: &str) {
 mod tests {
     use super::*;
 
+    fn options(dialect: Dialect) -> ParserOptions {
+        let flavor = match dialect {
+            Dialect::Pandoc => crate::options::Flavor::Pandoc,
+            Dialect::CommonMark => crate::options::Flavor::CommonMark,
+        };
+        ParserOptions {
+            flavor,
+            dialect,
+            extensions: crate::options::Extensions::for_flavor(flavor),
+            ..ParserOptions::default()
+        }
+    }
+
     #[test]
     fn pandoc_rejects_invalid_attribute_names() {
         for name in ["_bad", ":bad", "bad.name", "1bad", "bad&name", "\u{301}bad"] {
             let input = format!("<span {name}=x id=hidden>**hi**</span>");
             assert_eq!(
-                try_parse_native_span(&input, Dialect::Pandoc),
+                try_parse_native_span(&input, &options(Dialect::Pandoc)),
                 None,
                 "{name}"
             );
@@ -214,31 +251,52 @@ mod tests {
     #[test]
     fn commonmark_native_span_override_keeps_legacy_recognition() {
         let input = "<span _bad=x>hi</span>";
-        assert!(try_parse_native_span(input, Dialect::CommonMark).is_some());
+        assert!(try_parse_native_span(input, &options(Dialect::CommonMark)).is_some());
+    }
+
+    #[test]
+    fn pandoc_span_matching_respects_raw_html_extension() {
+        let input = "<span>before <!-- </span> --> after</span>";
+        let mut config = options(Dialect::Pandoc);
+        assert_eq!(
+            try_parse_native_span(input, &config).map(|(_, content, _)| content),
+            Some("before <!-- </span> --> after")
+        );
+        config.extensions.raw_html = false;
+        assert_eq!(
+            try_parse_native_span(input, &config).map(|(_, content, _)| content),
+            Some("before <!-- ")
+        );
     }
 
     #[test]
     fn test_parse_simple_span() {
-        let result = try_parse_native_span("<span>text</span>", Dialect::Pandoc);
+        let result = try_parse_native_span("<span>text</span>", &options(Dialect::Pandoc));
         assert_eq!(result, Some((17, "text", String::new())));
     }
 
     #[test]
     fn test_parse_span_with_class() {
-        let result = try_parse_native_span(r#"<span class="foo">text</span>"#, Dialect::Pandoc);
+        let result = try_parse_native_span(
+            r#"<span class="foo">text</span>"#,
+            &options(Dialect::Pandoc),
+        );
         assert_eq!(result, Some((29, "text", r#"class="foo""#.to_string())));
     }
 
     #[test]
     fn test_parse_span_with_id() {
-        let result = try_parse_native_span(r#"<span id="bar">text</span>"#, Dialect::Pandoc);
+        let result =
+            try_parse_native_span(r#"<span id="bar">text</span>"#, &options(Dialect::Pandoc));
         assert_eq!(result, Some((26, "text", r#"id="bar""#.to_string())));
     }
 
     #[test]
     fn test_parse_span_with_multiple_attrs() {
-        let result =
-            try_parse_native_span(r#"<span id="x" class="y z">text</span>"#, Dialect::Pandoc);
+        let result = try_parse_native_span(
+            r#"<span id="x" class="y z">text</span>"#,
+            &options(Dialect::Pandoc),
+        );
         assert_eq!(
             result,
             Some((36, "text", r#"id="x" class="y z""#.to_string()))
@@ -247,7 +305,10 @@ mod tests {
 
     #[test]
     fn test_parse_span_with_markdown() {
-        let result = try_parse_native_span("<span>*emphasis* and `code`</span>", Dialect::Pandoc);
+        let result = try_parse_native_span(
+            "<span>*emphasis* and `code`</span>",
+            &options(Dialect::Pandoc),
+        );
         assert_eq!(result, Some((34, "*emphasis* and `code`", String::new())));
     }
 
@@ -255,7 +316,7 @@ mod tests {
     fn test_parse_nested_spans() {
         let result = try_parse_native_span(
             "<span>outer <span>inner</span> text</span>",
-            Dialect::Pandoc,
+            &options(Dialect::Pandoc),
         );
         assert_eq!(
             result,
@@ -265,43 +326,47 @@ mod tests {
 
     #[test]
     fn test_parse_span_with_newlines_in_content() {
-        let result = try_parse_native_span("<span>line 1\nline 2</span>", Dialect::Pandoc);
+        let result =
+            try_parse_native_span("<span>line 1\nline 2</span>", &options(Dialect::Pandoc));
         assert_eq!(result, Some((26, "line 1\nline 2", String::new())));
     }
 
     #[test]
     fn test_not_span_no_closing_tag() {
-        let result = try_parse_native_span("<span>text", Dialect::Pandoc);
+        let result = try_parse_native_span("<span>text", &options(Dialect::Pandoc));
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_not_span_wrong_tag() {
-        let result = try_parse_native_span("<spanx>text</spanx>", Dialect::Pandoc);
+        let result = try_parse_native_span("<spanx>text</spanx>", &options(Dialect::Pandoc));
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_not_span_no_space_after() {
-        let result = try_parse_native_span("<spanner>text</spanner>", Dialect::Pandoc);
+        let result = try_parse_native_span("<spanner>text</spanner>", &options(Dialect::Pandoc));
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_parse_span_with_quoted_attrs_containing_gt() {
-        let result = try_parse_native_span(r#"<span title="a > b">text</span>"#, Dialect::Pandoc);
+        let result = try_parse_native_span(
+            r#"<span title="a > b">text</span>"#,
+            &options(Dialect::Pandoc),
+        );
         assert_eq!(result, Some((31, "text", r#"title="a > b""#.to_string())));
     }
 
     #[test]
     fn test_parse_empty_span() {
-        let result = try_parse_native_span("<span></span>", Dialect::Pandoc);
+        let result = try_parse_native_span("<span></span>", &options(Dialect::Pandoc));
         assert_eq!(result, Some((13, "", String::new())));
     }
 
     #[test]
     fn test_parse_span_trailing_text() {
-        let result = try_parse_native_span("<span>text</span> more", Dialect::Pandoc);
+        let result = try_parse_native_span("<span>text</span> more", &options(Dialect::Pandoc));
         assert_eq!(result, Some((17, "text", String::new())));
     }
 
@@ -309,7 +374,7 @@ mod tests {
     fn test_parse_span_with_non_ascii_content() {
         let result = try_parse_native_span(
             r#"<span class="rtl">(شربنا من النيل)</span>"#,
-            Dialect::Pandoc,
+            &options(Dialect::Pandoc),
         );
         assert_eq!(
             result,

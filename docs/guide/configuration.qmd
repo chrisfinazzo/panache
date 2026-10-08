@@ -1209,6 +1209,11 @@ native-spans = true
     span. Markdown in the body still parses, and `</span>` stays raw inline HTML.
     The rejected opener does not declare an anchor.
 
+    When matching a native span's closing tag, Panache skips code spans, escaped
+    tags, and raw inline HTML, including comments and quoted attribute values.
+    Rejected inner `<span>` openers do not add nesting depth, so their closing tag
+    can close the surrounding native span.
+
 ### Metadata Extensions
 
 ```toml

@@ -1,0 +1,16 @@
+[ Para
+    [ Span
+        ( "outer" , [] , [] )
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str "bad.name=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , Space
+    , Str "after"
+    , RawInline (Format "html") "</span>"
+    ]
+]

@@ -1,0 +1,43 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..130
+  PARAGRAPH@0..65
+    INLINE_HTML_SPAN@0..64
+      TEXT@0..5 "<span"
+      WHITESPACE@5..6 " "
+      HTML_ATTRS@6..14
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      TEXT@14..15 ">"
+      SPAN_CONTENT@15..57
+        TEXT@15..22 "before "
+        INLINE_HTML@22..41
+          INLINE_HTML_CONTENT@22..41 "<b title=\"</span>\">"
+        TEXT@41..47 "inside"
+        INLINE_HTML@47..51
+          INLINE_HTML_CONTENT@47..51 "</b>"
+        TEXT@51..57 " after"
+      SPAN_BRACKET_CLOSE@57..64 "</span>"
+    NEWLINE@64..65 "\n"
+  BLANK_LINE@65..66
+    BLANK_LINE@65..66 "\n"
+  PARAGRAPH@66..130
+    INLINE_HTML_SPAN@66..129
+      TEXT@66..71 "<span"
+      WHITESPACE@71..72 " "
+      HTML_ATTRS@72..80
+        TEXT@72..75 "id="
+        ATTR_ID@75..80 "other"
+      TEXT@80..81 ">"
+      SPAN_CONTENT@81..122
+        TEXT@81..88 "before "
+        INLINE_HTML@88..106
+          INLINE_HTML_CONTENT@88..106 "<b title=\"<span>\">"
+        TEXT@106..112 "inside"
+        INLINE_HTML@112..116
+          INLINE_HTML_CONTENT@112..116 "</b>"
+        TEXT@116..122 " after"
+      SPAN_BRACKET_CLOSE@122..129 "</span>"
+    NEWLINE@129..130 "\n"

@@ -922,3 +922,14 @@
 595
 596
 597
+
+# html-inline: native span depth follows valid openers and skips code, escapes,
+# comments, quoted tag attributes, and dialect-specific processing instructions.
+598
+599
+600
+601
+602
+603
+604
+605

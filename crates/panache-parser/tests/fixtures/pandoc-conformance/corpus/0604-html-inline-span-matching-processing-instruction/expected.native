@@ -1,0 +1,35 @@
+[ Para
+    [ Span
+        ( "outer" , [] , [] )
+        [ Str "before"
+        , Space
+        , RawInline (Format "html") "<?test </span>"
+        , Space
+        , Str "?>"
+        , Space
+        , Str "after"
+        ]
+    ]
+, Para
+    [ Span
+        ( "other" , [] , [] )
+        [ Str "before"
+        , Space
+        , RawInline (Format "html") "<?test <span>"
+        , Space
+        , Str "?>"
+        , Space
+        , Str "after"
+        ]
+    ]
+, Para
+    [ Span
+        ( "boundary" , [] , [] )
+        [ Str "before"
+        , Space
+        , RawInline (Format "html") "<?test >"
+        ]
+    , Space
+    , Str "tail?>"
+    ]
+]

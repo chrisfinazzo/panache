@@ -1,0 +1,71 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..304
+  PARAGRAPH@0..74
+    INLINE_HTML_SPAN@0..60
+      TEXT@0..5 "<span"
+      WHITESPACE@5..6 " "
+      HTML_ATTRS@6..16
+        TEXT@6..9 "id="
+        ATTR_ID@9..16 "outer-0"
+      TEXT@16..17 ">"
+      SPAN_CONTENT@17..53
+        TEXT@17..53 "before <span 1bad=x i ..."
+      SPAN_BRACKET_CLOSE@53..60 "</span>"
+    TEXT@60..66 " after"
+    INLINE_HTML@66..73
+      INLINE_HTML_CONTENT@66..73 "</span>"
+    NEWLINE@73..74 "\n"
+  BLANK_LINE@74..75
+    BLANK_LINE@74..75 "\n"
+  PARAGRAPH@75..153
+    INLINE_HTML_SPAN@75..139
+      TEXT@75..80 "<span"
+      WHITESPACE@80..81 " "
+      HTML_ATTRS@81..91
+        TEXT@81..84 "id="
+        ATTR_ID@84..91 "outer-1"
+      TEXT@91..92 ">"
+      SPAN_CONTENT@92..132
+        TEXT@92..132 "before <span bad&name ..."
+      SPAN_BRACKET_CLOSE@132..139 "</span>"
+    TEXT@139..145 " after"
+    INLINE_HTML@145..152
+      INLINE_HTML_CONTENT@145..152 "</span>"
+    NEWLINE@152..153 "\n"
+  BLANK_LINE@153..154
+    BLANK_LINE@153..154 "\n"
+  PARAGRAPH@154..228
+    INLINE_HTML_SPAN@154..214
+      TEXT@154..159 "<span"
+      WHITESPACE@159..160 " "
+      HTML_ATTRS@160..170
+        TEXT@160..163 "id="
+        ATTR_ID@163..170 "outer-2"
+      TEXT@170..171 ">"
+      SPAN_CONTENT@171..207
+        TEXT@171..207 "before <span :bad=x i ..."
+      SPAN_BRACKET_CLOSE@207..214 "</span>"
+    TEXT@214..220 " after"
+    INLINE_HTML@220..227
+      INLINE_HTML_CONTENT@220..227 "</span>"
+    NEWLINE@227..228 "\n"
+  BLANK_LINE@228..229
+    BLANK_LINE@228..229 "\n"
+  PARAGRAPH@229..304
+    INLINE_HTML_SPAN@229..290
+      TEXT@229..234 "<span"
+      WHITESPACE@234..235 " "
+      HTML_ATTRS@235..245
+        TEXT@235..238 "id="
+        ATTR_ID@238..245 "outer-3"
+      TEXT@245..246 ">"
+      SPAN_CONTENT@246..283
+        TEXT@246..283 "before <span \u{301}bad=x  ..."
+      SPAN_BRACKET_CLOSE@283..290 "</span>"
+    TEXT@290..296 " after"
+    INLINE_HTML@296..303
+      INLINE_HTML_CONTENT@296..303 "</span>"
+    NEWLINE@303..304 "\n"

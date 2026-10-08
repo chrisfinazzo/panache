@@ -1,0 +1,25 @@
+[ Para
+    [ Span
+        ( "outer" , [] , [] )
+        [ Str "before"
+        , Space
+        , Code ( "" , [] , [] ) "</span>"
+        , Space
+        , Str "and"
+        , Space
+        , Code ( "" , [] , [] ) "<span> ` </span>"
+        , Space
+        , Str "after"
+        ]
+    ]
+, Para
+    [ Span
+        ( "outer-open" , [] , [] )
+        [ Str "before"
+        , Space
+        , Code ( "" , [] , [] ) "<span>"
+        , Space
+        , Str "after"
+        ]
+    ]
+]

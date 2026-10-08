@@ -109,6 +109,24 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn html_inline_span_matching_ignores_code_close() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input = "<span id=outer>before `</span>` after</span>\n";
+    let tree = parse(input, None);
+    assert_eq!(tree.text().to_string(), input);
+    let span = tree
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::INLINE_HTML_SPAN)
+        .expect("the outer span must lift");
+    assert_eq!(span.text().to_string(), input.trim_end());
+    assert!(
+        span.descendants()
+            .any(|node| node.kind() == SyntaxKind::INLINE_CODE)
+    );
+}
+
+#[test]
 fn html_inline_span_invalid_attribute_name_exposes_markdown() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -330,6 +348,22 @@ macro_rules! golden_test_cases {
 }
 
 golden_test_cases!(
+    html_inline_span_matching_nested_rejected_pandoc,
+    html_inline_span_matching_nested_rejected_commonmark,
+    html_inline_span_matching_nested_rejected_names_pandoc,
+    html_inline_span_matching_nested_rejected_names_commonmark,
+    html_inline_span_matching_code_pandoc,
+    html_inline_span_matching_code_commonmark,
+    html_inline_span_matching_comments_pandoc,
+    html_inline_span_matching_comments_commonmark,
+    html_inline_span_matching_quoted_raw_pandoc,
+    html_inline_span_matching_quoted_raw_commonmark,
+    html_inline_span_matching_quoted_native_pandoc,
+    html_inline_span_matching_quoted_native_commonmark,
+    html_inline_span_matching_processing_instruction_pandoc,
+    html_inline_span_matching_processing_instruction_commonmark,
+    html_inline_span_matching_escapes_pandoc,
+    html_inline_span_matching_escapes_commonmark,
     html_block_div_attr_name_unclosed_same_line_pandoc,
     html_block_div_attr_name_unclosed_same_line_commonmark,
     html_block_div_attr_name_unclosed_multiline_pandoc,

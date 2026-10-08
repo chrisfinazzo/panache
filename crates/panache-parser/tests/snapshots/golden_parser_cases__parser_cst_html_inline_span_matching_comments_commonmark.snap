@@ -1,0 +1,27 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..109
+  PARAGRAPH@0..52
+    INLINE_HTML@0..15
+      INLINE_HTML_CONTENT@0..15 "<span id=outer>"
+    TEXT@15..22 "before "
+    INLINE_HTML@22..38
+      INLINE_HTML_CONTENT@22..38 "<!-- </span> -->"
+    TEXT@38..44 " after"
+    INLINE_HTML@44..51
+      INLINE_HTML_CONTENT@44..51 "</span>"
+    NEWLINE@51..52 "\n"
+  BLANK_LINE@52..53
+    BLANK_LINE@52..53 "\n"
+  PARAGRAPH@53..109
+    INLINE_HTML@53..73
+      INLINE_HTML_CONTENT@53..73 "<span id=outer-open>"
+    TEXT@73..80 "before "
+    INLINE_HTML@80..95
+      INLINE_HTML_CONTENT@80..95 "<!-- <span> -->"
+    TEXT@95..101 " after"
+    INLINE_HTML@101..108
+      INLINE_HTML_CONTENT@101..108 "</span>"
+    NEWLINE@108..109 "\n"

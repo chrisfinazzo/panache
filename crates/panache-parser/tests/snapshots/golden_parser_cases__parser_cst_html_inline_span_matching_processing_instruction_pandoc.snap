@@ -1,0 +1,54 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..155
+  PARAGRAPH@0..53
+    INLINE_HTML_SPAN@0..52
+      TEXT@0..5 "<span"
+      WHITESPACE@5..6 " "
+      HTML_ATTRS@6..14
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      TEXT@14..15 ">"
+      SPAN_CONTENT@15..45
+        TEXT@15..22 "before "
+        INLINE_HTML@22..36
+          INLINE_HTML_CONTENT@22..36 "<?test </span>"
+        TEXT@36..45 " ?> after"
+      SPAN_BRACKET_CLOSE@45..52 "</span>"
+    NEWLINE@52..53 "\n"
+  BLANK_LINE@53..54
+    BLANK_LINE@53..54 "\n"
+  PARAGRAPH@54..106
+    INLINE_HTML_SPAN@54..105
+      TEXT@54..59 "<span"
+      WHITESPACE@59..60 " "
+      HTML_ATTRS@60..68
+        TEXT@60..63 "id="
+        ATTR_ID@63..68 "other"
+      TEXT@68..69 ">"
+      SPAN_CONTENT@69..98
+        TEXT@69..76 "before "
+        INLINE_HTML@76..89
+          INLINE_HTML_CONTENT@76..89 "<?test <span>"
+        TEXT@89..98 " ?> after"
+      SPAN_BRACKET_CLOSE@98..105 "</span>"
+    NEWLINE@105..106 "\n"
+  BLANK_LINE@106..107
+    BLANK_LINE@106..107 "\n"
+  PARAGRAPH@107..155
+    INLINE_HTML_SPAN@107..147
+      TEXT@107..112 "<span"
+      WHITESPACE@112..113 " "
+      HTML_ATTRS@113..124
+        TEXT@113..116 "id="
+        ATTR_ID@116..124 "boundary"
+      TEXT@124..125 ">"
+      SPAN_CONTENT@125..140
+        TEXT@125..132 "before "
+        INLINE_HTML@132..140
+          INLINE_HTML_CONTENT@132..140 "<?test >"
+      SPAN_BRACKET_CLOSE@140..147 "</span>"
+    TEXT@147..154 " tail?>"
+    NEWLINE@154..155 "\n"

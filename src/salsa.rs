@@ -3550,6 +3550,35 @@ mod tests {
     }
 
     #[test]
+    fn symbol_usage_index_collects_spans_around_tag_examples() {
+        let db = SalsaDb::default();
+        for body in [
+            "`<span id=hidden>`",
+            "<!-- <span id=hidden> -->",
+            "<b title=\"<span id=hidden>\">text</b>",
+            "<span bad.name=x id=hidden>text</span> tail",
+        ] {
+            let input = format!("<span id=outer>{body}</span>\n\n[link](#outer).\n");
+            let tree = crate::parse(&input, None);
+            let index =
+                symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+            assert_eq!(
+                index
+                    .crossref_declarations("outer")
+                    .map(|ranges| ranges.len()),
+                Some(1),
+                "the surrounding span declares its anchor: {body}"
+            );
+            assert!(index.crossref_declarations("hidden").is_none(), "{body}");
+            let range = index.crossref_declaration_value_ranges("outer").unwrap()[0];
+            assert_eq!(
+                &input[usize::from(range.start())..usize::from(range.end())],
+                "outer"
+            );
+        }
+    }
+
+    #[test]
     fn symbol_usage_index_skips_markdown_in_raw_divs() {
         let db = SalsaDb::default();
         let tree = crate::parse(

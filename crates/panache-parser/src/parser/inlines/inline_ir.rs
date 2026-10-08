@@ -473,7 +473,7 @@ pub(super) fn build_ir_into(
             && !in_pandoc_bracket
             && b == b'<'
             && exts.native_spans
-            && let Some((len, _, _)) = try_parse_native_span(&text[pos..], config.dialect)
+            && let Some((len, _, _)) = try_parse_native_span(&text[pos..], config)
             && pos + len <= end
         {
             flush_text!();
