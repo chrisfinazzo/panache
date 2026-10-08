@@ -1,0 +1,15 @@
+[ Para
+    [ Emph
+        [ Str "before"
+        , Space
+        , Str "<span"
+        , Space
+        , Str "bad&name=x"
+        , Space
+        , Str "id=hidden>inside"
+        ]
+    , RawInline (Format "html") "</span>"
+    , Space
+    , Str "after*"
+    ]
+]

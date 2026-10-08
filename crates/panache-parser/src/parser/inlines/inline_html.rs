@@ -17,6 +17,7 @@
 
 use super::sink::InlineSink;
 use crate::options::Dialect;
+use crate::parser::utils::attributes::pandoc_html_attribute_names_valid;
 use crate::syntax::SyntaxKind;
 
 /// Try to match an inline raw HTML span starting at `text[0]`.
@@ -49,7 +50,21 @@ pub fn try_parse_inline_html(text: &str, dialect: Dialect) -> Option<usize> {
         })
         .or_else(|| parse_processing_instruction(text))
         .or_else(|| parse_close_tag(text))
-        .or_else(|| parse_open_tag(text))
+        .or_else(|| {
+            let len = parse_open_tag(text)?;
+            if dialect == Dialect::Pandoc {
+                let name_end = 1 + text.as_bytes()[1..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_alphanumeric() || **b == b'-')
+                    .count();
+                // A rejected native opener must stay Markdown text rather than
+                // becoming opaque raw HTML in the fallback recognizer.
+                if !pandoc_html_attribute_names_valid(&text[name_end..len - 1]) {
+                    return None;
+                }
+            }
+            Some(len)
+        })
 }
 
 /// Emit a single `INLINE_HTML` node holding the verbatim span.
@@ -261,6 +276,20 @@ fn skip_ws_required_with_optional_lf(bytes: &[u8], start: usize) -> Option<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pandoc_raw_openers_reject_invalid_attribute_names() {
+        for tag in ["span", "b"] {
+            for name in ["_bad", ":bad", "bad.name"] {
+                let input = format!("<{tag} {name}=x>");
+                assert_eq!(try_parse_inline_html(&input, Dialect::Pandoc), None);
+                assert_eq!(
+                    try_parse_inline_html(&input, Dialect::CommonMark),
+                    Some(input.len())
+                );
+            }
+        }
+    }
 
     fn matches(input: &str, expected_len: usize) {
         assert_eq!(

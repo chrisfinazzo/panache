@@ -1,0 +1,6 @@
+[ Para
+    [ Span
+        ( "visible" , [] , [ ( "title" , "a&b > c" ) ] )
+        [ Strong [ Str "hi" ] ]
+    ]
+]

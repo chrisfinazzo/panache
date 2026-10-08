@@ -109,6 +109,45 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn html_inline_span_invalid_attribute_name_exposes_markdown() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input = include_str!("fixtures/cases/html_inline_span_attr_name_invalid_pandoc/input.md");
+    let tree = parse(input, None);
+    assert_eq!(tree.text().to_string(), input);
+    assert!(!tree.descendants().any(|node| matches!(
+        node.kind(),
+        SyntaxKind::INLINE_HTML_SPAN | SyntaxKind::HTML_ATTRS
+    )));
+    assert!(
+        tree.descendants()
+            .any(|node| node.kind() == SyntaxKind::STRONG)
+    );
+    let raw_tags: Vec<_> = tree
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::INLINE_HTML)
+        .map(|node| node.text().to_string())
+        .collect();
+    assert_eq!(raw_tags, ["</span>"]);
+}
+
+#[test]
+fn html_inline_span_rejected_opener_allows_emphasis_to_cross() {
+    use panache_parser::syntax::SyntaxKind;
+
+    let input = include_str!("fixtures/cases/html_inline_span_attr_name_emphasis_pandoc/input.md");
+    let tree = parse(input, None);
+    let emphasis = tree
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::EMPHASIS)
+        .expect("emphasis can cross a rejected native span opener");
+    assert_eq!(
+        emphasis.text().to_string(),
+        "*before <span bad&name=x id=hidden>inside*"
+    );
+}
+
+#[test]
 fn html_block_div_invalid_attribute_name_keeps_body_raw() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -265,6 +304,22 @@ macro_rules! golden_test_cases {
 }
 
 golden_test_cases!(
+    html_inline_span_attr_name_invalid_pandoc,
+    html_inline_span_attr_name_invalid_commonmark,
+    html_inline_span_attr_name_entity_pandoc,
+    html_inline_span_attr_name_entity_commonmark,
+    html_inline_span_attr_name_emphasis_pandoc,
+    html_inline_span_attr_name_emphasis_commonmark,
+    html_inline_span_attr_name_multiline_pandoc,
+    html_inline_span_attr_name_multiline_commonmark,
+    html_inline_span_attr_name_list_pandoc,
+    html_inline_span_attr_name_list_commonmark,
+    html_inline_span_attr_name_blockquote_pandoc,
+    html_inline_span_attr_name_blockquote_commonmark,
+    html_inline_span_attr_name_unicode_pandoc,
+    html_inline_span_attr_name_unicode_commonmark,
+    html_inline_span_attr_name_values_pandoc,
+    html_inline_span_attr_name_values_commonmark,
     inline_execution,
     adjacent_simple_then_pipe_table_captions,
     alerts,

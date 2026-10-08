@@ -152,6 +152,14 @@ macro_rules! golden_test_cases {
 // 1. Create a new directory under tests/fixtures/cases/
 // 2. Add the directory name to this list
 golden_test_cases!(
+    html_inline_span_attr_name_invalid,
+    html_inline_span_attr_name_entity,
+    html_inline_span_attr_name_emphasis,
+    html_inline_span_attr_name_multiline,
+    html_inline_span_attr_name_list,
+    html_inline_span_attr_name_blockquote,
+    html_inline_span_attr_name_unicode,
+    html_inline_span_attr_name_values,
     inline_execution,
     inline_execution_preserve,
     adjacent_simple_then_pipe_table_captions,

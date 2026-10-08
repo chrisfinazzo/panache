@@ -1,0 +1,13 @@
+[ BulletList
+    [ [ Plain
+          [ Str "<span"
+          , Space
+          , Str "_bad=x"
+          , Space
+          , Str "id=hidden>"
+          , Strong [ Str "hi" ]
+          , RawInline (Format "html") "</span>"
+          ]
+      ]
+    ]
+]

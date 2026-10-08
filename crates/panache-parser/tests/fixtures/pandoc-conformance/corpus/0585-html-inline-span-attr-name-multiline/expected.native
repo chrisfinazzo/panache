@@ -1,0 +1,14 @@
+[ Para
+    [ Str "before"
+    , Space
+    , Str "<span"
+    , SoftBreak
+    , Str "_bad=x"
+    , Space
+    , Str "id=hidden>"
+    , Strong [ Str "hi" ]
+    , RawInline (Format "html") "</span>"
+    , Space
+    , Str "after"
+    ]
+]

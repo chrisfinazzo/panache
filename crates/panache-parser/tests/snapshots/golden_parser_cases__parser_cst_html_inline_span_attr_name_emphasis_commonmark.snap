@@ -1,0 +1,14 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..57
+  PARAGRAPH@0..57
+    EMPHASIS@0..42
+      EMPHASIS_MARKER@0..1 "*"
+      TEXT@1..41 "before <span bad&name ..."
+      EMPHASIS_MARKER@41..42 "*"
+    INLINE_HTML@42..49
+      INLINE_HTML_CONTENT@42..49 "</span>"
+    TEXT@49..56 " after*"
+    NEWLINE@56..57 "\n"

@@ -1196,7 +1196,14 @@ native-spans = true
 :   Bracketed spans `[text]{.class}` (default: enabled)
 
 `native-spans`
+
 :   HTML `<span>` elements (default: enabled)
+
+    Pandoc-family flavors require attribute names to start with a Unicode letter and
+    continue with letters, numbers, `:`, `-`, or `_`. An invalid name, such as
+    `_bad` or `a&b`, leaves the opener as Markdown text instead of creating a native
+    span. Markdown in the body still parses, and `</span>` stays raw inline HTML.
+    The rejected opener does not declare an anchor.
 
 ### Metadata Extensions
 

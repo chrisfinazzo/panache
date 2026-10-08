@@ -3586,6 +3586,27 @@ mod tests {
     }
 
     #[test]
+    fn symbol_usage_index_skips_invalid_span_attributes() {
+        let db = SalsaDb::default();
+        let tree = crate::parse(
+            "<span _bad=x id=hidden>[link](#visible)</span>\n",
+            Some(crate::Config {
+                flavor: crate::config::Flavor::Pandoc,
+                ..Default::default()
+            }),
+        );
+        let index = symbol_usage_index_from_tree(&db, &tree, &crate::config::Extensions::default());
+
+        assert!(index.crossref_declarations("hidden").is_none());
+        assert_eq!(
+            index
+                .heading_link_usages("visible")
+                .map(|ranges| ranges.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn symbol_usage_index_collects_links_after_raw_div_quoted_gt() {
         let db = SalsaDb::default();
         let tree = crate::parse(

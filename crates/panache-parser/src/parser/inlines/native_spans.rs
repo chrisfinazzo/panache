@@ -7,7 +7,9 @@
 
 use super::sink::InlineSink;
 use crate::options::{Dialect, ParserOptions};
-use crate::parser::utils::attributes::{emit_html_attrs_node, emit_html_span_attributes_node};
+use crate::parser::utils::attributes::{
+    emit_html_attrs_node, emit_html_span_attributes_node, pandoc_html_attribute_names_valid,
+};
 use crate::syntax::SyntaxKind;
 
 use super::core::parse_inline_text;
@@ -17,7 +19,7 @@ use super::core::parse_inline_text;
 ///
 /// Native spans have the form: <span attrs...>content</span>
 /// The content can contain markdown that will be parsed recursively.
-pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)> {
+pub(crate) fn try_parse_native_span(text: &str, dialect: Dialect) -> Option<(usize, &str, String)> {
     let bytes = text.as_bytes();
 
     if !text.starts_with("<span") {
@@ -60,6 +62,9 @@ pub(crate) fn try_parse_native_span(text: &str) -> Option<(usize, &str, String)>
     }
 
     let attributes = text[attr_start..pos].trim().to_string();
+    if dialect == Dialect::Pandoc && !pandoc_html_attribute_names_valid(&attributes) {
+        return None;
+    }
 
     pos += 1;
 
@@ -195,26 +200,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pandoc_rejects_invalid_attribute_names() {
+        for name in ["_bad", ":bad", "bad.name", "1bad", "bad&name", "\u{301}bad"] {
+            let input = format!("<span {name}=x id=hidden>**hi**</span>");
+            assert_eq!(
+                try_parse_native_span(&input, Dialect::Pandoc),
+                None,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn commonmark_native_span_override_keeps_legacy_recognition() {
+        let input = "<span _bad=x>hi</span>";
+        assert!(try_parse_native_span(input, Dialect::CommonMark).is_some());
+    }
+
+    #[test]
     fn test_parse_simple_span() {
-        let result = try_parse_native_span("<span>text</span>");
+        let result = try_parse_native_span("<span>text</span>", Dialect::Pandoc);
         assert_eq!(result, Some((17, "text", String::new())));
     }
 
     #[test]
     fn test_parse_span_with_class() {
-        let result = try_parse_native_span(r#"<span class="foo">text</span>"#);
+        let result = try_parse_native_span(r#"<span class="foo">text</span>"#, Dialect::Pandoc);
         assert_eq!(result, Some((29, "text", r#"class="foo""#.to_string())));
     }
 
     #[test]
     fn test_parse_span_with_id() {
-        let result = try_parse_native_span(r#"<span id="bar">text</span>"#);
+        let result = try_parse_native_span(r#"<span id="bar">text</span>"#, Dialect::Pandoc);
         assert_eq!(result, Some((26, "text", r#"id="bar""#.to_string())));
     }
 
     #[test]
     fn test_parse_span_with_multiple_attrs() {
-        let result = try_parse_native_span(r#"<span id="x" class="y z">text</span>"#);
+        let result =
+            try_parse_native_span(r#"<span id="x" class="y z">text</span>"#, Dialect::Pandoc);
         assert_eq!(
             result,
             Some((36, "text", r#"id="x" class="y z""#.to_string()))
@@ -223,13 +247,16 @@ mod tests {
 
     #[test]
     fn test_parse_span_with_markdown() {
-        let result = try_parse_native_span("<span>*emphasis* and `code`</span>");
+        let result = try_parse_native_span("<span>*emphasis* and `code`</span>", Dialect::Pandoc);
         assert_eq!(result, Some((34, "*emphasis* and `code`", String::new())));
     }
 
     #[test]
     fn test_parse_nested_spans() {
-        let result = try_parse_native_span("<span>outer <span>inner</span> text</span>");
+        let result = try_parse_native_span(
+            "<span>outer <span>inner</span> text</span>",
+            Dialect::Pandoc,
+        );
         assert_eq!(
             result,
             Some((42, "outer <span>inner</span> text", String::new()))
@@ -238,49 +265,52 @@ mod tests {
 
     #[test]
     fn test_parse_span_with_newlines_in_content() {
-        let result = try_parse_native_span("<span>line 1\nline 2</span>");
+        let result = try_parse_native_span("<span>line 1\nline 2</span>", Dialect::Pandoc);
         assert_eq!(result, Some((26, "line 1\nline 2", String::new())));
     }
 
     #[test]
     fn test_not_span_no_closing_tag() {
-        let result = try_parse_native_span("<span>text");
+        let result = try_parse_native_span("<span>text", Dialect::Pandoc);
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_not_span_wrong_tag() {
-        let result = try_parse_native_span("<spanx>text</spanx>");
+        let result = try_parse_native_span("<spanx>text</spanx>", Dialect::Pandoc);
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_not_span_no_space_after() {
-        let result = try_parse_native_span("<spanner>text</spanner>");
+        let result = try_parse_native_span("<spanner>text</spanner>", Dialect::Pandoc);
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_parse_span_with_quoted_attrs_containing_gt() {
-        let result = try_parse_native_span(r#"<span title="a > b">text</span>"#);
+        let result = try_parse_native_span(r#"<span title="a > b">text</span>"#, Dialect::Pandoc);
         assert_eq!(result, Some((31, "text", r#"title="a > b""#.to_string())));
     }
 
     #[test]
     fn test_parse_empty_span() {
-        let result = try_parse_native_span("<span></span>");
+        let result = try_parse_native_span("<span></span>", Dialect::Pandoc);
         assert_eq!(result, Some((13, "", String::new())));
     }
 
     #[test]
     fn test_parse_span_trailing_text() {
-        let result = try_parse_native_span("<span>text</span> more");
+        let result = try_parse_native_span("<span>text</span> more", Dialect::Pandoc);
         assert_eq!(result, Some((17, "text", String::new())));
     }
 
     #[test]
     fn test_parse_span_with_non_ascii_content() {
-        let result = try_parse_native_span(r#"<span class="rtl">(شربنا من النيل)</span>"#);
+        let result = try_parse_native_span(
+            r#"<span class="rtl">(شربنا من النيل)</span>"#,
+            Dialect::Pandoc,
+        );
         assert_eq!(
             result,
             Some((53, "(شربنا من النيل)", r#"class="rtl""#.to_string()))

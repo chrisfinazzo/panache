@@ -899,3 +899,15 @@
 # Pandoc 3.12 table-wide compaction keeps paragraph cells loose when a cell
 # contains a heading. Earlier compatibility targets compact them independently.
 581
+
+# html-inline: invalid span attribute names leave openers as Markdown text.
+# Emphasis, multiline openers, and containers share the recognition gate;
+# valid Unicode names and entity-bearing values still lift natively.
+582
+583
+584
+585
+586
+587
+588
+589

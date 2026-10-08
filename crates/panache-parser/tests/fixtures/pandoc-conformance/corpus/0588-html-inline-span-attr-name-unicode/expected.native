@@ -1,0 +1,6 @@
+[ Para
+    [ Span
+        ( "visible" , [] , [ ( "\233" , "x" ) , ( "a_b" , "y" ) ] )
+        [ Strong [ Str "hi" ] ]
+    ]
+]

@@ -1,0 +1,10 @@
+[ Para
+    [ Str "<span"
+    , Space
+    , Str "bad&name=x"
+    , Space
+    , Str "id=hidden>"
+    , Strong [ Str "hi" ]
+    , RawInline (Format "html") "</span>"
+    ]
+]
