@@ -46,7 +46,7 @@ To read from standard input and write the formatted document to standard output,
 supply a filename so Panache can select the document's flavor:
 
 ```sh
-cat document.qmd | panache --stdin-filename document.qmd format
+panache --stdin-filename=document.qmd format <document.qmd
 ```
 
 See [Editor Setup](lsp.qmd) for formatting while editing and

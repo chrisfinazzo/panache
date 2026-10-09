@@ -10,8 +10,8 @@ updates:
           - "*"
   - package-ecosystem: "cargo"
     directories:
+      # The root workspace includes all members under `crates/`.
       - "/"
-      - "/crates/*"
       # `editors/zed` is a separate workspace with its own lockfile. Without it
       # here the Zed extension is never updated, and the `zed_extension_api`
       # ignore rule below has nothing to apply to.
