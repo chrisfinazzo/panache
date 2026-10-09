@@ -1,18 +1,14 @@
 //! Line emission for `wrap = preserve`.
 //!
-//! Every other wrap mode re-renders inlines and so drops the padding at the
-//! end of a source line as a side effect of rebuilding it. Preserve mode
-//! copies bytes instead, which is what keeps the line breaks intact -- but it
-//! also carried the trailing whitespace straight into the output (issue #496).
-//! This module is the one place that turns a block's tokens into preserve-mode
-//! lines, so the two concerns stay separated: line breaks preserved, padding
-//! dropped.
+//! Preserve mode emits source tokens to keep authored line breaks intact,
+//! while normalizing emphasis markers and hard breaks and removing trailing
+//! prose whitespace. Verbatim content retains its original bytes.
 
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use rowan::NodeOrToken;
 
 /// Split a block into the lines `wrap = preserve` should emit, with trailing
-/// whitespace removed and hard breaks normalized.
+/// whitespace removed and emphasis markers and hard breaks normalized.
 ///
 /// Only `NEWLINE` and `HARD_LINE_BREAK` tokens end a line. Newlines inside
 /// verbatim constructs never reach us as either kind -- a code span keeps its
@@ -96,6 +92,7 @@ fn collect(
     lines: &mut Vec<String>,
     current: &mut String,
 ) {
+    let normalize_emphasis = can_normalize_emphasis_markers(node);
     for item in node.children_with_tokens() {
         match item {
             NodeOrToken::Node(child) => {
@@ -108,6 +105,8 @@ fn collect(
             }
             NodeOrToken::Token(token) => match token.kind() {
                 SyntaxKind::LINE_PREFIX if prefix == LinePrefix::Drop => {}
+                SyntaxKind::EMPHASIS_MARKER if normalize_emphasis => current.push('*'),
+                SyntaxKind::STRONG_MARKER if normalize_emphasis => current.push_str("**"),
                 SyntaxKind::NEWLINE => {
                     lines.push(trim_padding(current));
                     current.clear();
@@ -144,6 +143,31 @@ fn collect(
             },
         }
     }
+}
+
+fn can_normalize_emphasis_markers(node: &SyntaxNode) -> bool {
+    // Merging delimiter runs can change which characters receive emphasis.
+    // Keep mixed delimiters where adjacent emphasis or literal stars would
+    // make replacing underscores ambiguous.
+    node.children_with_tokens()
+        .filter_map(|item| item.into_token())
+        .all(|token| match token.kind() {
+            SyntaxKind::TEXT => !token.text().contains('*'),
+            SyntaxKind::EMPHASIS_MARKER | SyntaxKind::STRONG_MARKER => {
+                let adjacent_marker =
+                    |neighbor: &crate::syntax::SyntaxToken| neighbor.kind() == token.kind();
+                let ambiguous_before = token.prev_token().is_some_and(|previous| {
+                    adjacent_marker(&previous)
+                        || (previous.kind() == SyntaxKind::TEXT && previous.text().ends_with('*'))
+                });
+                let ambiguous_after = token.next_token().is_some_and(|next| {
+                    adjacent_marker(&next)
+                        || (next.kind() == SyntaxKind::TEXT && next.text().starts_with('*'))
+                });
+                !ambiguous_before && !ambiguous_after
+            }
+            _ => true,
+        })
 }
 
 fn trim_padding(line: &str) -> String {
