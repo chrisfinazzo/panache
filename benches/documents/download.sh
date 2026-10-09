@@ -17,7 +17,7 @@ cd "$DOCS_DIR"
 # run.
 #
 # Bump deliberately, in its own commit, and re-run
-# `task bench:incremental-gate` to see what moved.
+# `task bench:lsp` to see what moved.
 PANDOC_REV="cd77c632a8ee0dfe34ba9b16a92e940f47cb970c"
 QUARTO_WEB_REV="ccf7a9eaaa757b439b77546fd95cfdaf9462eeed"
 

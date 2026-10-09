@@ -339,7 +339,7 @@ by a `cfg(debug_assertions)` oracle on every reparse. Every guard failure bails
 to a full parse --- never an error, never a best effort. A divergence is fixed
 by adding a bail, never by relaxing an oracle assert.
 
-**Gates before touching any of this:** `task bench:lsp-gate` (both bench gates,
+**Gates before touching any of this:** `task bench:lsp` (both bench gates,
 release, default iteration count --- a shortened run measures sampling noise),
 `PANACHE_FUZZ_ITERS=20 cargo test -p panache-parser --test incremental_fuzz`,
 and the workspace suite with `PANACHE_INCREMENTAL_PARSING` forced both ways.

@@ -203,7 +203,7 @@
 //! ## Asserting the thresholds
 //!
 //! ```text
-//! task bench:incremental-gate                                     # corpus + gate
+//! task bench:lsp                                     # corpus + gate
 //! PANACHE_LSP_BENCH_ASSERT=1 cargo bench --bench lsp_incremental  # gate alone
 //! ```
 //!
@@ -1676,7 +1676,7 @@ fn main() {
             for entry in &missing {
                 eprintln!("  {entry}");
             }
-            eprintln!("Run `benches/documents/download.sh` (or `task bench:incremental-gate`).");
+            eprintln!("Run `benches/documents/download.sh` (or `task bench:lsp`).");
             std::process::exit(1);
         }
     }

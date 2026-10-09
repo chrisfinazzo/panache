@@ -1275,11 +1275,11 @@ bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/p
 bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_data.json
 
 # Run the Linux language-server speed and memory benchmark
-# bench:lsp-memory remains an alias.
+# bench:lsp remains an alias.
 task bench:lsp
 
 # Run the Quarto diagnostics, symbols, and memory comparison
-task bench:lsp-quarto
+task bench:lsp
 
 # Or run the human-readable text variant
 bash benches/compare_all.sh

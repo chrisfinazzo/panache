@@ -47,7 +47,7 @@ git, and re-downloading it from a moving branch dirtied the working tree on
 every run.
 
 To bump a revision, change the variable, re-run `./download.sh`, and re-run
-`task bench:incremental-gate` in the same commit so the threshold movement is
+`task bench:lsp` in the same commit so the threshold movement is
 recorded next to its cause.
 
 ## Regenerating Benchmarks

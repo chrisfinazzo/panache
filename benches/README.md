@@ -20,13 +20,13 @@ PANACHE_BENCH_DOC=math.qmd \
 cargo bench --bench lsp_incremental
 
 # Same run, with every case checked against the contract it declares
-task bench:incremental-gate
+task bench:lsp
 
 # Run LSP write-phase benchmarks (what a keystroke costs before any parse)
 cargo bench --bench lsp_write_phase
 
-# Same run, gated; `task bench:lsp-gate` runs both LSP gates
-task bench:write-phase-gate
+# Same run, gated; `task bench:lsp` runs both LSP gates
+task bench:lsp
 
 # Run the LSP settle benchmark (what publishing one document costs per settle)
 cargo bench --bench lsp_settle
@@ -35,7 +35,7 @@ cargo bench --bench lsp_settle
 task bench:lsp
 
 # Compare Panache and q2 on Quarto diagnostics and document symbols
-task bench:lsp-quarto
+task bench:lsp
 
 # Run interned key impact benchmark
 cargo bench --bench interned_keys
@@ -182,7 +182,7 @@ valgrind --tool=cachegrind cargo bench --bench formatting
     `PANACHE_LSP_MEMORY_EDITS`, `PANACHE_LSP_MEMORY_QUIET_SECONDS`, and
     `PANACHE_LSP_MEMORY_SETTLE_TIMEOUT` environment variables.
     `PANACHE_LSP_LATENCY_RUNS` and `PANACHE_LSP_LATENCY_WARMUPS` control request
-    repetitions. `task bench:lsp-memory` remains an alias for `task bench:lsp`.
+    repetitions. `task bench:lsp` runs all LSP benchmarks and comparisons.
 - **`benches/generate_docs.sh`**: Captures results for documentation
   - Generates `benches/benchmark_results.json` (machine-readable)
   - Renders `docs/benchmarks.qmd` from JSON
@@ -190,7 +190,7 @@ valgrind --tool=cachegrind cargo bench --bench formatting
 
 ### Quarto Language Server Comparison
 
-`task bench:lsp-quarto` runs the Quarto track in `benches/lsp_memory.py` against
+`task bench:lsp` runs the Quarto track in `benches/lsp_memory.py` against
 Panache and `q2 lsp`. It builds Panache in release mode and downloads the pinned
 q2 0.32.0 release for Linux x86-64 or ARM64, verifying the archive against a
 committed SHA-256 hash. The archive is cached under `benches/lsp-quarto-tools/`.

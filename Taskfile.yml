@@ -1,5 +1,11 @@
 version: "3"
 
+vars:
+  BENCH_COMMON_TOOLS: bash cargo curl git python3 hyperfine jq
+  BENCH_FORMATTER_TOOLS: prettier pandoc rumdl mdformat yamark mado markdownlint markdownlint-cli2
+  BENCH_LINTER_TOOLS: rumdl mado markdownlint markdownlint-cli2
+  BENCH_LSP_TOOLS: realpath sha256sum
+
 tasks:
   lint:
     desc: Run linter
@@ -70,52 +76,88 @@ tasks:
           --only-categories=performance,accessibility,best-practices,seo
         echo "Report: docs/lighthouse/report.report.html"
 
-  benchmarks:
-    desc: Run multi-formatter benchmark and write JSON consumed by docs/guide/performance.qmd
+  bench:
+    vars:
+      TOOLS: '{{.BENCH_FORMATTER_TOOLS}} {{.BENCH_LINTER_TOOLS}} {{.BENCH_LSP_TOOLS}}'
+      CHECK_LSP: 'true'
+    preconditions:
+      - sh: &bench-tools-check |
+          missing=0
+          for tool in {{.BENCH_COMMON_TOOLS}} {{.TOOLS}}; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "Missing benchmark tool: $tool" >&2
+              missing=1
+            fi
+          done
+          if [ "{{.CHECK_LSP}}" = "true" ]; then
+            for tool in "${MARKSMAN_BIN:-marksman}" "${Q2_BIN:-q2}"; do
+              if ! command -v "$tool" >/dev/null 2>&1; then
+                echo "Missing benchmark tool: $tool" >&2
+                missing=1
+              fi
+            done
+            if [ "$(uname -s)" != Linux ]; then
+              echo "LSP benchmarks require Linux" >&2
+              missing=1
+            fi
+          fi
+          exit "$missing"
+        msg: Install all required benchmark tools before running this task.
+    desc: Run all formatter, linter, and LSP benchmarks
     cmds:
-      - bash benches/compare_all.sh --json --out docs/guide/performance_data.json
+      - task: bench:formatter
+      - task: bench:linter
+      - task: bench:lsp
+      - cargo bench --bench cli_cache
 
-  bench:documents:
-    internal: true
-    desc: Fetch the gitignored benchmark corpus
+  bench:formatter:
+    vars:
+      TOOLS: '{{.BENCH_FORMATTER_TOOLS}}'
+      CHECK_LSP: 'false'
+    preconditions:
+      - sh: *bench-tools-check
+        msg: Install all required benchmark tools before running this task.
+    desc: Run formatter benchmarks and comparisons
     cmds:
       - bash benches/documents/download.sh
+      - cargo bench --bench formatting
+      - bash benches/compare_all.sh --json --out docs/guide/performance_data.json
+      - bash benches/compare_multifile.sh
+      - bash benches/compare_repo_suite.sh --mode format --track markdown --out docs/guide/performance_repo_markdown_format_data.json
+      - bash benches/compare_repo_suite.sh --mode format --track quarto --out docs/guide/performance_repo_quarto_format_data.json
 
-  bench:incremental-gate:
-    desc: Run the LSP incremental bench with every case checked against its declared contract
-    deps: [bench:documents]
+  bench:linter:
+    vars:
+      TOOLS: '{{.BENCH_LINTER_TOOLS}}'
+      CHECK_LSP: 'false'
+    preconditions:
+      - sh: *bench-tools-check
+        msg: Install all required benchmark tools before running this task.
+    desc: Run linter benchmarks and comparisons
     cmds:
-      - PANACHE_LSP_BENCH_ASSERT=1 cargo bench --bench lsp_incremental
-
-  bench:write-phase-gate:
-    desc: Run the LSP write-phase bench with every row checked against its declared contract
-    deps: [bench:documents]
-    cmds:
-      - PANACHE_LSP_WRITE_BENCH_ASSERT=1 cargo bench --bench lsp_write_phase
-
-  bench:lsp-gate:
-    desc: Run both LSP benchmark gates (incremental parse reuse + write phase)
-    cmds:
-      - task: bench:incremental-gate
-      - task: bench:write-phase-gate
+      - bash benches/documents/download.sh
+      - cargo bench --bench linting
+      - bash benches/compare_lint_single.sh
+      - bash benches/compare_lint.sh
+      - bash benches/compare_lint_corpus.sh
+      - bash benches/compare_repo_suite.sh --mode lint --track markdown --out docs/guide/performance_repo_markdown_lint_data.json
+      - bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/performance_repo_quarto_lint_data.json
 
   bench:lsp:
-    desc: Compare Panache and Marksman language-server speed and memory on Linux
-    aliases: ["bench:lsp-memory"]
+    vars:
+      TOOLS: '{{.BENCH_LSP_TOOLS}}'
+      CHECK_LSP: 'true'
+    preconditions:
+      - sh: *bench-tools-check
+        msg: Install all required benchmark tools before running this task.
+    desc: Run LSP benchmarks, contract checks, and server comparisons
     cmds:
+      - bash benches/documents/download.sh
+      - PANACHE_LSP_BENCH_ASSERT=1 cargo bench --features lsp --bench lsp_incremental
+      - PANACHE_LSP_WRITE_BENCH_ASSERT=1 cargo bench --features lsp --bench lsp_write_phase
+      - cargo bench --features lsp --bench lsp_relint --bench lsp_settle
       - bash benches/compare_lsp_memory.sh
-
-  bench:lsp-quarto:
-    desc: Compare Panache and q2 diagnostics, symbols, and memory on Linux
-    cmds:
-      - bash benches/compare_lsp_quarto.sh
-
-  refresh-benchmarks:
-    desc: Re-run benchmarks and rebuild the performance page (invalidates freeze cache)
-    cmds:
-      - bash benches/compare_all.sh --json --out docs/guide/performance_data.json
-      - rm -rf docs/_freeze/guide/performance
-      - cd docs && quarto render guide/performance.qmd
+      - Q2_BIN="$(command -v "${Q2_BIN:-q2}")" bash benches/compare_lsp_quarto.sh
 
   wasm-build:
     desc: Build and sync panache-wasm for playground

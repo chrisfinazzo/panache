@@ -231,7 +231,7 @@
 //! ```sh
 //! bash benches/documents/download.sh     # once; the corpus is gitignored
 //! cargo bench --bench lsp_write_phase    # measure
-//! task bench:write-phase-gate            # measure and enforce the contracts
+//! task bench:lsp            # measure and enforce the contracts
 //! ```
 //!
 //! Knobs: `PANACHE_LSP_WRITE_BENCH_ASSERT=1` (enforce),
@@ -951,7 +951,7 @@ fn main() {
             for entry in &missing {
                 eprintln!("  {entry}");
             }
-            eprintln!("Run `benches/documents/download.sh` (or `task bench:write-phase-gate`).");
+            eprintln!("Run `benches/documents/download.sh` (or `task bench:lsp`).");
             std::process::exit(1);
         }
     }
