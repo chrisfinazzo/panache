@@ -1,55 +1,30 @@
 ---
 title: "Performance"
 description: >
-  This page presents performance benchmarks for Panache, comparing its
-  formatting and linting speed against popular alternatives like Prettier,
-  Pandoc, rumdl, mdformat, Yamark, mado, markdownlint, and markdownlint-cli2 on
-  real Quarto and Markdown documents, and its language-server latency, runtime,
-  and memory use against Marksman and q2. The benchmarks highlight Panache's
-  efficiency and suitability for editor and repository-wide work.
+  Compare Panache's formatting, linting, and language-server performance with
+  other Markdown and Quarto tools on individual documents, whole repositories,
+  and editor sessions.
 engine: knitr
 ---
 
 ## Overview
 
-**Panache** is designed for speed without compromising on correctness. Built in
-Rust and compiled to native code, it delivers fast formatting with low startup
-overhead. In this document, we present benchmarks comparing Panache's formatting
-and linting performance against popular alternatives like Prettier, Pandoc,
-rumdl, mdformat, Yamark, mado, markdownlint, and markdownlint-cli2 on a
-realistic corpus of Quarto and Markdown documents. R Markdown is outside the
-current benchmark corpus.
+These benchmarks compare Panache's formatting, linting, and language-server
+performance with other Markdown and Quarto tools. They measure individual
+documents, whole repositories, and editor sessions. Tools differ in supported
+syntax, formatting policy, lint coverage, and editor features, so timings should
+be read alongside the work each tool performs.
 
-The formatting and linting benchmarks have two suites: per-document benchmarks
-that run each formatter on each document in the corpus individually, and
-repository-wide benchmarks that run formatters on entire repositories of tracked
-documents. The former highlights raw formatting speed on a variety of real-world
-documents; the latter captures the overhead of processing multiple files in a
-single run, which is more representative of repository-wide formatting or
-linting. CLI caches are disabled for these comparisons. A separate
-language-server suite measures startup, warm request latency, edit runtime, and
-memory use during an editor session.
+The formatting and linting comparisons cover Markdown and Quarto documents; R
+Markdown is outside the current corpus. The language-server comparisons use
+separate Markdown and Quarto workloads to measure startup, responses to editor
+requests, performance after edits, and memory use.
 
-Yamark runs with an empty configuration and external code formatters disabled
-(`--config /dev/null --skip-embedded-formatters`). Its default wrapping and
-style settings apply. Tools differ in supported syntax and formatting policy, so
-these timings compare their respective workloads. Failed repository runs have
-null timings in the data and are excluded from the plots.
-
-Yamark's formatting path uses [source spans and formatting
-plans](https://github.com/t-kalinowski/yamark/blob/v0.3.0/src/core/markdown.rs)
-and preserves display math as opaque content. Panache builds the lossless syntax
-tree also used by its linter and language server, and parses and formats TeX
-math, which explains part of the gap.
-
-The numbers on this page are produced by the scripts in
-[`benches/`](https://github.com/jolars/panache/tree/main/benches) and read from
-the JSON files written next to this document. The benchmark chunks on this page
-are intentionally not executed during preview or render, so small content edits
-reuse the existing JSON files instead of rerunning the benchmarks. Refresh the
-benchmark data explicitly with the commands at the bottom of this page, then
-delete `docs/_freeze/guide/performance/` and re-render if you want the page to
-pick up newly generated results.
+The timing charts use a logarithmic scale in milliseconds; lower is faster.
+Formatting and linting charts show mean times, with colors identifying documents
+or repositories. Language-server charts show medians, with colors identifying
+measurements. Hover over a point for details. Tools are ordered from fastest to
+slowest on average in the formatting and linting charts.
 
 ```{bash}
 #| label: run-benchmarks
@@ -72,13 +47,15 @@ data = FileAttachment("performance_data.json").json();
 //| label: prepare-records
 //| echo: false
 
-documentMeta = new Map(data.documents.map((d) => [d.id, d]));
+timeTicks = (times) => {
+    const [min, max] = d3.extent(times);
+    return d3
+        .range(Math.floor(Math.log10(min)), Math.ceil(Math.log10(max)) + 1)
+        .flatMap((exponent) => [1, 2, 5].map((value) => value * 10 ** exponent))
+        .filter((value) => value >= min && value <= max);
+};
 
-panacheByDoc = d3.rollup(
-    data.results.filter((r) => r.formatter === "panache"),
-    (v) => v[0].mean_ms,
-    (r) => r.document,
-);
+documentMeta = new Map(data.documents.map((d) => [d.id, d]));
 
 records = data.results.map((r) => ({
     formatter: r.formatter,
@@ -86,13 +63,12 @@ records = data.results.map((r) => ({
     documentName: documentMeta.get(r.document)?.name ?? r.document,
     mean_ms: r.mean_ms,
     runs: r.runs,
-    ratio: r.mean_ms / panacheByDoc.get(r.document),
 }));
 
 formatters = Array.from(
     d3.rollup(
         records,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.formatter,
     ),
 )
@@ -100,26 +76,6 @@ formatters = Array.from(
     .map(([k]) => k);
 
 documentIds = data.documents.map((d) => d.id);
-```
-
-```{ojs}
-//| label: compute-ratios
-//| echo: false
-
-formatterRanges = d3.rollup(
-    records.filter((r) => r.formatter !== "panache"),
-    (v) => {
-        const lo = Math.round(d3.min(v, (d) => d.ratio));
-        const hi = Math.round(d3.max(v, (d) => d.ratio));
-        return `${lo}\u2013${hi}x`;
-    },
-    (d) => d.formatter,
-);
-
-prettierRange = formatterRanges.get("prettier") ?? "n/a";
-pandocRange = formatterRanges.get("pandoc") ?? "n/a";
-rumdlRange = formatterRanges.get("rumdl") ?? "n/a";
-mdformatRange = formatterRanges.get("mdformat") ?? "n/a";
 ```
 
 ```{ojs}
@@ -141,19 +97,15 @@ html`<div class="callout-note">
 
 ### Single-Document
 
-In @fig-plot-results, we compare formatting time per document across panache,
-Prettier, Pandoc, rumdl, mdformat, and Yamark. Each dot is one document; the
-y-axis shows time relative to panache (×, lower is faster). Panache sits at 1×
-by construction (dashed baseline); points above it are slower. Hover a point to
-see the absolute wall-clock time in milliseconds. Formatters are ordered
-left-to-right from fastest to slowest on average.
+We compare `panache format` with Prettier, Pandoc, rumdl, mdformat, and Yamark
+on individual documents (@fig-plot-results). Each command formats one document
+in a fresh process, so the timings include startup overhead.
 
 ```{ojs}
 //| label: fig-plot-results
 //| echo: false
-//| fig-cap: "Formatting time per document, comparing panache to Prettier,
-//|   Pandoc, rumdl, mdformat, and Yamark. Each dot is one document; the y-axis shows
-//|   time relative to panache (×, lower is faster)."
+//| fig-cap: "Mean formatting time per document. Each dot represents one
+//|   document, identified by color."
 
 Plot.plot({
     marginLeft: 60,
@@ -163,7 +115,10 @@ Plot.plot({
     height: 360,
     x: { label: null, domain: formatters },
     y: {
-        label: "Mean time relative to panache (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(records.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -173,14 +128,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(records, {
             x: "formatter",
-            y: "ratio",
+            y: "mean_ms",
             fill: "document",
             r: 6,
             fillOpacity: 0.85,
@@ -189,7 +139,6 @@ Plot.plot({
             channels: {
                 document: "documentName",
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -203,14 +152,9 @@ Plot.plot({
 
 prepareRepoSuiteRows = (data, toolLabels) => {
     const repoMeta = new Map(data.repos.map((r) => [r.id, r]));
-    const baselineByRepo = new Map(
-        data.results
-            .filter((r) => r.tool === "panache" && !r.failed && r.mean_ms != null)
-            .map((r) => [r.repo, r.mean_ms]),
-    );
 
     return data.results
-        .filter((r) => !r.failed && r.mean_ms != null && baselineByRepo.has(r.repo))
+        .filter((r) => !r.failed && r.mean_ms > 0)
         .map((r) => {
             const repo = repoMeta.get(r.repo);
             const repoLabel = repo?.name ?? r.repo;
@@ -221,14 +165,20 @@ prepareRepoSuiteRows = (data, toolLabels) => {
                 toolLabel,
                 fileCount: repo?.file_count ?? null,
                 totalBytes: repo?.total_bytes ?? null,
-                barLabel: `${repoLabel} — ${toolLabel}`,
-                ratio: r.mean_ms / baselineByRepo.get(r.repo),
             };
         });
 };
 ```
 
+In the recorded runs, Yamark has the shortest mean time on every document,
+followed by Panache. The tools perform different work, including different
+handling of math; the [methodology](#methodology) describes those differences.
+
 ### Repository-Wide
+
+These comparisons run each formatter once per repository, processing its tracked
+Markdown or Quarto files together. They capture the cost of formatting many
+files in a single invocation.
 
 ```{bash}
 #| label: run-repo-markdown-format
@@ -263,7 +213,7 @@ repoMarkdownFormatResults = prepareRepoSuiteRows(repoMarkdownFormat, {
 repoMarkdownFormatTools = Array.from(
     d3.rollup(
         repoMarkdownFormatResults,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.toolLabel,
     ),
 )
@@ -275,17 +225,14 @@ repoMarkdownFormatRepoMeta = new Map(
 );
 ```
 
-In @fig-repo-markdown-format, we compare formatting time across panache,
-Prettier, rumdl, mdformat, and Yamark on tracked Markdown files from several
-repositories.
+The Markdown comparison includes Panache, Prettier, rumdl, mdformat, and Yamark
+(@fig-repo-markdown-format).
 
 ```{ojs}
 //| label: fig-repo-markdown-format
 //| echo: false
-//| fig-cap: "Repository-wide formatting benchmarks on standard Markdown repos,
-//|   comparing panache to Prettier, rumdl, mdformat, and Yamark. Each dot is one
-//|   repo/tool pair; the y-axis shows time relative to panache within that repo
-//|   (×, lower is faster)."
+//| fig-cap: "Mean formatting time across tracked Markdown files. Each dot
+//|   represents one repository and tool, with colors identifying repositories."
 
 Plot.plot({
     marginLeft: 60,
@@ -295,8 +242,10 @@ Plot.plot({
     height: 320,
     x: { label: null, domain: repoMarkdownFormatTools },
     y: {
-        label:
-            "Mean time relative to panache within each repo (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(repoMarkdownFormatResults.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -306,14 +255,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(repoMarkdownFormatResults, {
             x: "toolLabel",
-            y: "ratio",
+            y: "mean_ms",
             fill: "repo",
             r: 6,
             fillOpacity: 0.85,
@@ -324,7 +268,6 @@ Plot.plot({
                 tool: "toolLabel",
                 files: (d) => d.fileCount,
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -363,7 +306,7 @@ repoQuartoFormatResults = prepareRepoSuiteRows(repoQuartoFormat, {
 repoQuartoFormatTools = Array.from(
     d3.rollup(
         repoQuartoFormatResults,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.toolLabel,
     ),
 )
@@ -375,15 +318,14 @@ repoQuartoFormatRepoMeta = new Map(
 );
 ```
 
-In @fig-repo-quarto-format, we compare formatting time across panache, rumdl,
-and Yamark on tracked `.qmd` files from several Quarto repositories.
+The Quarto comparison includes Panache, rumdl, and Yamark, processing tracked
+`.qmd` files (@fig-repo-quarto-format).
 
 ```{ojs}
 //| label: fig-repo-quarto-format
 //| echo: false
-//| fig-cap: "Repository-wide formatting benchmarks on Quarto repos. Each dot
-//|   is one repo/tool pair; the y-axis shows time relative to panache within
-//|   that repo (×, lower is faster)."
+//| fig-cap: "Mean formatting time across tracked Quarto files. Each dot
+//|   represents one repository and tool, with colors identifying repositories."
 
 Plot.plot({
     marginLeft: 60,
@@ -393,8 +335,10 @@ Plot.plot({
     height: 320,
     x: { label: null, domain: repoQuartoFormatTools },
     y: {
-        label:
-            "Mean time relative to panache within each repo (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(repoQuartoFormatResults.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -404,14 +348,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(repoQuartoFormatResults, {
             x: "toolLabel",
-            y: "ratio",
+            y: "mean_ms",
             fill: "repo",
             r: 6,
             fillOpacity: 0.85,
@@ -422,7 +361,6 @@ Plot.plot({
                 tool: "toolLabel",
                 files: (d) => d.fileCount,
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -430,11 +368,15 @@ Plot.plot({
 });
 ```
 
-Each dot is one repo/tool pair. Panache sits at 1× by construction (dashed
-baseline), and points above it are slower on that repository. Hover a point to
-see the absolute wall-clock time in milliseconds and the corpus size.
+Yamark and Panache also have the shortest mean times in the repository
+formatting runs, in that order. The gap between them varies across repositories.
+Hover over a point to see the file count as well as the timing.
 
 ## Linting
+
+We compare `panache lint`, `rumdl check`, `mado check`, `markdownlint`, and
+`markdownlint-cli2`. Each linter checks for a different set of problems, so
+these timings compare the tools' respective checks.
 
 ### Single-Document
 
@@ -460,23 +402,17 @@ lintSingleData = FileAttachment("performance_lint_single_data.json").json();
 //| echo: false
 
 lintDocumentMeta = new Map(lintSingleData.documents.map((d) => [d.id, d]));
-lintPanacheByDoc = d3.rollup(
-    lintSingleData.results.filter((r) => r.tool === "panache"),
-    (v) => v[0].mean_ms,
-    (r) => r.document,
-);
 lintSingleRecords = lintSingleData.results.map((r) => ({
     tool: r.tool,
     document: r.document,
     documentName: lintDocumentMeta.get(r.document)?.name ?? r.document,
     mean_ms: r.mean_ms,
     runs: r.runs,
-    ratio: r.mean_ms / lintPanacheByDoc.get(r.document),
 }));
 lintTools = Array.from(
     d3.rollup(
         lintSingleRecords,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.tool,
     ),
 )
@@ -485,17 +421,14 @@ lintTools = Array.from(
 lintDocumentIds = lintSingleData.documents.map((d) => d.id);
 ```
 
-In @fig-lint-single-results, we compare linting time per document across panache
-lint, rumdl check, mado check, markdownlint, and markdownlint-cli2. Each dot is
-one document; the y-axis shows time relative to panache lint (×, lower is
-faster). Panache sits at 1× by construction.
+The individual-file comparison uses the same documents as the formatting
+benchmark (@fig-lint-single-results). Each invocation starts a fresh process.
 
 ```{ojs}
 //| label: fig-lint-single-results
 //| echo: false
-//| fig-cap: "Linting time per document, comparing panache lint to rumdl check,
-//|   mado check, markdownlint, and markdownlint-cli2. Each dot is one document;
-//|   the y-axis shows time relative to panache lint (×, lower is faster)."
+//| fig-cap: "Mean linting time per document. Each dot represents one
+//|   document, identified by color."
 
 Plot.plot({
     marginLeft: 60,
@@ -505,7 +438,10 @@ Plot.plot({
     height: 300,
     x: { label: null, domain: lintTools },
     y: {
-        label: "Mean time relative to panache lint (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(lintSingleRecords.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -515,14 +451,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(lintSingleRecords, {
             x: "tool",
-            y: "ratio",
+            y: "mean_ms",
             fill: "document",
             r: 6,
             fillOpacity: 0.85,
@@ -531,7 +462,6 @@ Plot.plot({
             channels: {
                 document: "documentName",
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache lint": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -539,13 +469,14 @@ Plot.plot({
 });
 ```
 
+Mado has the shortest mean time on five of the six documents in these runs;
+Panache has the shortest time on the remaining document. Both take longer on the
+Pandoc manual than on the other inputs.
+
 ### Repository-Wide
 
-This suite benchmarks linting on the same standard Markdown repositories as the
-formatting comparison, using `panache lint`, `rumdl check`, `mado check`,
-`markdownlint`, and `markdownlint-cli2`. In @fig-repo-markdown-lint, each dot is
-one repo/tool pair; the y-axis shows time relative to panache lint within that
-repo (×, lower is faster).
+The Markdown comparison runs the same five linters on the repositories used for
+formatting (@fig-repo-markdown-lint).
 
 ```{bash}
 #| label: run-repo-markdown-lint
@@ -580,7 +511,7 @@ repoMarkdownLintResults = prepareRepoSuiteRows(repoMarkdownLint, {
 repoMarkdownLintTools = Array.from(
     d3.rollup(
         repoMarkdownLintResults,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.toolLabel,
     ),
 )
@@ -595,10 +526,8 @@ repoMarkdownLintRepoMeta = new Map(
 ```{ojs}
 //| label: fig-repo-markdown-lint
 //| echo: false
-//| fig-cap: "Repository-wide linting benchmarks on standard Markdown repos,
-//|   comparing panache lint to rumdl check, mado check, markdownlint, and
-//|   markdownlint-cli2. Each dot is one repo/tool pair; the y-axis shows time
-//|   relative to panache lint within that repo (×, lower is faster)."
+//| fig-cap: "Mean linting time across tracked Markdown files. Each dot
+//|   represents one repository and tool, with colors identifying repositories."
 
 Plot.plot({
     marginLeft: 60,
@@ -608,8 +537,10 @@ Plot.plot({
     height: 300,
     x: { label: null, domain: repoMarkdownLintTools },
     y: {
-        label:
-            "Mean time relative to panache lint within each repo (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(repoMarkdownLintResults.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -619,14 +550,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(repoMarkdownLintResults, {
             x: "toolLabel",
-            y: "ratio",
+            y: "mean_ms",
             fill: "repo",
             r: 6,
             fillOpacity: 0.85,
@@ -637,7 +563,6 @@ Plot.plot({
                 tool: "toolLabel",
                 files: (d) => d.fileCount,
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache lint": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -645,8 +570,9 @@ Plot.plot({
 });
 ```
 
-In @fig-repo-quarto-lint, we compare linting time across panache and rumdl on
-tracked `.qmd` files from several Quarto repositories.
+Mado has the shortest mean time on each Markdown repository, followed by
+Panache. The Quarto comparison uses Panache and rumdl on tracked `.qmd` files
+(@fig-repo-quarto-lint).
 
 ```{bash}
 #| label: run-repo-quarto-lint
@@ -678,7 +604,7 @@ repoQuartoLintResults = prepareRepoSuiteRows(repoQuartoLint, {
 repoQuartoLintTools = Array.from(
     d3.rollup(
         repoQuartoLintResults,
-        (v) => d3.mean(v, (d) => d.ratio),
+        (v) => d3.mean(v, (d) => d.mean_ms),
         (d) => d.toolLabel,
     ),
 )
@@ -691,9 +617,8 @@ repoQuartoLintRepoMeta = new Map(repoQuartoLint.repos.map((r) => [r.id, r]));
 ```{ojs}
 //| label: fig-repo-quarto-lint
 //| echo: false
-//| fig-cap: "Repository-wide linting benchmarks on Quarto repos. Each dot is
-//|   one repo/tool pair; the y-axis shows time relative to panache lint within
-//|   that repo (×, lower is faster)."
+//| fig-cap: "Mean linting time across tracked Quarto files. Each dot
+//|   represents one repository and tool, with colors identifying repositories."
 
 Plot.plot({
     marginLeft: 60,
@@ -703,8 +628,10 @@ Plot.plot({
     height: 320,
     x: { label: null, domain: repoQuartoLintTools },
     y: {
-        label:
-            "Mean time relative to panache lint within each repo (×, lower is faster)",
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(repoQuartoLintResults.map((d) => d.mean_ms)),
+        label: "Mean time (ms, log scale; lower is faster)",
         grid: true,
     },
     color: {
@@ -714,14 +641,9 @@ Plot.plot({
         scheme: "tableau10",
     },
     marks: [
-        Plot.ruleY([1], {
-            stroke: "#2a9d8f",
-            strokeWidth: 2,
-            strokeDasharray: "4 3",
-        }),
         Plot.dot(repoQuartoLintResults, {
             x: "toolLabel",
-            y: "ratio",
+            y: "mean_ms",
             fill: "repo",
             r: 6,
             fillOpacity: 0.85,
@@ -732,7 +654,6 @@ Plot.plot({
                 tool: "toolLabel",
                 files: (d) => d.fileCount,
                 "time (ms)": (d) => d.mean_ms.toFixed(1),
-                "× panache lint": (d) => d.ratio.toFixed(2),
             },
             tip: true,
         }),
@@ -740,20 +661,22 @@ Plot.plot({
 });
 ```
 
-## Language-Server Speed and Memory
+Panache and rumdl have similar mean linting times on the Quarto repositories,
+and their ranking varies by repository.
 
-This Linux-only benchmark compares the latency, runtime, and memory use of
-Panache and [Marksman](https://github.com/artempyanykh/marksman). It opens the
-five largest tracked Markdown files in a pinned revision of the Rust Book,
-requests diagnostics and navigation features, and then performs 1,000
-fixed-width reference-label renames. Each rename is followed by a definition
-request, which forces the server to observe the updated label index.
+## Markdown Language Server
 
-The runner starts three fresh processes per server in alternating order. Each
-session opens the same files, obtains diagnostics using the server's advertised
-pull or push mode, primes navigation requests, and waits for background work to
-settle. It then times warm requests and the edit workload. The committed JSON
-contains each run's measurements; rendering this page never runs the benchmark.
+We compare Panache with [Marksman](https://github.com/artempyanykh/marksman) by
+opening the five largest tracked Markdown files in a pinned revision of the Rust
+Book. Each session requests diagnostics and navigation features, then performs
+1,000 reference-label edits. A definition request follows each edit to check
+that the server has observed the change.
+
+The benchmark measures startup, responses to editor requests, performance after
+edits, and memory use across three fresh sessions per server. Marksman indexes
+the Markdown workspace eagerly, while Panache analyzes open documents and
+discovers project relationships lazily. The results reflect those different
+strategies.
 
 ```{ojs}
 //| label: load-lsp-memory
@@ -783,52 +706,6 @@ lspMemoryRows = lspMemory.servers.flatMap((server) =>
 );
 
 lspServers = lspMemory.servers.map((server) => server.label);
-
-logTicks = (domain, multipliers) =>
-    d3
-        .range(
-            Math.round(Math.log10(domain[0])),
-            Math.round(Math.log10(domain[1])) + 1,
-        )
-        .flatMap((exponent) => multipliers.map((value) => value * 10 ** exponent))
-        .filter((value) => value >= domain[0] && value <= domain[1]);
-
-logAxisX = (domain) => [
-    Plot.gridX({ ticks: logTicks(domain, [1]), strokeOpacity: 0.12 }),
-    Plot.axisX({
-        ticks: logTicks(domain, [1]),
-        tickFormat: d3.format(",~g"),
-        tickSize: 9,
-        tickPadding: 4,
-        labelAnchor: "center",
-        labelArrow: "none",
-        labelOffset: 38,
-    }),
-    Plot.axisX({
-        ticks: logTicks(domain, [5]),
-        tickFormat: () => "",
-        tickSize: 6,
-        label: null,
-    }),
-    Plot.axisX({
-        ticks: logTicks(domain, [2, 3, 4, 6, 7, 8, 9]),
-        tickFormat: () => "",
-        tickSize: 3,
-        label: null,
-    }),
-];
-
-lspRowLabel = (label) =>
-    width < 500
-        ? label
-                .replace("Document symbols", "Symbols")
-                .replace("Go to definition", "Definition")
-                .replace("Find references", "References")
-                .replace("Edit to definition", "Edit")
-                .replace("Workspace ready", "Workspace")
-                .replace("Open files ready", "Open files")
-                .replace("Edit workload", "Edits")
-        : label;
 ```
 
 ```{ojs}
@@ -850,18 +727,21 @@ html`<div class="callout-note">
 
 ### Startup and Edit Runtime
 
-@fig-lsp-runtime shows four elapsed times in milliseconds. **Initialize** runs
-from process launch to the `initialize` response. **Workspace ready** runs from
-launch to the start of the final quiet window after initialization. **Open files
-ready** runs from the burst of file-open notifications through the initial
-diagnostics and navigation requests to the next quiet window. **Edit workload**
-times all reference-label edits and their definition responses, excluding the
-final diagnostics and memory-settling wait.
+@fig-lsp-runtime measures four stages:
 
-Readiness is estimated from process-tree CPU samples every 150 ms. A quiet
-window stays below 5% of one CPU core for five seconds; its start is reported
-only after those five seconds have elapsed. This excludes the deliberate wait
-from the plotted readiness times, but the estimate still has sampling error.
+- **Initialize** measures the time from process launch to the server's response
+  to the editor's initialization request.
+- **Workspace ready** measures the time from process launch until background
+  work settles after initialization.
+- **Open files ready** measures the time from opening the documents until
+  diagnostics arrive, initial navigation requests finish, and background work
+  settles.
+- **Edit workload** measures the time to complete all reference-label edits and
+  their definition requests.
+
+Readiness estimates exclude the deliberate wait used to confirm that background
+work has settled. The [methodology](#markdown-sessions) explains how the runner
+identifies these quiet periods.
 
 ```{ojs}
 //| label: prepare-lsp-runtime
@@ -886,7 +766,7 @@ lspRuntimeRows = lspRuntimeMetrics.flatMap((metric) =>
 
 lspRuntimeDomain = d3
     .scaleLog()
-    .domain(d3.extent(lspRuntimeRows.flatMap((d) => [d.min, d.max])))
+    .domain(d3.extent(lspRuntimeRows, (d) => d.median))
     .nice()
     .domain();
 ```
@@ -895,39 +775,35 @@ lspRuntimeDomain = d3
 //| label: fig-lsp-runtime
 //| echo: false
 //| fig-cap: "Language-server startup and edit runtime on a logarithmic scale.
-//|   Each row compares Panache and Marksman. Dots show medians; lines span the
-//|   minimum and maximum across fresh processes. Lower is faster."
+//|   Tools appear on the x-axis; colors identify runtime metrics. Dots show
+//|   medians in milliseconds; tooltips include the minimum and maximum across
+//|   fresh processes. Lower is faster."
 
 Plot.plot({
     width,
-    marginLeft: width < 500 ? 90 : 130,
+    marginLeft: 70,
     marginRight: 25,
     marginBottom: 50,
-    height: 260,
-    x: {
+    height: 360,
+    x: { label: null, domain: lspServers },
+    y: {
         type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(lspRuntimeDomain),
         domain: lspRuntimeDomain,
         label: "Elapsed time (ms, log scale)",
+        grid: true,
     },
-    y: {
-        label: null,
+    color: {
+        legend: true,
         domain: lspRuntimeMetrics.map((d) => d.label),
-        tickFormat: lspRowLabel,
+        scheme: "tableau10",
     },
-    color: { legend: true, domain: lspServers, scheme: "tableau10" },
     marks: [
-        ...logAxisX(lspRuntimeDomain),
-        Plot.ruleY(lspRuntimeRows, {
-            y: "row",
-            x1: "min",
-            x2: "max",
-            stroke: "server",
-            strokeWidth: 2,
-        }),
         Plot.dot(lspRuntimeRows, {
-            y: "row",
-            x: "median",
-            fill: "server",
+            x: "server",
+            y: "median",
+            fill: "row",
             r: 5,
             title: (d) =>
                 `${d.row} — ${d.server}\nMedian: ${d.median.toFixed(2)} ms\nRange: ${d.min.toFixed(2)}–${d.max.toFixed(2)} ms`,
@@ -939,22 +815,15 @@ Plot.plot({
 
 ### Request Latency
 
-@fig-lsp-latency shows the median and 95th percentile (p95) of serial request
-round trips over stdio. Each target gets two unmeasured warmup rounds and 20
-measured rounds per fresh process. Percentiles pool the measured samples from
-all three processes. Document-symbol requests cover the three largest open
-files. Hover, definition, references, and rename use the reference link appended
-to the largest file. References include the declaration; rename returns edits
-without applying them.
+After startup, we time requests for document symbols, hover information,
+definitions, references, and renaming. @fig-lsp-latency shows median response
+times, with the 95th percentile (p95) in tooltips. **Edit to definition**
+includes both the change notification and the following definition response,
+capturing the work needed to observe an edited document.
 
-**Edit to definition** measures each change notification through its following
-definition response, including the work needed to observe the edited document.
-It pools all 1,000 edits per process and has no discarded warmups. Tooltips show
-sample counts, empty responses, returned item counts, files involved, and result
-sizes. These help explain differences in the work each server performs. A failed
-or timed-out request fails the benchmark. Points marked "empty" returned no
-items in any measured request; they measure the overhead of responding without a
-result.
+Tooltips also show result counts and sizes, which can differ between servers.
+Points marked "empty" returned no items in any measured request; their timings
+measure the overhead of responding without a result.
 
 ```{ojs}
 //| label: prepare-lsp-latency
@@ -977,9 +846,7 @@ lspLatencyRows = lspMemory.servers[0].aggregate.request_latencies.flatMap(
 lspLatencyTip = (d) =>
     `${d.row} — ${d.server}\nMedian: ${d.median_ms.toFixed(3)} ms\np95: ${d.p95_ms.toFixed(3)} ms\nSamples: ${d.samples}; empty: ${d.empty_results}\nReturned items: ${d.result_count_min}–${d.result_count_max}\nFiles involved: ${d.result_files_min == null ? "n/a" : `${d.result_files_min}–${d.result_files_max}`}\nMedian result size: ${d.payload_bytes_median} bytes`;
 
-lspLatencyExtent = d3.extent(
-    lspLatencyRows.flatMap((d) => [d.median_ms, d.p95_ms]),
-);
+lspLatencyExtent = d3.extent(lspLatencyRows, (d) => d.median_ms);
 
 lspLatencyDomain = d3.scaleLog().domain(lspLatencyExtent).nice().domain();
 ```
@@ -987,42 +854,37 @@ lspLatencyDomain = d3.scaleLog().domain(lspLatencyExtent).nice().domain();
 ```{ojs}
 //| label: fig-lsp-latency
 //| echo: false
-//| fig-cap: "Language-server request latency on a logarithmic scale. Each row
-//|   compares Panache and Marksman. Dots show medians; lines extend to p95 and
-//|   are not confidence intervals. Lower is faster."
+//| fig-cap: "Language-server request latency on a logarithmic scale. Tools
+//|   appear on the x-axis; colors identify requests. Dots show medians in
+//|   milliseconds; tooltips include p95. Lower is faster."
 
 Plot.plot({
     width,
-    marginLeft: width < 500 ? 90 : 130,
+    marginLeft: 70,
     marginRight: 25,
     marginBottom: 50,
-    height: 340,
-    x: {
+    height: 380,
+    x: { label: null, domain: lspServers },
+    y: {
         type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(lspLatencyDomain),
         domain: lspLatencyDomain,
         label: "Request latency (ms, log scale)",
+        grid: true,
     },
-    y: {
-        label: null,
+    color: {
+        legend: true,
         domain: lspMemory.servers[0].aggregate.request_latencies.map(
             (d) => d.label,
         ),
-        tickFormat: lspRowLabel,
+        scheme: "tableau10",
     },
-    color: { legend: true, domain: lspServers, scheme: "tableau10" },
     marks: [
-        ...logAxisX(lspLatencyDomain),
-        Plot.ruleY(lspLatencyRows, {
-            y: "row",
-            x1: "median_ms",
-            x2: "p95_ms",
-            stroke: "server",
-            strokeWidth: 2,
-        }),
         Plot.dot(lspLatencyRows, {
-            y: "row",
-            x: "median_ms",
-            fill: "server",
+            x: "server",
+            y: "median_ms",
+            fill: "row",
             r: 5,
             title: lspLatencyTip,
             tip: true,
@@ -1030,10 +892,10 @@ Plot.plot({
         Plot.text(
             lspLatencyRows.filter((d) => d.empty_results === d.samples),
             {
-                y: "row",
-                x: "median_ms",
+                x: "server",
+                y: "median_ms",
                 text: () => "empty",
-                fill: "server",
+                fill: "row",
                 textAnchor: "start",
                 dx: 7,
                 dy: -10,
@@ -1043,14 +905,18 @@ Plot.plot({
 });
 ```
 
+Warm symbol, definition, and reference requests have median response times below
+one millisecond for both servers in these runs. Requests after edits take
+longer, especially for Marksman. Panache's hover and rename requests return
+empty results on this target, so their timings do not establish comparable
+feature performance.
+
 ### Memory
 
-The runner samples the complete process tree's resident set size (RSS) and
-proportional set size (PSS) from `/proc` every 150 ms. RSS counts shared pages
-in each process; PSS divides them among the processes that map them. Each
-milestone follows a quiet window, except peak, which covers the whole session.
-@fig-lsp-memory shows median RSS across the three processes, with PSS in the
-tooltips.
+@fig-lsp-memory shows median memory use across three fresh sessions, including
+child processes. **RSS** counts resident memory, including shared pages in each
+process. Tooltips also show **PSS**, which divides shared pages among the
+processes using them to estimate their share of physical memory.
 
 ```{ojs}
 //| label: fig-lsp-memory
@@ -1085,40 +951,30 @@ Plot.plot({
             text: (d) => d.rss.toFixed(1),
             dy: -7,
         }),
-        Plot.ruleY([0]),
     ],
 });
 ```
 
-The comparison measures default architecture, not identical internal work.
-Marksman indexes the Markdown workspace eagerly, while Panache analyzes open
-documents and discovers project relationships lazily. Both servers receive the
-same open, edit, and navigation sequence, while diagnostics use each server's
-advertised pull or push mode. Their memory totals reflect those different
-strategies.
+Panache uses less resident memory at every measured stage in these runs. This
+workload opens only five files from the project, so the difference should be
+read alongside the servers' approaches to workspace indexing.
 
 ## Quarto Language Server
 
-This separate Linux benchmark compares Panache with
-[`q2 lsp`](https://github.com/quarto-dev/q2), the experimental Rust Quarto
-language server. It uses three authoring guides from a pinned q2 revision:
-computations, Markdown basics, and title blocks. The files live in a standalone
-project with no workspace index to discover. Both servers must accept every
-document without error diagnostics and return a nonempty outline.
+We compare Panache with [`q2 lsp`](https://github.com/quarto-dev/q2), the
+experimental Rust Quarto language server, using three authoring guides from a
+pinned q2 revision: computations, Markdown basics, and title blocks. The files
+live in a standalone project; neither server builds a whole-project index in
+this workload.
 
-Each run opens the files serially, measures document-symbol requests, and
-performs 100 full-document replacements that change an appended heading in the
-computations guide. Full replacements accommodate q2's synchronization mode. A
-final outline request must contain the last edited heading. This track exercises
-diagnostics and symbols; q2 does not implement the navigation features used in
-the Markdown comparison above.
+Each session opens the three files, requests their outlines, and performs 100
+heading edits in the computations guide. This comparison covers diagnostics and
+document symbols; q2 does not implement the navigation features used in the
+Markdown comparison.
 
-Panache uses pull diagnostics, with a request immediately after each open or
-change. q2 pushes diagnostics after processing the notification. The timings
-include those different delivery paths. They compare editor-visible latency
-under these client policies, with each server's own checks, and do not measure
-Panache's debounced push mode. Empty diagnostic sets are successful analyses;
-empty symbol results, protocol errors, and timeouts fail the benchmark.
+Panache returns diagnostics on request, while q2 sends them after processing an
+open or change notification. The timings include those different delivery paths
+and each server's own checks.
 
 ```{ojs}
 //| label: load-lsp-quarto
@@ -1154,46 +1010,43 @@ html`<div class="callout-note">
 </div>`;
 ```
 
-@fig-lsp-quarto-latency pools samples across the three processes. File opens
-have no warmups. Symbol requests have two warmup rounds and 20 measured rounds
-per file per process. Each edit waits for diagnostics before the next begins.
+@fig-lsp-quarto-latency shows median times from opening or editing a document to
+receiving diagnostics, along with response times for document-symbol requests.
+Tooltips include p95 and the number of diagnostics or symbols returned.
 
 ```{ojs}
 //| label: fig-lsp-quarto-latency
 //| echo: false
-//| fig-cap: "Quarto LSP latency. Dots show medians; lines extend to p95. Tooltips
-//|   include sample counts and the median number of returned diagnostics or symbols."
+//| fig-cap: "Quarto LSP latency in milliseconds on a logarithmic scale. Tools
+//|   appear on the x-axis; colors identify requests. Dots show medians. Tooltips
+//|   include p95, sample counts, and the median number of returned diagnostics
+//|   or symbols. Lower is faster."
 
 Plot.plot({
     width,
-    height: 230,
-    marginLeft: width < 500 ? 80 : 140,
+    height: 320,
+    marginLeft: 70,
     marginRight: 30,
-    x: { type: "log", label: "Time (ms)", grid: true },
+    marginBottom: 40,
+    x: { label: null, domain: quartoLsp.servers.map((s) => s.label) },
     y: {
+        type: "log",
+        tickFormat: d3.format(",~g"),
+        ticks: timeTicks(quartoLspLatencies.map((d) => d.median)),
+        label: "Request latency (ms, log scale)",
+        grid: true,
+    },
+    color: {
+        legend: true,
         label: null,
         domain: ["Open to diagnostics", "Document symbols", "Edit to diagnostics"],
-        tickFormat: (label) =>
-            width < 500
-                ? {
-                        "Open to diagnostics": "Open",
-                        "Document symbols": "Symbols",
-                        "Edit to diagnostics": "Edit",
-                    }[label]
-                : label,
+        scheme: "tableau10",
     },
-    color: { legend: true, scheme: "tableau10" },
     marks: [
-        Plot.ruleY(quartoLspLatencies, {
-            y: "metric",
-            x1: "median",
-            x2: "p95",
-            stroke: "server",
-        }),
         Plot.dot(quartoLspLatencies, {
-            y: "metric",
-            x: "median",
-            fill: "server",
+            x: "server",
+            y: "median",
+            fill: "metric",
             r: 5,
             channels: {
                 "p95 (ms)": "p95",
@@ -1206,12 +1059,12 @@ Plot.plot({
 });
 ```
 
-Initialization measures process launch through the `initialize` response. Memory
-uses the same process-tree sampler and five-second quiet windows as the Markdown
-track. q2 performs open-document parsing and outline analysis; Panache also
-retains its syntax trees and analysis database. The table reports medians across
-processes. Neither server builds a whole-project index in this standalone
-workload.
+Panache has shorter median times for all three measurements in these runs. Both
+servers return outlines and report no error diagnostics, though their outlines
+contain different numbers of symbols.
+
+The table below reports median initialization times and memory use across the
+three sessions. Panache uses less resident memory at each measured stage.
 
 ```{ojs}
 //| label: render-lsp-quarto-memory
@@ -1238,56 +1091,130 @@ html`<table class="table">
 </table>`;
 ```
 
-## Reproducing
+## Methodology {#methodology}
 
-All benchmarks are reproducible. The formatting and linting comparisons require
-[`hyperfine`](https://github.com/sharkdp/hyperfine); the language-server memory
-and speed comparisons require Linux with `/proc`. The Markdown track needs
-Marksman; the Quarto track downloads a pinned q2 release and verifies its
-SHA-256 hash, or uses the executable specified by `Q2_BIN`. The scripts in
-`benches/` are designed to be run from the repository root:
+### Formatting and Linting
+
+Individual-document comparisons start a fresh process for each file. Repository
+comparisons process tracked files in a single invocation per tool and
+repository. CLI caches are disabled. Failed repository runs have null timings in
+the data and are excluded from the plots.
+
+Yamark runs with an empty configuration and external code formatters disabled
+(`--config /dev/null --skip-embedded-formatters`). Its default wrapping and
+style settings apply. Yamark uses [source spans and formatting
+plans](https://github.com/t-kalinowski/yamark/blob/v0.3.0/src/core/markdown.rs)
+and preserves display math as opaque content. Panache builds the lossless syntax
+tree also used by its linter and language server, and parses and formats TeX
+math. These differences describe the work each formatter performs; the
+benchmarks do not isolate their individual costs.
+
+### Markdown Sessions {#markdown-sessions}
+
+The runner starts three fresh processes per server in alternating order. Each
+session opens the same files, obtains diagnostics using the server's advertised
+pull or push mode, primes navigation requests, and waits for background work to
+settle. It then times warm requests and the edit workload.
+
+Requests run serially over stdio. Each target gets two unmeasured warmup rounds
+and 20 measured rounds per session. Medians and p95 pool the measured samples
+from all three sessions. Document-symbol requests cover the three largest open
+files. Hover, definition, references, and rename use the reference link appended
+to the largest file. References include the declaration; rename returns edits
+without applying them.
+
+The edit workload performs 1,000 fixed-width reference-label renames per
+session, each followed by a definition request. Edit-to-definition timings
+include all 1,000 edits, with no discarded warmups. The total edit runtime
+excludes the final diagnostics and memory-settling wait. A failed or timed-out
+request fails the benchmark.
+
+The runner samples the server and its descendants through Linux `/proc` every
+150 ms. Background work has settled when CPU use stays below 5% of one core for
+five seconds. Workspace and open-file readiness timings end at the start of
+their respective quiet periods, confirmed only after the five seconds have
+elapsed. These estimates retain sampling error.
+
+Memory measurements use the same sampler. Baseline, files-open, and after-edits
+measurements follow quiet periods. Peak is the largest sampled value during the
+complete session. The charts show medians across the three sessions; the JSON
+retains each session's measurements.
+
+### Quarto Sessions
+
+The runner starts three fresh sessions per server. Each session opens the files
+serially, measures document-symbol requests, and performs 100 full-document
+replacements that change an appended heading in the computations guide. Full
+replacements accommodate q2's synchronization mode. A final outline request must
+contain the last edited heading.
+
+File opens have no warmups. Symbol requests have two warmup rounds and 20
+measured rounds per file per session. Latency medians and p95 pool samples
+across all three sessions. Each edit waits for diagnostics before the next
+begins. Panache uses pull diagnostics, with a request immediately after each
+open or change; q2 pushes diagnostics after processing the notification. This
+comparison does not measure Panache's debounced push mode.
+
+Both servers must accept every document without error diagnostics and return a
+nonempty outline. Empty diagnostic sets count as successful analyses; empty
+symbol results, protocol errors, and timeouts fail the benchmark.
+
+Initialization measures process launch through the `initialize` response. Memory
+uses the same process-tree sampler and five-second quiet periods as the Markdown
+comparison. q2 performs open-document parsing and outline analysis; Panache also
+retains its syntax trees and analysis database.
+
+## Reproducibility
+
+Run these commands from the repository root:
 
 ```bash
-# Download test documents (idempotent)
-cd benches/documents && ./download.sh && cd ../..
+# Measure formatting on individual documents and whole repositories.
+task bench:formatter
 
-# Outside devenv: install Yamark and record its version
-# The development environment already provides both.
+# Measure linting on individual documents and whole repositories.
+task bench:linter
+
+# Measure both language-server comparisons, including memory use.
+task bench:lsp
+```
+
+The tasks download the benchmark documents and check that the required tools are
+available. The formatting and linting comparisons use `hyperfine` and `jq`. The
+language-server comparisons require Linux with `/proc` and Python 3, plus
+Marksman and q2 for their respective workloads. Outside the development
+environment, install Yamark and record its version:
+
+```bash
 uv tool install yamark==0.3.0
 export PANACHE_BENCH_YAMARK_VERSION=0.3.0
+```
 
-# Run comparison benchmark and write JSON
+The scripts in [`benches/`](https://github.com/jolars/panache/tree/main/benches)
+write the committed JSON files next to this document. These files supply the
+charts, machine details, and tool versions shown above. Previewing or rendering
+the documentation reads the saved results without running the benchmarks.
+
+To refresh an individual comparison, run its script:
+
+```bash
 bash benches/compare_all.sh --json --out docs/guide/performance_data.json
-
-# Run repository-wide Markdown formatting benchmark
-bash benches/compare_repo_suite.sh --mode format --track markdown --out docs/guide/performance_repo_markdown_format_data.json
-
-# Run repository-wide Quarto formatting benchmark
-bash benches/compare_repo_suite.sh --mode format --track quarto --out docs/guide/performance_repo_quarto_format_data.json
-
-# Run repository-wide Markdown lint benchmark
-bash benches/compare_repo_suite.sh --mode lint --track markdown --out docs/guide/performance_repo_markdown_lint_data.json
-
-# Run repository-wide Quarto lint benchmark
-bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/performance_repo_quarto_lint_data.json
-
-# Run per-document lint benchmark
 bash benches/compare_lint_single.sh --out docs/guide/performance_lint_single_data.json
+bash benches/compare_repo_suite.sh --mode format --track markdown --out docs/guide/performance_repo_markdown_format_data.json
+bash benches/compare_repo_suite.sh --mode format --track quarto --out docs/guide/performance_repo_quarto_format_data.json
+bash benches/compare_repo_suite.sh --mode lint --track markdown --out docs/guide/performance_repo_markdown_lint_data.json
+bash benches/compare_repo_suite.sh --mode lint --track quarto --out docs/guide/performance_repo_quarto_lint_data.json
+bash benches/compare_lsp_memory.sh
+bash benches/compare_lsp_quarto.sh
+```
 
-# Run the Linux language-server speed and memory benchmark
-# bench:lsp remains an alias.
-task bench:lsp
+The Quarto script downloads a pinned q2 release and verifies its SHA-256 hash,
+or uses the executable specified by `Q2_BIN`.
 
-# Run the Quarto diagnostics, symbols, and memory comparison
-task bench:lsp
+After refreshing the JSON, clear this page's freeze cache and re-render it to
+pick up the new results:
 
-# Or run the human-readable text variant
-bash benches/compare_all.sh
-
-# Re-render this page (uses freeze cache by default)
-quarto render docs/guide/performance.qmd
-
-# Pick up refreshed JSON by invalidating the rendered page's freeze cache
+```bash
 rm -rf docs/_freeze/guide/performance
 quarto render docs/guide/performance.qmd
 ```
