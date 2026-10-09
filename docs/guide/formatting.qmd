@@ -278,6 +278,11 @@ heading is removed. Spacing between the `#` characters and the heading text is
 normalized to a single space. Headings are separated from surrounding content by
 a blank line.
 
+Repeated spaces and tabs in heading prose collapse to a single space, including
+inside emphasis and link labels. Literal content such as code spans and link
+destinations keeps its spacing. The GFM flavor preserves internal heading
+spacing because changing it can change GitHub's automatic anchors.
+
 A `#` that belongs to the heading's *text* is kept, since dropping it would
 change what the heading says. A run is only decoration when it ends the line, so
 `# foo # #` keeps a closing run to hold the first hash in the text, and an

@@ -2,9 +2,9 @@ use panache_parser::parser::blocks::headings::content_reads_as_decoration;
 use rowan::NodeOrToken;
 
 use super::core::normalize_attribute_text;
-use super::inline::format_inline_node;
+use super::inline::{collapse_spaces, format_inline_node_with_spacing};
 use super::smart::normalize_smart_punctuation;
-use crate::config::Config;
+use crate::config::{Config, Flavor};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// Render a single heading line (`### content {attrs}`), formatting inline
@@ -17,6 +17,8 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 /// identically regardless of where the heading appears. The `#` prefix means
 /// the rendered line can never collide with a thematic break.
 pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
+    // GitHub derives anchors from each source space, so collapsing them can break links.
+    let collapse_ws = config.flavor != Flavor::Gfm;
     let mut level = 1;
     let mut attributes = String::new();
     let mut content = String::new();
@@ -40,9 +42,14 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
                                     content.push(' ');
                                 }
                             } else {
+                                let text = if collapse_ws && t.kind() == SyntaxKind::TEXT {
+                                    std::borrow::Cow::Owned(collapse_spaces(t.text()))
+                                } else {
+                                    std::borrow::Cow::Borrowed(t.text())
+                                };
                                 content.push_str(
                                     normalize_smart_punctuation(
-                                        t.text(),
+                                        &text,
                                         config.formatter_extensions.smart,
                                         config.formatter_extensions.smart_quotes,
                                     )
@@ -51,7 +58,11 @@ pub(super) fn format_heading(node: &SyntaxNode, config: &Config) -> String {
                             }
                         }
                         NodeOrToken::Node(n) => {
-                            content.push_str(&format_inline_node(&n, config));
+                            content.push_str(&format_inline_node_with_spacing(
+                                &n,
+                                config,
+                                collapse_ws,
+                            ));
                         }
                     }
                 }

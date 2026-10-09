@@ -355,6 +355,8 @@ golden_test_cases!(
     table_pipe_surplus_in_list_item,
     list_mixed_bullets_commonmark,
     headings,
+    issue_553_heading_whitespace,
+    issue_553_heading_whitespace_gfm,
     heading_attributes_commonmark,
     heading_closing_run,
     heading_in_list_item,
