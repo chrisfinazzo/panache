@@ -1,0 +1,103 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..201
+  FENCED_DIV@0..30
+    DIV_FENCE_OPEN@0..26
+      TEXT@0..3 ":::"
+      WHITESPACE@3..4 " "
+      DIV_INFO@4..25
+        TEXT@4..5 "{"
+        WHITESPACE@5..9 "    "
+        ATTR_CLASS@9..22 ".callout-note"
+        WHITESPACE@22..24 "  "
+        TEXT@24..25 "}"
+      NEWLINE@25..26 "\n"
+    DIV_FENCE_CLOSE@26..30
+      TEXT@26..29 ":::"
+      NEWLINE@29..30 "\n"
+  BLANK_LINE@30..31
+    BLANK_LINE@30..31 "\n"
+  FENCED_DIV@31..102
+    DIV_FENCE_OPEN@31..92
+      TEXT@31..34 ":::"
+      WHITESPACE@34..35 " "
+      DIV_INFO@35..91
+        TEXT@35..36 "{"
+        WHITESPACE@36..38 "  "
+        ATTR_ID@38..43 "#note"
+        WHITESPACE@43..46 "   "
+        ATTR_CLASS@46..59 ".callout-note"
+        WHITESPACE@59..62 "   "
+        ATTR_KEY_VALUE@62..88
+          ATTR_KEY@62..67 "title"
+          TEXT@67..68 "="
+          ATTR_VALUE@68..88 "\"Keep  these spaces\""
+        WHITESPACE@88..90 "  "
+        TEXT@90..91 "}"
+      NEWLINE@91..92 "\n"
+    PARAGRAPH@92..98
+      TEXT@92..97 "Text."
+      NEWLINE@97..98 "\n"
+    DIV_FENCE_CLOSE@98..102
+      TEXT@98..101 ":::"
+      NEWLINE@101..102 "\n"
+  BLANK_LINE@102..103
+    BLANK_LINE@102..103 "\n"
+  LIST@103..157
+    LIST_ITEM@103..157
+      LIST_MARKER@103..104 "-"
+      WHITESPACE@104..105 " "
+      PLAIN@105..110
+        TEXT@105..109 "Item"
+        NEWLINE@109..110 "\n"
+      BLANK_LINE@110..111
+        BLANK_LINE@110..111 "\n"
+      FENCED_DIV@111..157
+        DIV_FENCE_OPEN@111..143
+          WHITESPACE@111..113 "  "
+          TEXT@113..116 ":::"
+          WHITESPACE@116..117 " "
+          DIV_INFO@117..142
+            TEXT@117..118 "{"
+            WHITESPACE@118..120 "  "
+            ATTR_CLASS@120..132 ".callout-tip"
+            WHITESPACE@132..135 "   "
+            ATTR_ID@135..139 "#tip"
+            WHITESPACE@139..141 "  "
+            TEXT@141..142 "}"
+          NEWLINE@142..143 "\n"
+        PARAGRAPH@143..151
+          TEXT@143..150 "  Text."
+          NEWLINE@150..151 "\n"
+        DIV_FENCE_CLOSE@151..157
+          WHITESPACE@151..153 "  "
+          TEXT@153..156 ":::"
+          NEWLINE@156..157 "\n"
+  BLANK_LINE@157..158
+    BLANK_LINE@157..158 "\n"
+  BLOCK_QUOTE@158..201
+    BLOCK_QUOTE_MARKER@158..159 ">"
+    WHITESPACE@159..160 " "
+    FENCED_DIV@160..201
+      DIV_FENCE_OPEN@160..187
+        TEXT@160..163 ":::"
+        WHITESPACE@163..164 " "
+        DIV_INFO@164..186
+          TEXT@164..165 "{"
+          WHITESPACE@165..167 "  "
+          ATTR_CLASS@167..183 ".callout-warning"
+          WHITESPACE@183..185 "  "
+          TEXT@185..186 "}"
+        NEWLINE@186..187 "\n"
+      BLOCK_QUOTE_MARKER@187..188 ">"
+      WHITESPACE@188..189 " "
+      PARAGRAPH@189..197
+        TEXT@189..194 "Text."
+        NEWLINE@194..195 "\n"
+        LINE_PREFIX@195..196 ">"
+        LINE_PREFIX@196..197 " "
+      DIV_FENCE_CLOSE@197..201
+        TEXT@197..200 ":::"
+        NEWLINE@200..201 "\n"

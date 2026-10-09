@@ -577,6 +577,7 @@ golden_test_cases!(
     fenced_code_unclosed_pandoc,
     fenced_divs,
     fenced_div_attributes_structured,
+    fenced_div_attribute_spacing,
     fenced_div_after_wrapped_list_item,
     fenced_math_in_list_blockquote,
     fenced_div_list_idempotency_setup,

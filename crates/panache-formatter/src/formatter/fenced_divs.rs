@@ -1,5 +1,5 @@
 use crate::formatter::Formatter;
-use crate::syntax::{DivFenceOpen, FencedDiv, SyntaxKind, SyntaxNode};
+use crate::syntax::{DivFenceOpen, DivInfo, FencedDiv, SyntaxKind, SyntaxNode};
 use rowan::{NodeOrToken, ast::AstNode};
 
 use super::utils::is_block_element;
@@ -64,7 +64,11 @@ impl Formatter {
         };
         self.output.push_str(&" ".repeat(indent));
         self.output.push_str(&":".repeat(opening_colons));
-        if let Some(attributes) = div.info_text().filter(|text| !text.is_empty()) {
+        if let Some(attributes) = div
+            .info()
+            .map(normalize_div_info)
+            .filter(|text| !text.is_empty())
+        {
             self.output.push(' ');
             self.output.push_str(&attributes);
         }
@@ -144,6 +148,30 @@ impl Formatter {
             self.consecutive_blank_lines = 1;
         }
     }
+}
+
+fn normalize_div_info(info: DivInfo) -> String {
+    let text = info.text();
+    if !text.starts_with('{') || !text.ends_with('}') {
+        return text;
+    }
+
+    // Only the gaps are whitespace tokens; quoted values retain their source bytes.
+    let mut output = String::new();
+    let mut pending_space = false;
+    for child in info.syntax().children_with_tokens() {
+        if child.kind() == SyntaxKind::WHITESPACE {
+            pending_space = true;
+            continue;
+        }
+        let text = child.to_string();
+        if pending_space && output != "{" && text != "}" && !output.is_empty() {
+            output.push(' ');
+        }
+        output.push_str(&text);
+        pending_space = false;
+    }
+    output
 }
 
 fn opening_has_trailing_text(open: DivFenceOpen) -> bool {

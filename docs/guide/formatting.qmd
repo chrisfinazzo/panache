@@ -1385,7 +1385,10 @@ Output
 Fenced divs are normalized so that blank lines at the boundaries of the div body
 are stripped (no blank line after the opening fence or before the closing fence)
 and runs of blank lines inside the body collapse to a single separator, matching
-pandoc. Attributes are preserved and normalized. With nested divs, the inner div
+pandoc. Attribute blocks have no spaces next to the braces and a single space
+between attributes (`::: {    .callout-note  }` becomes `::: {.callout-note}`).
+Whitespace inside quoted attribute values is preserved. Nested divs use two more
+colons than their parent.
 
 Input
 

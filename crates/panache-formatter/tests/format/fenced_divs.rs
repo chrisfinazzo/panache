@@ -1,6 +1,15 @@
 use panache_formatter::format;
 
 #[test]
+fn fenced_div_spacing_preserves_attribute_values_and_shorthand() {
+    let input = "::: {  .note\t#id   ---   title=\"A  \\\"quote\\\"\"   key=unquoted  }\n:::\n";
+    let expected = "::: {.note #id --- title=\"A  \\\"quote\\\"\" key=unquoted}\n:::\n";
+    let output = format(input, None, None);
+    assert_eq!(output, expected);
+    assert_eq!(format(&output, None, None), output);
+}
+
+#[test]
 fn fenced_div_strips_leading_and_trailing_blank_lines_in_body() {
     let input = "\
 ::: declare
