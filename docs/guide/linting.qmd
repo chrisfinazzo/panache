@@ -311,9 +311,20 @@ Line accuracy
 Auto-fixes
 :   Supported for external linters that return fix edits with mappable ranges
     (currently `arity`, `fatou`, `badness`, `jarl`, `ruff`, and `eslint`). Fixes
-    that the linter marks as unsafe (`arity`, `fatou`, `badness`, `ruff`) are
-    only applied under `--unsafe-fixes`. Requires badness 0.14+ for LaTeX
-    (earlier versions lack JSON output and are skipped).
+    that the linter marks as unsafe (`arity`, `fatou`, `badness`, `jarl`,
+    `ruff`) are only applied under `--unsafe-fixes`. Requires badness 0.14+ for
+    LaTeX (earlier versions lack JSON output and are skipped). Jarl's legacy
+    `content`/`start`/`end` fixes (0.5), `content`/`range` fixes (0.6), and
+    `edits`/`safety` fixes (0.7) are recognized by JSON shape, without inferring
+    a version. Legacy single-edit shapes (0.5 and 0.6 output) require
+    `--unsafe-fixes`; those releases do not serialize safety with the fix. The
+    modern edits shape preserves Jarl's explicit safety. Additional metadata is
+    accepted, but conflicting shapes are rejected. Multi-edit fixes are mapped
+    atomically: if any edit cannot be mapped or edits overlap, no part of the
+    fix is offered. Unrecognized shapes, mapping failures and overlaps retain
+    the diagnostic and add a visible explanatory note. Decoder errors and fix
+    JSON in notes are limited to 256 characters each (with an ellipsis when
+    truncated) to keep CLI and LSP diagnostics readable.
 
 ### Where External Linters Run
 

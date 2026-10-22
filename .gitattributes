@@ -50,6 +50,10 @@ crates/panache-formatter/tests/math_badness/report.txt eol=lf
 # on every platform (Windows would otherwise get CRLF and the test panics).
 docs/reference/linter-rules.qmd eol=lf
 
+# Jarl captures store byte offsets into `probe.R`; a CRLF checkout on Windows
+# would shift every offset after the first line, so keep the fixtures LF.
+tests/fixtures/jarl/* eol=lf
+
 # Vendored IANA URI scheme registry — kept byte-for-byte as fetched (CRLF) so
 # scripts/update-uri-schemes.sh reproduces it exactly with no processing.
 crates/panache-parser/src/parser/inlines/uri-schemes.csv -text linguist-vendored
