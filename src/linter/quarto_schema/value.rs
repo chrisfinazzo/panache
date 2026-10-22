@@ -16,11 +16,23 @@
 use rowan::{TextRange, TextSize};
 
 use crate::syntax::{
-    AstNode, SyntaxNode, YamlBlockMapEntry, YamlDocument, YamlFlowMapEntry, YamlNode, YamlScalar,
+    AstNode, SyntaxNode, YamlBlockMapEntry, YamlBlockMapValue, YamlBlockSequenceItem, YamlDocument,
+    YamlFlowMapEntry, YamlFlowMapValue, YamlFlowSequenceItem, YamlNode, YamlScalar,
     YamlScalarStyle,
 };
 
 use super::interp::{MapEntry, ScalarType, SchemaValue, ValueKind};
+
+/// How knitr dynamic YAML tags are treated while bridging schema values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicTags {
+    /// Validate tagged scalars as ordinary literals (metadata and Jupyter cells).
+    Literal,
+    /// Model `!expr` scalars as opaque `ValueKind::Expr` runtime results,
+    /// bypassing static type and enum checks without evaluating R. Quarto
+    /// rejects `!r` in cell options, so it stays an ordinary literal.
+    Knitr,
+}
 
 /// Bridge the embedded YAML of a content node (`YAML_METADATA_CONTENT` or
 /// `HASHPIPE_YAML_CONTENT`) to a [`SchemaValue`].
@@ -31,12 +43,16 @@ use super::interp::{MapEntry, ScalarType, SchemaValue, ValueKind};
 /// reparse-and-shift of the prefix-stripped text would not). Returns `None`
 /// when the region has no parsed YAML document (malformed YAML the parser left
 /// as opaque tokens — already reported as a `yaml-*` diagnostic).
-pub fn bridge_yaml_content(content_node: &SyntaxNode) -> Option<SchemaValue> {
+pub fn bridge_yaml_content(
+    content_node: &SyntaxNode,
+    dynamic_tags: DynamicTags,
+) -> Option<SchemaValue> {
     let doc = content_node.descendants().find_map(YamlDocument::cast)?;
     Some(bridge_node_or_empty(
         doc.as_node(),
         doc.syntax().text_range(),
         TextSize::new(0),
+        dynamic_tags,
     ))
 }
 
@@ -46,9 +62,14 @@ fn shift(range: TextRange, base: TextSize) -> TextRange {
 
 /// Bridge an optional content node, falling back to an empty (null) scalar at
 /// `span` when the value is empty (`key:` with nothing after it).
-fn bridge_node_or_empty(node: Option<YamlNode>, span: TextRange, base: TextSize) -> SchemaValue {
+fn bridge_node_or_empty(
+    node: Option<YamlNode>,
+    span: TextRange,
+    base: TextSize,
+    dynamic_tags: DynamicTags,
+) -> SchemaValue {
     match node {
-        Some(n) => bridge_node(n, base),
+        Some(n) => bridge_node(n, base, dynamic_tags),
         None => SchemaValue {
             span,
             kind: ValueKind::Scalar {
@@ -59,22 +80,29 @@ fn bridge_node_or_empty(node: Option<YamlNode>, span: TextRange, base: TextSize)
     }
 }
 
-fn bridge_node(node: YamlNode, base: TextSize) -> SchemaValue {
+fn bridge_node(node: YamlNode, base: TextSize, dynamic_tags: DynamicTags) -> SchemaValue {
     match node {
-        YamlNode::Scalar(s) => bridge_scalar(&s, base),
+        YamlNode::Scalar(s) => bridge_scalar(&s, base, dynamic_tags),
         YamlNode::BlockMap(m) => SchemaValue {
             span: shift(m.content_range(), base),
-            kind: ValueKind::Map(bridge_block_entries(m.entries(), base)),
+            kind: ValueKind::Map(bridge_block_entries(m.entries(), base, dynamic_tags)),
         },
         YamlNode::FlowMap(m) => SchemaValue {
             span: shift(m.content_range(), base),
-            kind: ValueKind::Map(bridge_flow_entries(m.entries(), base)),
+            kind: ValueKind::Map(bridge_flow_entries(m.entries(), base, dynamic_tags)),
         },
         YamlNode::BlockSequence(s) => SchemaValue {
             span: shift(s.content_range(), base),
             kind: ValueKind::Seq(
                 s.items()
-                    .map(|item| bridge_node_or_empty(item.as_node(), item_span(&item, base), base))
+                    .map(|item| {
+                        bridge_node_or_empty(
+                            item.as_node(),
+                            item_span(&item, base),
+                            base,
+                            dynamic_tags,
+                        )
+                    })
                     .collect(),
             ),
         },
@@ -82,7 +110,14 @@ fn bridge_node(node: YamlNode, base: TextSize) -> SchemaValue {
             span: shift(s.content_range(), base),
             kind: ValueKind::Seq(
                 s.items()
-                    .map(|item| bridge_node_or_empty(item.as_node(), item_span(&item, base), base))
+                    .map(|item| {
+                        bridge_node_or_empty(
+                            item.as_node(),
+                            item_span(&item, base),
+                            base,
+                            dynamic_tags,
+                        )
+                    })
                     .collect(),
             ),
         },
@@ -99,6 +134,7 @@ fn item_span<N: AstNode<Language = crate::syntax::PanacheLanguage>>(
 fn bridge_block_entries(
     entries: impl Iterator<Item = YamlBlockMapEntry>,
     base: TextSize,
+    dynamic_tags: DynamicTags,
 ) -> Vec<MapEntry> {
     let mut out = Vec::new();
     for entry in entries {
@@ -112,9 +148,12 @@ fn bridge_block_entries(
             .or_else(|| entry.key().map(|k| shift(k.syntax().text_range(), base)))
             .unwrap_or_else(|| shift(entry.syntax().text_range(), base));
         let value = match entry.value() {
-            Some(v) => {
-                bridge_node_or_empty(v.as_node(), shift(v.syntax().text_range(), base), base)
-            }
+            Some(v) => bridge_node_or_empty(
+                v.as_node(),
+                shift(v.syntax().text_range(), base),
+                base,
+                dynamic_tags,
+            ),
             None => SchemaValue {
                 span: key_span,
                 kind: ValueKind::Scalar {
@@ -135,6 +174,7 @@ fn bridge_block_entries(
 fn bridge_flow_entries(
     entries: impl Iterator<Item = YamlFlowMapEntry>,
     base: TextSize,
+    dynamic_tags: DynamicTags,
 ) -> Vec<MapEntry> {
     let mut out = Vec::new();
     for entry in entries {
@@ -147,9 +187,12 @@ fn bridge_flow_entries(
             .map(|s| shift(s.text_range(), base))
             .unwrap_or_else(|| shift(entry.syntax().text_range(), base));
         let value = match entry.value() {
-            Some(v) => {
-                bridge_node_or_empty(v.as_node(), shift(v.syntax().text_range(), base), base)
-            }
+            Some(v) => bridge_node_or_empty(
+                v.as_node(),
+                shift(v.syntax().text_range(), base),
+                base,
+                dynamic_tags,
+            ),
             None => SchemaValue {
                 span: key_span,
                 kind: ValueKind::Scalar {
@@ -167,7 +210,25 @@ fn bridge_flow_entries(
     out
 }
 
-fn bridge_scalar(scalar: &YamlScalar, base: TextSize) -> SchemaValue {
+fn has_dynamic_tag(scalar: &YamlScalar) -> bool {
+    let Some(parent) = scalar.syntax().parent() else {
+        return false;
+    };
+    YamlBlockMapValue::cast(parent.clone())
+        .and_then(|value| value.tag())
+        .or_else(|| YamlFlowMapValue::cast(parent.clone()).and_then(|value| value.tag()))
+        .or_else(|| YamlBlockSequenceItem::cast(parent.clone()).and_then(|value| value.tag()))
+        .or_else(|| YamlFlowSequenceItem::cast(parent).and_then(|value| value.tag()))
+        .is_some_and(|tag| tag.text() == "!expr")
+}
+
+fn bridge_scalar(scalar: &YamlScalar, base: TextSize, dynamic_tags: DynamicTags) -> SchemaValue {
+    if dynamic_tags == DynamicTags::Knitr && has_dynamic_tag(scalar) {
+        return SchemaValue {
+            span: shift(scalar.text_range(), base),
+            kind: ValueKind::Expr,
+        };
+    }
     let literal = scalar.value();
     let ty = if scalar.style() == YamlScalarStyle::Plain {
         classify_plain(&literal)
@@ -252,6 +313,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recognizes_dynamic_tags_on_typed_value_wrappers() {
+        for (yaml, dynamic) in [
+            ("key: !expr height", true),
+            ("key: {nested: !expr height}", true),
+            ("key:\n  - !expr height", true),
+            ("key: [!expr height]", true),
+            ("key: !r height", false),
+            ("key: height", false),
+            ("!expr height: value", false),
+        ] {
+            let input = format!("---\n{yaml}\n---\n");
+            let tree = crate::parser::parse(&input, None);
+            let scalar = tree
+                .descendants()
+                .filter_map(YamlScalar::cast)
+                .find(|scalar| scalar.value() == "height")
+                .expect("height scalar");
+            assert_eq!(has_dynamic_tag(&scalar), dynamic, "{yaml}");
+        }
+    }
+
+    #[test]
     fn classifies_core_scalars() {
         assert_eq!(classify_plain("true"), ScalarType::Bool);
         assert_eq!(classify_plain("FALSE"), ScalarType::Bool);
@@ -280,7 +363,7 @@ mod tests {
             .descendants()
             .find(|n| n.kind() == crate::syntax::SyntaxKind::YAML_METADATA_CONTENT)
             .expect("frontmatter content node");
-        bridge_yaml_content(&content).expect("bridge")
+        bridge_yaml_content(&content, DynamicTags::Literal).expect("bridge")
     }
 
     #[test]

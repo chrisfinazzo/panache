@@ -13,7 +13,7 @@ use crate::syntax::SyntaxNode;
 
 use super::interp::{ErrorKind, ScalarType, SchemaError, SchemaValue, ValueKind, validate};
 use super::schema;
-use super::value::bridge_yaml_content;
+use super::value::{DynamicTags, bridge_yaml_content};
 
 pub const UNKNOWN_KEY: &str = "quarto-schema-unknown-key";
 pub const TYPE_MISMATCH: &str = "quarto-schema-type-mismatch";
@@ -51,7 +51,7 @@ pub fn to_diagnostic(err: SchemaError, input: &str) -> Diagnostic {
 /// bridge and validate identically. Empty when the tree carries no YAML
 /// document.
 fn schema_diagnostics_for_tree(tree: &SyntaxNode, text: &str, root_id: &str) -> Vec<Diagnostic> {
-    let Some(value) = bridge_yaml_content(tree) else {
+    let Some(value) = bridge_yaml_content(tree, DynamicTags::Literal) else {
         return Vec::new();
     };
     if validation_disabled(&value) {

@@ -23,7 +23,7 @@ use crate::linter::quarto_schema::report::{
     INVALID_ENUM, TYPE_MISMATCH, UNKNOWN_KEY, to_diagnostic, validation_disabled,
 };
 use crate::linter::quarto_schema::schema;
-use crate::linter::quarto_schema::value::bridge_yaml_content;
+use crate::linter::quarto_schema::value::{DynamicTags, bridge_yaml_content};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
 use crate::syntax::{AstNode, CodeBlock, SyntaxKind, SyntaxNode};
 
@@ -116,18 +116,20 @@ fn schema_diagnostics(cx: &LintContext) -> Vec<Diagnostic> {
     // host coordinates (the `#|` prefix is trivia), so no offset shifting.
     for node in cx.tree.descendants() {
         let root = match node.kind() {
-            SyntaxKind::YAML_METADATA_CONTENT => Some(schema.roots.frontmatter.as_str()),
+            SyntaxKind::YAML_METADATA_CONTENT => {
+                Some((schema.roots.frontmatter.as_str(), DynamicTags::Literal))
+            }
             SyntaxKind::HASHPIPE_YAML_CONTENT => node
                 .ancestors()
                 .find_map(CodeBlock::cast)
                 .and_then(|block| cell_root(&block, schema)),
             _ => continue,
         };
-        let Some(root) = root else {
+        let Some((root, dynamic_tags)) = root else {
             continue;
         };
         // `None` means malformed YAML (opaque tokens) — already reported.
-        let Some(value) = bridge_yaml_content(&node) else {
+        let Some(value) = bridge_yaml_content(&node, dynamic_tags) else {
             continue;
         };
         for err in validate(schema, root, &value) {
@@ -142,13 +144,14 @@ fn schema_diagnostics(cx: &LintContext) -> Vec<Diagnostic> {
 fn frontmatter_opts_out(tree: &SyntaxNode) -> bool {
     tree.descendants()
         .find(|n| n.kind() == SyntaxKind::YAML_METADATA_CONTENT)
-        .and_then(|n| bridge_yaml_content(&n))
+        .and_then(|n| bridge_yaml_content(&n, DynamicTags::Literal))
         .is_some_and(|v| validation_disabled(&v))
 }
 
 /// The cell-options engine root for an executable code cell: `engine-knitr` for
-/// R, `engine-jupyter` otherwise. `None` for non-executable fences.
-fn cell_root<'s>(block: &CodeBlock, schema: &'s QuartoSchema) -> Option<&'s str> {
+/// R, `engine-jupyter` otherwise, together with permission for dynamic values.
+/// `None` for non-executable fences.
+fn cell_root<'s>(block: &CodeBlock, schema: &'s QuartoSchema) -> Option<(&'s str, DynamicTags)> {
     if !block.is_executable_chunk() {
         return None;
     }
@@ -156,9 +159,17 @@ fn cell_root<'s>(block: &CodeBlock, schema: &'s QuartoSchema) -> Option<&'s str>
         .language()
         .is_some_and(|lang| lang.eq_ignore_ascii_case("r"));
     if is_r {
-        schema.roots.cell_knitr.as_deref()
+        schema
+            .roots
+            .cell_knitr
+            .as_deref()
+            .map(|root| (root, DynamicTags::Knitr))
     } else {
-        schema.roots.cell_jupyter.as_deref()
+        schema
+            .roots
+            .cell_jupyter
+            .as_deref()
+            .map(|root| (root, DynamicTags::Literal))
     }
 }
 
@@ -298,6 +309,56 @@ mod tests {
         assert_eq!(diags[0].code, TYPE_MISMATCH);
         assert!(diags[0].message.contains("boolean"));
         assert!(diags[0].message.contains("fenced"));
+    }
+
+    #[test]
+    fn accepts_knitr_dynamic_expr_without_evaluating_it() {
+        for (key, expression) in [
+            ("fig-height", "0.3 * n_guidelines + 1.5"),
+            ("fig-height", "'0.28 * panel$k + 1.4'"),
+            ("echo", "show_code"),
+        ] {
+            let input = format!("```{{r}}\n#| {key}: !expr {expression}\n1\n```\n");
+            let diags = lint(&input, Flavor::Quarto);
+            assert!(diags.is_empty(), "{key}: {expression}: {diags:?}");
+        }
+    }
+
+    #[test]
+    fn dynamic_expr_does_not_hide_invalid_literals_or_sibling_options() {
+        for value in [
+            "\"!expr 1 + 1\"",
+            "!expression wrong",
+            "!R wrong",
+            "!r 1 + 1",
+        ] {
+            let input = format!("```{{r}}\n#| fig-height: {value}\n1\n```\n");
+            let diags = lint(&input, Flavor::Quarto);
+            assert_eq!(diags.len(), 1, "{value}: {diags:?}");
+            assert_eq!(diags[0].code, TYPE_MISMATCH);
+        }
+        let input = "```{r}\n#| fig-height: !expr height\n#| cache: maybe\n1\n```\n";
+        let diags = lint(input, Flavor::Quarto);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(input_at(&diags[0].location.range, input), "maybe");
+        let input = "```{r}\n#| eccho: !expr show_code\n1\n```\n";
+        let unknown = lint_unknown(input, Flavor::Quarto);
+        assert_eq!(unknown.len(), 1, "{unknown:?}");
+        assert_eq!(unknown[0].code, UNKNOWN_KEY);
+    }
+
+    #[test]
+    fn dynamic_expr_is_not_accepted_in_frontmatter_or_jupyter_cells() {
+        for tag in ["!expr", "!r"] {
+            for input in [
+                format!("---\ntoc: {tag} show_toc\n---\n"),
+                format!("```{{python}}\n#| echo: {tag} show_code\n1\n```\n"),
+            ] {
+                let diags = lint(&input, Flavor::Quarto);
+                assert_eq!(diags.len(), 1, "{input}: {diags:?}");
+                assert_eq!(diags[0].code, TYPE_MISMATCH);
+            }
+        }
     }
 
     #[test]
