@@ -54,6 +54,11 @@ tasks:
     cmds:
       - cd docs && quarto preview --no-browser
 
+  docs:rules:
+    desc: Regenerate the lint rule reference from descriptions and executable examples
+    cmds:
+      - cargo run --quiet --example docgen
+
   lighthouse:
     desc: Render docs and run a Lighthouse audit against the local site
     vars:

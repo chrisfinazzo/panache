@@ -5,6 +5,21 @@ use crate::syntax::{AstNode, MathLineBreak, SyntaxKind};
 pub struct InlineMathLineBreakRule;
 
 impl Rule for InlineMathLineBreakRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/inline-math-line-break.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "$\\\\mathrm{x}$\n",
+                &["inline-math-line-break"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "inline-math-line-break"
     }

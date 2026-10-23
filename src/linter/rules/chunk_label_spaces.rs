@@ -5,6 +5,21 @@ use crate::syntax::{AstNode, ChunkInfoItem, ChunkLabel, ChunkLabelSource, CodeBl
 pub struct ChunkLabelSpacesRule;
 
 impl Rule for ChunkLabelSpacesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/chunk-label-spaces.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "```{r several words}\n1 + 1\n```\n",
+                &["chunk-label-spaces"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "chunk-label-spaces"
     }

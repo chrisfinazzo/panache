@@ -4,6 +4,21 @@ use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleM
 pub struct DuplicateReferencesRule;
 
 impl Rule for DuplicateReferencesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/duplicate-reference-labels.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "[Read more][guide].\n\n[guide]: /first\n[guide]: /second\n",
+                &["duplicate-reference-labels"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "duplicate-reference-labels"
     }

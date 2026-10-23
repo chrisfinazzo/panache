@@ -58,6 +58,21 @@ struct Candidate {
 }
 
 impl Rule for SwallowedListMarkerRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/swallowed-list-marker.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Choose one option:\n- First choice\n- Second choice\n",
+                &["swallowed-list-marker"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         SWALLOWED_LIST_MARKER
     }

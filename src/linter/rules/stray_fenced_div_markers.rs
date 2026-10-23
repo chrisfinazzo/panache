@@ -7,6 +7,21 @@ use crate::syntax::SyntaxKind;
 pub struct StrayFencedDivMarkersRule;
 
 impl Rule for StrayFencedDivMarkersRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/stray-fenced-div-markers.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Text with a misplaced ::: marker.\n",
+                &["stray-fenced-div-markers"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "stray-fenced-div-markers"
     }

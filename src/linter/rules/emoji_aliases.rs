@@ -5,6 +5,21 @@ use crate::syntax::SyntaxKind;
 pub struct EmojiAliasesRule;
 
 impl Rule for EmojiAliasesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/unknown-emoji-alias.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new("Hello :not-a-real-emoji:\n", &["unknown-emoji-alias"])
+                    .config("[extensions]\nemoji = true\n"),
+            ]
+        }
+    }
+
     fn name(&self) -> &str {
         "unknown-emoji-alias"
     }

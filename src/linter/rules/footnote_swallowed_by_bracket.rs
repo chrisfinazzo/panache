@@ -28,6 +28,30 @@ enum Swallower {
 }
 
 impl Rule for FootnoteSwallowedByBracketRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/footnote-swallowed-by-bracket.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new(
+                    "Text^[A note][link].\n\n[link]: https://example.com\n",
+                    &["footnote-swallowed-by-bracket"],
+                )
+                .caption("A reference link follows the apparent note:"),
+                Example::new(
+                    "Text^[A note](https://example.com).\n",
+                    &["footnote-swallowed-by-bracket"],
+                )
+                .caption("A parenthesis follows the apparent note:")
+                .unsafe_fixes(),
+            ]
+        }
+    }
+
     fn name(&self) -> &str {
         "footnote-swallowed-by-bracket"
     }

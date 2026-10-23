@@ -6,6 +6,21 @@ use rowan::ast::AstNode;
 pub struct HeadingStripCommentsResidueRule;
 
 impl Rule for HeadingStripCommentsResidueRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/heading-strip-comments-residue.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "# Results <!-- Draft --> {#results}\n",
+                &["heading-strip-comments-residue"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "heading-strip-comments-residue"
     }

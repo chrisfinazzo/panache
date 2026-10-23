@@ -20,6 +20,16 @@ use rowan::{TextRange, TextSize};
 pub struct EmptyValuesRule;
 
 impl Rule for EmptyValuesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/empty-values.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const { &[Example::new("---\ntitle:\n---\n", &["empty-values"]).unsafe_fixes()] }
+    }
+
     fn name(&self) -> &str {
         "empty-values"
     }

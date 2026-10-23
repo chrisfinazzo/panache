@@ -57,6 +57,21 @@ impl Stakes {
 }
 
 impl Rule for FootnoteAfterImageRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/footnote-after-image.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "![A caption.](image.png){#fig-plot}\n^[A note about the figure.]\n",
+                &["footnote-after-image"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         FOOTNOTE_AFTER_IMAGE
     }

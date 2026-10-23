@@ -7,6 +7,21 @@ use crate::syntax::{AstNode, CodeBlock, SyntaxKind};
 pub struct MissingChunkLabelsRule;
 
 impl Rule for MissingChunkLabelsRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/missing-chunk-labels.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "```{r}\n1 + 1\n```\n",
+                &["missing-chunk-labels"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "missing-chunk-labels"
     }

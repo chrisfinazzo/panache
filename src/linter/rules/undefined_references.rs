@@ -9,6 +9,29 @@ use crate::utils::{crossref_resolution_labels, normalize_anchor_label, normalize
 pub struct UndefinedReferencesRule;
 
 impl Rule for UndefinedReferencesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/undefined-references.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new("[Read more][missing].\n", &["undefined-reference-label"]),
+                Example::new("Text[^missing].\n", &["undefined-footnote-id"]),
+            ]
+        }
+    }
+
+    fn code_description(&self, code: &str) -> Option<&'static str> {
+        Some(match code {
+            "undefined-reference-label" => "A reference-style link has no matching definition.",
+            "undefined-footnote-id" => "A footnote reference has no matching definition.",
+            _ => return None,
+        })
+    }
+
     fn name(&self) -> &str {
         "undefined-references"
     }

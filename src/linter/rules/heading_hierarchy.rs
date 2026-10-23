@@ -6,6 +6,21 @@ use rowan::ast::AstNode;
 pub struct HeadingHierarchyRule;
 
 impl Rule for HeadingHierarchyRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/heading-hierarchy.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "# Methods\n\n### Results\n",
+                &["heading-hierarchy"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "heading-hierarchy"
     }

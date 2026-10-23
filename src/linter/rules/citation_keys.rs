@@ -8,6 +8,53 @@ use crate::metadata::{
 pub struct CitationKeysRule;
 
 impl Rule for CitationKeysRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/citation-keys.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+            Example::new("---\nbibliography: missing.bib\n---\n", &["bibliography-load-error"])
+.caption("The declared bibliography file does not exist:"),
+            Example::new("---\nbibliography: refs.json\n---\n", &["bibliography-parse-error"])
+.caption("The bibliography file cannot be parsed:")
+.companions(&[("refs.json", "not valid JSON\n")]),
+            Example::new("---\nbibliography: refs.bib\n---\n\nSee [@missing].\n", &["missing-bibliography-key"])
+.caption("A citation has no matching entry:")
+.companions(&[("refs.bib", "@book{known, title = {A Book}}\n")]),
+            Example::new("---\nbibliography: refs.bib\n---\n", &["duplicate-bibliography-key"])
+.caption("Two bibliography entries share a key:")
+.companions(&[("refs.bib", "@book{same, title = {First}}\n@book{same, title = {Second}}\n")]),
+            Example::new("---\nreferences:\n  - id: same\n    title: First\n  - id: same\n    title: Second\n---\n", &["duplicate-inline-reference-id"])
+.caption("Two inline references share an ID:")
+        ]
+        }
+    }
+
+    fn code_description(&self, code: &str) -> Option<&'static str> {
+        Some(match code {
+            "bibliography-load-error" => {
+                "A bibliography file could not be read. Check that the path is correct and the file is accessible."
+            }
+            "bibliography-parse-error" => {
+                "A bibliography file contains invalid syntax. Correct it using the syntax for its file format."
+            }
+            "missing-bibliography-key" => {
+                "A cited key is absent from the loaded bibliography and inline references."
+            }
+            "duplicate-bibliography-key" => {
+                "More than one bibliography entry uses the same key. Rename or remove the duplicate."
+            }
+            "duplicate-inline-reference-id" => {
+                "An inline reference ID is repeated, or conflicts with a key in a bibliography file."
+            }
+            _ => return None,
+        })
+    }
+
     fn name(&self) -> &str {
         "citation-keys"
     }

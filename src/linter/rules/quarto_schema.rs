@@ -43,6 +43,38 @@ pub struct QuartoSchemaRule;
 pub struct QuartoSchemaUnknownKeyRule;
 
 impl Rule for QuartoSchemaRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/quarto-schema.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new("---\ntoc: maybe\n---\n", &["quarto-schema-type-mismatch"])
+                    .caption("A boolean option has a text value:"),
+                Example::new(
+                    "---\nfig-align: sideways\n---\n",
+                    &["quarto-schema-invalid-enum"],
+                )
+                .caption("An option has an unsupported value:"),
+            ]
+        }
+    }
+
+    fn code_description(&self, code: &str) -> Option<&'static str> {
+        Some(match code {
+            "quarto-schema-type-mismatch" => {
+                "A value has the wrong type for the option, such as text where a boolean is required."
+            }
+            "quarto-schema-invalid-enum" => {
+                "A value is not among the choices allowed for the option."
+            }
+            _ => return None,
+        })
+    }
+
     fn name(&self) -> &str {
         "quarto-schema"
     }
@@ -71,6 +103,21 @@ impl Rule for QuartoSchemaRule {
 }
 
 impl Rule for QuartoSchemaUnknownKeyRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/quarto-schema-unknown-key.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "---\nforrmat: html\n---\n",
+                &["quarto-schema-unknown-key"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "quarto-schema-unknown-key"
     }

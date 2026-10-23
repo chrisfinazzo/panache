@@ -48,6 +48,21 @@ pub const UNSUPPORTED_METADATA_KEY: &str = "unsupported-metadata-key";
 pub struct UnsupportedMetadataKeyRule;
 
 impl Rule for UnsupportedMetadataKeyRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/unsupported-metadata-key.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "---\n[a, b]: value\n---\n",
+                &["unsupported-metadata-key"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         UNSUPPORTED_METADATA_KEY
     }

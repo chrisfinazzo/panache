@@ -7,6 +7,21 @@ use crate::syntax::SyntaxKind;
 pub struct FootnoteRefInFootnoteDefRule;
 
 impl Rule for FootnoteRefInFootnoteDefRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/footnote-ref-in-footnote-def.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Text[^a].\n\n[^a]: See [^b].\n\n[^b]: More detail.\n",
+                &["footnote-ref-in-footnote-def"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "footnote-ref-in-footnote-def"
     }

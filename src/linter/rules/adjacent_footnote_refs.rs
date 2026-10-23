@@ -7,6 +7,21 @@ use crate::syntax::SyntaxKind;
 pub struct AdjacentFootnoteRefsRule;
 
 impl Rule for AdjacentFootnoteRefsRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/adjacent-footnote-refs.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Text[^a][^b].\n\n[^a]: First note.\n\n[^b]: Second note.\n",
+                &["adjacent-footnote-refs"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "adjacent-footnote-refs"
     }

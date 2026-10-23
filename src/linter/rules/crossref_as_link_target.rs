@@ -7,6 +7,21 @@ use rowan::{TextRange, TextSize};
 pub struct CrossrefAsLinkTargetRule;
 
 impl Rule for CrossrefAsLinkTargetRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/crossref-as-link-target.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "# Results {#results}\n\n[Results](@results)\n",
+                &["crossref-as-link-target"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "crossref-as-link-target"
     }

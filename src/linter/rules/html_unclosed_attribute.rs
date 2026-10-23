@@ -5,6 +5,21 @@ use crate::syntax::InlineNode;
 pub struct HtmlUnclosedAttributeRule;
 
 impl Rule for HtmlUnclosedAttributeRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/html-unclosed-attribute.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "<a id=\"goal></a>\n",
+                &["html-unclosed-attribute"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "html-unclosed-attribute"
     }

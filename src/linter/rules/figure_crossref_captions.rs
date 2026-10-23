@@ -8,6 +8,22 @@ use std::collections::HashMap;
 pub struct FigureCrossrefCaptionsRule;
 
 impl Rule for FigureCrossrefCaptionsRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/figure-crossref-captions.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Figure \\@ref(fig:plot).\n\n```{r}\n#| label: plot\nplot(1:10)\n```\n",
+                &["figure-crossref-captions"],
+            )
+            .flavor(crate::config::Flavor::RMarkdown)]
+        }
+    }
+
     fn name(&self) -> &str {
         "figure-crossref-captions"
     }

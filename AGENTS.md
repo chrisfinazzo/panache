@@ -52,6 +52,7 @@ commands. Important generated outputs include:
 - `docs/reference/cli.qmd`
 - `docs/reference/_formatter-presets-details.qmd`
 - `docs/reference/_linter-presets-details.qmd`
+- `docs/reference/_linter-rules.qmd` (`task docs:rules`)
 - `panache.schema.json`
 
 ### Commits and releases
@@ -183,6 +184,8 @@ commands. Important generated outputs include:
 - Reuse shared linter orchestration instead of duplicating flows.
 - Add focused lint tests, and synchronize documentation for user-visible
   changes.
+- Keep rule explanations in `src/linter/rules/docs/` and executable examples in
+  each rule's `examples()`. Regenerate the reference with `task docs:rules`.
 
 ### Tests and debugging
 

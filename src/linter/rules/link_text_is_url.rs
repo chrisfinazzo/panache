@@ -7,6 +7,21 @@ use crate::syntax::{Link, SyntaxKind};
 pub struct LinkTextIsUrlRule;
 
 impl Rule for LinkTextIsUrlRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/link-text-is-url.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "[https://example.com/](https://example.com/)\n",
+                &["link-text-is-url"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "link-text-is-url"
     }

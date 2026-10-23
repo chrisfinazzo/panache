@@ -9,6 +9,21 @@ use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 pub struct BlankLineInInlineFootnoteRule;
 
 impl Rule for BlankLineInInlineFootnoteRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/blank-line-in-inline-footnote.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Text^[A note\n\ncontinued here].\n",
+                &["blank-line-in-inline-footnote"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "blank-line-in-inline-footnote"
     }

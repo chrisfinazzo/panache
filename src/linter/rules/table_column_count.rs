@@ -14,6 +14,21 @@ use crate::syntax::{AstNode, PipeTable, SyntaxKind};
 pub struct TableColumnCountRule;
 
 impl Rule for TableColumnCountRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/table-column-count.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "| a | b | c |\n|---|---|\n| 1 | 2 | 3 |\n",
+                &["table-column-count"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "table-column-count"
     }

@@ -13,6 +13,16 @@ use panache_parser::entities::ENTITIES;
 pub struct HtmlEntitiesRule;
 
 impl Rule for HtmlEntitiesRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/html-entities.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const { &[Example::new("An ellipsis: &ellips;\n", &["html-entities"])] }
+    }
+
     fn name(&self) -> &str {
         "html-entities"
     }

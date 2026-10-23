@@ -36,6 +36,16 @@ pub const CONSUMER_DIVERGENCE: &str = "consumer-divergence";
 pub struct ConsumerDivergenceRule;
 
 impl Rule for ConsumerDivergenceRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/consumer-divergence.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const { &[Example::new("---\ncountry: no\n---\n", &["consumer-divergence"]).unsafe_fixes()] }
+    }
+
     fn name(&self) -> &str {
         CONSUMER_DIVERGENCE
     }

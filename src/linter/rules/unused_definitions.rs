@@ -6,6 +6,32 @@ use crate::syntax::SyntaxKind;
 pub struct UnusedDefinitionsRule;
 
 impl Rule for UnusedDefinitionsRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/unused-definitions.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new(
+                    "[unused]: https://example.com\n",
+                    &["unused-definition-label"],
+                ),
+                Example::new("[^unused]: A note.\n", &["unused-footnote-id"]),
+            ]
+        }
+    }
+
+    fn code_description(&self, code: &str) -> Option<&'static str> {
+        Some(match code {
+            "unused-definition-label" => "A reference-link definition is never used.",
+            "unused-footnote-id" => "A footnote definition is never used.",
+            _ => return None,
+        })
+    }
+
     fn name(&self) -> &str {
         "unused-definitions"
     }

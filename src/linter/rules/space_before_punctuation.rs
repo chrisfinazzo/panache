@@ -10,6 +10,22 @@ use crate::syntax::{
 pub struct SpaceBeforePunctuationRule;
 
 impl Rule for SpaceBeforePunctuationRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/space-before-punctuation.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "We have A   , and B    ; so we have C    .\n",
+                &["space-before-punctuation"],
+            )
+            .unsafe_fixes()]
+        }
+    }
+
     fn name(&self) -> &str {
         "space-before-punctuation"
     }

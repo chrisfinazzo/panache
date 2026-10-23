@@ -13,6 +13,21 @@ use crate::parser::inlines::citations::suppressed_bare_citation;
 pub struct UnspacedCitationRule;
 
 impl Rule for UnspacedCitationRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/unspaced-citation.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "---\nreferences:\n  - id: smith2024\n    title: A study\n---\n\nSee@smith2024.\n",
+                &["unspaced-citation"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "unspaced-citation"
     }

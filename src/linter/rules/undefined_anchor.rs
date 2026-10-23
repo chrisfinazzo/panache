@@ -8,6 +8,16 @@ use std::collections::HashSet;
 pub struct UndefinedAnchorRule;
 
 impl Rule for UndefinedAnchorRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/undefined-anchor.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const { &[Example::new("[Methods](#methods)\n", &["undefined-anchor"])] }
+    }
+
     fn name(&self) -> &str {
         "undefined-anchor"
     }

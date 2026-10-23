@@ -69,6 +69,21 @@ fn is_bracketed(citation: &SyntaxNode) -> bool {
 }
 
 impl Rule for CitationNonbreakingSpaceRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/citation-nonbreaking-space.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "A result [@smith2024].\n",
+                &["citation-nonbreaking-space"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "citation-nonbreaking-space"
     }

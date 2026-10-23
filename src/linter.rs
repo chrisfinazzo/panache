@@ -1,17 +1,21 @@
 pub mod code_block_collector;
 pub mod diagnostics;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod docs;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod execution_context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod external_linters;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod external_linters_sync;
+pub mod fix;
 pub(crate) mod fuzzy;
 pub mod index;
 pub mod metadata_diagnostics;
 pub(crate) mod offsets;
 pub mod project_index;
 pub mod quarto_schema;
+pub mod render;
 pub mod rules;
 pub mod runner;
 pub(crate) mod yaml_anchors;
@@ -87,7 +91,7 @@ pub fn lint_with_external_sync_and_metadata(
 /// `default_registry` filters this list by config; `builtin_rule_metadata`
 /// reads each rule's [`RuleMeta`] off it. Adding a rule means adding one entry
 /// here (plus its `impl Rule`), nothing else.
-fn all_rules() -> Vec<Box<dyn Rule>> {
+pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(rules::heading_hierarchy::HeadingHierarchyRule),
         Box::new(rules::empty_list_item::EmptyListItemRule),
@@ -133,9 +137,8 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
     ]
 }
 
-/// Metadata for every built-in rule, independent of config. The reference docs
-/// (`docs/reference/linter-rules.qmd`) are validated against this in
-/// `tests/linter_rules_docs.rs`.
+/// Metadata for every built-in rule, independent of config. The reference
+/// generator and CLI guidance read these same facts.
 pub fn builtin_rule_metadata() -> Vec<RuleMeta> {
     all_rules().iter().map(|rule| rule.metadata()).collect()
 }

@@ -9,6 +9,21 @@ use crate::syntax::SyntaxKind;
 pub struct UnusedYamlAnchorRule;
 
 impl Rule for UnusedYamlAnchorRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/unused-yaml-anchor.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "---\ntitle: &title A report\n---\n",
+                &["unused-yaml-anchor"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "unused-yaml-anchor"
     }

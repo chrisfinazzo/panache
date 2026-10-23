@@ -63,6 +63,7 @@ the source and regenerate.
   | `docs/reference/cli.qmd`                        | `cargo build` (from the clap definitions in `src/cli.rs`) |
   | `docs/reference/_formatter-presets-details.qmd` | `cargo build` (from `src/config/formatter_presets.rs`)    |
   | `docs/reference/_linter-presets-details.qmd`    | `cargo build` (from `src/linter/external_linters.rs`)     |
+  | `docs/reference/_linter-rules.qmd`              | `task docs:rules` (from rule descriptions and examples)   |
   | `panache.schema.json`                           | `UPDATE_EXPECTED=1 cargo test config_schema`              |
   | `docs/guide/benchmarks.qmd`                     | `./benches/generate_docs.sh`                              |
 
@@ -240,10 +241,20 @@ binaries on `PATH`; the devenv shell provides them.
 - Keep fixes explicit and safe; avoid silent behavior changes. A fix must never
   change the meaning of the document.
 - Add tests for rule behavior and autofix output.
-- Every rule must be documented in `docs/reference/linter-rules.qmd`.
-  `tests/linter_rules_docs.rs` asserts the catalogue matches the rule registry
-  (codes, severities, fixability, default state), so an undocumented rule fails
-  the test suite.
+- Every rule supplies a `description()` and executable `examples()`. Keep the
+  description in `src/linter/rules/docs/<rule-name>.md`, and use `include_str!`
+  from the rule. Explain what the warning means and how to resolve it; keep
+  parser internals and development history out of the reference.
+- Examples declare their expected diagnostic codes. Set their flavor,
+  configuration, and companion files when needed. Diagnostics and fix output
+  come from the real linter, renderer, and fix application code. Unsafe fix
+  examples must opt in with `.unsafe_fixes()`.
+- Run `task docs:rules` (or `cargo run --example docgen`) after editing a rule
+  or its documentation. It regenerates `docs/reference/_linter-rules.qmd`,
+  included by `docs/reference/linter-rules.qmd`. Do not edit the catalog by
+  hand. `cargo test --test linter_rules_docs` checks example codes, severities,
+  fix behavior, coverage of every rule and code, stable anchors, and catalog
+  freshness. Review the generated diff before committing.
 - When debugging the linter from the CLI, remember that lint results are cached
   on disk under `~/.cache/panache/` and the cache key does not invalidate on
   every code change. Use `cargo run -- clean --all`, `--no-cache`, or

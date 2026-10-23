@@ -25,6 +25,22 @@ use crate::syntax::{AstNode, FootnoteReference, SyntaxKind, SyntaxNode};
 pub struct ReversedFootnoteMarkerRule;
 
 impl Rule for ReversedFootnoteMarkerRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/reversed-footnote-marker.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "Text [^a longer explanation goes here].\n",
+                &["reversed-footnote-marker"],
+            )
+            .unsafe_fixes()]
+        }
+    }
+
     fn name(&self) -> &str {
         "reversed-footnote-marker"
     }

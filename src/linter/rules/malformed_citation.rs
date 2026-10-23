@@ -12,6 +12,16 @@ use crate::syntax::{
 pub struct MalformedCitationRule;
 
 impl Rule for MalformedCitationRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/malformed-citation.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const { &[Example::new("See [@].\n", &["malformed-citation"])] }
+    }
+
     fn name(&self) -> &str {
         "malformed-citation"
     }

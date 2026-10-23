@@ -45,10 +45,10 @@ crates/panache-formatter/tests/math_badness/migration_census.txt eol=lf
 # The Badness audit is generated with `writeln!` and compared byte-for-byte.
 crates/panache-formatter/tests/math_badness/report.txt eol=lf
 
-# `tests/linter_rules_docs.rs` `include_str!`s this doc and searches for
-# LF-anchored substrings (`\n## Rules\n`, etc.), so it must check out with LF
-# on every platform (Windows would otherwise get CRLF and the test panics).
+# The rule reference is compared with generated text on every platform.
 docs/reference/linter-rules.qmd eol=lf
+docs/reference/_linter-rules.qmd eol=lf
+src/linter/rules/docs/*.md eol=lf
 
 # Jarl captures store byte offsets into `probe.R`; a CRLF checkout on Windows
 # would shift every offset after the first line, so keep the fixtures LF.

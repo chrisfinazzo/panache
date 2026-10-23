@@ -158,10 +158,8 @@ impl DiagnosticCode {
 
 /// Declarative, machine-readable facts about a built-in rule.
 ///
-/// This is the source of truth that the reference docs are checked against (see
-/// `tests/linter_rules_docs.rs`): every fact here must be reflected in
-/// `docs/reference/linter-rules.qmd`, and the docs may not list a rule or code
-/// that does not appear here.
+/// The reference generator reads these facts directly. The documentation tests
+/// also check them against the diagnostics produced by executable examples.
 #[derive(Debug, Clone)]
 pub struct RuleMeta {
     /// Rule name, as used in `[lint]` selection lists and the docs' `### \`name\`` heading.
@@ -181,10 +179,26 @@ pub struct RuleMeta {
 pub trait Rule {
     fn name(&self) -> &str;
 
+    /// Explain what the rule catches and how the author can resolve it.
+    fn description(&self) -> &'static str {
+        ""
+    }
+
+    /// Examples used to generate the reference and verify its diagnostic codes.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        &[]
+    }
+
+    /// Explain individual codes when a rule emits more than one diagnostic.
+    fn code_description(&self, _code: &str) -> Option<&'static str> {
+        None
+    }
+
     /// Declarative metadata describing the rule's gating, severity, auto-fix
     /// support, and the set of diagnostic codes it can emit. Keep this in sync
-    /// with the rule body; `tests/linter_rules_docs.rs` checks the reference
-    /// docs against it.
+    /// with the rule body; `tests/linter_rules_docs.rs` checks the examples
+    /// against it and verifies the generated reference.
     fn metadata(&self) -> RuleMeta;
 
     /// Node kinds this rule wants collected for it by the shared walk. The

@@ -12,6 +12,21 @@ use crate::syntax::SyntaxKind;
 pub struct DuplicateYamlAnchorRule;
 
 impl Rule for DuplicateYamlAnchorRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/duplicate-yaml-anchor.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "---\nfirst: &value 1\nsecond: &value 2\n---\n",
+                &["duplicate-yaml-anchor"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "duplicate-yaml-anchor"
     }

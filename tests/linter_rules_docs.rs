@@ -1,224 +1,162 @@
-//! Keeps `docs/reference/linter-rules.qmd` honest against the built-in rule
-//! registry.
-//!
-//! The reference page is hand-written prose, but several of its facts (the set
-//! of rules, each rule's diagnostic codes, severities, auto-fix support,
-//! default-on/off state, and config requirements) have an authoritative source
-//! in code via [`RuleMeta`]. This test asserts the docs reflect that metadata
-//! and never document a rule or code that no longer exists, so the catalogue
-//! cannot silently drift from the linter.
+//! Keep the generated reference complete, reproducible, and true to behavior.
 
-use panache::linter::{Requirement, Severity, builtin_rule_metadata};
+use std::collections::BTreeSet;
+use std::path::Path;
 
-const DOC: &str = include_str!("../docs/reference/linter-rules.qmd");
+use panache::linter::docs::{lint_example, render_catalog};
+use panache::linter::fix::apply_fixes;
+use panache::linter::{FixSafety, all_rules};
 
-/// The body of the `## Rules` section: everything between the `## Rules`
-/// heading and the next top-level section (`## YAML diagnostics`). The YAML
-/// codes are emitted by the parser, not the rule registry, so they live in
-/// their own section and are out of scope here.
-fn rules_section() -> &'static str {
-    let start = DOC
-        .find("\n## Rules\n")
-        .expect("docs must have a `## Rules` section");
-    let after = &DOC[start + "\n## Rules\n".len()..];
-    let end = after
-        .find("\n## ")
-        .expect("`## Rules` must be followed by another `## ` section");
-    &after[..end]
-}
-
-/// Returns the rule name when `line` is a rule heading of the exact form
-/// ``### `name` {#anchor}``. Markdown `### ` headings inside example code
-/// blocks have no backtick-wrapped name and no `{#…}` anchor, so they are
-/// skipped.
-fn rule_heading_name(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("### `")?;
-    let name = rest.split('`').next()?;
-    line.contains("{#").then_some(name)
-}
-
-/// Per-rule chunks keyed by rule name: each rule's heading through the line
-/// before the next rule heading, so its `#### code` subsections stay inside its
-/// own chunk.
-fn rule_chunks() -> Vec<(String, &'static str)> {
-    let section = rules_section();
-    let starts: Vec<(usize, &str)> = section
-        .match_indices('\n')
-        .filter_map(|(nl, _)| {
-            let line_start = nl + 1;
-            let line = section[line_start..].lines().next()?;
-            rule_heading_name(line).map(|name| (line_start, name))
-        })
-        .collect();
-
-    starts
-        .iter()
-        .enumerate()
-        .map(|(i, &(start, name))| {
-            let end = starts.get(i + 1).map_or(section.len(), |&(s, _)| s);
-            (name.to_string(), &section[start..end])
-        })
-        .collect()
-}
-
-/// Value of a pandoc definition-list field (`Term\n:   value...`), with
-/// continuation lines joined by spaces. Returns `None` when the term is absent.
-fn field(chunk: &str, term: &str) -> Option<String> {
-    let lines: Vec<&str> = chunk.lines().collect();
-    let idx = lines.iter().position(|l| l.trim() == term)?;
-    let mut out = String::new();
-    let mut i = idx + 1;
-    while i < lines.len() && lines[i].trim().is_empty() {
-        i += 1; // pandoc allows a blank line between the term and its `:` body
-    }
-    while i < lines.len() && !lines[i].trim().is_empty() {
-        let line = lines[i].trim_start();
-        let line = line.strip_prefix(':').unwrap_or(line);
-        out.push_str(line.trim());
-        out.push(' ');
-        i += 1;
-    }
-    Some(out.trim().to_string())
-}
-
-/// A lowercase substring the docs' "Requirements" field must mention for a
-/// given requirement, so the documented precondition matches the gating.
-fn requirement_token(req: Requirement) -> Option<&'static str> {
-    match req {
-        Requirement::Always => None,
-        Requirement::HeaderAttributes => Some("header-attributes"),
-        Requirement::Footnotes => Some("footnotes"),
-        Requirement::InlineFootnotes => Some("inline-footnotes"),
-        Requirement::Citations => Some("citations"),
-        Requirement::FencedCodeAttributes => Some("fenced-code-attributes"),
-        Requirement::FencedDivs => Some("fenced-divs"),
-        Requirement::Emoji => Some("emoji"),
-        Requirement::RawHtml => Some("raw-html"),
-        Requirement::TexMath => Some("tex-math"),
-        Requirement::TexMathDollars => Some("tex-math-dollars"),
-        Requirement::ChunkFlavor => Some("chunk"),
-        Requirement::Quarto => Some("quarto"),
-        Requirement::PandocMetadata => Some("pandoc"),
-    }
-}
-
-fn severity_word(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "Error",
-        Severity::Warning => "Warning",
-        Severity::Info => "Info",
+#[test]
+fn every_rule_has_a_description_and_executable_examples() {
+    for rule in all_rules() {
+        assert!(
+            !rule.description().trim().is_empty(),
+            "{} has no description",
+            rule.name()
+        );
+        assert!(
+            !rule.examples().is_empty(),
+            "{} has no examples",
+            rule.name()
+        );
     }
 }
 
 #[test]
-fn every_rule_is_documented_and_nothing_extra() {
-    let meta_names: std::collections::BTreeSet<String> = builtin_rule_metadata()
-        .iter()
-        .map(|m| m.name.to_string())
-        .collect();
-    let doc_names: std::collections::BTreeSet<String> =
-        rule_chunks().into_iter().map(|(name, _)| name).collect();
-
-    let missing: Vec<_> = meta_names.difference(&doc_names).collect();
-    assert!(
-        missing.is_empty(),
-        "rules registered in code but missing from docs/reference/linter-rules.qmd: {missing:?}"
-    );
-
-    let phantom: Vec<_> = doc_names.difference(&meta_names).collect();
-    assert!(
-        phantom.is_empty(),
-        "rules documented but not registered in code: {phantom:?}"
-    );
+fn documented_examples_emit_the_expected_codes() {
+    for rule in all_rules() {
+        let meta = rule.metadata();
+        let mut covered = BTreeSet::new();
+        let mut demonstrated_fix = false;
+        for example in rule.examples() {
+            assert!(
+                !example.expected_codes.is_empty(),
+                "{} has no expected codes",
+                rule.name()
+            );
+            let diagnostics = lint_example(rule.as_ref(), example)
+                .unwrap_or_else(|error| panic!("{}: {error}", rule.name()));
+            let actual: BTreeSet<_> = diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect();
+            let expected: BTreeSet<_> = example.expected_codes.iter().copied().collect();
+            assert_eq!(
+                actual,
+                expected,
+                "example for {}: {}",
+                rule.name(),
+                example.source
+            );
+            covered.extend(expected);
+            for diagnostic in &diagnostics {
+                let code = meta
+                    .codes
+                    .iter()
+                    .find(|code| code.code == diagnostic.code)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{} emitted undeclared code {}",
+                            rule.name(),
+                            diagnostic.code
+                        )
+                    });
+                assert_eq!(diagnostic.severity, code.severity, "{}", diagnostic.code);
+                if diagnostic.fix.is_some() {
+                    assert!(meta.auto_fix, "{} offers an undeclared fix", rule.name());
+                    demonstrated_fix = true;
+                }
+            }
+        }
+        let declared: BTreeSet<_> = meta.codes.iter().map(|code| code.code).collect();
+        assert_eq!(
+            covered,
+            declared,
+            "{} has codes without examples",
+            rule.name()
+        );
+        assert_eq!(
+            demonstrated_fix,
+            meta.auto_fix,
+            "{} has no example of its fix",
+            rule.name()
+        );
+    }
 }
 
 #[test]
-fn documented_facts_match_metadata() {
-    let chunks: std::collections::HashMap<String, &'static str> =
-        rule_chunks().into_iter().collect();
-
-    for meta in builtin_rule_metadata() {
-        let chunk = chunks
-            .get(meta.name)
-            .unwrap_or_else(|| panic!("rule `{}` has no docs section", meta.name));
-
-        // Every diagnostic code must appear in the rule's section.
-        for code in meta.codes {
-            assert!(
-                chunk.contains(code.code),
-                "rule `{}`: diagnostic code `{}` is not documented",
-                meta.name,
-                code.code
+fn fix_examples_respect_safety_and_resolve_the_demonstrated_issue() {
+    for rule in all_rules() {
+        for example in rule.examples() {
+            let diagnostics = lint_example(rule.as_ref(), example).unwrap();
+            let safe = apply_fixes(example.source, &diagnostics, false);
+            if diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.fix.is_some())
+                && diagnostics
+                    .iter()
+                    .filter_map(|diagnostic| diagnostic.fix.as_ref())
+                    .all(|fix| fix.safety == FixSafety::Unsafe)
+            {
+                assert_eq!(
+                    safe.output,
+                    example.source,
+                    "{} applied an unsafe fix",
+                    rule.name()
+                );
+            }
+            let fixed = apply_fixes(example.source, &diagnostics, example.allow_unsafe_fixes);
+            if fixed.output == example.source {
+                continue;
+            }
+            assert_eq!(
+                fixed.conflicted,
+                0,
+                "{} has conflicting example fixes",
+                rule.name()
             );
-        }
-
-        // The Severity field must mention every distinct severity the rule emits.
-        let severity = field(chunk, "Severity")
-            .unwrap_or_else(|| panic!("rule `{}` has no Severity field", meta.name));
-        let mut severities: Vec<Severity> = meta.codes.iter().map(|c| c.severity).collect();
-        severities.dedup();
-        for sev in severities {
+            let source = fixed.output;
+            let fixed_diagnostics =
+                panache::linter::docs::lint_example_source(rule.as_ref(), example, &source)
+                    .unwrap();
             assert!(
-                severity.contains(severity_word(sev)),
-                "rule `{}`: Severity field {severity:?} does not mention {:?}",
-                meta.name,
-                severity_word(sev)
-            );
-        }
-
-        // Auto-fix field must agree with `auto_fix`.
-        let auto_fix = field(chunk, "Auto-fix")
-            .unwrap_or_else(|| panic!("rule `{}` has no Auto-fix field", meta.name));
-        if meta.auto_fix {
-            assert!(
-                auto_fix.starts_with("Yes"),
-                "rule `{}`: auto_fix=true but docs say {auto_fix:?}",
-                meta.name
-            );
-        } else {
-            assert!(
-                auto_fix.starts_with("No"),
-                "rule `{}`: auto_fix=false but docs say {auto_fix:?}",
-                meta.name
-            );
-        }
-
-        // Opt-in rules must be flagged "Default: Off"; default-on rules must not.
-        let default_field = field(chunk, "Default");
-        if meta.default_on {
-            assert!(
-                default_field.is_none(),
-                "rule `{}`: default_on=true but docs declare a Default field ({:?})",
-                meta.name,
-                default_field
-            );
-        } else {
-            let value = default_field.unwrap_or_else(|| {
-                panic!(
-                    "rule `{}`: default_on=false but docs have no Default field",
-                    meta.name
-                )
-            });
-            assert!(
-                value.contains("Off"),
-                "rule `{}`: opt-in rule's Default field should say Off, got {value:?}",
-                meta.name
-            );
-        }
-
-        // Gated rules must document a matching Requirements field.
-        if let Some(token) = requirement_token(meta.requires) {
-            let req = field(chunk, "Requirements").unwrap_or_else(|| {
-                panic!(
-                    "rule `{}`: requires {:?} but docs have no Requirements field",
-                    meta.name, meta.requires
-                )
-            });
-            assert!(
-                req.to_lowercase().contains(token),
-                "rule `{}`: Requirements field {req:?} does not mention `{token}`",
-                meta.name
+                fixed_diagnostics.is_empty(),
+                "{} remains after its fix: {fixed_diagnostics:?}",
+                rule.name()
             );
         }
     }
+}
+
+#[test]
+fn every_rule_and_diagnostic_code_has_a_stable_anchor() {
+    let catalog = render_catalog().unwrap();
+    for rule in all_rules() {
+        let meta = rule.metadata();
+        for name in std::iter::once(meta.name).chain(meta.codes.iter().map(|code| code.code)) {
+            assert_eq!(
+                catalog.matches(&format!("{{#{name}}}")).count(),
+                1,
+                "missing or duplicate anchor for {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn committed_catalog_matches_the_generator() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/_linter-rules.qmd");
+    let committed =
+        std::fs::read_to_string(path).expect("run `task docs:rules` to generate the catalog");
+    assert_eq!(
+        committed,
+        render_catalog().unwrap(),
+        "rule reference is stale; run `task docs:rules`"
+    );
+    let reference = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/linter-rules.qmd"),
+    )
+    .unwrap();
+    assert!(reference.contains("{{< include _linter-rules.qmd >}}"));
 }

@@ -30,6 +30,59 @@ use crate::syntax::{MathDiagnosticKind, SyntaxKind, math_diagnostics};
 pub struct MathContentRule;
 
 impl Rule for MathContentRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/math-syntax.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[
+                Example::new("$\\frac{1}{2$\n", &["math-unclosed-group"])
+                    .caption("A group is missing its closing brace:"),
+                Example::new("$a}b$\n", &["math-unexpected-close-brace"])
+                    .caption("A closing brace has no matching opener:"),
+                Example::new(
+                    "$$\n\\begin{aligned} x &= 1\n$$\n",
+                    &["math-unclosed-environment"],
+                )
+                .caption("An environment is missing its end:"),
+                Example::new(
+                    "$$\\begin{aligned}x\\end{matrix}$$\n",
+                    &["math-mismatched-environment"],
+                )
+                .caption("The environment names do not match:"),
+                Example::new("$x \\end{aligned}$\n", &["math-unexpected-end"])
+                    .caption("An environment ends without being opened:"),
+                Example::new("$\\left(x$\n", &["math-unclosed-delimiter"])
+                    .caption("A scalable delimiter is missing its partner:"),
+                Example::new("$x\\right)$\n", &["math-unexpected-right"])
+                    .caption("A closing scalable delimiter has no opener:"),
+                Example::new("$$\n$ a\n$$\n", &["math-unexpected-dollar"])
+                    .caption("A dollar sign appears inside display math:"),
+            ]
+        }
+    }
+
+    fn code_description(&self, code: &str) -> Option<&'static str> {
+        Some(match code {
+            "math-unclosed-group" => "An opening `{` has no matching `}`.",
+            "math-unexpected-close-brace" => "A closing `}` has no matching `{`.",
+            "math-unclosed-environment" => "A `\\begin{...}` has no matching `\\end{...}`.",
+            "math-mismatched-environment" => {
+                "The name in `\\end{...}` differs from the open environment."
+            }
+            "math-unexpected-end" => "A `\\end{...}` has no matching `\\begin{...}`.",
+            "math-unclosed-delimiter" => "A `\\left` has no matching `\\right`.",
+            "math-unexpected-right" => "A `\\right` has no matching `\\left`.",
+            "math-unexpected-dollar" => {
+                "An unescaped `$` appears inside TeX math. Use `\\$` for a literal dollar sign."
+            }
+            _ => return None,
+        })
+    }
+
     fn name(&self) -> &str {
         "math-syntax"
     }

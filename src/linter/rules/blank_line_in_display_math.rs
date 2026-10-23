@@ -7,6 +7,21 @@ use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 pub struct BlankLineInDisplayMathRule;
 
 impl Rule for BlankLineInDisplayMathRule {
+    fn description(&self) -> &'static str {
+        include_str!("docs/blank-line-in-display-math.md")
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn examples(&self) -> &'static [crate::linter::docs::Example] {
+        use crate::linter::docs::Example;
+        const {
+            &[Example::new(
+                "$$\nx = 1\n\n$$\n",
+                &["blank-line-in-display-math"],
+            )]
+        }
+    }
+
     fn name(&self) -> &str {
         "blank-line-in-display-math"
     }
