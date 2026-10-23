@@ -5,7 +5,13 @@ expression: cst_output
 DOCUMENT@0..28
   HTML_BLOCK@0..17
     HTML_BLOCK_TAG@0..13
-      TEXT@0..12 "<div id=\"x\">"
+      TEXT@0..4 "<div"
+      HTML_ATTRS@4..11
+        WHITESPACE@4..5 " "
+        TEXT@5..9 "id=\""
+        ATTR_ID@9..10 "x"
+        TEXT@10..11 "\""
+      TEXT@11..12 ">"
       NEWLINE@12..13 "\n"
     HTML_BLOCK_CONTENT@13..17
       TEXT@13..16 "foo"

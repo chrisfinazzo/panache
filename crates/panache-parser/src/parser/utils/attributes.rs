@@ -600,11 +600,10 @@ enum HtmlAttrComponent {
     Id(std::ops::Range<usize>),
     /// One whitespace-separated word of a `class="a b"` value.
     Class(std::ops::Range<usize>),
-    /// `key="v"` / `key=v` → key range, `=` byte index, value range (value
+    /// `key="v"` / `key=v` → key range and value range (value
     /// includes surrounding quotes when present).
     KeyValue {
         key: std::ops::Range<usize>,
-        eq: usize,
         value: std::ops::Range<usize>,
     },
     /// A valueless attribute (`hidden`) → key range only (projects to `(key,"")`).
@@ -664,9 +663,14 @@ fn html_attribute_spans(content: &str) -> Vec<HtmlAttrComponent> {
                 let key_end = i;
                 let key = &content[key_start..key_end];
 
+                while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
                 if i < bytes.len() && bytes[i] == b'=' {
-                    let eq = i;
                     i += 1; // skip '='
+                    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
                     let value_start = i;
                     if i < bytes.len() && (bytes[i] == b'"' || bytes[i] == b'\'') {
                         let quote = bytes[i];
@@ -678,24 +682,22 @@ fn html_attribute_spans(content: &str) -> Vec<HtmlAttrComponent> {
                             i += 1; // closing quote
                         }
                     } else {
-                        while i < bytes.len()
-                            && !matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'/')
-                        {
+                        while i < bytes.len() && !matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r') {
                             i += 1;
                         }
                     }
                     let value_end = i;
                     match key {
-                        "id" => {
+                        _ if key.eq_ignore_ascii_case("id") => {
                             if !have_id {
+                                have_id = true;
                                 let inner = html_value_inner_range(content, value_start, value_end);
                                 if inner.end > inner.start {
                                     comps.push(HtmlAttrComponent::Id(inner));
-                                    have_id = true;
                                 }
                             }
                         }
-                        "class" => {
+                        _ if key.eq_ignore_ascii_case("class") => {
                             let inner = html_value_inner_range(content, value_start, value_end);
                             for w in html_word_ranges(content, inner.start, inner.end) {
                                 comps.push(HtmlAttrComponent::Class(w));
@@ -703,12 +705,13 @@ fn html_attribute_spans(content: &str) -> Vec<HtmlAttrComponent> {
                         }
                         _ => comps.push(HtmlAttrComponent::KeyValue {
                             key: key_start..key_end,
-                            eq,
                             value: value_start..value_end,
                         }),
                     }
                 } else if key_end > key_start {
                     comps.push(HtmlAttrComponent::Flag(key_start..key_end));
+                    have_id |= key.eq_ignore_ascii_case("id");
+                    i = key_end;
                 }
             }
         }
@@ -764,10 +767,10 @@ fn emit_html_attrs_with_kind(
                     builder.token(SyntaxKind::ATTR_KEY.into(), &attrs_text[r.clone()]);
                     builder.finish_node();
                 }
-                HtmlAttrComponent::KeyValue { key, eq, value } => {
+                HtmlAttrComponent::KeyValue { key, value } => {
                     builder.start_node(SyntaxKind::ATTR_KEY_VALUE.into());
                     builder.token(SyntaxKind::ATTR_KEY.into(), &attrs_text[key.clone()]);
-                    builder.token(SyntaxKind::TEXT.into(), &attrs_text[*eq..value.start]);
+                    builder.token(SyntaxKind::TEXT.into(), &attrs_text[key.end..value.start]);
                     if value.end > value.start {
                         builder.token(SyntaxKind::ATTR_VALUE.into(), &attrs_text[value.clone()]);
                     }
@@ -1011,6 +1014,7 @@ fn emit_attribute_gap(builder: &mut impl InlineSink, gap: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rowan::ast::AstNode;
 
     #[test]
     fn test_simple_id() {
@@ -1360,6 +1364,9 @@ mod tests {
             r#"id="x" hidden data-n="1""#,
             r#"  id="x"  /"#,
             r#"id="""#,
+            r#"ID = "x" title = 'one > two' hidden"#,
+            "id\n=\n'x'",
+            "id=one/two",
             "",
             "   ",
         ] {
@@ -1409,6 +1416,29 @@ mod tests {
         );
         assert!(parse_html_attribute_list("   ").is_none());
         assert!(parse_html_attribute_list(r#"id="""#).is_none());
+    }
+
+    #[test]
+    fn html_id_values_follow_html_attribute_syntax() {
+        for (raw, expected) in [
+            (r#"ID = "saved""#, Some("saved")),
+            ("id\n=\n'saved'", Some("saved")),
+            ("id=saved/path", Some("saved/path")),
+            (r##"id="#saved""##, Some("#saved")),
+            (r#"id="a&amp;b""#, Some("a&b")),
+            (r#"id="first" id="second""#, Some("first")),
+            (r#"id="" id="second""#, None),
+            ("id id=second", None),
+        ] {
+            let parsed = parse_html_attribute_list(raw).and_then(|attrs| attrs.identifier);
+            assert_eq!(parsed.as_deref(), expected, "{raw:?}");
+            let node = structured_html_attrs(raw);
+            assert_eq!(node.text().to_string(), raw);
+            assert_eq!(
+                crate::syntax::AttributeNode::cast(node).unwrap().id(),
+                parsed
+            );
+        }
     }
 
     /// Terminated named and numeric references decode; everything else is

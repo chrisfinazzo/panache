@@ -6,7 +6,17 @@ DOCUMENT@0..50
   PARAGRAPH@0..50
     TEXT@0..7 "before "
     INLINE_HTML@7..30
-      INLINE_HTML_CONTENT@7..30 "<span\n_bad=x id=hidden>"
+      INLINE_HTML_CONTENT@7..12 "<span"
+      HTML_ATTRS@12..29
+        NEWLINE@12..13 "\n"
+        ATTR_KEY_VALUE@13..19
+          ATTR_KEY@13..17 "_bad"
+          TEXT@17..18 "="
+          ATTR_VALUE@18..19 "x"
+        WHITESPACE@19..20 " "
+        TEXT@20..23 "id="
+        ATTR_ID@23..29 "hidden"
+      INLINE_HTML_CONTENT@29..30 ">"
     STRONG@30..36
       STRONG_MARKER@30..32 "**"
       TEXT@32..34 "hi"

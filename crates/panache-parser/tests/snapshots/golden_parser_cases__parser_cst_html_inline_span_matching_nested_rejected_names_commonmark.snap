@@ -5,7 +5,12 @@ expression: cst_output
 DOCUMENT@0..304
   PARAGRAPH@0..74
     INLINE_HTML@0..17
-      INLINE_HTML_CONTENT@0..17 "<span id=outer-0>"
+      INLINE_HTML_CONTENT@0..5 "<span"
+      HTML_ATTRS@5..16
+        WHITESPACE@5..6 " "
+        TEXT@6..9 "id="
+        ATTR_ID@9..16 "outer-0"
+      INLINE_HTML_CONTENT@16..17 ">"
     TEXT@17..53 "before <span 1bad=x i ..."
     INLINE_HTML@53..60
       INLINE_HTML_CONTENT@53..60 "</span>"
@@ -17,7 +22,12 @@ DOCUMENT@0..304
     BLANK_LINE@74..75 "\n"
   PARAGRAPH@75..153
     INLINE_HTML@75..92
-      INLINE_HTML_CONTENT@75..92 "<span id=outer-1>"
+      INLINE_HTML_CONTENT@75..80 "<span"
+      HTML_ATTRS@80..91
+        WHITESPACE@80..81 " "
+        TEXT@81..84 "id="
+        ATTR_ID@84..91 "outer-1"
+      INLINE_HTML_CONTENT@91..92 ">"
     TEXT@92..132 "before <span bad&name ..."
     INLINE_HTML@132..139
       INLINE_HTML_CONTENT@132..139 "</span>"
@@ -29,10 +39,25 @@ DOCUMENT@0..304
     BLANK_LINE@153..154 "\n"
   PARAGRAPH@154..228
     INLINE_HTML@154..171
-      INLINE_HTML_CONTENT@154..171 "<span id=outer-2>"
+      INLINE_HTML_CONTENT@154..159 "<span"
+      HTML_ATTRS@159..170
+        WHITESPACE@159..160 " "
+        TEXT@160..163 "id="
+        ATTR_ID@163..170 "outer-2"
+      INLINE_HTML_CONTENT@170..171 ">"
     TEXT@171..178 "before "
     INLINE_HTML@178..201
-      INLINE_HTML_CONTENT@178..201 "<span :bad=x id=hidden>"
+      INLINE_HTML_CONTENT@178..183 "<span"
+      HTML_ATTRS@183..200
+        WHITESPACE@183..184 " "
+        ATTR_KEY_VALUE@184..190
+          ATTR_KEY@184..188 ":bad"
+          TEXT@188..189 "="
+          ATTR_VALUE@189..190 "x"
+        WHITESPACE@190..191 " "
+        TEXT@191..194 "id="
+        ATTR_ID@194..200 "hidden"
+      INLINE_HTML_CONTENT@200..201 ">"
     TEXT@201..207 "inside"
     INLINE_HTML@207..214
       INLINE_HTML_CONTENT@207..214 "</span>"
@@ -44,7 +69,12 @@ DOCUMENT@0..304
     BLANK_LINE@228..229 "\n"
   PARAGRAPH@229..304
     INLINE_HTML@229..246
-      INLINE_HTML_CONTENT@229..246 "<span id=outer-3>"
+      INLINE_HTML_CONTENT@229..234 "<span"
+      HTML_ATTRS@234..245
+        WHITESPACE@234..235 " "
+        TEXT@235..238 "id="
+        ATTR_ID@238..245 "outer-3"
+      INLINE_HTML_CONTENT@245..246 ">"
     TEXT@246..283 "before <span \u{301}bad=x  ..."
     INLINE_HTML@283..290
       INLINE_HTML_CONTENT@283..290 "</span>"

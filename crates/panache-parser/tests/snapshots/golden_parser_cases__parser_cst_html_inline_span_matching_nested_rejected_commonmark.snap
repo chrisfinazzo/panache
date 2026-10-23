@@ -5,10 +5,25 @@ expression: cst_output
 DOCUMENT@0..76
   PARAGRAPH@0..76
     INLINE_HTML@0..15
-      INLINE_HTML_CONTENT@0..15 "<span id=outer>"
+      INLINE_HTML_CONTENT@0..5 "<span"
+      HTML_ATTRS@5..14
+        WHITESPACE@5..6 " "
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      INLINE_HTML_CONTENT@14..15 ">"
     TEXT@15..22 "before "
     INLINE_HTML@22..49
-      INLINE_HTML_CONTENT@22..49 "<span bad.name=x id=h ..."
+      INLINE_HTML_CONTENT@22..27 "<span"
+      HTML_ATTRS@27..48
+        WHITESPACE@27..28 " "
+        ATTR_KEY_VALUE@28..38
+          ATTR_KEY@28..36 "bad.name"
+          TEXT@36..37 "="
+          ATTR_VALUE@37..38 "x"
+        WHITESPACE@38..39 " "
+        TEXT@39..42 "id="
+        ATTR_ID@42..48 "hidden"
+      INLINE_HTML_CONTENT@48..49 ">"
     TEXT@49..55 "inside"
     INLINE_HTML@55..62
       INLINE_HTML_CONTENT@55..62 "</span>"

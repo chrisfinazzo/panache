@@ -224,15 +224,15 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
 
 ### Anchor false positives (Basin mdsvex triage, 2026-10)
 
-- [ ] Collect explicit HTML IDs under `--flavor mdsvex` and other CommonMark
+- [x] Collect explicit HTML IDs under `--flavor mdsvex` and other CommonMark
   dialect flavors. Minimal reproducers are `<h2 id="saved">Saved</h2>` or
   `**<span id="saved"></span>Saved**`, followed by a blank line and
-  `[link](#saved)`. Both trigger `undefined-anchor`. Pandoc's `commonmark`
-  reader preserves these tags as raw HTML, and mdsvex renders their IDs. The
-  CST retains opaque `HTML_BLOCK_TAG` and `INLINE_HTML` content without
-  `HTML_ATTRS`, so the symbol index's `AttributeNode` walk misses the IDs.
-  Expose attributes structurally without changing CommonMark's raw HTML
-  semantics, then add focused parser and anchor-resolution regressions.
+  `[link](#saved)`. The parser now exposes `HTML_ATTRS` inside raw HTML
+  tags, so the symbol index's existing `AttributeNode` walk finds their IDs.
+  HTML bodies remain raw, matching Pandoc's `commonmark` reader and mdsvex.
+  Parser, formatter, and anchor-resolution regressions cover inline and
+  block tags, multiline attributes, and containers, while excluding tag-like
+  text in comments and scripts.
 
 - [ ] Support explicit configuration for heading IDs supplied by mdsvex plugins.
   Minimal reproducer: `## Trust region`, a blank line, and

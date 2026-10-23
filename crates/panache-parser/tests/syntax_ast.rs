@@ -4,7 +4,7 @@
 //! expose accessors for their underlying CST nodes. We test links, images,
 //! tables, headings, and other AST constructs.
 
-use panache_parser::{parse, syntax::SyntaxKind};
+use panache_parser::{Dialect, Extensions, Flavor, ParserOptions, parse, syntax::SyntaxKind};
 
 use panache_parser::syntax::{
     AstNode, Figure, GridTable, Heading, ImageAlt, ImageLink, Link, LinkDest, LinkRef, LinkText,
@@ -566,6 +566,83 @@ fn heading_text_with_nested_emphasis() {
         text, "Heading with emphasis and code",
         "Heading text should extract text from nested inline elements"
     );
+}
+
+#[test]
+fn heading_text_excludes_html_attributes() {
+    for flavor in [
+        Flavor::CommonMark,
+        Flavor::Gfm,
+        Flavor::Hugo,
+        Flavor::Pandoc,
+    ] {
+        let input = "# <span class=\"badge\" title=\"hidden\">**Title**</span>\n";
+        let tree = parse_with_flavor(input, flavor);
+        let heading = tree.descendants().find_map(Heading::cast).unwrap();
+        assert_eq!(heading.text(), "Title", "{flavor:?}");
+    }
+}
+
+#[test]
+fn link_text_excludes_html_attributes() {
+    for flavor in [
+        Flavor::CommonMark,
+        Flavor::Gfm,
+        Flavor::Hugo,
+        Flavor::Pandoc,
+    ] {
+        let tree = parse_with_flavor(
+            "[<span class=\"badge\" title=\"hidden\">**Title**</span>](page.html)\n",
+            flavor,
+        );
+        let text = tree.descendants().find_map(LinkText::cast).unwrap();
+        assert_eq!(text.text_content(), "Title", "{flavor:?}");
+    }
+}
+
+#[test]
+fn image_alt_excludes_html_attributes() {
+    for flavor in [
+        Flavor::CommonMark,
+        Flavor::Gfm,
+        Flavor::Hugo,
+        Flavor::Pandoc,
+    ] {
+        let tree = parse_with_flavor(
+            "![<span class=\"badge\" id=\"hidden\">**Alt**</span>](image.png)\n",
+            flavor,
+        );
+        let alt = tree.descendants().find_map(ImageAlt::cast).unwrap();
+        assert_eq!(alt.text(), "Alt", "{flavor:?}");
+        assert!(
+            tree.descendants()
+                .any(|node| node.kind() == SyntaxKind::HTML_ATTRS)
+        );
+    }
+}
+
+#[test]
+fn table_caption_excludes_html_attributes() {
+    let tree = parse(
+        "| A |\n|---|\n| 1 |\n\n: <span class=\"badge\">Caption</span>\n",
+        None,
+    );
+    let caption = tree.descendants().find_map(TableCaption::cast).unwrap();
+    assert_eq!(caption.text(), "Caption");
+}
+
+fn parse_with_flavor(input: &str, flavor: Flavor) -> panache_parser::SyntaxNode {
+    let tree = parse(
+        input,
+        Some(ParserOptions {
+            flavor,
+            dialect: Dialect::for_flavor(flavor),
+            extensions: Extensions::for_flavor(flavor),
+            ..Default::default()
+        }),
+    );
+    assert_eq!(tree.text().to_string(), input);
+    tree
 }
 
 #[test]

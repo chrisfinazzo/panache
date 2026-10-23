@@ -7,11 +7,15 @@ DOCUMENT@0..30
     BLOCK_QUOTE_MARKER@0..1 ">"
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..30
-      HTML_BLOCK_TAG@2..8
+      HTML_BLOCK_TAG@2..30
         TEXT@2..7 "<form"
-        NEWLINE@7..8 "\n"
-      HTML_BLOCK_CONTENT@8..30
-        LINE_PREFIX@8..9 ">"
-        LINE_PREFIX@9..10 " "
-        TEXT@10..29 "  id=\"x\">foo</form>"
+        HTML_ATTRS@7..18
+          NEWLINE@7..8 "\n"
+          LINE_PREFIX@8..9 ">"
+          LINE_PREFIX@9..10 " "
+          WHITESPACE@10..12 "  "
+          TEXT@12..16 "id=\""
+          ATTR_ID@16..17 "x"
+          TEXT@17..18 "\""
+        TEXT@18..29 ">foo</form>"
         NEWLINE@29..30 "\n"

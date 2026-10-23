@@ -5,10 +5,22 @@ expression: cst_output
 DOCUMENT@0..130
   PARAGRAPH@0..65
     INLINE_HTML@0..15
-      INLINE_HTML_CONTENT@0..15 "<span id=outer>"
+      INLINE_HTML_CONTENT@0..5 "<span"
+      HTML_ATTRS@5..14
+        WHITESPACE@5..6 " "
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      INLINE_HTML_CONTENT@14..15 ">"
     TEXT@15..22 "before "
     INLINE_HTML@22..41
-      INLINE_HTML_CONTENT@22..41 "<b title=\"</span>\">"
+      INLINE_HTML_CONTENT@22..24 "<b"
+      HTML_ATTRS@24..40
+        WHITESPACE@24..25 " "
+        ATTR_KEY_VALUE@25..40
+          ATTR_KEY@25..30 "title"
+          TEXT@30..31 "="
+          ATTR_VALUE@31..40 "\"</span>\""
+      INLINE_HTML_CONTENT@40..41 ">"
     TEXT@41..47 "inside"
     INLINE_HTML@47..51
       INLINE_HTML_CONTENT@47..51 "</b>"
@@ -20,10 +32,22 @@ DOCUMENT@0..130
     BLANK_LINE@65..66 "\n"
   PARAGRAPH@66..130
     INLINE_HTML@66..81
-      INLINE_HTML_CONTENT@66..81 "<span id=other>"
+      INLINE_HTML_CONTENT@66..71 "<span"
+      HTML_ATTRS@71..80
+        WHITESPACE@71..72 " "
+        TEXT@72..75 "id="
+        ATTR_ID@75..80 "other"
+      INLINE_HTML_CONTENT@80..81 ">"
     TEXT@81..88 "before "
     INLINE_HTML@88..106
-      INLINE_HTML_CONTENT@88..106 "<b title=\"<span>\">"
+      INLINE_HTML_CONTENT@88..90 "<b"
+      HTML_ATTRS@90..105
+        WHITESPACE@90..91 " "
+        ATTR_KEY_VALUE@91..105
+          ATTR_KEY@91..96 "title"
+          TEXT@96..97 "="
+          ATTR_VALUE@97..105 "\"<span>\""
+      INLINE_HTML_CONTENT@105..106 ">"
     TEXT@106..112 "inside"
     INLINE_HTML@112..116
       INLINE_HTML_CONTENT@112..116 "</b>"

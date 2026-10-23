@@ -110,6 +110,93 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn raw_html_trailing_container_markers_are_lossless() {
+    for input in [
+        "> <script>\n>",
+        "> <script>\n> ",
+        "> > <script>\n> >",
+        "> <!--\n>",
+        "> <pre>\r\n>",
+        "> <style>\n>\t",
+        "> <textarea>\n>",
+    ] {
+        let tree = parse(
+            input,
+            Some(ParserOptions {
+                flavor: Flavor::CommonMark,
+                dialect: Dialect::CommonMark,
+                extensions: Extensions::for_flavor(Flavor::CommonMark),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(tree.text().to_string(), input);
+    }
+}
+
+#[test]
+fn raw_html_closing_line_keeps_multiline_child_attributes() {
+    use panache_parser::syntax::{AstNode, AttributeNode};
+
+    for input in [
+        "<pre>\n<span\nid=\"saved\">Saved</span></pre>\n",
+        "> <pre>\n> <span\n> id=\"saved\">Saved</span></pre>\n",
+        "<pre>\r\n<span\r\nid=\"saved\">Saved</span></pre>\r\n",
+    ] {
+        let tree = parse(
+            input,
+            Some(ParserOptions {
+                flavor: Flavor::CommonMark,
+                dialect: Dialect::CommonMark,
+                extensions: Extensions::for_flavor(Flavor::CommonMark),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(tree.text().to_string(), input);
+        let ids: Vec<_> = tree
+            .descendants()
+            .filter_map(AttributeNode::cast)
+            .filter_map(|attrs| attrs.id())
+            .collect();
+        assert_eq!(ids, ["saved"], "{input:?}");
+    }
+}
+
+#[test]
+fn raw_html_attributes_keep_commonmark_bodies_raw() {
+    use panache_parser::syntax::{AstNode, AttributeNode, InlineHtml, SyntaxKind};
+
+    let input = include_str!("fixtures/cases/html_raw_attributes_commonmark/input.md");
+    let options = load_test_parser_options(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/cases/html_raw_attributes_commonmark")
+            .as_path(),
+    );
+    let tree = parse(input, options);
+    assert_eq!(tree.text().to_string(), input);
+    let ids: Vec<_> = tree
+        .descendants()
+        .filter_map(AttributeNode::cast)
+        .filter_map(|attrs| attrs.id())
+        .collect();
+    assert_eq!(ids, ["saved", "inline", "nested", "script", "quoted"]);
+    for block in tree
+        .children()
+        .filter(|node| node.kind() == SyntaxKind::HTML_BLOCK)
+    {
+        assert!(!block.descendants().any(|node| matches!(
+            node.kind(),
+            SyntaxKind::STRONG | SyntaxKind::EMPHASIS | SyntaxKind::HEADING
+        )));
+    }
+    let inline = tree
+        .descendants()
+        .filter_map(InlineHtml::cast)
+        .next()
+        .unwrap();
+    assert_eq!(inline.verbatim(), "<span id='inline'>");
+}
+
+#[test]
 fn html_inline_span_matching_ignores_code_close() {
     use panache_parser::syntax::SyntaxKind;
 
@@ -349,6 +436,12 @@ macro_rules! golden_test_cases {
 }
 
 golden_test_cases!(
+    html_raw_trailing_container_marker_commonmark,
+    html_raw_trailing_container_marker_pandoc,
+    html_raw_multiline_child_attributes_commonmark,
+    html_raw_multiline_child_attributes_pandoc,
+    html_raw_attributes_commonmark,
+    html_raw_attributes_mdsvex,
     html_unclosed_attribute_quote_pandoc,
     html_unclosed_attribute_quote_commonmark,
     html_inline_span_matching_nested_rejected_pandoc,

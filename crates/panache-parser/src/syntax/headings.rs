@@ -116,9 +116,7 @@ impl AstNode for HeadingContent {
 impl HeadingContent {
     /// Returns the text content of the heading.
     pub fn text(&self) -> String {
-        self.0
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
+        super::ast::visible_text_tokens(&self.0)
             .filter(|token| {
                 matches!(
                     token.kind(),

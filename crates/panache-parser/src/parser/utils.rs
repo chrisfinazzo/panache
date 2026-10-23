@@ -19,6 +19,8 @@ pub mod inline_emission;
 pub mod list_item_buffer;
 #[path = "utils/marker_utils.rs"]
 pub mod marker_utils;
+#[path = "utils/raw_html.rs"]
+pub(crate) mod raw_html;
 #[path = "utils/text_buffer.rs"]
 pub mod text_buffer;
 #[path = "utils/tree_copy.rs"]

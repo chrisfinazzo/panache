@@ -1,9 +1,37 @@
-//! Source diagnostics for HTML-like text retained by the Markdown parser.
+//! Typed HTML tags and source diagnostics for retained HTML-like text.
 
 use crate::Dialect;
 use crate::parser::inlines::inline_html::inspect_inline_html;
 
-use super::{SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize};
+use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HtmlBlockTag(SyntaxNode);
+
+impl AstNode for HtmlBlockTag {
+    type Language = PanacheLanguage;
+
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::HTML_BLOCK_TAG
+    }
+
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self(syntax))
+    }
+
+    fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
+}
+
+impl HtmlBlockTag {
+    /// Whether this block tag ends the given literal element's contents.
+    pub fn contains_literal_close(&self, name: &str) -> bool {
+        name != "plaintext"
+            && crate::parser::utils::raw_html::raw_text_end(&self.0.text().to_string(), 0, name)
+                .is_some()
+    }
+}
 
 /// An unterminated quoted HTML attribute, anchored to its opening quote.
 #[derive(Debug, Clone, PartialEq, Eq)]

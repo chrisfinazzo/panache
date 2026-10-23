@@ -27,10 +27,20 @@ load-bearing; the code holds the full detail.
 
 ### Parser shape & losslessness
 
+- **Visible text and declarations need consumer context.** `HTML_ATTRS`
+  contains TEXT gaps; skip those subtrees in typed text accessors. Image
+  descriptions retain structural attributes but declare no anchors. Inline
+  literal HTML needs declaration context across nested inlines, preserving
+  opening-element IDs and ignoring image-description tags. Context survives
+  top-level blocks and ends at matching inline or block-form closers. Per-block
+  memos key on the incoming element and return the outgoing element.
 - **HTML_ATTRS is the structural attr pattern; never add synthetic
   tokens.** Tokenize existing bytes (`TEXT + WS + HTML_ATTRS{TEXT} +
   TEXT`); use source-byte slices (`&rest[..4]`), never literals, for
   case-insensitive prefix matches.
+  Raw HTML fragment boundaries must keep each attribute range whole. Flush
+  `MarkerInjectingSink` at EOF; prefix-only final lines need formatter emission
+  even after their container prefixes are stripped.
 - **Same-line `<div>foo</div>` is ONE `HTML_BLOCK_TAG`** — close lives
   in a TEXT child; scan to first **unquoted** `>` (naive
   `strip_suffix('>')` grabs the close's). Quote-aware scanners thread
@@ -340,58 +350,46 @@ load-bearing; the code holds the full detail.
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-10-08 (Phase G: native-span close boundaries)
+## Latest session — 2026-10-23 (raw HTML review fixes)
 
-Conformance: **html-block 300/306 → 300/306; html-inline 41/41 → 49/49**.
-Total **591/597 → 599/605** (Pandoc 3.12); six existing smart-quote cases
-remain blocked. Workspace **6521 → 6549 passing**; all required checks pass.
-No red tests remain. Changes are included in the session commit.
+Phases 3/7a follow-up. Pandoc unchanged: **601/607**, html-block **300/306**,
+html-inline **49/49**. Workspace **6829 → 6844 passing**. Check and tests pass;
+Clippy, formatting, both allowlists, and the regenerated conformance report pass.
 
-### What landed
+### What changed
 
-- **Parser-shape gap:** native nesting counts only valid span openers and skips
-  code spans, escapes, and raw inline HTML, including comments and quoted tags.
-  Rejected inner openers leave the first close available to the outer span.
-- The IR and emitter share recognition with parser options; raw masking honors
-  `raw_html`. CommonMark's native-span override keeps its legacy recognition.
-- Inline PIs end at the first `>` under Pandoc; CommonMark still requires `?>`.
-  The corpus covers both hidden tag bytes and a real close after the PI ends.
-- Eight html-inline cases (0598-0605), 16 paired parser snapshots, and eight
-  formatter goldens cover rejected names, code, comments, quoted raw/native
-  tags, PIs, and escapes. Expectations come from Pandoc 3.12; both dialects
-  were probed. New cases passed the regenerated report before allowlisting.
-- Test-first CST regression, extension gating, and Salsa anchor/range coverage
-  pass. Formatting is lossless/idempotent and preserves Pandoc JSON exactly.
-  No projector compensation was added.
+- Flush CommonMark raw-HTML prefixes at EOF and preserve their formatter line.
+- Keep multiline attribute regions intact across both raw-HTML fragment splits.
+- Both declaration indexes recognize block closers and carry literal-element
+  state across blocks; cached contributions key on and return that state.
+- Four paired parser fixtures, two formatter goldens, and 15 regressions cover
+  losslessness, idempotency, diagnostics, index parity, and context-changing edits.
+  No corpus cases or allowlist entries were added.
 
 ### Files in committable diff
 
-- `crates/panache-parser/src/parser/inlines/` — recognition and dispatch
-  (parser-shape).
-- `crates/panache-parser/tests/` — focused regression, paired snapshots, corpus,
-  allowlist, and generated reports.
-- `src/salsa.rs`, `tests/` — consumer regression and formatter goldens.
-- `docs/guide/`, `.agents/skills/html-conformance/` — docs and rolling recap.
+- Parser HTML emission and syntax wrappers — parser-shape and consumer fixes.
+- Formatter raw blocks and golden suites — prefix-only EOF preservation.
+- Salsa, lint tests, linter documentation, and this recap — index fixes.
 
 ### Suggested next sub-targets (ranked)
 
-1. **Unmatched emphasis inside native spans** — `_bad` outer raw fallback;
-   investigate recursive inline termination rather than all-name rejection.
-2. **Native-span edge whitespace projection** — CST keeps the spaces, but
-   `inline_html_span_inline` trims them; Pandoc retains them inside the span.
+1. **Unmatched emphasis inside native spans** — recursive inline termination.
+2. **Native-span edge whitespace projection** — CST keeps spaces; projector trims.
 3. **Standalone smart closing quotes** — unblock 0573-0578.
 4. **Semicolon-less legacy value refs** (`id="a&amp b"` → `a& b`).
 5. **Multi-line-second-div inter-tag** — depth-model gap.
 
 ### New traps
 
-- Pandoc inline PIs stop at the first `>`, not `?>`; native-span edge-space
-  projection is a separate gap. Both are folded into Persistent.
+- EOF prefix handling and cross-block memo state are folded into Persistent traps.
 
 --------------------------------------------------------------------------------
 
 ## Earlier sessions (compact log)
 
+- 2026-10-23 — raw HTML consumers — html 349/355 unchanged; workspace 6817 → 6829 — typed visible text skips attrs; declarations exclude image descriptions and inline literal contents.
+- 2026-10-08 — Phase G native-span close boundaries — skip code, escapes, comments, quoted tags, and PIs; html-inline 41 → 49 passing.
 - 2026-10-08 — Phase G invalid span names + unclosed divs — html 325 → 341 — shared native/raw name and rejected-div boundary gates.
 - 2026-10-07 — Phase G invalid self-closing divs + quoted `>` — html 317 → 325 — raw boundary; six tail typography cases deferred.
 - 2026-09-16 — Phase G matched-div names — html 307 → 317 — Unicode name gate, opaque raw bodies, and container prefixes.

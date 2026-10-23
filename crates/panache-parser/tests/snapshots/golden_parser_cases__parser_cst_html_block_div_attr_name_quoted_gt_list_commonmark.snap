@@ -9,7 +9,24 @@ DOCUMENT@0..66
       WHITESPACE@1..2 " "
       HTML_BLOCK@2..66
         HTML_BLOCK_TAG@2..54
-          TEXT@2..53 "<div _bad=\"x\" id=\"hid ..."
+          TEXT@2..6 "<div"
+          HTML_ATTRS@6..40
+            WHITESPACE@6..7 " "
+            ATTR_KEY_VALUE@7..15
+              ATTR_KEY@7..11 "_bad"
+              TEXT@11..12 "="
+              ATTR_VALUE@12..15 "\"x\""
+            WHITESPACE@15..16 " "
+            TEXT@16..20 "id=\""
+            ATTR_ID@20..26 "hidden"
+            TEXT@26..27 "\""
+            WHITESPACE@27..28 " "
+            ATTR_KEY_VALUE@28..39
+              ATTR_KEY@28..33 "title"
+              TEXT@33..34 "="
+              ATTR_VALUE@34..39 "\"a>b\""
+            TEXT@39..40 "/"
+          TEXT@40..53 ">**Outside.**"
           NEWLINE@53..54 "\n"
         HTML_BLOCK_CONTENT@54..66
           TEXT@54..65 "  next line"

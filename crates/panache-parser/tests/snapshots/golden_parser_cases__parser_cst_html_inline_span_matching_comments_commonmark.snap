@@ -5,7 +5,12 @@ expression: cst_output
 DOCUMENT@0..109
   PARAGRAPH@0..52
     INLINE_HTML@0..15
-      INLINE_HTML_CONTENT@0..15 "<span id=outer>"
+      INLINE_HTML_CONTENT@0..5 "<span"
+      HTML_ATTRS@5..14
+        WHITESPACE@5..6 " "
+        TEXT@6..9 "id="
+        ATTR_ID@9..14 "outer"
+      INLINE_HTML_CONTENT@14..15 ">"
     TEXT@15..22 "before "
     INLINE_HTML@22..38
       INLINE_HTML_CONTENT@22..38 "<!-- </span> -->"
@@ -17,7 +22,12 @@ DOCUMENT@0..109
     BLANK_LINE@52..53 "\n"
   PARAGRAPH@53..109
     INLINE_HTML@53..73
-      INLINE_HTML_CONTENT@53..73 "<span id=outer-open>"
+      INLINE_HTML_CONTENT@53..58 "<span"
+      HTML_ATTRS@58..72
+        WHITESPACE@58..59 " "
+        TEXT@59..62 "id="
+        ATTR_ID@62..72 "outer-open"
+      INLINE_HTML_CONTENT@72..73 ">"
     TEXT@73..80 "before "
     INLINE_HTML@80..95
       INLINE_HTML_CONTENT@80..95 "<!-- <span> -->"

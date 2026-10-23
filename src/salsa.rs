@@ -8,8 +8,9 @@ use crate::linter::diagnostics::Diagnostic;
 use crate::metadata::DocumentMetadata;
 use crate::syntax::{
     AstNode, AttributeNode, Citation, CodeBlock, Crossref, FootnoteDefinition, FootnoteReference,
-    Heading, Link, ListItem, ParsedYamlRegionSnapshot, ReferenceDefinition, SyntaxKind, SyntaxNode,
-    SyntaxToken, UnresolvedReference, YamlRegion, collect_parsed_yaml_region_snapshots,
+    Heading, HtmlBlockTag, ImageAlt, InlineHtml, Link, ListItem, ParsedYamlRegionSnapshot,
+    ReferenceDefinition, SyntaxKind, SyntaxNode, SyntaxToken, UnresolvedReference, YamlRegion,
+    collect_parsed_yaml_region_snapshots,
 };
 use crate::utils::{implicit_heading_ids, normalize_anchor_label, normalize_label};
 use crate::vfs::Vfs;
@@ -1045,33 +1046,49 @@ pub fn document_blocks(db: &dyn Db, file: FileText, config: FileConfig) -> Vec<r
 /// absolute offset still memo-hits here. [`symbol_usage_index`] offsets these
 /// back to absolute ranges when merging. Only the node-local buckets are
 /// populated; the cross-block implicit-heading pass runs once in the merge.
+/// The incoming literal HTML element is part of the cache key, and the result
+/// carries the element that remains open for the next block.
 ///
 /// `unsafe(non_salsa_values)`: the interned `GreenNode` argument is not a salsa
 /// value. It is an immutable Arc-backed tree carrying no salsa ids, so the
-/// interning contract holds. The output backdates on `SymbolUsageIndex`
-/// equality (no `no_eq`), giving a second memoization layer.
+/// interning contract holds. The output backdates when both the index and
+/// outgoing context are equal, giving a second memoization layer.
 #[salsa::tracked(returns(ref), unsafe(non_salsa_values))]
 pub fn symbol_usage_index_block(
     db: &dyn Db,
     block: rowan::GreenNode,
     config: FileConfig,
-) -> SymbolUsageIndex {
+    literal_element: Option<&'static str>,
+) -> (SymbolUsageIndex, Option<&'static str>) {
     let tree = SyntaxNode::new_root(block);
     let mut index = SymbolUsageIndex::default();
-    collect_block_local_symbols(db, &tree, &config.config(db).extensions, &mut index);
-    index
+    let mut attribute_context = AttributeDeclarationContext {
+        literal_element,
+        ..Default::default()
+    };
+    collect_block_local_symbols(
+        db,
+        &tree,
+        &config.config(db).extensions,
+        &mut index,
+        &mut attribute_context,
+    );
+    (index, attribute_context.literal_element)
 }
 
 #[salsa::tracked(returns(ref), lru = 512)]
 pub fn symbol_usage_index(db: &dyn Db, file: FileText, config: FileConfig) -> SymbolUsageIndex {
     // Merge the memoized per-block node-local indexes, shifting each block's
-    // relative ranges to absolute by prefix-summing block lengths. Unchanged
-    // blocks are cache hits, so only edited blocks are re-walked.
+    // relative ranges to absolute by prefix-summing block lengths. Blocks with
+    // unchanged content and incoming HTML context are cache hits.
     let mut index = SymbolUsageIndex::default();
     let mut offset = rowan::TextSize::from(0);
+    let mut literal_element = None;
     for block in document_blocks(db, file, config) {
-        let block_index = symbol_usage_index_block(db, block.clone(), config);
+        let (block_index, next_literal_element) =
+            symbol_usage_index_block(db, block.clone(), config, literal_element);
         index.merge_offset(block_index, offset);
+        literal_element = *next_literal_element;
         offset += block.text_len();
     }
 
@@ -1254,23 +1271,82 @@ pub fn symbol_usage_index_from_tree(
     extensions: &crate::config::Extensions,
 ) -> SymbolUsageIndex {
     let mut index = SymbolUsageIndex::default();
-    collect_block_local_symbols(db, tree, extensions, &mut index);
+    collect_block_local_symbols(
+        db,
+        tree,
+        extensions,
+        &mut index,
+        &mut AttributeDeclarationContext::default(),
+    );
     collect_implicit_heading_symbols(db, tree, extensions, &mut index);
     index
 }
 
+#[derive(Default)]
+struct AttributeDeclarationContext {
+    literal_element: Option<&'static str>,
+    literal_opener: Option<rowan::TextRange>,
+    ignored_html: Option<rowan::TextRange>,
+}
+
+impl AttributeDeclarationContext {
+    fn includes(&mut self, node: &SyntaxNode) -> bool {
+        if node
+            .ancestors()
+            .any(|ancestor| ImageAlt::can_cast(ancestor.kind()))
+        {
+            return false;
+        }
+        if self
+            .ignored_html
+            .is_some_and(|range| range.contains_range(node.text_range()))
+        {
+            return false;
+        }
+        self.ignored_html = None;
+
+        if let Some(name) = self.literal_element {
+            let closes = InlineHtml::cast(node.clone())
+                .map(|html| html.contains_literal_close(name))
+                .or_else(|| {
+                    HtmlBlockTag::cast(node.clone()).map(|tag| tag.contains_literal_close(name))
+                });
+            if let Some(closes) = closes {
+                if closes {
+                    self.literal_element = None;
+                    self.literal_opener = None;
+                }
+                // A close can occur inside a raw tag's quoted attribute or
+                // comment. That node's own attributes still belong to text.
+                self.ignored_html = Some(node.text_range());
+                return false;
+            }
+        } else if let Some(html) = InlineHtml::cast(node.clone())
+            && let Some(name) = html.literal_element_name()
+        {
+            self.literal_element = Some(name);
+            self.literal_opener = Some(node.text_range());
+        }
+
+        self.literal_element.is_none()
+            || self
+                .literal_opener
+                .is_some_and(|opener| opener.contains_range(node.text_range()))
+    }
+}
+
 /// Collect every node-local symbol bucket for `tree` into `index`.
 ///
-/// "Node-local" means each range derives from a single node or token with no
-/// cross-node state, so this is safe to run per top-level block and merge with
-/// offsets — the basis of the salsa per-block memoization in
-/// [`symbol_usage_index`]. The one cross-block pass (implicit heading ids, which
-/// dedups slugs document-wide) lives in [`collect_implicit_heading_symbols`].
+/// Ranges stay within one top-level block and merge with offsets, while the
+/// literal HTML context passes between blocks through the memoized query in
+/// [`symbol_usage_index`]. The pass that deduplicates implicit heading slugs
+/// across the document lives in [`collect_implicit_heading_symbols`].
 fn collect_block_local_symbols(
     db: &dyn Db,
     tree: &SyntaxNode,
     extensions: &crate::config::Extensions,
     index: &mut SymbolUsageIndex,
+    attribute_context: &mut AttributeDeclarationContext,
 ) {
     // Single pre-order walk buckets every node/token kind the passes below
     // consume, replacing the ~12 separate `tree.descendants()` traversals that
@@ -1291,10 +1367,10 @@ fn collect_block_local_symbols(
     let mut attribute_nodes: Vec<AttributeNode> = Vec::new();
     let mut span_attribute_nodes: Vec<SyntaxNode> = Vec::new();
     let mut code_blocks: Vec<CodeBlock> = Vec::new();
-
     for element in tree.descendants_with_tokens() {
         if let Some(node) = element.as_node() {
             db.unwind_if_revision_cancelled();
+            let declares_attributes = attribute_context.includes(node);
             if let Some(cast) = ReferenceDefinition::cast(node.clone()) {
                 reference_definitions.push(cast);
             }
@@ -1322,10 +1398,10 @@ fn collect_block_local_symbols(
             if node.kind() == SyntaxKind::CROSSREF {
                 crossref_nodes.push(node.clone());
             }
-            if let Some(cast) = AttributeNode::cast(node.clone()) {
+            if declares_attributes && let Some(cast) = AttributeNode::cast(node.clone()) {
                 attribute_nodes.push(cast);
             }
-            if node.kind() == SyntaxKind::SPAN_ATTRIBUTES {
+            if declares_attributes && node.kind() == SyntaxKind::SPAN_ATTRIBUTES {
                 span_attribute_nodes.push(node.clone());
             }
             if let Some(cast) = CodeBlock::cast(node.clone()) {
@@ -1800,8 +1876,15 @@ pub fn definition_index(db: &dyn Db, file: FileText, config: FileConfig) -> Defi
         insert_example_label(&mut index, &label, location);
     }
 
-    for attribute in tree.descendants().filter_map(AttributeNode::cast) {
+    let mut attribute_context = AttributeDeclarationContext::default();
+    for node in tree.descendants() {
         db.unwind_if_revision_cancelled();
+        if !attribute_context.includes(&node) {
+            continue;
+        }
+        let Some(attribute) = AttributeNode::cast(node) else {
+            continue;
+        };
         if let Some(id) = attribute.id() {
             let location = DefinitionLocation {
                 path: path.clone(),
@@ -3525,6 +3608,177 @@ mod tests {
         assert_eq!(index.heading_reference_ranges("em", true).len(), 2);
         assert_eq!(index.heading_reference_ranges("EM", true).len(), 2);
         assert_eq!(index.heading_reference_ranges("Em", true).len(), 0);
+    }
+
+    #[test]
+    fn html_declaration_indexes_resume_after_block_literal_closers() {
+        for input in [
+            "> Before <script>\n>\n> </SCRIPT >\n>\n> <span id=\"saved\">Saved</span>\n",
+            "- Before <script>\n\n  </script>\n\n  <span id=\"saved\">Saved</span>\n",
+        ] {
+            let mut db = SalsaDb::default();
+            let file = db.update_file_text(PathBuf::from("/tmp/html_close.md"), input.to_string());
+            let cfg = crate::Config::default();
+            let config = FileConfig::new(&db, cfg.clone());
+            let tree = parsed_tree_root(&db, file, config);
+            let symbols = symbol_usage_index(&db, file, config);
+            assert_eq!(
+                *symbols,
+                symbol_usage_index_from_tree(&db, &tree, &cfg.extensions),
+                "{input:?}"
+            );
+            assert_eq!(
+                symbols.crossref_declarations("saved").map(Vec::len),
+                Some(1),
+                "{input:?}"
+            );
+            assert!(
+                definition_index(&db, file, config)
+                    .find_crossref("saved")
+                    .is_some(),
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn html_declaration_indexes_preserve_literal_context_across_blocks() {
+        let input = "Before <script id=\"element\">\n\n\
+                     <span id=\"hidden\">Hidden</span>\n\n</script>\n\n\
+                     <span id=\"visible\">Visible</span>\n";
+        for flavor in [
+            crate::config::Flavor::CommonMark,
+            crate::config::Flavor::Gfm,
+            crate::config::Flavor::Mdsvex,
+            crate::config::Flavor::Myst,
+            crate::config::Flavor::Hugo,
+        ] {
+            let mut db = SalsaDb::default();
+            let file = db.update_file_text(PathBuf::from("/tmp/html_blocks.md"), input.to_string());
+            let cfg = crate::Config {
+                flavor,
+                extensions: crate::config::Extensions::for_flavor(flavor),
+                ..Default::default()
+            };
+            let config = FileConfig::new(&db, cfg.clone());
+            let tree = parsed_tree_root(&db, file, config);
+            let symbols = symbol_usage_index(&db, file, config);
+            assert_eq!(
+                *symbols,
+                symbol_usage_index_from_tree(&db, &tree, &cfg.extensions),
+                "{flavor:?}"
+            );
+            assert!(
+                symbols.crossref_declarations("hidden").is_none(),
+                "{flavor:?}"
+            );
+            let definitions = definition_index(&db, file, config);
+            assert!(definitions.find_crossref("hidden").is_none(), "{flavor:?}");
+            for id in ["element", "visible"] {
+                assert_eq!(
+                    symbols.crossref_declarations(id).map(Vec::len),
+                    Some(1),
+                    "{flavor:?}: {id}"
+                );
+                assert!(definitions.find_crossref(id).is_some(), "{flavor:?}: {id}");
+            }
+        }
+    }
+
+    #[test]
+    fn html_declaration_indexes_update_literal_context_after_edits() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/tmp/html_literal_edit.md");
+        let cfg = crate::Config {
+            flavor: crate::config::Flavor::CommonMark,
+            extensions: crate::config::Extensions::for_flavor(crate::config::Flavor::CommonMark),
+            ..Default::default()
+        };
+        let config = FileConfig::new(&db, cfg.clone());
+        let body =
+            "\n\n<span id=\"saved\">Saved</span>\n\n</script>\n\n<span id=\"after\">After</span>\n";
+        for (prefix, saved_is_declared) in [
+            ("Before", true),
+            ("Before <script>", false),
+            ("Before", true),
+        ] {
+            let source = format!("{prefix}{body}");
+            let file = db.update_file_text(path.clone(), source.clone());
+            log.lock().unwrap().clear();
+            let symbols = symbol_usage_index(&db, file, config);
+            let tree = parsed_tree_root(&db, file, config);
+            assert_eq!(
+                *symbols,
+                symbol_usage_index_from_tree(&db, &tree, &cfg.extensions)
+            );
+            assert_eq!(
+                symbols.crossref_declarations("saved").is_some(),
+                saved_is_declared
+            );
+            assert_eq!(
+                symbols.crossref_declarations("after").map(Vec::len),
+                Some(1)
+            );
+            let definitions = definition_index(&db, file, config);
+            assert_eq!(
+                definitions.find_crossref("saved").is_some(),
+                saved_is_declared
+            );
+            let range = symbols.crossref_declaration_value_ranges("after").unwrap()[0];
+            assert_eq!(&source[std::ops::Range::<usize>::from(range)], "after");
+            if prefix == "Before <script>" {
+                assert!(
+                    executed(&log, "symbol_usage_index_block") > 1,
+                    "unchanged blocks must account for their new literal context"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn html_declaration_indexes_exclude_non_rendered_ids() {
+        let input = "![<span id=\"hidden\"></span>Alt](image.png)\n\n\
+                     Before <script id=\"script\">const s = '<span id=\"hidden\"></span>';</script> \
+                     <textarea id=\"textarea\"><span id=\"hidden\"></span></textarea> \
+                     <span id=\"visible\"></span>\n";
+        for flavor in [
+            crate::config::Flavor::CommonMark,
+            crate::config::Flavor::Gfm,
+            crate::config::Flavor::Mdsvex,
+            crate::config::Flavor::Myst,
+            crate::config::Flavor::Hugo,
+        ] {
+            let mut db = SalsaDb::default();
+            let file = db.update_file_text(PathBuf::from("/tmp/html_ids.md"), input.to_string());
+            let cfg = crate::Config {
+                flavor,
+                extensions: crate::config::Extensions::for_flavor(flavor),
+                ..Default::default()
+            };
+            let config = FileConfig::new(&db, cfg.clone());
+            let tree = parsed_tree_root(&db, file, config);
+            let symbols = symbol_usage_index(&db, file, config);
+            assert_eq!(
+                *symbols,
+                symbol_usage_index_from_tree(&db, &tree, &cfg.extensions),
+                "{flavor:?}"
+            );
+            assert!(
+                symbols.crossref_declarations("hidden").is_none(),
+                "{flavor:?}"
+            );
+            let definitions = definition_index(&db, file, config);
+            assert!(definitions.find_crossref("hidden").is_none(), "{flavor:?}");
+            for id in ["script", "textarea", "visible"] {
+                assert_eq!(
+                    symbols.crossref_declarations(id).map(Vec::len),
+                    Some(1),
+                    "{flavor:?}: {id}"
+                );
+                let definition = definitions.find_crossref(id).unwrap();
+                assert!(input[std::ops::Range::<usize>::from(definition.range)].contains(id));
+            }
+        }
     }
 
     /// `<div id="a&amp;b">` declares the HTML id `a&b`, so that -- not the

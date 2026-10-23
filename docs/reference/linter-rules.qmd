@@ -561,9 +561,13 @@ Description
     (Pandoc renders bibliography entries with `id="ref-<citekey>"`), so they resolve
     as long as `@citekey` appears somewhere in the document.
 
-    Anchors declared via raw HTML `<a id="x">` or `<a name="x">` are not currently
-    inspected, so links to them may be flagged as undefined. `<div id="x">` blocks
-    are recognized.
+    Raw HTML `id` attributes are recognized in CommonMark, GFM, mdsvex, MyST, and
+    Hugo, including IDs on block headings and inline spans. IDs inside image
+    descriptions or literal HTML contents, such as script and textarea bodies, do
+    not declare anchors, including across blank lines and block boundaries. The
+    opening elements' own IDs still count. Pandoc's structured HTML elements also
+    contribute their IDs. Legacy `<a name="x">` anchors and IDs on other raw HTML
+    elements in Pandoc are not currently inspected.
 
 **Example violation:**
 

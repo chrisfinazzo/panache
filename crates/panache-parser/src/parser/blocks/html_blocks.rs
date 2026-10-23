@@ -1202,6 +1202,16 @@ pub(crate) fn parse_html_block_with_wrapper(
     config: &ParserOptions,
     first_line_content: Option<&str>,
 ) -> usize {
+    if config.dialect == crate::options::Dialect::CommonMark {
+        return parse_commonmark_html_block(
+            builder,
+            lines,
+            start_pos,
+            &block_type,
+            prefix,
+            first_line_content,
+        );
+    }
     let bq_depth = prefix.bq_depth();
     if config.dialect == crate::options::Dialect::Pandoc
         && matches!(&block_type, HtmlBlockType::BlockTag {
@@ -1741,17 +1751,6 @@ pub(crate) fn parse_html_block_with_wrapper(
             break;
         }
 
-        // CommonMark §5.2: a non-blank line indented less than the list
-        // item's content column is not part of the item, and an HTML block
-        // takes no lazy continuation lines, so the block ends with the item.
-        if config.dialect == crate::options::Dialect::CommonMark
-            && prefix.list_content_col() > 0
-            && !inner.trim().is_empty()
-            && !prefix.resolve(line).reaches_frame()
-        {
-            break;
-        }
-
         if blank_terminated && inner.trim().is_empty() {
             break;
         }
@@ -2019,6 +2018,96 @@ pub(crate) fn parse_html_block_with_wrapper(
 
     builder.finish_node(); // HtmlBlock
     current_pos
+}
+
+fn parse_commonmark_html_block(
+    builder: &mut GreenNodeBuilder<'static>,
+    lines: &[&str],
+    start_pos: usize,
+    block_type: &HtmlBlockType,
+    prefix: &ContainerPrefix,
+    first_line_content: Option<&str>,
+) -> usize {
+    use crate::parser::inlines::sink::{InjectedMarker, InlineSink, MarkerInjectingSink};
+    use crate::parser::utils::raw_html;
+
+    let (first, indent) = first_line_content.map_or_else(
+        || prefix.strip_line_0_with_indent_emit(lines[start_pos]),
+        |content| (content, None),
+    );
+    let mut source = first.to_string();
+    let mut markers = Vec::new();
+    let mut end_pos = start_pos + 1;
+    let mut close_start = None;
+    if !is_closing_marker(first, block_type) {
+        while let Some(&line) = lines.get(end_pos) {
+            let (depth, inner) = count_blockquote_markers(line);
+            // Raw HTML accepts no lazy continuation outside its container.
+            if depth < prefix.bq_depth()
+                || (prefix.list_content_col() > 0
+                    && !inner.trim().is_empty()
+                    && !prefix.resolve(line).reaches_frame())
+                || (ends_at_blank_line(block_type) && inner.trim().is_empty())
+            {
+                break;
+            }
+            // List indentation remains raw HTML content. The formatter needs
+            // those bytes when it adjusts the enclosing list's indentation.
+            let content = strip_n_blockquote_markers(line, prefix.bq_depth());
+            let prefix_len = line.len() - content.len();
+            for (offset, ch) in line[..prefix_len].char_indices() {
+                markers.push((
+                    source.len(),
+                    InjectedMarker::Indent(&line[offset..offset + ch.len_utf8()]),
+                ));
+            }
+            let closes = is_closing_marker(inner, block_type);
+            if closes {
+                close_start = Some(source.len());
+            }
+            source.push_str(content);
+            end_pos += 1;
+            if closes {
+                break;
+            }
+        }
+    }
+
+    let attributes = raw_html::attribute_ranges(&source);
+    // Neither line boundary may divide a multiline tag's attribute region.
+    let extend_fragment = |mut end| {
+        for attrs in &attributes {
+            if attrs.start < end && end < attrs.end {
+                end = source[attrs.end..]
+                    .find('\n')
+                    .map_or(source.len(), |newline| attrs.end + newline + 1);
+            }
+        }
+        end
+    };
+    let first_end = extend_fragment(first.len());
+    let close_start = extend_fragment(close_start.unwrap_or(source.len())).max(first_end);
+    builder.start_node(SyntaxKind::HTML_BLOCK.into());
+    builder.start_node(SyntaxKind::HTML_BLOCK_TAG.into());
+    if let Some(indent) = indent {
+        builder.token(SyntaxKind::WHITESPACE.into(), indent);
+    }
+    let mut sink = MarkerInjectingSink::new(builder, &markers);
+    raw_html::emit_fragment(&mut sink, &source, &attributes, 0..first_end);
+    sink.finish_node();
+    for (kind, range) in [
+        (SyntaxKind::HTML_BLOCK_CONTENT, first_end..close_start),
+        (SyntaxKind::HTML_BLOCK_TAG, close_start..source.len()),
+    ] {
+        if !range.is_empty() {
+            sink.start_node_with_leading_markers(kind.into());
+            raw_html::emit_fragment(&mut sink, &source, &attributes, range);
+            sink.finish_node();
+        }
+    }
+    sink.finish();
+    builder.finish_node();
+    end_pos
 }
 
 /// Emit the collected inner content lines for an HTML block.

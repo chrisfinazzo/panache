@@ -6,7 +6,13 @@ DOCUMENT@0..99
   PARAGRAPH@0..49
     TEXT@0..10 "Body with "
     INLINE_HTML@10..28
-      INLINE_HTML_CONTENT@10..28 "<span id=\"marker\">"
+      INLINE_HTML_CONTENT@10..15 "<span"
+      HTML_ATTRS@15..27
+        WHITESPACE@15..16 " "
+        TEXT@16..20 "id=\""
+        ATTR_ID@20..26 "marker"
+        TEXT@26..27 "\""
+      INLINE_HTML_CONTENT@27..28 ">"
     TEXT@28..35 "flagged"
     INLINE_HTML@35..42
       INLINE_HTML_CONTENT@35..42 "</span>"
@@ -17,7 +23,19 @@ DOCUMENT@0..99
   PARAGRAPH@50..99
     TEXT@50..52 "A "
     INLINE_HTML@52..77
-      INLINE_HTML_CONTENT@52..77 "<span id=\"x\" class=\"c ..."
+      INLINE_HTML_CONTENT@52..57 "<span"
+      HTML_ATTRS@57..76
+        WHITESPACE@57..58 " "
+        TEXT@58..62 "id=\""
+        ATTR_ID@62..63 "x"
+        TEXT@63..64 "\""
+        WHITESPACE@64..65 " "
+        TEXT@65..72 "class=\""
+        ATTR_CLASS@72..73 "c"
+        WHITESPACE@73..74 " "
+        ATTR_CLASS@74..75 "k"
+        TEXT@75..76 "\""
+      INLINE_HTML_CONTENT@76..77 ">"
     TEXT@77..83 "tagged"
     INLINE_HTML@83..90
       INLINE_HTML_CONTENT@83..90 "</span>"

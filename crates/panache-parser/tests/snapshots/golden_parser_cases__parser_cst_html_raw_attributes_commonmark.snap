@@ -1,0 +1,137 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..330
+  HTML_BLOCK@0..30
+    HTML_BLOCK_TAG@0..30
+      TEXT@0..3 "<h2"
+      HTML_ATTRS@3..14
+        WHITESPACE@3..4 " "
+        TEXT@4..8 "id=\""
+        ATTR_ID@8..13 "saved"
+        TEXT@13..14 "\""
+      TEXT@14..29 ">**Saved**</h2>"
+      NEWLINE@29..30 "\n"
+  BLANK_LINE@30..31
+    BLANK_LINE@30..31 "\n"
+  PARAGRAPH@31..66
+    STRONG@31..65
+      STRONG_MARKER@31..33 "**"
+      INLINE_HTML@33..51
+        INLINE_HTML_CONTENT@33..38 "<span"
+        HTML_ATTRS@38..50
+          WHITESPACE@38..39 " "
+          TEXT@39..43 "id='"
+          ATTR_ID@43..49 "inline"
+          TEXT@49..50 "'"
+        INLINE_HTML_CONTENT@50..51 ">"
+      INLINE_HTML@51..58
+        INLINE_HTML_CONTENT@51..58 "</span>"
+      TEXT@58..63 "Saved"
+      STRONG_MARKER@63..65 "**"
+    NEWLINE@65..66 "\n"
+  BLANK_LINE@66..67
+    BLANK_LINE@66..67 "\n"
+  HTML_BLOCK@67..222
+    HTML_BLOCK_TAG@67..73
+      TEXT@67..72 "<div>"
+      NEWLINE@72..73 "\n"
+    HTML_BLOCK_CONTENT@73..222
+      TEXT@73..75 "<a"
+      HTML_ATTRS@75..99
+        WHITESPACE@75..76 " "
+        TEXT@76..79 "id="
+        ATTR_ID@79..85 "nested"
+        WHITESPACE@85..86 " "
+        ATTR_KEY_VALUE@86..99
+          ATTR_KEY@86..91 "title"
+          TEXT@91..92 "="
+          ATTR_VALUE@92..99 "\"a > b\""
+      TEXT@99..117 ">*Raw content*</a>"
+      NEWLINE@117..118 "\n"
+      TEXT@118..153 "<!-- <span id=\"commen ..."
+      NEWLINE@153..154 "\n"
+      TEXT@154..161 "<script"
+      HTML_ATTRS@161..173
+        WHITESPACE@161..162 " "
+        TEXT@162..166 "id=\""
+        ATTR_ID@166..172 "script"
+        TEXT@172..173 "\""
+      TEXT@173..214 ">const tag = '<b id=\" ..."
+      NEWLINE@214..215 "\n"
+      TEXT@215..221 "</div>"
+      NEWLINE@221..222 "\n"
+  BLANK_LINE@222..223
+    BLANK_LINE@222..223 "\n"
+  BLOCK_QUOTE@223..259
+    BLOCK_QUOTE_MARKER@223..224 ">"
+    WHITESPACE@224..225 " "
+    HTML_BLOCK@225..259
+      HTML_BLOCK_TAG@225..259
+        TEXT@225..228 "<h2"
+        HTML_ATTRS@228..246
+          NEWLINE@228..229 "\n"
+          LINE_PREFIX@229..230 ">"
+          LINE_PREFIX@230..231 " "
+          WHITESPACE@231..233 "  "
+          TEXT@233..235 "ID"
+          WHITESPACE@235..236 " "
+          TEXT@236..237 "="
+          WHITESPACE@237..238 " "
+          TEXT@238..239 "\""
+          ATTR_ID@239..245 "quoted"
+          TEXT@245..246 "\""
+        TEXT@246..258 ">Quoted</h2>"
+        NEWLINE@258..259 "\n"
+  BLANK_LINE@259..260
+    BLANK_LINE@259..260 "\n"
+  PARAGRAPH@260..330
+    LINK@260..275
+      LINK_START@260..261
+        LINK_START@260..261 "["
+      LINK_TEXT@261..266
+        TEXT@261..266 "saved"
+      LINK_TEXT_END@266..267 "]"
+      LINK_DEST_START@267..268 "("
+      LINK_DEST@268..274
+        LINK_DEST_URL@268..274
+          TEXT@268..274 "#saved"
+      LINK_DEST_END@274..275 ")"
+    TEXT@275..276 " "
+    LINK@276..293
+      LINK_START@276..277
+        LINK_START@276..277 "["
+      LINK_TEXT@277..283
+        TEXT@277..283 "inline"
+      LINK_TEXT_END@283..284 "]"
+      LINK_DEST_START@284..285 "("
+      LINK_DEST@285..292
+        LINK_DEST_URL@285..292
+          TEXT@285..292 "#inline"
+      LINK_DEST_END@292..293 ")"
+    TEXT@293..294 " "
+    LINK@294..311
+      LINK_START@294..295
+        LINK_START@294..295 "["
+      LINK_TEXT@295..301
+        TEXT@295..301 "nested"
+      LINK_TEXT_END@301..302 "]"
+      LINK_DEST_START@302..303 "("
+      LINK_DEST@303..310
+        LINK_DEST_URL@303..310
+          TEXT@303..310 "#nested"
+      LINK_DEST_END@310..311 ")"
+    TEXT@311..312 " "
+    LINK@312..329
+      LINK_START@312..313
+        LINK_START@312..313 "["
+      LINK_TEXT@313..319
+        TEXT@313..319 "quoted"
+      LINK_TEXT_END@319..320 "]"
+      LINK_DEST_START@320..321 "("
+      LINK_DEST@321..328
+        LINK_DEST_URL@321..328
+          TEXT@321..328 "#quoted"
+      LINK_DEST_END@328..329 ")"
+    NEWLINE@329..330 "\n"

@@ -23,7 +23,13 @@ DOCUMENT@0..81
     BLANK_LINE@24..25 "\n"
   HTML_BLOCK@25..56
     HTML_BLOCK_TAG@25..46
-      TEXT@25..45 "<section id=\"intro\">"
+      TEXT@25..33 "<section"
+      HTML_ATTRS@33..44
+        WHITESPACE@33..34 " "
+        TEXT@34..38 "id=\""
+        ATTR_ID@38..43 "intro"
+        TEXT@43..44 "\""
+      TEXT@44..45 ">"
       NEWLINE@45..46 "\n"
     HTML_BLOCK_CONTENT@46..56
       TEXT@46..55 "# Heading"

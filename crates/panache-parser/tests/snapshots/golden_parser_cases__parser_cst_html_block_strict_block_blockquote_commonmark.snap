@@ -26,7 +26,13 @@ DOCUMENT@0..66
     WHITESPACE@28..29 " "
     HTML_BLOCK@29..66
       HTML_BLOCK_TAG@29..46
-        TEXT@29..45 "<section id=\"x\">"
+        TEXT@29..37 "<section"
+        HTML_ATTRS@37..44
+          WHITESPACE@37..38 " "
+          TEXT@38..42 "id=\""
+          ATTR_ID@42..43 "x"
+          TEXT@43..44 "\""
+        TEXT@44..45 ">"
         NEWLINE@45..46 "\n"
       HTML_BLOCK_CONTENT@46..66
         LINE_PREFIX@46..47 ">"

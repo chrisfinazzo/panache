@@ -5,7 +5,24 @@ expression: cst_output
 DOCUMENT@0..62
   HTML_BLOCK@0..62
     HTML_BLOCK_TAG@0..52
-      TEXT@0..51 "<div _bad='x' id='hid ..."
+      TEXT@0..4 "<div"
+      HTML_ATTRS@4..38
+        WHITESPACE@4..5 " "
+        ATTR_KEY_VALUE@5..13
+          ATTR_KEY@5..9 "_bad"
+          TEXT@9..10 "="
+          ATTR_VALUE@10..13 "'x'"
+        WHITESPACE@13..14 " "
+        TEXT@14..18 "id='"
+        ATTR_ID@18..24 "hidden"
+        TEXT@24..25 "'"
+        WHITESPACE@25..26 " "
+        ATTR_KEY_VALUE@26..37
+          ATTR_KEY@26..31 "title"
+          TEXT@31..32 "="
+          ATTR_VALUE@32..37 "'a>b'"
+        TEXT@37..38 "/"
+      TEXT@38..51 ">**Outside.**"
       NEWLINE@51..52 "\n"
     HTML_BLOCK_CONTENT@52..62
       TEXT@52..61 "next line"

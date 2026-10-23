@@ -5,7 +5,17 @@ expression: cst_output
 DOCUMENT@0..51
   PARAGRAPH@0..51
     INLINE_HTML@0..37
-      INLINE_HTML_CONTENT@0..37 "<span title=\"a&amp;b  ..."
+      INLINE_HTML_CONTENT@0..5 "<span"
+      HTML_ATTRS@5..36
+        WHITESPACE@5..6 " "
+        ATTR_KEY_VALUE@6..25
+          ATTR_KEY@6..11 "title"
+          TEXT@11..12 "="
+          ATTR_VALUE@12..25 "\"a&amp;b > c\""
+        WHITESPACE@25..26 " "
+        TEXT@26..29 "id="
+        ATTR_ID@29..36 "visible"
+      INLINE_HTML_CONTENT@36..37 ">"
     STRONG@37..43
       STRONG_MARKER@37..39 "**"
       TEXT@39..41 "hi"

@@ -118,6 +118,12 @@ impl<'a, 'b> MarkerInjectingSink<'a, 'b> {
         }
     }
 
+    /// Keep a raw block's leading container prefixes inside its line wrapper.
+    pub(crate) fn start_node_with_leading_markers(&mut self, kind: rowan::SyntaxKind) {
+        self.inner.start_node(kind);
+        self.emit_markers_at_current();
+    }
+
     /// Flush any markers at or past the end of the emitted text. Must be called
     /// once after the inline parser finishes, to place trailing markers.
     pub(crate) fn finish(mut self) {

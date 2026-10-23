@@ -1,0 +1,15 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..42
+  HTML_BLOCK_RAW@0..42
+    HTML_BLOCK_TAG@0..6
+      TEXT@0..5 "<pre>"
+      NEWLINE@5..6 "\n"
+    HTML_BLOCK_CONTENT@6..12
+      TEXT@6..11 "<span"
+      NEWLINE@11..12 "\n"
+    HTML_BLOCK_TAG@12..42
+      TEXT@12..41 "id=\"saved\">Saved</spa ..."
+      NEWLINE@41..42 "\n"

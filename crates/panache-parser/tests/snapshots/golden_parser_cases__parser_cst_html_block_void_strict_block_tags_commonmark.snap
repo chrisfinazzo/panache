@@ -10,7 +10,13 @@ DOCUMENT@0..39
     HTML_BLOCK_CONTENT@5..39
       TEXT@5..11 "<hr />"
       NEWLINE@11..12 "\n"
-      TEXT@12..25 "<hr id=\"bar\">"
+      TEXT@12..15 "<hr"
+      HTML_ATTRS@15..24
+        WHITESPACE@15..16 " "
+        TEXT@16..20 "id=\""
+        ATTR_ID@20..23 "bar"
+        TEXT@23..24 "\""
+      TEXT@24..25 ">"
       NEWLINE@25..26 "\n"
       TEXT@26..31 "<col>"
       NEWLINE@31..32 "\n"

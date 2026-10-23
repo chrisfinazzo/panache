@@ -5,7 +5,14 @@ expression: cst_output
 DOCUMENT@0..18
   HTML_BLOCK@0..18
     HTML_BLOCK_TAG@0..16
-      TEXT@0..15 "<embed src=\"x\">"
+      TEXT@0..6 "<embed"
+      HTML_ATTRS@6..14
+        WHITESPACE@6..7 " "
+        ATTR_KEY_VALUE@7..14
+          ATTR_KEY@7..10 "src"
+          TEXT@10..11 "="
+          ATTR_VALUE@11..14 "\"x\""
+      TEXT@14..15 ">"
       NEWLINE@15..16 "\n"
     HTML_BLOCK_CONTENT@16..18
       TEXT@16..17 "b"

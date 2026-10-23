@@ -6,7 +6,14 @@ DOCUMENT@0..225
   PARAGRAPH@0..36
     TEXT@0..6 "Open: "
     INLINE_HTML@6..18
-      INLINE_HTML_CONTENT@6..18 "<a href=\"x\">"
+      INLINE_HTML_CONTENT@6..8 "<a"
+      HTML_ATTRS@8..17
+        WHITESPACE@8..9 " "
+        ATTR_KEY_VALUE@9..17
+          ATTR_KEY@9..13 "href"
+          TEXT@13..14 "="
+          ATTR_VALUE@14..17 "\"x\""
+      INLINE_HTML_CONTENT@17..18 ">"
     TEXT@18..27 ". Close: "
     INLINE_HTML@27..34
       INLINE_HTML_CONTENT@27..34 "</foo >"
@@ -45,6 +52,13 @@ DOCUMENT@0..225
   PARAGRAPH@166..225
     TEXT@166..204 "Backslashes and entit ..."
     INLINE_HTML@204..223
-      INLINE_HTML_CONTENT@204..223 "<a href=\"\\*&ouml;\">"
+      INLINE_HTML_CONTENT@204..206 "<a"
+      HTML_ATTRS@206..222
+        WHITESPACE@206..207 " "
+        ATTR_KEY_VALUE@207..222
+          ATTR_KEY@207..211 "href"
+          TEXT@211..212 "="
+          ATTR_VALUE@212..222 "\"\\*&ouml;\""
+      INLINE_HTML_CONTENT@222..223 ">"
     TEXT@223..224 "."
     NEWLINE@224..225 "\n"

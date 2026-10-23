@@ -48,6 +48,15 @@ impl Formatter {
             after_marker = false;
             text.push_str(token.text());
         }
+        // A prefix-only final line still belongs to the raw block without a
+        // source newline; the enclosing container must emit that blank line.
+        if text.ends_with('\n')
+            && node
+                .last_token()
+                .is_some_and(|token| token.kind() == SyntaxKind::LINE_PREFIX)
+        {
+            text.push('\n');
+        }
         let starts_on_marker_line = node
             .first_token()
             .and_then(|token| token.prev_token())

@@ -27,7 +27,14 @@ DOCUMENT@0..91
     BLANK_LINE@45..46 "\n"
   HTML_BLOCK@46..70
     HTML_BLOCK_TAG@46..59
-      TEXT@46..58 "<a href=\"x\">"
+      TEXT@46..48 "<a"
+      HTML_ATTRS@48..57
+        WHITESPACE@48..49 " "
+        ATTR_KEY_VALUE@49..57
+          ATTR_KEY@49..53 "href"
+          TEXT@53..54 "="
+          ATTR_VALUE@54..57 "\"x\""
+      TEXT@57..58 ">"
       NEWLINE@58..59 "\n"
     HTML_BLOCK_CONTENT@59..70
       TEXT@59..64 "*bar*"

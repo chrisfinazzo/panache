@@ -8,7 +8,13 @@ DOCUMENT@0..30
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..30
       HTML_BLOCK_TAG@2..18
-        TEXT@2..17 "<div id=\"x\">foo"
+        TEXT@2..6 "<div"
+        HTML_ATTRS@6..13
+          WHITESPACE@6..7 " "
+          TEXT@7..11 "id=\""
+          ATTR_ID@11..12 "x"
+          TEXT@12..13 "\""
+        TEXT@13..17 ">foo"
         NEWLINE@17..18 "\n"
       HTML_BLOCK_CONTENT@18..30
         LINE_PREFIX@18..19 ">"

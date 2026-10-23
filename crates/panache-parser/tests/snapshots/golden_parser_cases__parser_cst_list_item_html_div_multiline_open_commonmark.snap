@@ -8,12 +8,17 @@ DOCUMENT@0..33
       LIST_MARKER@0..1 "-"
       WHITESPACE@1..2 " "
       HTML_BLOCK@2..33
-        HTML_BLOCK_TAG@2..7
+        HTML_BLOCK_TAG@2..17
           TEXT@2..6 "<div"
-          NEWLINE@6..7 "\n"
-        HTML_BLOCK_CONTENT@7..33
-          TEXT@7..16 "  id=\"x\">"
+          HTML_ATTRS@6..15
+            NEWLINE@6..7 "\n"
+            WHITESPACE@7..9 "  "
+            TEXT@9..13 "id=\""
+            ATTR_ID@13..14 "x"
+            TEXT@14..15 "\""
+          TEXT@15..16 ">"
           NEWLINE@16..17 "\n"
+        HTML_BLOCK_CONTENT@17..33
           TEXT@17..23 "  body"
           NEWLINE@23..24 "\n"
           TEXT@24..32 "  </div>"

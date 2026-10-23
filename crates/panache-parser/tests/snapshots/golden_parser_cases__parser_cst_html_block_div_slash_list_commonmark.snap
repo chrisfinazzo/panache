@@ -9,7 +9,13 @@ DOCUMENT@0..38
       WHITESPACE@1..2 " "
       HTML_BLOCK@2..38
         HTML_BLOCK_TAG@2..20
-          TEXT@2..19 "<div id=\"outer\"/>"
+          TEXT@2..6 "<div"
+          HTML_ATTRS@6..18
+            WHITESPACE@6..7 " "
+            TEXT@7..11 "id=\""
+            ATTR_ID@11..16 "outer"
+            TEXT@16..18 "\"/"
+          TEXT@18..19 ">"
           NEWLINE@19..20 "\n"
         HTML_BLOCK_CONTENT@20..38
           TEXT@20..28 "  inside"

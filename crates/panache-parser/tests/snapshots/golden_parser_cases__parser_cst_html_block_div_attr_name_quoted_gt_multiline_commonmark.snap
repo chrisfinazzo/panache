@@ -4,13 +4,27 @@ expression: cst_output
 ---
 DOCUMENT@0..65
   HTML_BLOCK@0..65
-    HTML_BLOCK_TAG@0..5
+    HTML_BLOCK_TAG@0..55
       TEXT@0..4 "<DIV"
-      NEWLINE@4..5 "\n"
-    HTML_BLOCK_CONTENT@5..65
-      TEXT@5..37 "  _bad=\"x\" id=\"hidden ..."
-      NEWLINE@37..38 "\n"
-      TEXT@38..54 "b\"/>**Outside.**"
+      HTML_ATTRS@4..41
+        NEWLINE@4..5 "\n"
+        WHITESPACE@5..7 "  "
+        ATTR_KEY_VALUE@7..15
+          ATTR_KEY@7..11 "_bad"
+          TEXT@11..12 "="
+          ATTR_VALUE@12..15 "\"x\""
+        WHITESPACE@15..16 " "
+        TEXT@16..20 "id=\""
+        ATTR_ID@20..26 "hidden"
+        TEXT@26..27 "\""
+        WHITESPACE@27..28 " "
+        ATTR_KEY_VALUE@28..40
+          ATTR_KEY@28..33 "title"
+          TEXT@33..34 "="
+          ATTR_VALUE@34..40 "\"a>\nb\""
+        TEXT@40..41 "/"
+      TEXT@41..54 ">**Outside.**"
       NEWLINE@54..55 "\n"
+    HTML_BLOCK_CONTENT@55..65
       TEXT@55..64 "next line"
       NEWLINE@64..65 "\n"

@@ -4,9 +4,13 @@ expression: cst_output
 ---
 DOCUMENT@0..26
   HTML_BLOCK@0..26
-    HTML_BLOCK_TAG@0..6
+    HTML_BLOCK_TAG@0..26
       TEXT@0..5 "<form"
-      NEWLINE@5..6 "\n"
-    HTML_BLOCK_CONTENT@6..26
-      TEXT@6..25 "  id=\"x\">foo</form>"
+      HTML_ATTRS@5..14
+        NEWLINE@5..6 "\n"
+        WHITESPACE@6..8 "  "
+        TEXT@8..12 "id=\""
+        ATTR_ID@12..13 "x"
+        TEXT@13..14 "\""
+      TEXT@14..25 ">foo</form>"
       NEWLINE@25..26 "\n"

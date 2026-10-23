@@ -1,0 +1,89 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..155
+  HTML_BLOCK@0..26
+    HTML_BLOCK_TAG@0..26
+      TEXT@0..3 "<h2"
+      HTML_ATTRS@3..14
+        WHITESPACE@3..4 " "
+        TEXT@4..8 "id=\""
+        ATTR_ID@8..13 "saved"
+        TEXT@13..14 "\""
+      TEXT@14..25 ">Saved</h2>"
+      NEWLINE@25..26 "\n"
+  BLANK_LINE@26..27
+    BLANK_LINE@26..27 "\n"
+  PARAGRAPH@27..62
+    STRONG@27..61
+      STRONG_MARKER@27..29 "**"
+      INLINE_HTML@29..47
+        INLINE_HTML_CONTENT@29..34 "<span"
+        HTML_ATTRS@34..46
+          WHITESPACE@34..35 " "
+          TEXT@35..39 "id=\""
+          ATTR_ID@39..45 "inline"
+          TEXT@45..46 "\""
+        INLINE_HTML_CONTENT@46..47 ">"
+      INLINE_HTML@47..54
+        INLINE_HTML_CONTENT@47..54 "</span>"
+      TEXT@54..59 "Saved"
+      STRONG_MARKER@59..61 "**"
+    NEWLINE@61..62 "\n"
+  BLANK_LINE@62..63
+    BLANK_LINE@62..63 "\n"
+  HTML_BLOCK@63..102
+    HTML_BLOCK_TAG@63..69
+      TEXT@63..68 "<div>"
+      NEWLINE@68..69 "\n"
+    HTML_BLOCK_CONTENT@69..102
+      TEXT@69..74 "<span"
+      HTML_ATTRS@74..86
+        WHITESPACE@74..75 " "
+        TEXT@75..79 "id=\""
+        ATTR_ID@79..85 "nested"
+        TEXT@85..86 "\""
+      TEXT@86..94 "></span>"
+      NEWLINE@94..95 "\n"
+      TEXT@95..101 "</div>"
+      NEWLINE@101..102 "\n"
+  BLANK_LINE@102..103
+    BLANK_LINE@102..103 "\n"
+  PARAGRAPH@103..155
+    LINK@103..118
+      LINK_START@103..104
+        LINK_START@103..104 "["
+      LINK_TEXT@104..109
+        TEXT@104..109 "saved"
+      LINK_TEXT_END@109..110 "]"
+      LINK_DEST_START@110..111 "("
+      LINK_DEST@111..117
+        LINK_DEST_URL@111..117
+          TEXT@111..117 "#saved"
+      LINK_DEST_END@117..118 ")"
+    TEXT@118..119 " "
+    LINK@119..136
+      LINK_START@119..120
+        LINK_START@119..120 "["
+      LINK_TEXT@120..126
+        TEXT@120..126 "inline"
+      LINK_TEXT_END@126..127 "]"
+      LINK_DEST_START@127..128 "("
+      LINK_DEST@128..135
+        LINK_DEST_URL@128..135
+          TEXT@128..135 "#inline"
+      LINK_DEST_END@135..136 ")"
+    TEXT@136..137 " "
+    LINK@137..154
+      LINK_START@137..138
+        LINK_START@137..138 "["
+      LINK_TEXT@138..144
+        TEXT@138..144 "nested"
+      LINK_TEXT_END@144..145 "]"
+      LINK_DEST_START@145..146 "("
+      LINK_DEST@146..153
+        LINK_DEST_URL@146..153
+          TEXT@146..153 "#nested"
+      LINK_DEST_END@153..154 ")"
+    NEWLINE@154..155 "\n"

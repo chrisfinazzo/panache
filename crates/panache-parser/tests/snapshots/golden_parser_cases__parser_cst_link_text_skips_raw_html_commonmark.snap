@@ -6,14 +6,28 @@ DOCUMENT@0..64
   PARAGRAPH@0..25
     TEXT@0..5 "[foo "
     INLINE_HTML@5..24
-      INLINE_HTML_CONTENT@5..24 "<bar attr=\"](baz)\">"
+      INLINE_HTML_CONTENT@5..9 "<bar"
+      HTML_ATTRS@9..23
+        WHITESPACE@9..10 " "
+        ATTR_KEY_VALUE@10..23
+          ATTR_KEY@10..14 "attr"
+          TEXT@14..15 "="
+          ATTR_VALUE@15..23 "\"](baz)\""
+      INLINE_HTML_CONTENT@23..24 ">"
     NEWLINE@24..25 "\n"
   BLANK_LINE@25..26
     BLANK_LINE@25..26 "\n"
   PARAGRAPH@26..51
     TEXT@26..31 "[foo "
     INLINE_HTML@31..50
-      INLINE_HTML_CONTENT@31..50 "<bar attr=\"][ref]\">"
+      INLINE_HTML_CONTENT@31..35 "<bar"
+      HTML_ATTRS@35..49
+        WHITESPACE@35..36 " "
+        ATTR_KEY_VALUE@36..49
+          ATTR_KEY@36..40 "attr"
+          TEXT@40..41 "="
+          ATTR_VALUE@41..49 "\"][ref]\""
+      INLINE_HTML_CONTENT@49..50 ">"
     NEWLINE@50..51 "\n"
   BLANK_LINE@51..52
     BLANK_LINE@51..52 "\n"

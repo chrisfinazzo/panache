@@ -8,7 +8,13 @@ DOCUMENT@0..34
     WHITESPACE@1..2 " "
     PARAGRAPH@2..34
       INLINE_HTML@2..16
-        INLINE_HTML_CONTENT@2..16 "<video id=\"x\">"
+        INLINE_HTML_CONTENT@2..8 "<video"
+        HTML_ATTRS@8..15
+          WHITESPACE@8..9 " "
+          TEXT@9..13 "id=\""
+          ATTR_ID@13..14 "x"
+          TEXT@14..15 "\""
+        INLINE_HTML_CONTENT@15..16 ">"
       TEXT@16..20 "foo "
       EMPHASIS@20..25
         EMPHASIS_MARKER@20..21 "*"

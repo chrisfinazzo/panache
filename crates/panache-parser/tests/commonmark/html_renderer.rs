@@ -11,7 +11,7 @@
 //! (if newly broken). The renderer grows in lockstep with parser fixes.
 
 use panache_parser::SyntaxNode;
-use panache_parser::syntax::SyntaxKind;
+use panache_parser::syntax::{AstNode, InlineHtml, SyntaxKind};
 use rowan::NodeOrToken;
 use std::collections::HashMap;
 
@@ -901,14 +901,8 @@ fn render_inline_node(node: &SyntaxNode, refs: &HashMap<String, RefDef>, out: &m
         SyntaxKind::IMAGE_LINK => render_image(node, refs, out),
         SyntaxKind::AUTO_LINK => render_autolink(node, out),
         SyntaxKind::INLINE_HTML => {
-            for el in node.children_with_tokens() {
-                if let NodeOrToken::Token(t) = el
-                    && t.kind() == SyntaxKind::INLINE_HTML_CONTENT
-                {
-                    for c in t.text().chars() {
-                        out.push(protect_entity_whitespace(c));
-                    }
-                }
+            for c in InlineHtml::cast(node.clone()).unwrap().verbatim().chars() {
+                out.push(protect_entity_whitespace(c));
             }
         }
         _ => {

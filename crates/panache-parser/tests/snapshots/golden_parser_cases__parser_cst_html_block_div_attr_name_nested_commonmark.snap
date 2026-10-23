@@ -8,7 +8,13 @@ DOCUMENT@0..110
       TEXT@0..13 "<div a&amp;b>"
       NEWLINE@13..14 "\n"
     HTML_BLOCK_CONTENT@14..58
-      TEXT@14..43 "<div id=\"inner\">**raw ..."
+      TEXT@14..18 "<div"
+      HTML_ATTRS@18..29
+        WHITESPACE@18..19 " "
+        TEXT@19..23 "id=\""
+        ATTR_ID@23..28 "inner"
+        TEXT@28..29 "\""
+      TEXT@29..43 ">**raw**</div>"
       NEWLINE@43..44 "\n"
       TEXT@44..50 "<div/>"
       NEWLINE@50..51 "\n"
@@ -18,7 +24,13 @@ DOCUMENT@0..110
     BLANK_LINE@58..59 "\n"
   HTML_BLOCK@59..110
     HTML_BLOCK_TAG@59..76
-      TEXT@59..75 "<div id=\"outer\">"
+      TEXT@59..63 "<div"
+      HTML_ATTRS@63..74
+        WHITESPACE@63..64 " "
+        TEXT@64..68 "id=\""
+        ATTR_ID@68..73 "outer"
+        TEXT@73..74 "\""
+      TEXT@74..75 ">"
       NEWLINE@75..76 "\n"
     HTML_BLOCK_CONTENT@76..110
       TEXT@76..102 "<div a&amp;b>**raw**< ..."

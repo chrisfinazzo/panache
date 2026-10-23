@@ -7,14 +7,19 @@ DOCUMENT@0..43
     BLOCK_QUOTE_MARKER@0..1 ">"
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..43
-      HTML_BLOCK_TAG@2..7
+      HTML_BLOCK_TAG@2..27
         TEXT@2..6 "<div"
-        NEWLINE@6..7 "\n"
-      HTML_BLOCK_CONTENT@7..43
-        LINE_PREFIX@7..8 ">"
-        LINE_PREFIX@8..9 " "
-        TEXT@9..26 "  id=\"x\">trailing"
+        HTML_ATTRS@6..17
+          NEWLINE@6..7 "\n"
+          LINE_PREFIX@7..8 ">"
+          LINE_PREFIX@8..9 " "
+          WHITESPACE@9..11 "  "
+          TEXT@11..15 "id=\""
+          ATTR_ID@15..16 "x"
+          TEXT@16..17 "\""
+        TEXT@17..26 ">trailing"
         NEWLINE@26..27 "\n"
+      HTML_BLOCK_CONTENT@27..43
         LINE_PREFIX@27..28 ">"
         LINE_PREFIX@28..29 " "
         TEXT@29..33 "body"

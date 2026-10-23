@@ -8,7 +8,14 @@ DOCUMENT@0..45
     NEWLINE@3..4 "\n"
   HTML_BLOCK@4..41
     HTML_BLOCK_TAG@4..41
-      TEXT@4..40 "<script type=\"math/te ..."
+      TEXT@4..11 "<script"
+      HTML_ATTRS@11..27
+        WHITESPACE@11..12 " "
+        ATTR_KEY_VALUE@12..27
+          ATTR_KEY@12..16 "type"
+          TEXT@16..17 "="
+          ATTR_VALUE@17..27 "\"math/tex\""
+      TEXT@27..40 ">x^2</script>"
       NEWLINE@40..41 "\n"
   PARAGRAPH@41..45
     TEXT@41..44 "bar"

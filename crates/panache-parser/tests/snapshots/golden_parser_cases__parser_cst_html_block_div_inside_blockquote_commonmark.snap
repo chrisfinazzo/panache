@@ -8,7 +8,17 @@ DOCUMENT@0..58
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..58
       HTML_BLOCK_TAG@2..32
-        TEXT@2..31 "<div id=\"warn\" class= ..."
+        TEXT@2..6 "<div"
+        HTML_ATTRS@6..30
+          WHITESPACE@6..7 " "
+          TEXT@7..11 "id=\""
+          ATTR_ID@11..15 "warn"
+          TEXT@15..16 "\""
+          WHITESPACE@16..17 " "
+          TEXT@17..24 "class=\""
+          ATTR_CLASS@24..29 "alert"
+          TEXT@29..30 "\""
+        TEXT@30..31 ">"
         NEWLINE@31..32 "\n"
       HTML_BLOCK_CONTENT@32..58
         LINE_PREFIX@32..33 ">"

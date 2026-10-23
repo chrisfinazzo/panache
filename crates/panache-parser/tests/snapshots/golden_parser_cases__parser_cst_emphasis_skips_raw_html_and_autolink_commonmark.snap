@@ -6,21 +6,48 @@ DOCUMENT@0..118
   PARAGRAPH@0..28
     TEXT@0..1 "*"
     INLINE_HTML@1..27
-      INLINE_HTML_CONTENT@1..27 "<img src=\"foo\" title= ..."
+      INLINE_HTML_CONTENT@1..5 "<img"
+      HTML_ATTRS@5..26
+        WHITESPACE@5..6 " "
+        ATTR_KEY_VALUE@6..15
+          ATTR_KEY@6..9 "src"
+          TEXT@9..10 "="
+          ATTR_VALUE@10..15 "\"foo\""
+        WHITESPACE@15..16 " "
+        ATTR_KEY_VALUE@16..25
+          ATTR_KEY@16..21 "title"
+          TEXT@21..22 "="
+          ATTR_VALUE@22..25 "\"*\""
+        TEXT@25..26 "/"
+      INLINE_HTML_CONTENT@26..27 ">"
     NEWLINE@27..28 "\n"
   BLANK_LINE@28..29
     BLANK_LINE@28..29 "\n"
   PARAGRAPH@29..45
     TEXT@29..31 "**"
     INLINE_HTML@31..44
-      INLINE_HTML_CONTENT@31..44 "<a href=\"**\">"
+      INLINE_HTML_CONTENT@31..33 "<a"
+      HTML_ATTRS@33..43
+        WHITESPACE@33..34 " "
+        ATTR_KEY_VALUE@34..43
+          ATTR_KEY@34..38 "href"
+          TEXT@38..39 "="
+          ATTR_VALUE@39..43 "\"**\""
+      INLINE_HTML_CONTENT@43..44 ">"
     NEWLINE@44..45 "\n"
   BLANK_LINE@45..46
     BLANK_LINE@45..46 "\n"
   PARAGRAPH@46..62
     TEXT@46..48 "__"
     INLINE_HTML@48..61
-      INLINE_HTML_CONTENT@48..61 "<a href=\"__\">"
+      INLINE_HTML_CONTENT@48..50 "<a"
+      HTML_ATTRS@50..60
+        WHITESPACE@50..51 " "
+        ATTR_KEY_VALUE@51..60
+          ATTR_KEY@51..55 "href"
+          TEXT@55..56 "="
+          ATTR_VALUE@56..60 "\"__\""
+      INLINE_HTML_CONTENT@60..61 ">"
     NEWLINE@61..62 "\n"
   BLANK_LINE@62..63
     BLANK_LINE@62..63 "\n"

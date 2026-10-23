@@ -4,13 +4,20 @@ expression: cst_output
 ---
 DOCUMENT@0..57
   HTML_BLOCK@0..40
-    HTML_BLOCK_TAG@0..6
+    HTML_BLOCK_TAG@0..40
       TEXT@0..5 "<form"
-      NEWLINE@5..6 "\n"
-    HTML_BLOCK_CONTENT@6..40
-      TEXT@6..20 "  id=\"contact\""
-      NEWLINE@20..21 "\n"
-      TEXT@21..39 "  class=\"primary\">"
+      HTML_ATTRS@5..38
+        NEWLINE@5..6 "\n"
+        WHITESPACE@6..8 "  "
+        TEXT@8..12 "id=\""
+        ATTR_ID@12..19 "contact"
+        TEXT@19..20 "\""
+        NEWLINE@20..21 "\n"
+        WHITESPACE@21..23 "  "
+        TEXT@23..30 "class=\""
+        ATTR_CLASS@30..37 "primary"
+        TEXT@37..38 "\""
+      TEXT@38..39 ">"
       NEWLINE@39..40 "\n"
   BLANK_LINE@40..41
     BLANK_LINE@40..41 "\n"

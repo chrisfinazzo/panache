@@ -11,5 +11,11 @@ DOCUMENT@0..44
     BLANK_LINE@18..19 "\n"
   HTML_BLOCK@19..44
     HTML_BLOCK_TAG@19..44
-      TEXT@19..43 "<div id=\"x\">foo</div>baz"
+      TEXT@19..23 "<div"
+      HTML_ATTRS@23..30
+        WHITESPACE@23..24 " "
+        TEXT@24..28 "id=\""
+        ATTR_ID@28..29 "x"
+        TEXT@29..30 "\""
+      TEXT@30..43 ">foo</div>baz"
       NEWLINE@43..44 "\n"

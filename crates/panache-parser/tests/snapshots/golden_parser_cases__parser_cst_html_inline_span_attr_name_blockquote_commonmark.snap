@@ -8,7 +8,17 @@ DOCUMENT@0..39
     WHITESPACE@1..2 " "
     PARAGRAPH@2..39
       INLINE_HTML@2..25
-        INLINE_HTML_CONTENT@2..25 "<span _bad=x id=hidden>"
+        INLINE_HTML_CONTENT@2..7 "<span"
+        HTML_ATTRS@7..24
+          WHITESPACE@7..8 " "
+          ATTR_KEY_VALUE@8..14
+            ATTR_KEY@8..12 "_bad"
+            TEXT@12..13 "="
+            ATTR_VALUE@13..14 "x"
+          WHITESPACE@14..15 " "
+          TEXT@15..18 "id="
+          ATTR_ID@18..24 "hidden"
+        INLINE_HTML_CONTENT@24..25 ">"
       STRONG@25..31
         STRONG_MARKER@25..27 "**"
         TEXT@27..29 "hi"

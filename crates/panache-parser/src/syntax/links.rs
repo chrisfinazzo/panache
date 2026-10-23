@@ -101,9 +101,7 @@ impl AstNode for LinkText {
 impl LinkText {
     /// Returns the text content.
     pub fn text_content(&self) -> String {
-        self.0
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
+        super::ast::visible_text_tokens(&self.0)
             .filter(|token| token.kind() == SyntaxKind::TEXT)
             .map(|token| token.text().to_string())
             .collect()
@@ -458,9 +456,7 @@ impl AstNode for ImageAlt {
 impl ImageAlt {
     /// Returns the alt text content.
     pub fn text(&self) -> String {
-        self.0
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
+        super::ast::visible_text_tokens(&self.0)
             .filter(|token| token.kind() == SyntaxKind::TEXT)
             .map(|token| token.text().to_string())
             .collect()
@@ -550,9 +546,7 @@ impl UnresolvedReference {
         if let Some(image_alt) = support::child::<ImageAlt>(&self.0) {
             return image_alt.text();
         }
-        self.0
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
+        super::ast::visible_text_tokens(&self.0)
             .filter(|token| token.kind() == SyntaxKind::TEXT)
             .map(|token| token.text().to_string())
             .collect()

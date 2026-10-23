@@ -17,7 +17,7 @@
 
 use super::sink::InlineSink;
 use crate::options::Dialect;
-use crate::parser::utils::attributes::pandoc_html_attribute_names_valid;
+use crate::parser::utils::attributes::{emit_html_attrs_node, pandoc_html_attribute_names_valid};
 use crate::syntax::SyntaxKind;
 
 /// Try to match an inline raw HTML span starting at `text[0]`.
@@ -78,10 +78,32 @@ pub(crate) fn inspect_inline_html(
 }
 
 /// Emit a single `INLINE_HTML` node holding the verbatim span.
-pub fn emit_inline_html(builder: &mut impl InlineSink, raw: &str) {
+pub fn emit_inline_html(builder: &mut impl InlineSink, raw: &str, dialect: Dialect) {
     builder.start_node(SyntaxKind::INLINE_HTML.into());
-    builder.token(SyntaxKind::INLINE_HTML_CONTENT.into(), raw);
+    if dialect == Dialect::CommonMark
+        && let Some(attrs) = open_tag_attribute_range(raw)
+    {
+        builder.token(SyntaxKind::INLINE_HTML_CONTENT.into(), &raw[..attrs.start]);
+        emit_html_attrs_node(builder, &raw[attrs.clone()]);
+        builder.token(SyntaxKind::INLINE_HTML_CONTENT.into(), &raw[attrs.end..]);
+    } else {
+        builder.token(SyntaxKind::INLINE_HTML_CONTENT.into(), raw);
+    }
     builder.finish_node();
+}
+
+/// Locate attributes only after the raw HTML recognizer has accepted the tag.
+pub(crate) fn open_tag_attribute_range(raw: &str) -> Option<std::ops::Range<usize>> {
+    let len = parse_open_tag(raw)?;
+    let name_end = 1 + raw.as_bytes()[1..]
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'-')
+        .count();
+    let attrs = name_end..len - 1;
+    raw[attrs.clone()]
+        .bytes()
+        .any(|b| !b.is_ascii_whitespace() && b != b'/')
+        .then_some(attrs)
 }
 
 fn parse_html_comment(text: &str) -> Option<usize> {

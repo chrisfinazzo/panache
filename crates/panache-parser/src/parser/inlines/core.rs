@@ -1289,7 +1289,7 @@ fn parse_inline_range_impl(
                 builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos]);
             }
             log::trace!("Matched inline raw HTML at pos {}", pos);
-            emit_inline_html(builder, &text[pos..pos + len]);
+            emit_inline_html(builder, &text[pos..pos + len], config.dialect);
             pos += len;
             text_start = pos;
             continue;

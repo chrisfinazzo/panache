@@ -8,5 +8,11 @@ DOCUMENT@0..32
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..32
       HTML_BLOCK_TAG@2..32
-        TEXT@2..31 "<form id=\"x\">foo *bar ..."
+        TEXT@2..7 "<form"
+        HTML_ATTRS@7..14
+          WHITESPACE@7..8 " "
+          TEXT@8..12 "id=\""
+          ATTR_ID@12..13 "x"
+          TEXT@13..14 "\""
+        TEXT@14..31 ">foo *bar*</form>"
         NEWLINE@31..32 "\n"

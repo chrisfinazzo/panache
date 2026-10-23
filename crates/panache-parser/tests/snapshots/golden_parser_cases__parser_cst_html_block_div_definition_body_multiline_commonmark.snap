@@ -11,7 +11,13 @@ DOCUMENT@0..40
   PARAGRAPH@6..40
     TEXT@6..10 ":   "
     INLINE_HTML@10..22
-      INLINE_HTML_CONTENT@10..22 "<div id=\"d\">"
+      INLINE_HTML_CONTENT@10..14 "<div"
+      HTML_ATTRS@14..21
+        WHITESPACE@14..15 " "
+        TEXT@15..19 "id=\""
+        ATTR_ID@19..20 "d"
+        TEXT@20..21 "\""
+      INLINE_HTML_CONTENT@21..22 ">"
     NEWLINE@22..23 "\n"
     TEXT@23..28 "    x"
     NEWLINE@28..29 "\n"

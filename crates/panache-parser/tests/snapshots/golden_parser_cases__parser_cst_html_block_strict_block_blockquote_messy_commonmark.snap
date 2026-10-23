@@ -8,7 +8,13 @@ DOCUMENT@0..47
     WHITESPACE@1..2 " "
     HTML_BLOCK@2..47
       HTML_BLOCK_TAG@2..28
-        TEXT@2..27 "<section id=\"sec-a\">f ..."
+        TEXT@2..10 "<section"
+        HTML_ATTRS@10..21
+          WHITESPACE@10..11 " "
+          TEXT@11..15 "id=\""
+          ATTR_ID@15..20 "sec-a"
+          TEXT@20..21 "\""
+        TEXT@21..27 ">first"
         NEWLINE@27..28 "\n"
       HTML_BLOCK_CONTENT@28..47
         LINE_PREFIX@28..29 ">"

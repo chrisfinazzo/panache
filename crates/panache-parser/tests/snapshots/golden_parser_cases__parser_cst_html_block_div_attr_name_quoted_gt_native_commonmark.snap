@@ -5,5 +5,16 @@ expression: cst_output
 DOCUMENT@0..57
   HTML_BLOCK@0..57
     HTML_BLOCK_TAG@0..57
-      TEXT@0..56 "<div id=\"visible\" tit ..."
+      TEXT@0..4 "<div"
+      HTML_ATTRS@4..29
+        WHITESPACE@4..5 " "
+        TEXT@5..9 "id=\""
+        ATTR_ID@9..16 "visible"
+        TEXT@16..17 "\""
+        WHITESPACE@17..18 " "
+        ATTR_KEY_VALUE@18..29
+          ATTR_KEY@18..23 "title"
+          TEXT@23..24 "="
+          ATTR_VALUE@24..29 "\"a>b\""
+      TEXT@29..56 ">**Inside.**</div>**T ..."
       NEWLINE@56..57 "\n"

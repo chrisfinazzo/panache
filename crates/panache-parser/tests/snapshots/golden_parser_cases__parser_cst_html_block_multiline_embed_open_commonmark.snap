@@ -1,10 +1,17 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..18
   PARAGRAPH@0..18
     INLINE_HTML@0..17
-      INLINE_HTML_CONTENT@0..17 "<embed\n  src=\"x\">"
+      INLINE_HTML_CONTENT@0..6 "<embed"
+      HTML_ATTRS@6..16
+        NEWLINE@6..7 "\n"
+        WHITESPACE@7..9 "  "
+        ATTR_KEY_VALUE@9..16
+          ATTR_KEY@9..12 "src"
+          TEXT@12..13 "="
+          ATTR_VALUE@13..16 "\"x\""
+      INLINE_HTML_CONTENT@16..17 ">"
     NEWLINE@17..18 "\n"

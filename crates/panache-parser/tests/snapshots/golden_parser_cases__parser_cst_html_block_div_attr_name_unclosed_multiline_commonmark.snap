@@ -4,11 +4,18 @@ expression: cst_output
 ---
 DOCUMENT@0..37
   HTML_BLOCK@0..37
-    HTML_BLOCK_TAG@0..5
+    HTML_BLOCK_TAG@0..37
       TEXT@0..4 "<div"
-      NEWLINE@4..5 "\n"
-    HTML_BLOCK_CONTENT@5..37
-      TEXT@5..17 "  bad.name=x"
-      NEWLINE@17..18 "\n"
-      TEXT@18..36 "  id=hidden>**hi**"
+      HTML_ATTRS@4..29
+        NEWLINE@4..5 "\n"
+        WHITESPACE@5..7 "  "
+        ATTR_KEY_VALUE@7..17
+          ATTR_KEY@7..15 "bad.name"
+          TEXT@15..16 "="
+          ATTR_VALUE@16..17 "x"
+        NEWLINE@17..18 "\n"
+        WHITESPACE@18..20 "  "
+        TEXT@20..23 "id="
+        ATTR_ID@23..29 "hidden"
+      TEXT@29..36 ">**hi**"
       NEWLINE@36..37 "\n"

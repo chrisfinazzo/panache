@@ -228,11 +228,22 @@ impl AstNode for InlineHtml {
 }
 
 impl InlineHtml {
+    /// The literal element opened by this tag, if its contents are HTML text.
+    pub fn literal_element_name(&self) -> Option<&'static str> {
+        crate::parser::utils::raw_html::literal_element_name(&self.verbatim())
+    }
+
+    /// Whether these raw bytes end the given literal element's contents.
+    pub fn contains_literal_close(&self, name: &str) -> bool {
+        name != "plaintext"
+            && crate::parser::utils::raw_html::raw_text_end(&self.verbatim(), 0, name).is_some()
+    }
+
     pub fn verbatim(&self) -> String {
         self.0
-            .children_with_tokens()
+            .descendants_with_tokens()
             .filter_map(|child| child.into_token())
-            .filter(|token| token.kind() == SyntaxKind::INLINE_HTML_CONTENT)
+            .filter(|token| token.kind() != SyntaxKind::LINE_PREFIX)
             .map(|token| token.text().to_string())
             .collect()
     }

@@ -11,7 +11,13 @@ DOCUMENT@0..42
     WHITESPACE@5..6 " "
     PARAGRAPH@6..31
       INLINE_HTML@6..18
-        INLINE_HTML_CONTENT@6..18 "<div id=\"d\">"
+        INLINE_HTML_CONTENT@6..10 "<div"
+        HTML_ATTRS@10..17
+          WHITESPACE@10..11 " "
+          TEXT@11..15 "id=\""
+          ATTR_ID@15..16 "d"
+          TEXT@16..17 "\""
+        INLINE_HTML_CONTENT@17..18 ">"
       STRONG@18..24
         STRONG_MARKER@18..20 "**"
         TEXT@20..22 "Hi"

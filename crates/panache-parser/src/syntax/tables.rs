@@ -442,9 +442,7 @@ impl AstNode for TableCaption {
 impl TableCaption {
     /// Returns the caption text.
     pub fn text(&self) -> String {
-        self.0
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
+        super::ast::visible_text_tokens(&self.0)
             .filter(|token| token.kind() == SyntaxKind::TEXT)
             .map(|token| token.text().to_string())
             .collect()

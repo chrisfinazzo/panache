@@ -204,6 +204,37 @@ mod tests {
     }
 
     #[test]
+    fn html_ids_in_non_rendered_content_do_not_duplicate_real_ids() {
+        for flavor in [
+            Flavor::CommonMark,
+            Flavor::Gfm,
+            Flavor::Mdsvex,
+            Flavor::Myst,
+            Flavor::Hugo,
+        ] {
+            for html in [
+                "![<span id=\"saved\"></span>Alt](image.png)",
+                "Before <script>const s = '<span id=\"saved\"></span>';</script>",
+                "Before <textarea><span id=\"saved\"></span></textarea>",
+                "Before <script>\n\n<span id=\"saved\"></span>\n\n</script>",
+            ] {
+                let input = format!("{html}\n\n<span id=\"saved\"></span>\n");
+                let config = Config {
+                    flavor,
+                    extensions: crate::config::Extensions::for_flavor(flavor),
+                    ..Default::default()
+                };
+                let tree = crate::parser::parse(&input, Some(config.clone()));
+                let diagnostics = DuplicateReferencesRule.check_tree(&tree, &input, &config, None);
+                assert!(
+                    diagnostics.is_empty(),
+                    "{flavor:?}: {input:?}: {diagnostics:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_no_duplicates() {
         let input = r#"[ref1]: https://example.com
 [ref2]: https://another.com

@@ -108,9 +108,7 @@ impl AttributeNode {
         if self.has_structured_children() {
             return self
                 .structured_id_token()
-                .map(|t| {
-                    self.decode_structured_value(t.text().strip_prefix('#').unwrap_or(t.text()))
-                })
+                .map(|token| attribute_token_value(self, &token, Some('#')).value)
                 .filter(|id| !id.is_empty());
         }
         self.reparse()
@@ -211,7 +209,7 @@ impl AttributeNode {
                     if t.kind() == SyntaxKind::ATTR_UNNUMBERED {
                         return "unnumbered".to_string();
                     }
-                    self.decode_structured_value(t.text().strip_prefix('.').unwrap_or(t.text()))
+                    attribute_token_value(self, &t, Some('.')).value
                 })
                 .collect();
         }
@@ -240,7 +238,7 @@ impl AttributeNode {
         if self.has_structured_children() {
             let tok = self.structured_id_token()?;
             let r = tok.text_range();
-            let lead = if tok.text().starts_with('#') {
+            let lead = if self.0.kind() != SyntaxKind::HTML_ATTRS && tok.text().starts_with('#') {
                 rowan::TextSize::from(1)
             } else {
                 rowan::TextSize::from(0)
@@ -294,6 +292,7 @@ fn attribute_token_value(
 ) -> AttributeValue {
     let raw = token.text().to_string();
     let prefix_len = prefix
+        .filter(|_| attributes.0.kind() != SyntaxKind::HTML_ATTRS)
         .filter(|prefix| raw.starts_with(*prefix))
         .map_or(0, char::len_utf8);
     let source_value = &raw[prefix_len..];

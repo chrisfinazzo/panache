@@ -9,7 +9,17 @@ DOCUMENT@0..38
       WHITESPACE@1..2 " "
       HTML_BLOCK@2..38
         HTML_BLOCK_TAG@2..29
-          TEXT@2..28 "<div bad.name=x id=hi ..."
+          TEXT@2..6 "<div"
+          HTML_ATTRS@6..27
+            WHITESPACE@6..7 " "
+            ATTR_KEY_VALUE@7..17
+              ATTR_KEY@7..15 "bad.name"
+              TEXT@15..16 "="
+              ATTR_VALUE@16..17 "x"
+            WHITESPACE@17..18 " "
+            TEXT@18..21 "id="
+            ATTR_ID@21..27 "hidden"
+          TEXT@27..28 ">"
           NEWLINE@28..29 "\n"
         HTML_BLOCK_CONTENT@29..38
           TEXT@29..37 "  **hi**"

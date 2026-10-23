@@ -131,6 +131,21 @@ fn run_golden_case(case_name: &str) {
 }
 
 #[test]
+fn raw_html_preserves_prefix_only_final_lines() {
+    let config = Config {
+        flavor: Flavor::CommonMark,
+        extensions: Extensions::for_flavor(Flavor::CommonMark),
+        ..Default::default()
+    };
+    for prefix in [">", "> >", "> > >"] {
+        let input = format!("{prefix} <script>\n{prefix}");
+        let output = format(&input, Some(config.clone()), None);
+        assert_eq!(output, format!("{input}\n"));
+        assert_eq!(format(&output, Some(config.clone()), None), output);
+    }
+}
+
+#[test]
 fn html_block_dedented_paragraph_preserves_commonmark_html() {
     assert_commonmark_html_preserved(
         include_str!("fixtures/cases/html_block_dedented_paragraph_commonmark/input.md"),
@@ -197,6 +212,10 @@ macro_rules! golden_test_cases {
 // 1. Create a new directory under tests/fixtures/cases/
 // 2. Add the directory name to this list
 golden_test_cases!(
+    html_raw_trailing_container_marker_commonmark,
+    html_raw_multiline_child_attributes_commonmark,
+    html_raw_attributes_commonmark,
+    html_raw_attributes_mdsvex,
     list_leading_block_multiline_code_preserve,
     list_leading_block_multiline_html_reflow,
     sentence_link_multiline_title,
