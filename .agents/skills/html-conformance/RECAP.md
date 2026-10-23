@@ -1,15 +1,8 @@
 # HTML conformance — running session recap
 
-Read Persistent traps, Phase progress, and Suggested next sub-targets first.
-Rewrite Latest session, demote its predecessor, and fold durable traps into Persistent.
-Keep ≤ 400 lines (see `SKILL.md`).
-
 --------------------------------------------------------------------------------
 
 ## Persistent traps & invariants (cross-session)
-
-"You'd warn a future session" knowledge. Function/gate names are
-load-bearing; the code holds the full detail.
 
 ### Disk + tooling
 
@@ -29,11 +22,18 @@ load-bearing; the code holds the full detail.
 
 - **Visible text and declarations need consumer context.** `HTML_ATTRS`
   contains TEXT gaps; skip those subtrees in typed text accessors. Image
-  descriptions retain structural attributes but declare no anchors. Inline
+  descriptions retain structural attributes but declare no anchors unless they
+  serve as rendered figure captions. Nested images in captions still use alt text.
+  Native divs must bypass raw scanning even when empty; Pandoc accepts attribute
+  names outside the CommonMark grammar. Raw reference labels retain inline markup
+  but omit host `LINE_PREFIX` tokens, and heading declaration keys use the same
+  raw labels while slugs continue to use visible text. Inline
   literal HTML needs declaration context across nested inlines, preserving
   opening-element IDs and ignoring image-description tags. Context survives
-  top-level blocks and ends at matching inline or block-form closers. Per-block
-  memos key on the incoming element and return the outgoing element.
+  top-level blocks. Scan opaque raw blocks as one fragment: matching closes can
+  live in `HTML_BLOCK_CONTENT`, and raw openers can outlive a blank-line block
+  boundary. Per-block memos key on the incoming element and return the outgoing
+  element. Map raw attribute ranges past container-prefix tokens.
 - **HTML_ATTRS is the structural attr pattern; never add synthetic
   tokens.** Tokenize existing bytes (`TEXT + WS + HTML_ATTRS{TEXT} +
   TEXT`); use source-byte slices (`&rest[..4]`), never literals, for
@@ -146,6 +146,10 @@ load-bearing; the code holds the full detail.
 
 ### Refs / footnotes / heading-id resolution
 
+- **Reference identity uses raw labels.** `LinkText::raw_label()` and
+  `UnresolvedReference::raw_label()` preserve inline markup for diagnostics,
+  usage collection, and navigation. Visible text can collapse distinct labels:
+  `[<span>Title</span>]` neither resolves to nor uses `[Title]: /url`.
 - **Recursive reparse uses `parse_with_refdefs`, not `parse`** (`parse`
   re-runs `populate_refdef_labels` on inner text, hiding outer refdefs).
   `parse_pandoc_blocks` swaps in an inner `RefsCtx` (swap belongs IN it);
@@ -350,27 +354,53 @@ load-bearing; the code holds the full detail.
 
 --------------------------------------------------------------------------------
 
-## Latest session — 2026-10-23 (raw HTML review fixes)
+## Latest session — 2026-10-23 (review regression fixes)
 
-Phases 3/7a follow-up. Pandoc unchanged: **601/607**, html-block **300/306**,
-html-inline **49/49**. Workspace **6829 → 6844 passing**. Check and tests pass;
-Clippy, formatting, both allowlists, and the regenerated conformance report pass.
+Consumer follow-up to the raw HTML and reference identity changes. All four
+reviewed regressions reproduced in focused lint tests before their fixes.
+Workspace **6853 → 6864 passing**. Check, Clippy, formatting, editor extension
+compilation, both conformance allowlists, and the regenerated Pandoc report pass.
+Pandoc remains **601/607**, with html-block **300/306** and html-inline **49/49**.
+All four CLI reproductions report no issues with caching disabled.
+
+- Heading declarations and heading-link conversion match raw labels consistently;
+  visible heading text still determines automatic IDs.
+- Shared label accessors omit container prefixes while retaining inline markup,
+  including image labels used by project usage indexing and hover.
+- Empty native divs bypass CommonMark raw HTML rescanning.
+- Direct figure captions contribute declarations, while inline image descriptions
+  and descriptions of nested images in captions remain excluded.
+- Explicit anchor navigation consults the shared symbol declaration index, so
+  caption spans resolve consistently with lint diagnostics.
+- Regression tests cover lint diagnostics, lossless syntax accessors, definition
+  navigation, and heading-link conversion. No CST shapes, formatter behavior,
+  conformance corpus entries, or allowlists changed.
+
+## Previous session — 2026-10-23 (raw HTML boundaries and reference identity)
+
+Phases 3/7a consumer follow-up. Pandoc unchanged: **601/607**, html-block
+**300/306**, html-inline **49/49**. Workspace **6844 → 6853 passing**. Check,
+tests, Clippy, formatting, both allowlists, and the regenerated report pass.
 
 ### What changed
 
-- Flush CommonMark raw-HTML prefixes at EOF and preserve their formatter line.
-- Keep multiline attribute regions intact across both raw-HTML fragment splits.
-- Both declaration indexes recognize block closers and carry literal-element
-  state across blocks; cached contributions key on and return that state.
-- Four paired parser fixtures, two formatter goldens, and 15 regressions cover
-  losslessness, idempotency, diagnostics, index parity, and context-changing edits.
-  No corpus cases or allowlist entries were added.
+- Both declaration indexes scan opaque raw blocks with incoming literal context
+  and retain outgoing context, using the existing HTML attribute recognizer.
+- Declaration filtering handles closes anywhere in raw content and openers that
+  survive Markdown block boundaries, while preserving source ranges and memo parity.
+- Reference diagnostics, usages, and navigation preserve raw label identity.
+- Nine regressions cover syntax accessors, prefix mapping, index parity, context
+  edits, diagnostics, matching marked-up definitions, and heading-link actions.
+- CLI reproductions pass: both HTML cases are clean; the reference case reports
+  undefined-reference and unused-definition warnings. No CST shape or formatter
+  changes, corpus additions, allowlist edits, or golden fixture changes.
 
 ### Files in committable diff
 
-- Parser HTML emission and syntax wrappers — parser-shape and consumer fixes.
-- Formatter raw blocks and golden suites — prefix-only EOF preservation.
-- Salsa, lint tests, linter documentation, and this recap — index fixes.
+- Parser HTML scanning and syntax wrappers — consumer context and label identity.
+- Salsa and linter consumers/tests — declaration-index and reference-usage fixes.
+- LSP consumers/tests and guides — navigation identity and behavior documentation.
+- This recap — raw-block boundary and reference-identity traps.
 
 ### Suggested next sub-targets (ranked)
 
@@ -382,16 +412,15 @@ Clippy, formatting, both allowlists, and the regenerated conformance report pass
 
 ### New traps
 
-- EOF prefix handling and cross-block memo state are folded into Persistent traps.
+- Raw-content boundaries and reference identity are folded into Persistent traps.
 
 --------------------------------------------------------------------------------
 
 ## Earlier sessions (compact log)
 
+- 2026-10-23 — raw HTML review fixes — html 349/355 unchanged; workspace 6829 → 6844 — EOF prefixes, multiline attribute fragments, and cross-block literal-state memos.
 - 2026-10-23 — raw HTML consumers — html 349/355 unchanged; workspace 6817 → 6829 — typed visible text skips attrs; declarations exclude image descriptions and inline literal contents.
-- 2026-10-08 — Phase G native-span close boundaries — skip code, escapes, comments, quoted tags, and PIs; html-inline 41 → 49 passing.
-- 2026-10-08 — Phase G invalid span names + unclosed divs — html 325 → 341 — shared native/raw name and rejected-div boundary gates.
-- 2026-10-07 — Phase G invalid self-closing divs + quoted `>` — html 317 → 325 — raw boundary; six tail typography cases deferred.
+- 2026-10-07→08 — Phase G invalid names and raw boundaries — html 317 → 349 — shared span/div name gates; skip code, escapes, comments, quoted tags, and PIs in native-span matching; six typography cases deferred.
 - 2026-09-16 — Phase G matched-div names — html 307 → 317 — Unicode name gate, opaque raw bodies, and container prefixes.
 - 2026-09-15 — Phase 6 slash-suffixed openers — html 300 → 307 — native `<div/>` depth in both scanners.
 - 2026-08-05 — Phase G attribute values — html 295 → 300 — decoding in all readers; source-byte id spans.

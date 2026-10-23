@@ -6,6 +6,93 @@ use crate::parser::inlines::inline_html::inspect_inline_html;
 use super::{AstNode, PanacheLanguage, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HtmlBlock(SyntaxNode);
+
+impl AstNode for HtmlBlock {
+    type Language = PanacheLanguage;
+
+    fn can_cast(kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::HTML_BLOCK | SyntaxKind::HTML_BLOCK_RAW | SyntaxKind::HTML_BLOCK_DIV
+        )
+    }
+
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self(syntax))
+    }
+
+    fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
+}
+
+/// Declaration ranges and the element context left open by an opaque HTML block.
+pub struct RawHtmlContext {
+    pub attribute_ranges: Vec<TextRange>,
+    pub literal_element: Option<&'static str>,
+    pub template_depth: usize,
+}
+
+impl HtmlBlock {
+    /// Scan raw HTML as one fragment, preserving element context across blocks.
+    /// Lifted blocks expose their body through structural children instead.
+    pub fn raw_context(
+        &self,
+        literal_element: Option<&'static str>,
+        template_depth: usize,
+    ) -> Option<RawHtmlContext> {
+        // Empty native divs still carry Pandoc attributes, whose grammar
+        // differs from the raw HTML scanner's CommonMark grammar.
+        if self.0.kind() == SyntaxKind::HTML_BLOCK_DIV
+            || self.0.children().any(|node| {
+                !matches!(
+                    node.kind(),
+                    SyntaxKind::HTML_BLOCK_TAG | SyntaxKind::HTML_BLOCK_CONTENT
+                )
+            })
+        {
+            return None;
+        }
+
+        let mut source = String::new();
+        let mut segments = Vec::new();
+        for token in self
+            .0
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| token.kind() != SyntaxKind::LINE_PREFIX)
+        {
+            segments.push((source.len(), token.text_range()));
+            source.push_str(token.text());
+        }
+        let (attributes, literal_element, template_depth) =
+            crate::parser::utils::raw_html::attribute_ranges_with_context(
+                &source,
+                literal_element,
+                template_depth,
+            );
+        let attribute_ranges = attributes
+            .into_iter()
+            .map(|range| {
+                let first = segments.partition_point(|&(offset, _)| offset <= range.start) - 1;
+                let last = segments.partition_point(|&(offset, _)| offset < range.end) - 1;
+                let (offset, host) = segments[first];
+                let start = host.start() + TextSize::from((range.start - offset) as u32);
+                let (offset, host) = segments[last];
+                let end = host.start() + TextSize::from((range.end - offset) as u32);
+                TextRange::new(start, end)
+            })
+            .collect();
+        Some(RawHtmlContext {
+            attribute_ranges,
+            literal_element,
+            template_depth,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HtmlBlockTag(SyntaxNode);
 
 impl AstNode for HtmlBlockTag {
@@ -155,8 +242,59 @@ fn html_text_context(token: &SyntaxToken) -> Option<(SyntaxNode, bool)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::syntax::{InlineNode, SyntaxKind};
+    use crate::syntax::{AstNode, HtmlBlock, InlineNode, SyntaxKind};
     use crate::{Dialect, Extensions, Flavor, ParserOptions, parse};
+
+    #[test]
+    fn empty_native_divs_do_not_use_raw_html_context() {
+        for input in [
+            "<div café=\"a\" id=\"saved\"></div>\n",
+            "<div café=\"a\" id=\"saved\">\n</div>\n",
+        ] {
+            let tree = parse(input, None);
+            assert_eq!(tree.text().to_string(), input);
+            let block = tree.descendants().find_map(HtmlBlock::cast).unwrap();
+            assert_eq!(block.syntax().kind(), SyntaxKind::HTML_BLOCK_DIV);
+            assert!(block.raw_context(None, 0).is_none(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn raw_block_context_maps_declarations_between_literal_elements() {
+        for prefix in ["", "> "] {
+            let input = [
+                "<div>",
+                "<span id=\"hidden\"></span>",
+                "</SCRIPT >",
+                "<span",
+                "id=\"saved\"></span>",
+                "<textarea id=\"next\">",
+            ]
+            .map(|line| format!("{prefix}{line}\n"))
+            .concat();
+            let tree = parse(
+                &input,
+                Some(ParserOptions {
+                    flavor: Flavor::CommonMark,
+                    dialect: Dialect::CommonMark,
+                    extensions: Extensions::for_flavor(Flavor::CommonMark),
+                    ..Default::default()
+                }),
+            );
+            assert_eq!(tree.text().to_string(), input);
+            let block = tree.descendants().find_map(HtmlBlock::cast).unwrap();
+            let context = block.raw_context(Some("script"), 0).unwrap();
+            assert_eq!(context.literal_element, Some("textarea"));
+            let attributes: Vec<_> = context
+                .attribute_ranges
+                .into_iter()
+                .map(|range| input[std::ops::Range::<usize>::from(range)].to_string())
+                .collect();
+            assert_eq!(attributes.len(), 2);
+            assert!(attributes[0].contains("id=\"saved\""));
+            assert!(attributes[1].contains("id=\"next\""));
+        }
+    }
 
     fn diagnostics(input: &str, flavor: Flavor) -> Vec<super::HtmlAttributeDiagnostic> {
         let tree = parse(

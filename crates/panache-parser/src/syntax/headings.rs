@@ -63,6 +63,14 @@ impl Heading {
         self.content().map(|c| c.text()).unwrap_or_default()
     }
 
+    /// Returns the heading's reference label, preserving inline markup and
+    /// omitting container prefixes.
+    pub fn raw_label(&self) -> String {
+        self.content()
+            .map(|content| super::ast::raw_text(content.syntax()))
+            .unwrap_or_default()
+    }
+
     /// Returns the heading text range.
     pub fn text_range(&self) -> rowan::TextRange {
         self.0.text_range()

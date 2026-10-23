@@ -309,7 +309,7 @@ fn heading_target_from_unresolved(unresolved: &UnresolvedReference) -> Option<St
     if unresolved.is_image() || unresolved.label().is_some() {
         return None;
     }
-    let label = normalize_label(&unresolved.text());
+    let label = normalize_label(&unresolved.raw_label());
     (!label.is_empty()).then_some(label)
 }
 
@@ -521,7 +521,7 @@ fn heading_target_from_link(link: &Link) -> Option<String> {
     if link.reference().is_none()
         && let Some(text) = link.text()
     {
-        let label = normalize_label(&text.text_content());
+        let label = normalize_label(&text.raw_label());
         return (!label.is_empty()).then_some(label);
     }
 
@@ -725,6 +725,20 @@ mod tests {
             extract_reference_label(link_ref.syntax()).expect("Should extract label");
         assert_eq!(label, "ref");
         assert!(!is_footnote);
+    }
+
+    #[test]
+    fn heading_targets_preserve_raw_shortcut_labels() {
+        let input = "# Title\n\n[<span>Title</span>]\n";
+        let root = parse(input);
+        let node = root
+            .descendants()
+            .find_map(UnresolvedReference::cast)
+            .unwrap();
+        assert_eq!(
+            extract_heading_link_target(node.syntax()).as_deref(),
+            Some("<span>title</span>")
+        );
     }
 
     #[test]

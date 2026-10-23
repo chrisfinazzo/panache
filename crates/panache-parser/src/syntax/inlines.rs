@@ -228,6 +228,11 @@ impl AstNode for InlineHtml {
 }
 
 impl InlineHtml {
+    /// Template nesting depth after this tag, excluding tag-like attribute values.
+    pub fn template_depth_after(&self, depth: usize) -> usize {
+        crate::parser::utils::raw_html::template_depth_after(&self.verbatim(), depth)
+    }
+
     /// The literal element opened by this tag, if its contents are HTML text.
     pub fn literal_element_name(&self) -> Option<&'static str> {
         crate::parser::utils::raw_html::literal_element_name(&self.verbatim())

@@ -107,18 +107,18 @@ impl LinkText {
             .collect()
     }
 
-    /// Returns the raw source text of the label (every byte between the
-    /// brackets), used for CommonMark reference-label matching.
+    /// Returns the source label without container prefixes, used for
+    /// reference-label matching.
     ///
     /// Unlike [`text_content`](Self::text_content), which collects only `TEXT`
     /// tokens and therefore drops inline markup, this preserves the label
-    /// verbatim. That matters for shortcut/collapsed reference links whose
+    /// markup. That matters for shortcut/collapsed reference links whose
     /// label parses as inline structure (e.g. a code span `` [`insta`] ``):
     /// the reference definition stores its label as raw text, and the parser's
     /// refdef map matches on raw text, so usage-side label extraction must do
     /// the same or the labels won't compare equal.
     pub fn raw_label(&self) -> String {
-        self.0.text().to_string()
+        super::ast::raw_text(&self.0)
     }
 }
 
@@ -454,6 +454,22 @@ impl AstNode for ImageAlt {
 }
 
 impl ImageAlt {
+    /// Returns the source label, preserving inline markup and omitting
+    /// container prefixes.
+    pub fn raw_label(&self) -> String {
+        super::ast::raw_text(&self.0)
+    }
+
+    /// Whether this description is rendered as a figure caption.
+    pub fn is_figure_caption(&self) -> bool {
+        self.0
+            .parent()
+            .and_then(ImageLink::cast)
+            .and_then(|image| image.syntax().parent())
+            .and_then(Figure::cast)
+            .is_some()
+    }
+
     /// Returns the alt text content.
     pub fn text(&self) -> String {
         super::ast::visible_text_tokens(&self.0)
@@ -536,9 +552,7 @@ impl UnresolvedReference {
         self.0.text().to_string().as_bytes().first() == Some(&b'!')
     }
 
-    /// The bracket-text content (the bytes between the outer `[` and
-    /// `]`). For `[foo]` this is `"foo"`; for `[text][label]` this is
-    /// `"text"`.
+    /// The visible bracket text, excluding inline markup and HTML attributes.
     pub fn text(&self) -> String {
         if let Some(link_text) = support::child::<LinkText>(&self.0) {
             return link_text.text_content();
@@ -550,6 +564,17 @@ impl UnresolvedReference {
             .filter(|token| token.kind() == SyntaxKind::TEXT)
             .map(|token| token.text().to_string())
             .collect()
+    }
+
+    /// The raw bracket text used to match shortcut and collapsed labels.
+    pub fn raw_label(&self) -> String {
+        if let Some(text) = self.text_node() {
+            return text.raw_label();
+        }
+        if let Some(alt) = support::child::<ImageAlt>(&self.0) {
+            return alt.raw_label();
+        }
+        self.text()
     }
 
     /// The reference label for full / collapsed forms
@@ -618,7 +643,36 @@ impl WikiLink {
 
 #[cfg(test)]
 mod tests {
-    use super::{AstNode, ImageLink, UnresolvedReference};
+    use super::{AstNode, ImageLink, Link, UnresolvedReference};
+
+    #[test]
+    fn raw_reference_labels_omit_container_prefixes_and_preserve_markup() {
+        for definition in ["", "\n[*hello* world]: /url\n"] {
+            for prefix in ["", "!"] {
+                let input = format!("> {prefix}[*hello* \n> world]\n{definition}");
+                let tree = crate::parse(&input, None);
+                assert_eq!(tree.text().to_string(), input);
+                let label = if let Some(unresolved) =
+                    tree.descendants().find_map(UnresolvedReference::cast)
+                {
+                    unresolved.raw_label()
+                } else if let Some(image) = tree.descendants().find_map(ImageLink::cast) {
+                    image.alt().unwrap().raw_label()
+                } else {
+                    tree.descendants()
+                        .find_map(Link::cast)
+                        .unwrap()
+                        .text()
+                        .unwrap()
+                        .raw_label()
+                };
+                assert_eq!(
+                    label.split_whitespace().collect::<Vec<_>>().join(" "),
+                    "*hello* world"
+                );
+            }
+        }
+    }
 
     #[test]
     fn image_reference_label_and_range_are_extracted() {
@@ -674,5 +728,20 @@ mod tests {
 
         assert!(!unresolved.is_image());
         assert!(unresolved.label().is_none());
+    }
+
+    #[test]
+    fn unresolved_reference_keeps_raw_label_separate_from_visible_text() {
+        for prefix in ["", "!"] {
+            let input = format!("{prefix}[<span class=\"badge\">Title</span>]");
+            let tree = crate::parse(&input, None);
+            let unresolved = tree
+                .descendants()
+                .find_map(UnresolvedReference::cast)
+                .expect("unresolved reference");
+
+            assert_eq!(unresolved.text(), "Title");
+            assert_eq!(unresolved.raw_label(), "<span class=\"badge\">Title</span>");
+        }
     }
 }

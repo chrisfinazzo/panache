@@ -30,6 +30,10 @@ Go to definition
 
     - Reference links: `[text][ref]` → `[ref]: url`
     - Reference images: `![alt][ref]` → `[ref]: url`
+    - Implicit heading references: `[*Title*]` → `# *Title*`, matching source
+      markup
+    - Anchor links: `[text](#id)` → rendered declarations, including native divs
+      and figure caption spans in Pandoc
     - Footnote references: `[^id]` → `[^id]: content`
     - Citation references: `[@key]` → `[@key]: content`
     - Quarto crossrefs: `@fig-label` → chunk/equation/figure label definition
@@ -946,6 +950,10 @@ The LSP exposes clickable links so editors can ctrl/cmd-click to follow them
 - Reference links and images (resolved to their `[ref]: url` definition)
 - Autolinks (`<https://example.com>`)
 - `{{{< include path >}}}` shortcode paths
+
+Reference labels retain their inline markup when matching definitions. For
+example, `[<span>Title</span>]` does not resolve to a `[Title]: url` definition
+or a plain `Title` heading.
 
 ### File Rename
 

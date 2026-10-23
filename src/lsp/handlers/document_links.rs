@@ -55,7 +55,7 @@ pub(crate) fn document_links(
                 if label.is_empty()
                     && let Some(text) = link.text()
                 {
-                    label = text.text_content();
+                    label = text.raw_label();
                 }
                 let key = normalize_label(&label);
                 if let Some(target_info) = reference_targets.get(&key)
@@ -76,7 +76,7 @@ pub(crate) fn document_links(
             } else if link.dest().is_none()
                 && let Some(text) = link.text()
             {
-                let key = normalize_label(&text.text_content());
+                let key = normalize_label(&text.raw_label());
                 if let Some(target_info) = reference_targets.get(&key)
                     && let Some(target) = resolve_link_target(
                         &target_info.raw_target,

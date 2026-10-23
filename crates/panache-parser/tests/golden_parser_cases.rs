@@ -162,6 +162,29 @@ fn raw_html_closing_line_keeps_multiline_child_attributes() {
 }
 
 #[test]
+fn raw_html_template_descendants_do_not_expose_attributes() {
+    use panache_parser::syntax::{AstNode, AttributeNode};
+
+    let input = include_str!("fixtures/cases/html_raw_template_commonmark/input.md");
+    let tree = parse(
+        input,
+        Some(ParserOptions {
+            flavor: Flavor::CommonMark,
+            dialect: Dialect::CommonMark,
+            extensions: Extensions::for_flavor(Flavor::CommonMark),
+            ..Default::default()
+        }),
+    );
+    assert_eq!(tree.text().to_string(), input);
+    let ids: Vec<_> = tree
+        .descendants()
+        .filter_map(AttributeNode::cast)
+        .filter_map(|attrs| attrs.id())
+        .collect();
+    assert_eq!(ids, ["element", "after"]);
+}
+
+#[test]
 fn raw_html_attributes_keep_commonmark_bodies_raw() {
     use panache_parser::syntax::{AstNode, AttributeNode, InlineHtml, SyntaxKind};
 
@@ -441,6 +464,7 @@ golden_test_cases!(
     html_raw_multiline_child_attributes_commonmark,
     html_raw_multiline_child_attributes_pandoc,
     html_raw_attributes_commonmark,
+    html_raw_template_commonmark,
     html_raw_attributes_mdsvex,
     html_unclosed_attribute_quote_pandoc,
     html_unclosed_attribute_quote_commonmark,

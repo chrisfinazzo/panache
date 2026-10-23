@@ -48,7 +48,7 @@ impl ReferenceDefinition {
     pub fn label(&self) -> String {
         self.link()
             .and_then(|link| link.text())
-            .map(|text| text.text_content())
+            .map(|text| text.raw_label())
             .unwrap_or_default()
     }
 

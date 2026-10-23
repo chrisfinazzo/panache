@@ -117,7 +117,10 @@ pub(crate) fn goto_definition(
     if let PendingDefinition::HeadingLink(label) = &pending {
         if heading_link_is_explicit_anchor {
             for doc in &doc_indices {
-                if let Some(ranges) = doc.symbol_index.heading_explicit_definition_ranges(label)
+                if let Some(ranges) = doc
+                    .symbol_index
+                    .heading_explicit_definition_ranges(label)
+                    .or_else(|| doc.symbol_index.crossref_declarations(label))
                     && let Some(range) = ranges.first()
                 {
                     let location =

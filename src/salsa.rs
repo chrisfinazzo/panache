@@ -8,9 +8,9 @@ use crate::linter::diagnostics::Diagnostic;
 use crate::metadata::DocumentMetadata;
 use crate::syntax::{
     AstNode, AttributeNode, Citation, CodeBlock, Crossref, FootnoteDefinition, FootnoteReference,
-    Heading, HtmlBlockTag, ImageAlt, InlineHtml, Link, ListItem, ParsedYamlRegionSnapshot,
-    ReferenceDefinition, SyntaxKind, SyntaxNode, SyntaxToken, UnresolvedReference, YamlRegion,
-    collect_parsed_yaml_region_snapshots,
+    Heading, HtmlBlock, HtmlBlockTag, ImageAlt, InlineHtml, Link, ListItem,
+    ParsedYamlRegionSnapshot, ReferenceDefinition, SyntaxKind, SyntaxNode, SyntaxToken,
+    UnresolvedReference, YamlRegion, collect_parsed_yaml_region_snapshots,
 };
 use crate::utils::{implicit_heading_ids, normalize_anchor_label, normalize_label};
 use crate::vfs::Vfs;
@@ -1046,8 +1046,8 @@ pub fn document_blocks(db: &dyn Db, file: FileText, config: FileConfig) -> Vec<r
 /// absolute offset still memo-hits here. [`symbol_usage_index`] offsets these
 /// back to absolute ranges when merging. Only the node-local buckets are
 /// populated; the cross-block implicit-heading pass runs once in the merge.
-/// The incoming literal HTML element is part of the cache key, and the result
-/// carries the element that remains open for the next block.
+/// The incoming literal HTML element and template depth are part of the cache
+/// key, and the result carries the context that remains open for the next block.
 ///
 /// `unsafe(non_salsa_values)`: the interned `GreenNode` argument is not a salsa
 /// value. It is an immutable Arc-backed tree carrying no salsa ids, so the
@@ -1059,11 +1059,13 @@ pub fn symbol_usage_index_block(
     block: rowan::GreenNode,
     config: FileConfig,
     literal_element: Option<&'static str>,
-) -> (SymbolUsageIndex, Option<&'static str>) {
+    template_depth: usize,
+) -> (SymbolUsageIndex, Option<&'static str>, usize) {
     let tree = SyntaxNode::new_root(block);
     let mut index = SymbolUsageIndex::default();
     let mut attribute_context = AttributeDeclarationContext {
         literal_element,
+        template_depth,
         ..Default::default()
     };
     collect_block_local_symbols(
@@ -1073,7 +1075,11 @@ pub fn symbol_usage_index_block(
         &mut index,
         &mut attribute_context,
     );
-    (index, attribute_context.literal_element)
+    (
+        index,
+        attribute_context.literal_element,
+        attribute_context.template_depth,
+    )
 }
 
 #[salsa::tracked(returns(ref), lru = 512)]
@@ -1084,11 +1090,13 @@ pub fn symbol_usage_index(db: &dyn Db, file: FileText, config: FileConfig) -> Sy
     let mut index = SymbolUsageIndex::default();
     let mut offset = rowan::TextSize::from(0);
     let mut literal_element = None;
+    let mut template_depth = 0;
     for block in document_blocks(db, file, config) {
-        let (block_index, next_literal_element) =
-            symbol_usage_index_block(db, block.clone(), config, literal_element);
+        let (block_index, next_literal_element, next_template_depth) =
+            symbol_usage_index_block(db, block.clone(), config, literal_element, template_depth);
         index.merge_offset(block_index, offset);
         literal_element = *next_literal_element;
+        template_depth = *next_template_depth;
         offset += block.text_len();
     }
 
@@ -1286,17 +1294,31 @@ pub fn symbol_usage_index_from_tree(
 struct AttributeDeclarationContext {
     literal_element: Option<&'static str>,
     literal_opener: Option<rowan::TextRange>,
+    template_depth: usize,
+    template_opener: Option<rowan::TextRange>,
     ignored_html: Option<rowan::TextRange>,
+    raw_html: Option<(rowan::TextRange, Vec<rowan::TextRange>)>,
 }
 
 impl AttributeDeclarationContext {
     fn includes(&mut self, node: &SyntaxNode) -> bool {
         if node
             .ancestors()
-            .any(|ancestor| ImageAlt::can_cast(ancestor.kind()))
+            .filter_map(ImageAlt::cast)
+            .any(|alt| !alt.is_figure_caption())
         {
             return false;
         }
+        if let Some((range, attributes)) = &self.raw_html
+            && range.contains_range(node.text_range())
+        {
+            let preceding =
+                attributes.partition_point(|range| range.start() <= node.text_range().start());
+            return preceding
+                .checked_sub(1)
+                .is_some_and(|index| attributes[index].contains_range(node.text_range()));
+        }
+        self.raw_html = None;
         if self
             .ignored_html
             .is_some_and(|range| range.contains_range(node.text_range()))
@@ -1304,6 +1326,17 @@ impl AttributeDeclarationContext {
             return false;
         }
         self.ignored_html = None;
+
+        if let Some(context) = HtmlBlock::cast(node.clone())
+            .and_then(|block| block.raw_context(self.literal_element, self.template_depth))
+        {
+            self.literal_element = context.literal_element;
+            self.literal_opener = None;
+            self.template_depth = context.template_depth;
+            self.template_opener = None;
+            self.raw_html = Some((node.text_range(), context.attribute_ranges));
+            return false;
+        }
 
         if let Some(name) = self.literal_element {
             let closes = InlineHtml::cast(node.clone())
@@ -1321,24 +1354,35 @@ impl AttributeDeclarationContext {
                 self.ignored_html = Some(node.text_range());
                 return false;
             }
-        } else if let Some(html) = InlineHtml::cast(node.clone())
-            && let Some(name) = html.literal_element_name()
-        {
-            self.literal_element = Some(name);
-            self.literal_opener = Some(node.text_range());
+        } else if let Some(html) = InlineHtml::cast(node.clone()) {
+            let depth = html.template_depth_after(self.template_depth);
+            if self.template_depth == 0 && depth > 0 {
+                self.template_opener = Some(node.text_range());
+            } else if depth == 0 {
+                self.template_opener = None;
+            }
+            self.template_depth = depth;
+            if let Some(name) = html.literal_element_name() {
+                self.literal_element = Some(name);
+                self.literal_opener = Some(node.text_range());
+            }
         }
 
-        self.literal_element.is_none()
+        (self.literal_element.is_none()
             || self
                 .literal_opener
-                .is_some_and(|opener| opener.contains_range(node.text_range()))
+                .is_some_and(|opener| opener.contains_range(node.text_range())))
+            && (self.template_depth == 0
+                || self
+                    .template_opener
+                    .is_some_and(|opener| opener.contains_range(node.text_range())))
     }
 }
 
 /// Collect every node-local symbol bucket for `tree` into `index`.
 ///
 /// Ranges stay within one top-level block and merge with offsets, while the
-/// literal HTML context passes between blocks through the memoized query in
+/// HTML element context passes between blocks through the memoized query in
 /// [`symbol_usage_index`]. The pass that deduplicates implicit heading slugs
 /// across the document lives in [`collect_implicit_heading_symbols`].
 fn collect_block_local_symbols(
@@ -1478,7 +1522,7 @@ fn collect_block_local_symbols(
 
     for heading in headings {
         db.unwind_if_revision_cancelled();
-        let label = normalize_label(&heading.text());
+        let label = normalize_label(&heading.raw_label());
         if label.is_empty() {
             continue;
         }
@@ -1515,7 +1559,7 @@ fn collect_block_local_symbols(
         if link.reference().is_none()
             && let Some(text) = link.text()
         {
-            let label = normalize_label(&text.text_content());
+            let label = normalize_label(&text.raw_label());
             if label.is_empty() {
                 continue;
             }
@@ -1536,7 +1580,7 @@ fn collect_block_local_symbols(
         if unresolved.is_image() || unresolved.label().is_some() {
             continue;
         }
-        let label = normalize_label(&unresolved.text());
+        let label = normalize_label(&unresolved.raw_label());
         if label.is_empty() {
             continue;
         }
@@ -3613,6 +3657,7 @@ mod tests {
     #[test]
     fn html_declaration_indexes_resume_after_block_literal_closers() {
         for input in [
+            "Before <script>\n\n<pre>\n</script>\n</pre>\n\n<div id=\"saved\">Saved</div>\n",
             "> Before <script>\n>\n> </SCRIPT >\n>\n> <span id=\"saved\">Saved</span>\n",
             "- Before <script>\n\n  </script>\n\n  <span id=\"saved\">Saved</span>\n",
         ] {
@@ -3638,6 +3683,53 @@ mod tests {
                     .is_some(),
                 "{input:?}"
             );
+        }
+    }
+
+    #[test]
+    fn html_declaration_indexes_carry_literal_openers_from_raw_blocks() {
+        for flavor in [
+            crate::config::Flavor::CommonMark,
+            crate::config::Flavor::Gfm,
+            crate::config::Flavor::Mdsvex,
+            crate::config::Flavor::Myst,
+            crate::config::Flavor::Hugo,
+        ] {
+            for opener in [
+                "<div>\n<script id=\"element\">",
+                "<div><script id=\"element\">",
+                "> <div>\n> <script\n> id=\"element\">",
+            ] {
+                let input = format!(
+                    "{opener}\n\n<span id=\"saved\">Hidden</span>\n\n</script>\n\n\
+                     <span id=\"saved\">Saved</span>\n"
+                );
+                let mut db = SalsaDb::default();
+                let file = db.update_file_text(PathBuf::from("/tmp/raw_opener.md"), input.clone());
+                let cfg = crate::Config {
+                    flavor,
+                    extensions: crate::config::Extensions::for_flavor(flavor),
+                    ..Default::default()
+                };
+                let config = FileConfig::new(&db, cfg.clone());
+                let tree = parsed_tree_root(&db, file, config);
+                let symbols = symbol_usage_index(&db, file, config);
+                assert_eq!(
+                    *symbols,
+                    symbol_usage_index_from_tree(&db, &tree, &cfg.extensions),
+                    "{flavor:?}: {input:?}"
+                );
+                let ranges = symbols.crossref_declaration_value_ranges("saved").unwrap();
+                assert_eq!(ranges.len(), 1, "{flavor:?}: {input:?}");
+                assert_eq!(
+                    usize::from(ranges[0].start()),
+                    input.rfind("saved").unwrap()
+                );
+                let definitions = definition_index(&db, file, config);
+                let definition = definitions.find_crossref("saved").unwrap();
+                assert!(definition.range.contains_range(ranges[0]));
+                assert!(definitions.find_crossref("element").is_some());
+            }
         }
     }
 
@@ -3700,6 +3792,7 @@ mod tests {
         for (prefix, saved_is_declared) in [
             ("Before", true),
             ("Before <script>", false),
+            ("<div>\n<script>", false),
             ("Before", true),
         ] {
             let source = format!("{prefix}{body}");
@@ -3730,6 +3823,71 @@ mod tests {
                 assert!(
                     executed(&log, "symbol_usage_index_block") > 1,
                     "unchanged blocks must account for their new literal context"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn html_declaration_indexes_update_template_context_after_edits() {
+        let (mut db, log) = db_with_exec_log();
+        let path = PathBuf::from("/tmp/html_template_edit.md");
+        let cfg = crate::Config {
+            flavor: crate::config::Flavor::CommonMark,
+            extensions: crate::config::Extensions::for_flavor(crate::config::Flavor::CommonMark),
+            ..Default::default()
+        };
+        let config = FileConfig::new(&db, cfg.clone());
+        let body = "\n\nBefore <template id=\"nested\">\n\n\
+                    <span id=\"deep\"></span>\n\n</template>\n\n\
+                    <span id=\"saved\"></span>\n\n</template>\n\n\
+                    <span id=\"after\"></span>\n";
+        for (prefix, saved_is_declared) in [
+            ("Before", true),
+            ("Before <template id=\"element\">", false),
+            ("<div>\n<template id=\"element\">", false),
+            ("Before", true),
+        ] {
+            let source = format!("{prefix}{body}");
+            let file = db.update_file_text(path.clone(), source.clone());
+            log.lock().unwrap().clear();
+            let symbols = symbol_usage_index(&db, file, config);
+            let tree = parsed_tree_root(&db, file, config);
+            assert_eq!(
+                *symbols,
+                symbol_usage_index_from_tree(&db, &tree, &cfg.extensions)
+            );
+            let definitions = definition_index(&db, file, config);
+            for id in ["nested", "saved"] {
+                assert_eq!(
+                    symbols.crossref_declarations(id).is_some(),
+                    saved_is_declared,
+                    "{prefix:?}: {id}"
+                );
+                assert_eq!(
+                    definitions.find_crossref(id).is_some(),
+                    saved_is_declared,
+                    "{prefix:?}: {id}"
+                );
+            }
+            assert!(symbols.crossref_declarations("deep").is_none());
+            assert!(definitions.find_crossref("deep").is_none());
+            assert_eq!(
+                symbols.crossref_declarations("after").map(Vec::len),
+                Some(1)
+            );
+            assert!(definitions.find_crossref("after").is_some());
+            if !saved_is_declared {
+                assert_eq!(
+                    symbols.crossref_declarations("element").map(Vec::len),
+                    Some(1)
+                );
+                assert!(definitions.find_crossref("element").is_some());
+            }
+            if prefix == "Before <template id=\"element\">" {
+                assert!(
+                    executed(&log, "symbol_usage_index_block") > 1,
+                    "unchanged blocks must account for their new template context"
                 );
             }
         }

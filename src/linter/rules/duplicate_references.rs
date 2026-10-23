@@ -217,6 +217,13 @@ mod tests {
                 "Before <script>const s = '<span id=\"saved\"></span>';</script>",
                 "Before <textarea><span id=\"saved\"></span></textarea>",
                 "Before <script>\n\n<span id=\"saved\"></span>\n\n</script>",
+                "<div>\n<script>\n\n<span id=\"saved\"></span>\n\n</script>",
+                "<div><style>\n\n<span id=\"saved\"></span>\n\n</style>",
+                "<template><span id=\"saved\"></span></template>",
+                "Before <template><span id=\"saved\"></span></template>",
+                "Before <template><template></template><span id=\"saved\"></span></template>",
+                "<template>\n\nBefore <template></template><span id=\"saved\"></span>\n\n</template>",
+                "Before <template>\n\n<div><span id=\"saved\"></span></div>\n\n</template>",
             ] {
                 let input = format!("{html}\n\n<span id=\"saved\"></span>\n");
                 let config = Config {

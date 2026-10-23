@@ -487,9 +487,15 @@ Diagnostic codes
     [`undefined-footnote-id`](#undefined-footnote-id)
 
 Description
+
 :   Flags unresolved reference-style links (including shortcut and collapsed
     forms) and unresolved footnote references. This helps catch broken
     cross-references early in editing and CI.
+
+    Reference labels match their source text, including inline markup. For example,
+    `[<span>Title</span>]` does not use a `[Title]: /url` definition. Container
+    prefixes on continuation lines do not contribute to the label. Implicit heading
+    references follow the same rule: `[*Title*]` matches `# *Title*`.
 
 **Example violation:**
 
@@ -563,11 +569,13 @@ Description
 
     Raw HTML `id` attributes are recognized in CommonMark, GFM, mdsvex, MyST, and
     Hugo, including IDs on block headings and inline spans. IDs inside image
-    descriptions or literal HTML contents, such as script and textarea bodies, do
-    not declare anchors, including across blank lines and block boundaries. The
-    opening elements' own IDs still count. Pandoc's structured HTML elements also
-    contribute their IDs. Legacy `<a name="x">` anchors and IDs on other raw HTML
-    elements in Pandoc are not currently inspected.
+    descriptions, inert template contents, or literal HTML contents, such as script
+    and textarea bodies, do not declare anchors, including across blank lines and
+    block boundaries. The opening elements' own IDs still count. Pandoc's structured
+    HTML elements also contribute their IDs, including empty native divs. IDs inside
+    rendered figure captions also declare anchors when `implicit-figures` is
+    enabled. Legacy `<a name="x">` anchors and IDs on other raw HTML elements in
+    Pandoc are not currently inspected.
 
 **Example violation:**
 

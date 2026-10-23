@@ -221,6 +221,60 @@ mod tests {
     }
 
     #[test]
+    fn resolves_empty_native_div_ids() {
+        for flavor in [Flavor::Pandoc, Flavor::Quarto, Flavor::RMarkdown] {
+            for html in [
+                "<div café=\"a\" id=\"saved\"></div>",
+                "<div café=\"a\" id=\"saved\">\n</div>",
+                "> <div café=\"a\" id=\"saved\"></div>",
+            ] {
+                let input = format!("{html}\n\n[link](#saved)\n");
+                let config = Config {
+                    flavor,
+                    extensions: crate::config::Extensions::for_flavor(flavor),
+                    ..Default::default()
+                };
+                let diagnostics = parse_and_lint_with_config(&input, config);
+                assert!(
+                    diagnostics.is_empty(),
+                    "{flavor:?}: {input:?}: {diagnostics:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resolves_rendered_figure_caption_ids() {
+        for caption in ["[Span]{#saved}", "<span id=\"saved\">Span</span>"] {
+            for prefix in ["", "> "] {
+                let input = format!("{prefix}![Caption {caption}](image.png)\n\n[link](#saved)\n");
+                let diagnostics = parse_and_lint(&input);
+                assert!(diagnostics.is_empty(), "{input:?}: {diagnostics:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn excludes_alt_only_image_description_ids_in_pandoc() {
+        for image in [
+            "Before ![Caption [Span]{#saved}](image.png)",
+            "[![Caption [Span]{#saved}](image.png)](page.html)",
+            "![Caption ![[Span]{#saved}](nested.png)](image.png)",
+        ] {
+            let input = format!("{image}\n\n[link](#saved)\n");
+            let diagnostics = parse_and_lint(&input);
+            assert_eq!(diagnostics.len(), 1, "{input:?}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].code, "undefined-anchor");
+        }
+        let input = "![Caption [Span]{#saved}](image.png)\n\n[link](#saved)\n";
+        let mut config = Config::default();
+        config.extensions.implicit_figures = false;
+        let diagnostics = parse_and_lint_with_config(input, config);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "undefined-anchor");
+    }
+
+    #[test]
     fn resolves_implicit_heading_with_auto_identifiers_on() {
         let input = "# Heading Name\n\nSee [there](#heading-name).\n";
         let diagnostics = parse_and_lint(input);
@@ -276,6 +330,8 @@ mod tests {
                 "> <h2\n> id=\"saved\">Saved</h2>",
                 "- <div\n    id=\"saved\">Saved</div>",
                 "<script id=\"saved\">const x = 1;</script>",
+                "<template id=\"saved\"><span></span></template>",
+                "Before <template id=\"saved\"><span></span></template>",
             ] {
                 let input = format!("{html}\n\n[link](#saved)\n");
                 let config = Config {
@@ -315,6 +371,46 @@ mod tests {
             let diagnostics = parse_and_lint_with_config(&input, config);
             assert_eq!(diagnostics.len(), 1, "{input:?}: {diagnostics:?}");
             assert!(diagnostics[0].message.contains("#saved"));
+        }
+    }
+
+    #[test]
+    fn html_template_descendants_do_not_declare_anchors() {
+        for flavor in [
+            Flavor::CommonMark,
+            Flavor::Gfm,
+            Flavor::Mdsvex,
+            Flavor::Myst,
+            Flavor::Hugo,
+        ] {
+            for html in [
+                "<template id=\"element\"><span id=\"saved\"></span></template>",
+                "Before <template id=\"element\"><span id=\"saved\"></span></template>",
+                "Before <TEMPLATE id=\"element\"><template></template><span id=\"saved\"></span></TEMPLATE >",
+                "<template id=\"element\">\n\nBefore <template></template><span id=\"saved\"></span>\n\n</template>",
+                "Before <template id=\"element\">\n\n<div><template></template><span id=\"saved\"></span></div>\n\n</template>",
+                "<template id=\"element\"><script>const s = '</template>';</script><span id=\"saved\"></span></template>",
+                "Before <template id=\"element\"><textarea></template></textarea><span id=\"saved\"></span></template>",
+                "Before <template id=\"element\"><!-- </template> --><span id=\"saved\"></span></template>",
+                "Before <template id=\"element\">![</template>Alt](image.png)<span id=\"saved\"></span></template>",
+            ] {
+                let input = format!(
+                    "{html}\n\n<span id=\"after\"></span>\n\n\
+                     [hidden](#saved) [opener](#element) [after](#after)\n"
+                );
+                let config = Config {
+                    flavor,
+                    extensions: crate::config::Extensions::for_flavor(flavor),
+                    ..Default::default()
+                };
+                let diagnostics = parse_and_lint_with_config(&input, config);
+                assert_eq!(
+                    diagnostics.len(),
+                    1,
+                    "{flavor:?}: {input:?}: {diagnostics:?}"
+                );
+                assert!(diagnostics[0].message.contains("#saved"));
+            }
         }
     }
 
@@ -446,12 +542,25 @@ mod tests {
     #[test]
     fn inline_html_block_literal_closers_resume_declarations() {
         for html in [
+            "Before <script>\n\n<pre>\n</script>\n</pre>\n\n<div id=\"saved\">Saved</div>\n",
             "> Before <script>\n>\n> </script>\n>\n> <span id=\"saved\">Saved</span>\n",
             "- Before <script>\n\n  </script>\n\n  <span id=\"saved\">Saved</span>\n",
         ] {
             let input = format!("{html}\n[link](#saved)\n");
             assert!(parse_and_lint(&input).is_empty(), "{input:?}");
         }
+    }
+
+    #[test]
+    fn literal_closers_inside_raw_block_content_resume_declarations() {
+        let input = "Before <script>\n\n<div>\n</script>\n\
+                     <span id=\"saved\">Saved</span>\n</div>\n\n[link](#saved)\n";
+        let config = Config {
+            flavor: Flavor::CommonMark,
+            extensions: crate::config::Extensions::for_flavor(Flavor::CommonMark),
+            ..Default::default()
+        };
+        assert!(parse_and_lint_with_config(input, config).is_empty());
     }
 
     #[test]

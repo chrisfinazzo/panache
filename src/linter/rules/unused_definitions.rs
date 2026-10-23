@@ -214,6 +214,40 @@ mod tests {
     }
 
     #[test]
+    fn reference_usage_identity_preserves_inline_markup() {
+        for label in [
+            "<span>Title</span>",
+            "<span class=\"badge\">Title</span>",
+            "*Title*",
+            "`Title`",
+        ] {
+            for prefix in ["", "!"] {
+                for suffix in ["", "[]"] {
+                    let input = format!("{prefix}[{label}]{suffix}\n\n[Title]: /url\n");
+                    let diagnostics = parse_and_lint(&input);
+                    assert_eq!(diagnostics.len(), 1, "{input:?}: {diagnostics:?}");
+                    assert_eq!(diagnostics[0].code, "unused-definition-label");
+                    assert!(diagnostics[0].message.contains("[title]"));
+                    assert_eq!(diagnostics[0].location.line, 3);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_reference_labels_with_matching_inline_markup() {
+        for label in ["<span>Title</span>", "*Title*", "`Title`"] {
+            for prefix in ["", "!"] {
+                for suffix in ["", "[]"] {
+                    let input = format!("{prefix}[{label}]{suffix}\n\n[{label}]: /url\n");
+                    let diagnostics = parse_and_lint(&input);
+                    assert!(diagnostics.is_empty(), "{input:?}: {diagnostics:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn accepts_shortcut_reference_with_code_span_label() {
         // `[`insta`]` is a shortcut reference link whose label is a code span.
         // Its raw label matches the `[`insta`]:` definition, so the definition

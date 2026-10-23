@@ -1,0 +1,38 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..215
+  HTML_BLOCK@0..215
+    HTML_BLOCK_TAG@0..24
+      TEXT@0..9 "<template"
+      HTML_ATTRS@9..22
+        WHITESPACE@9..10 " "
+        TEXT@10..14 "id=\""
+        ATTR_ID@14..21 "element"
+        TEXT@21..22 "\""
+      TEXT@22..23 ">"
+      NEWLINE@23..24 "\n"
+    HTML_BLOCK_CONTENT@24..215
+      TEXT@24..46 "<template id=\"nested\">"
+      NEWLINE@46..47 "\n"
+      TEXT@47..72 "<span id=\"hidden\"></s ..."
+      NEWLINE@72..73 "\n"
+      TEXT@73..84 "</template>"
+      NEWLINE@84..85 "\n"
+      TEXT@85..130 "<script>const close = ..."
+      NEWLINE@130..131 "\n"
+      TEXT@131..151 "<!-- </template> -->"
+      NEWLINE@151..152 "\n"
+      TEXT@152..177 "<span id=\"hidden\"></s ..."
+      NEWLINE@177..178 "\n"
+      TEXT@178..189 "</template>"
+      NEWLINE@189..190 "\n"
+      TEXT@190..195 "<span"
+      HTML_ATTRS@195..206
+        WHITESPACE@195..196 " "
+        TEXT@196..200 "id=\""
+        ATTR_ID@200..205 "after"
+        TEXT@205..206 "\""
+      TEXT@206..214 "></span>"
+      NEWLINE@214..215 "\n"

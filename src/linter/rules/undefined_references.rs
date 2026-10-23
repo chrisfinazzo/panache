@@ -218,7 +218,7 @@ fn extract_reference_label_and_node(link: &Link) -> Option<(String, SyntaxNode)>
     }
 
     link.text()
-        .map(|text| (text.text_content(), link.syntax().clone()))
+        .map(|text| (text.raw_label(), link.syntax().clone()))
 }
 
 /// Mirror of [`extract_reference_label_and_node`] for the
@@ -239,7 +239,7 @@ fn extract_unresolved_label_and_node(
             .unwrap_or_else(|| unresolved.syntax().clone());
         return Some((label, link_ref_node));
     }
-    let text = unresolved.text();
+    let text = unresolved.raw_label();
     if text.trim().is_empty() {
         return None;
     }
@@ -270,6 +270,27 @@ mod tests {
     }
 
     #[test]
+    fn reference_label_identity_preserves_inline_markup() {
+        for label in [
+            "<span>Title</span>",
+            "<span class=\"badge\">Title</span>",
+            "*Title*",
+            "`Title`",
+        ] {
+            for prefix in ["", "!"] {
+                for suffix in ["", "[]"] {
+                    let input = format!("{prefix}[{label}]{suffix}\n\n[Title]: /url\n");
+                    let diagnostics = parse_and_lint(&input);
+                    assert_eq!(diagnostics.len(), 1, "{input:?}: {diagnostics:?}");
+                    assert_eq!(diagnostics[0].code, "undefined-reference-label");
+                    assert!(diagnostics[0].message.contains(label));
+                    assert_eq!(diagnostics[0].location.line, 1);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn reports_missing_footnotes() {
         let input = "Text with footnote[^missing].\n\n[^ok]: Defined.\n";
         let diagnostics = parse_and_lint(input);
@@ -290,6 +311,44 @@ mod tests {
         let input = "# Heading Name\n\nSee [Heading Name].\n";
         let diagnostics = parse_and_lint(input);
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn implicit_heading_references_match_raw_heading_labels() {
+        for flavor in [Flavor::Pandoc, Flavor::Quarto] {
+            for label in ["*Title*", "`Title`", "<span>Title</span>"] {
+                let input = format!("# {label}\n\n[{label}]\n\n[Title]\n");
+                let config = Config {
+                    flavor,
+                    extensions: crate::config::Extensions::for_flavor(flavor),
+                    ..Default::default()
+                };
+                let tree = crate::parse(&input, Some(config.clone()));
+                let diagnostics = UndefinedReferencesRule.check_tree(&tree, &input, &config, None);
+                assert_eq!(
+                    diagnostics.len(),
+                    1,
+                    "{flavor:?}: {input:?}: {diagnostics:?}"
+                );
+                assert_eq!(diagnostics[0].code, "undefined-reference-label");
+                assert_eq!(diagnostics[0].location.line, 5);
+            }
+        }
+    }
+
+    #[test]
+    fn reference_labels_exclude_container_prefixes() {
+        for (first, continuation) in [("> ", "> "), ("> - ", ">   "), ("- ", "  ")] {
+            for prefix in ["", "!"] {
+                for suffix in ["", "[]"] {
+                    let input = format!(
+                        "{first}{prefix}[*hello* \n{continuation}world]{suffix}\n\n[*hello* world]: /url\n"
+                    );
+                    let diagnostics = parse_and_lint(&input);
+                    assert!(diagnostics.is_empty(), "{input:?}: {diagnostics:?}");
+                }
+            }
+        }
     }
 
     #[test]

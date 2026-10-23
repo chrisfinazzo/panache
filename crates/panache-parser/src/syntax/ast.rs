@@ -5,6 +5,16 @@ pub use rowan::ast::{AstChildren, AstNode};
 
 use super::{SyntaxKind, SyntaxNode, SyntaxToken};
 
+pub(super) fn raw_text(node: &SyntaxNode) -> String {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() != SyntaxKind::LINE_PREFIX)
+        .fold(String::new(), |mut text, token| {
+            text.push_str(token.text());
+            text
+        })
+}
+
 pub(super) fn visible_text_tokens(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
     let mut walk = node.preorder_with_tokens();
     std::iter::from_fn(move || {

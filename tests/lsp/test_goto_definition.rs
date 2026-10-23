@@ -500,6 +500,49 @@ fn test_goto_definition_shortcut_implicit_heading_reference_with_spaces() {
 }
 
 #[test]
+fn test_goto_definition_raw_implicit_heading_reference() {
+    for label in ["*Title*", "`Title`", "<span>Title</span>"] {
+        let mut server = TestLspServer::new();
+        let content = format!("# {label}\n\n[{label}]\n");
+        server.open_document("file:///test.qmd", &content, "quarto");
+        let result = server.goto_definition("file:///test.qmd", 2, 3);
+        let Some(GotoDefinitionResponse::Scalar(location)) = result else {
+            panic!("Expected heading definition for {label:?}");
+        };
+        assert_eq!(location.range.start.line, 0);
+    }
+}
+
+#[test]
+fn test_goto_definition_wrapped_implicit_heading_reference() {
+    let mut server = TestLspServer::new();
+    let content = "# *hello* world\n\n> [*hello* \n> world]\n";
+    server.open_document("file:///test.qmd", content, "quarto");
+    let result = server.goto_definition("file:///test.qmd", 3, 4);
+    let Some(GotoDefinitionResponse::Scalar(location)) = result else {
+        panic!("Expected wrapped heading reference definition");
+    };
+    assert_eq!(location.range.start.line, 0);
+}
+
+#[test]
+fn test_goto_definition_native_div_and_figure_caption_anchors() {
+    for declaration in [
+        "<div café=\"a\" id=\"saved\"></div>",
+        "![Caption [Span]{#saved}](image.png)",
+    ] {
+        let mut server = TestLspServer::new();
+        let content = format!("{declaration}\n\n[link](#saved)\n");
+        server.open_document("file:///test.qmd", &content, "quarto");
+        let result = server.goto_definition("file:///test.qmd", 2, 10);
+        let Some(GotoDefinitionResponse::Scalar(location)) = result else {
+            panic!("Expected anchor definition for {declaration:?}");
+        };
+        assert_eq!(location.range.start.line, 0);
+    }
+}
+
+#[test]
 fn test_goto_definition_shortcut_hyphenated_heading_reference_returns_none() {
     let mut server = TestLspServer::new();
 

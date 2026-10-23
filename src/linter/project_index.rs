@@ -329,7 +329,7 @@ fn usage_label_from_image(image: ImageLink) -> Option<String> {
     }
     image
         .alt()
-        .map(|alt| normalize_label(&alt.text()))
+        .map(|alt| normalize_label(&alt.raw_label()))
         .filter(|label| !label.is_empty())
 }
 
@@ -340,7 +340,7 @@ fn usage_label_from_unresolved(unresolved: UnresolvedReference) -> Option<String
             return Some(normalized);
         }
     }
-    let normalized = normalize_label(&unresolved.text());
+    let normalized = normalize_label(&unresolved.raw_label());
     if normalized.is_empty() {
         None
     } else {

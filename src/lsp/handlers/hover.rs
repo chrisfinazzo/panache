@@ -338,7 +338,7 @@ fn hovered_reference_label(root: &SyntaxNode, offset: usize) -> Option<String> {
             }
             (
                 image.reference_label(),
-                image.alt().map(|alt| alt.syntax().text().to_string()),
+                image.alt().map(|alt| alt.raw_label()),
             )
         } else if let Some(unresolved) = UnresolvedReference::cast(node.clone()) {
             // Definitions in included documents are absent from the local parse.
@@ -346,7 +346,7 @@ fn hovered_reference_label(root: &SyntaxNode, offset: usize) -> Option<String> {
                 if let Some(text) = LinkText::cast(child.clone()) {
                     Some(text.raw_label())
                 } else {
-                    ImageAlt::cast(child).map(|alt| alt.syntax().text().to_string())
+                    ImageAlt::cast(child).map(|alt| alt.raw_label())
                 }
             });
             (unresolved.label(), text)
@@ -581,7 +581,7 @@ fn hovered_link_target(root: &crate::syntax::SyntaxNode, offset: usize) -> Optio
                 return (!label.is_empty()).then_some(format!("[ref]:{label}"));
             }
             if let Some(text) = link.text() {
-                let label = normalize_label(&text.text_content());
+                let label = normalize_label(&text.raw_label());
                 return (!label.is_empty()).then_some(format!("[ref]:{label}"));
             }
         }

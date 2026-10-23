@@ -17,13 +17,13 @@ fn shortcut_label(node: &SyntaxNode) -> Option<String> {
             return None;
         }
         let text = link.text()?;
-        let label = normalize_label(&text.text_content());
+        let label = normalize_label(&text.raw_label());
         if label.is_empty() { None } else { Some(label) }
     } else if let Some(unresolved) = UnresolvedReference::cast(node.clone()) {
         if unresolved.is_image() || unresolved.label().is_some() {
             return None;
         }
-        let label = normalize_label(&unresolved.text());
+        let label = normalize_label(&unresolved.raw_label());
         if label.is_empty() { None } else { Some(label) }
     } else {
         None
@@ -57,7 +57,7 @@ pub fn convert_to_explicit_heading_link(
         .into_iter()
         .find(|entry| {
             Heading::cast(entry.heading.clone())
-                .map(|heading| normalize_label(&heading.text()) == normalized_label)
+                .map(|heading| normalize_label(&heading.raw_label()) == normalized_label)
                 .unwrap_or(false)
         })
     else {
@@ -107,5 +107,38 @@ mod tests {
         );
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "[unordered lists](#unordered-lists)");
+    }
+
+    #[test]
+    fn convert_raw_heading_reference_preserves_markup_and_visible_slug() {
+        let input = "# *Title*\n\n[*Title*]\n";
+        let tree = crate::parse(input, None);
+        let offset = input.find("[*Title*]").unwrap() + 2;
+        let node = find_implicit_heading_link_at_position(&tree, offset).unwrap();
+        let edits = convert_to_explicit_heading_link(
+            &node,
+            &tree,
+            input,
+            &crate::config::Extensions::default(),
+        );
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "[*Title*](#title)");
+    }
+
+    #[test]
+    fn preserves_raw_shortcut_label_identity_when_matching_headings() {
+        let input = "# Title\n\n[<span>Title</span>]\n";
+        let tree = crate::parse(input, None);
+        let offset = input.find("<span>").unwrap();
+        let node = find_implicit_heading_link_at_position(&tree, offset).unwrap();
+        assert!(
+            convert_to_explicit_heading_link(
+                &node,
+                &tree,
+                input,
+                &crate::config::Extensions::default(),
+            )
+            .is_empty()
+        );
     }
 }
