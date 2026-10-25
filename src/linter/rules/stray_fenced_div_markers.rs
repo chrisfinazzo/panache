@@ -2,7 +2,7 @@ use rowan::TextRange;
 
 use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, Location};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
-use crate::syntax::SyntaxKind;
+use crate::syntax::{DivFenceOpen, SyntaxKind};
 
 pub struct StrayFencedDivMarkersRule;
 
@@ -66,7 +66,23 @@ impl Rule for StrayFencedDivMarkersRule {
                     let location = Location::from_range(range, input);
                     let marker = &text[run_start..run_end];
 
-                    let diag = if is_swept_fence_shape(input, para_start, abs_start as usize) {
+                    let line_end = input[abs_start as usize..]
+                        .find('\n')
+                        .map_or(input.len(), |offset| abs_start as usize + offset);
+                    let content = &input[abs_start as usize..line_end];
+                    let diag = if is_fence_line_start(input, para_start, abs_start as usize)
+                        && DivFenceOpen::has_separate_attribute_blocks(content)
+                    {
+                        Diagnostic::warning(
+                            location,
+                            "stray-fenced-div-markers",
+                            format!("'{marker}' appears as text because the opener has separate attribute blocks"),
+                        )
+                        .with_note(
+                            DiagnosticNoteKind::Help,
+                            "Put the ID, classes, and key-value attributes inside one `{...}` block",
+                        )
+                    } else if is_swept_fence_shape(input, para_start, abs_start as usize) {
                         Diagnostic::warning(
                             location,
                             "stray-fenced-div-markers",
@@ -136,37 +152,19 @@ fn is_swept_fence_shape(input: &str, para_start: usize, run_start: usize) -> boo
     looks_like_div_fence(&line[leading_spaces..])
 }
 
-/// Minimal version of the parser's fence-shape recognizer: accepts both
-/// opener (`::: {.cls}` / `::: classname` / `::::: {#id} :::::`) and closer
-/// (`:::` / `::::`) shapes. Inlined here to avoid widening
-/// `panache-parser`'s public API for a lint-only check.
+fn is_fence_line_start(input: &str, para_start: usize, run_start: usize) -> bool {
+    if run_start == para_start {
+        return true;
+    }
+    let line_start = input[..run_start].rfind('\n').map_or(0, |i| i + 1);
+    input[line_start..run_start]
+        .chars()
+        .all(|c| c.is_whitespace() || c == '>')
+}
+
 fn looks_like_div_fence(content: &str) -> bool {
-    let colon_count = content.bytes().take_while(|b| *b == b':').count();
-    if colon_count < 3 {
-        return false;
-    }
-    let after = content[colon_count..].trim();
-
-    if after.is_empty() {
-        return true;
-    }
-
-    if let Some(rest) = after.strip_prefix('{') {
-        return rest.contains('}');
-    }
-
-    let word_end = after
-        .find(|c: char| c.is_whitespace() || c == ':')
-        .unwrap_or(after.len());
-    let (first, rest) = after.split_at(word_end);
-    if first.is_empty() {
-        return false;
-    }
-    let trailing = rest.trim();
-    if trailing.is_empty() {
-        return true;
-    }
-    trailing.chars().all(|c| c == ':') && trailing.len() >= 3
+    DivFenceOpen::recognizes(content)
+        || (content.trim().len() >= 3 && content.trim().bytes().all(|b| b == b':'))
 }
 
 /// Non-overlapping byte offsets of every run of three or more `:` characters
@@ -200,6 +198,70 @@ mod tests {
         let config = Config::default();
         let tree = crate::parser::parse(input, Some(config.clone()));
         StrayFencedDivMarkersRule.check_tree(&tree, input, &config, None)
+    }
+
+    #[test]
+    fn explains_separate_attribute_blocks() {
+        for input in [
+            "::: {custom-style=\"AbstractTitle\" .abstract-title}{#en_abstract}\nAbstract\n:::\n",
+            "Text\n::: {.class} {#id}\n",
+            "> ::: {.class}{#id}\n",
+            "- ::: {.class}{#id}\n",
+            "::: {title=\"a}b\"}{#id} :::\r\n",
+            "::: {.one}{.two}{#id}\n",
+        ] {
+            let diagnostics = parse_and_lint(input);
+            let diagnostic = diagnostics.first().expect(input);
+            assert!(
+                diagnostic.message.contains("separate attribute blocks"),
+                "{input}: {diagnostic:?}"
+            );
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.message.contains("inside one `{...}` block"))
+            );
+            assert_eq!(
+                &input[std::ops::Range::<usize>::from(diagnostic.location.range)],
+                ":::"
+            );
+            assert!(diagnostic.fix.is_none());
+        }
+    }
+
+    #[test]
+    fn valid_and_literal_attribute_blocks_are_clean() {
+        for input in [
+            "::: {#id custom-style=\"AbstractTitle\" .abstract-title}\nAbstract\n:::\n",
+            "::: {custom-style=\"AbstractTitle\" .abstract-title #id}\nAbstract\n:::\n",
+            "::: {title=\"a}{b\"}\nAbstract\n:::\n",
+            "`::: {.class}{#id}`\n",
+            "```\n::: {.class}{#id}\n```\n",
+            "\\:\\:\\: {.class}{#id}\n",
+        ] {
+            assert!(parse_and_lint(input).is_empty(), "{input}");
+        }
+    }
+
+    #[test]
+    fn other_strays_keep_generic_help() {
+        for input in [
+            "Use ::: {.class}{#id}\n",
+            "::: {.class} extra {#id}\n",
+            "Text\n::: {.class} extra {#id}\n",
+            "::: {.class}{#id} extra\n",
+            "::: {.class}{#id\n",
+        ] {
+            let diagnostics = parse_and_lint(input);
+            assert!(!diagnostics.is_empty(), "{input}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|d| d.message.contains("appears as text")),
+                "{input}"
+            );
+        }
     }
 
     #[test]

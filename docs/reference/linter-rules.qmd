@@ -1200,7 +1200,11 @@ Description
 
     Keep all div attributes inside one brace block. For example,
     `::: {.abstract-title}{#en_abstract}` is literal text in Pandoc; write
-    `::: {.abstract-title #en_abstract}` to create a div with that class and ID.
+    `::: {.abstract-title #en_abstract}` to create a div with that class and ID. For
+    separate attribute blocks, the diagnostic points at the opening colons and
+    suggests putting the ID, classes, and key-value attributes inside one `{...}`
+    block. This correction is manual because merging blocks can create conflicting
+    attributes.
 
     Quarto's runtime emits a warning when it sees stray `:::`, but exits 0, which
     makes the issue invisible to CI/Makefile workflows. This rule fills that gap by

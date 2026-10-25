@@ -133,6 +133,32 @@ impl AstNode for DivFenceOpen {
 }
 
 impl DivFenceOpen {
+    /// Whether source text forms a valid opening fence, without container prefixes.
+    pub fn recognizes(content: &str) -> bool {
+        crate::parser::blocks::fenced_divs::try_parse_div_fence_open(content).is_some()
+    }
+
+    /// Whether an opening fence has multiple consecutive brace attribute blocks.
+    pub fn has_separate_attribute_blocks(content: &str) -> bool {
+        use crate::parser::utils::attributes::find_matching_open_brace_for_trailing_block;
+
+        let content = content.trim_start();
+        let colons = content.bytes().take_while(|&b| b == b':').count();
+        if colons < 3 {
+            return false;
+        }
+        let mut attributes = content[colons..].trim().trim_end_matches(':').trim_end();
+        let mut blocks = 0;
+        while attributes.starts_with('{') {
+            let Some(open) = find_matching_open_brace_for_trailing_block(attributes) else {
+                return false;
+            };
+            blocks += 1;
+            attributes = attributes[..open].trim_end();
+        }
+        attributes.is_empty() && blocks > 1
+    }
+
     pub fn info(&self) -> Option<DivInfo> {
         self.0.children().find_map(DivInfo::cast)
     }
@@ -211,6 +237,35 @@ impl DivInfo {
 mod tests {
     use super::*;
     use crate::parse;
+
+    #[test]
+    fn recognizes_separate_attribute_blocks() {
+        for content in [
+            "::: {.class}{#id}",
+            ":::: {.class} {#id} :::",
+            "::: {title=\"a}b\"}{#id}",
+            "::: {}{ }{#id}",
+        ] {
+            assert!(
+                DivFenceOpen::has_separate_attribute_blocks(content),
+                "{content}"
+            );
+            assert!(!DivFenceOpen::recognizes(content), "{content}");
+        }
+        for content in [
+            "::: {.class #id}",
+            "::: {title=\"a}{b\"}",
+            "::: {.class} text {#id}",
+            "::: {.class}{#id} text",
+            "::: {.class}{#id",
+            ":: {.class}{#id}",
+        ] {
+            assert!(
+                !DivFenceOpen::has_separate_attribute_blocks(content),
+                "{content}"
+            );
+        }
+    }
 
     #[test]
     fn fenced_div_wrapper_with_braced_attributes() {

@@ -1140,6 +1140,36 @@ fn test_stray_fenced_div_markers() {
 }
 
 #[test]
+fn test_separate_fenced_div_attribute_blocks() {
+    let diagnostics = lint_file("issue_584_fenced_div_attributes.md");
+    let issues: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code == "stray-fenced-div-markers" && d.message.contains("separate attribute blocks")
+        })
+        .collect();
+    assert_eq!(
+        issues.iter().map(|d| d.location.line).collect::<Vec<_>>(),
+        vec![1, 13, 17]
+    );
+    let input = include_str!("linting/issue_584_fenced_div_attributes.md");
+    for issue in issues {
+        assert_eq!(issue.severity, panache::linter::Severity::Warning);
+        assert_eq!(
+            &input[std::ops::Range::<usize>::from(issue.location.range)],
+            ":::"
+        );
+        assert!(
+            issue
+                .notes
+                .iter()
+                .any(|note| note.message.contains("inside one `{...}` block"))
+        );
+        assert!(issue.fix.is_none());
+    }
+}
+
+#[test]
 fn test_swallowed_list_marker() {
     let diagnostics = lint_file("swallowed_list_marker.md");
     let issues: Vec<_> = diagnostics
