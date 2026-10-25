@@ -89,7 +89,7 @@ fn trim_attribute_gap(before: &str) -> &str {
     }
 }
 
-fn find_matching_open_brace_for_trailing_block(text: &str) -> Option<usize> {
+pub(crate) fn find_matching_open_brace_for_trailing_block(text: &str) -> Option<usize> {
     if !text.ends_with('}') {
         return None;
     }

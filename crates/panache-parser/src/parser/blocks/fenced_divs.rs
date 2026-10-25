@@ -1,6 +1,8 @@
 //! Fenced div parsing utilities.
 
-use crate::parser::utils::helpers::strip_leading_spaces;
+use crate::parser::utils::{
+    attributes::find_matching_open_brace_for_trailing_block, helpers::strip_leading_spaces,
+};
 
 /// Information about a detected div fence opening.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,8 +36,13 @@ pub(crate) fn try_parse_div_fence_open(content: &str) -> Option<DivFenceInfo> {
     let after_colons = trimmed[colon_count..].trim_start();
 
     let attributes = if after_colons.starts_with('{') {
-        let close_idx = after_colons.find('}')?;
-        after_colons[..=close_idx].to_string()
+        let attributes = after_colons.trim_end().trim_end_matches(':').trim_end();
+        let open_brace = find_matching_open_brace_for_trailing_block(attributes)?;
+        // A second attribute block or other trailing text makes the whole line prose.
+        if open_brace != 0 {
+            return None;
+        }
+        attributes.to_string()
     } else if after_colons.is_empty() {
         return None;
     } else {
@@ -125,6 +132,35 @@ mod tests {
         let line = "::: Warning :::";
         let fence = try_parse_div_fence_open(line).unwrap();
         assert_eq!(fence.attributes, "Warning");
+    }
+
+    #[test]
+    fn rejects_trailing_content_after_attributes() {
+        for line in [
+            "::: {custom-style=\"AbstractTitle\" .abstract-title}{#en_abstract}",
+            "::: {.class} {#id}",
+            "::: {.class} text",
+            "::: {.class} ::: text",
+            "::: {.class} : : :",
+        ] {
+            assert!(try_parse_div_fence_open(line).is_none(), "{line}");
+        }
+    }
+
+    #[test]
+    fn accepts_empty_attributes() {
+        for line in ["::: {}", "::: { } :::"] {
+            assert!(try_parse_div_fence_open(line).is_some(), "{line}");
+        }
+    }
+
+    #[test]
+    fn accepts_attributes_with_optional_trailing_colons() {
+        for suffix in ["", " ", ":", " ::", " ::: "] {
+            let line = format!("::: {{title=\"a}}b\" #id}}{suffix}");
+            let fence = try_parse_div_fence_open(&line).unwrap();
+            assert_eq!(fence.attributes, "{title=\"a}b\" #id}");
+        }
     }
 
     #[test]

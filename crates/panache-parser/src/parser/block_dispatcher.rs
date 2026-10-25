@@ -2208,15 +2208,7 @@ impl BlockParser for FencedDivOpenParser {
 
             emit_div_info_node(builder, &div_fence.attributes);
 
-            let after_attrs = if div_fence.attributes.starts_with('{') {
-                if let Some(close_idx) = content_after_space.find('}') {
-                    &content_after_space[close_idx + 1..]
-                } else {
-                    ""
-                }
-            } else {
-                &content_after_space[div_fence.attributes.len()..]
-            };
+            let after_attrs = &content_after_space[div_fence.attributes.len()..];
 
             if !after_attrs.is_empty() {
                 let suffix_trimmed = after_attrs.trim_start();

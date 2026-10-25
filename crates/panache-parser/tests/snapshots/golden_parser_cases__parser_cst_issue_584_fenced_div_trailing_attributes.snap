@@ -1,0 +1,115 @@
+---
+source: crates/panache-parser/tests/golden_parser_cases.rs
+expression: cst_output
+---
+DOCUMENT@0..390
+  PARAGRAPH@0..78
+    TEXT@0..64 "::: {custom-style=\"Ab ..."
+    NEWLINE@64..65 "\n"
+    TEXT@65..73 "Abstract"
+    NEWLINE@73..74 "\n"
+    TEXT@74..77 ":::"
+    NEWLINE@77..78 "\n"
+  BLANK_LINE@78..79
+    BLANK_LINE@78..79 "\n"
+  FENCED_DIV@79..156
+    DIV_FENCE_OPEN@79..143
+      TEXT@79..82 ":::"
+      WHITESPACE@82..83 " "
+      DIV_INFO@83..142
+        TEXT@83..84 "{"
+        ATTR_ID@84..96 "#en_abstract"
+        WHITESPACE@96..97 " "
+        ATTR_KEY_VALUE@97..125
+          ATTR_KEY@97..109 "custom-style"
+          TEXT@109..110 "="
+          ATTR_VALUE@110..125 "\"AbstractTitle\""
+        WHITESPACE@125..126 " "
+        ATTR_CLASS@126..141 ".abstract-title"
+        TEXT@141..142 "}"
+      NEWLINE@142..143 "\n"
+    PARAGRAPH@143..152
+      TEXT@143..151 "Abstract"
+      NEWLINE@151..152 "\n"
+    DIV_FENCE_CLOSE@152..156
+      TEXT@152..155 ":::"
+      NEWLINE@155..156 "\n"
+  BLANK_LINE@156..157
+    BLANK_LINE@156..157 "\n"
+  FENCED_DIV@157..234
+    DIV_FENCE_OPEN@157..221
+      TEXT@157..160 ":::"
+      WHITESPACE@160..161 " "
+      DIV_INFO@161..220
+        TEXT@161..162 "{"
+        ATTR_KEY_VALUE@162..190
+          ATTR_KEY@162..174 "custom-style"
+          TEXT@174..175 "="
+          ATTR_VALUE@175..190 "\"AbstractTitle\""
+        WHITESPACE@190..191 " "
+        ATTR_CLASS@191..206 ".abstract-title"
+        WHITESPACE@206..207 " "
+        ATTR_ID@207..219 "#en_abstract"
+        TEXT@219..220 "}"
+      NEWLINE@220..221 "\n"
+    PARAGRAPH@221..230
+      TEXT@221..229 "Abstract"
+      NEWLINE@229..230 "\n"
+    DIV_FENCE_CLOSE@230..234
+      TEXT@230..233 ":::"
+      NEWLINE@233..234 "\n"
+  BLANK_LINE@234..235
+    BLANK_LINE@234..235 "\n"
+  BLOCK_QUOTE@235..290
+    BLOCK_QUOTE_MARKER@235..236 ">"
+    WHITESPACE@236..237 " "
+    PARAGRAPH@237..290
+      TEXT@237..272 "::: {.abstract-title} ..."
+      NEWLINE@272..273 "\n"
+      LINE_PREFIX@273..274 ">"
+      LINE_PREFIX@274..275 " "
+      TEXT@275..283 "Abstract"
+      NEWLINE@283..284 "\n"
+      LINE_PREFIX@284..285 ">"
+      LINE_PREFIX@285..286 " "
+      TEXT@286..289 ":::"
+      NEWLINE@289..290 "\n"
+  BLANK_LINE@290..291
+    BLANK_LINE@290..291 "\n"
+  LIST@291..346
+    LIST_ITEM@291..346
+      LIST_MARKER@291..292 "-"
+      WHITESPACE@292..293 " "
+      PLAIN@293..346
+        TEXT@293..328 "::: {.abstract-title} ..."
+        NEWLINE@328..329 "\n"
+        LINE_PREFIX@329..331 "  "
+        TEXT@331..339 "Abstract"
+        NEWLINE@339..340 "\n"
+        LINE_PREFIX@340..342 "  "
+        TEXT@342..345 ":::"
+        NEWLINE@345..346 "\n"
+  BLANK_LINE@346..347
+    BLANK_LINE@346..347 "\n"
+  FENCED_DIV@347..390
+    DIV_FENCE_OPEN@347..377
+      TEXT@347..350 ":::"
+      WHITESPACE@350..351 " "
+      DIV_INFO@351..372
+        TEXT@351..352 "{"
+        ATTR_KEY_VALUE@352..363
+          ATTR_KEY@352..357 "title"
+          TEXT@357..358 "="
+          ATTR_VALUE@358..363 "\"a}b\""
+        WHITESPACE@363..364 " "
+        ATTR_ID@364..371 "#quoted"
+        TEXT@371..372 "}"
+      WHITESPACE@372..373 " "
+      TEXT@373..376 ":::"
+      NEWLINE@376..377 "\n"
+    PARAGRAPH@377..386
+      TEXT@377..385 "Abstract"
+      NEWLINE@385..386 "\n"
+    DIV_FENCE_CLOSE@386..390
+      TEXT@386..389 ":::"
+      NEWLINE@389..390 "\n"

@@ -705,6 +705,7 @@ golden_test_cases!(
     fenced_code_unclosed_commonmark,
     fenced_code_unclosed_pandoc,
     fenced_divs,
+    issue_584_fenced_div_trailing_attributes,
     fenced_div_attributes_structured,
     fenced_div_attribute_spacing,
     fenced_div_after_wrapped_list_item,
