@@ -286,7 +286,7 @@ function writeDiscrepancies(cases, tools) {
 }
 
 function md(s) {
-  return String(s).replace(/\|/g, '\\|');
+  return String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
 main();
