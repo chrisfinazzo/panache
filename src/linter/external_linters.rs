@@ -470,7 +470,7 @@ pub(crate) fn line_col_to_offset(input: &str, line: usize, column: usize) -> Opt
     line_col_to_byte_offset_1based(input, line, column)
 }
 
-/// Project both endpoints together so a diagnostic cannot cross source snippets.
+/// Project a diagnostic onto the source snippet containing its start.
 pub(crate) fn map_tool_range(
     ctx: &ParseContext<'_>,
     line: usize,
@@ -528,8 +528,10 @@ pub(crate) fn map_concatenated_offset_to_original_with_end_boundary(
     })
 }
 
-/// A diagnostic must belong to one source snippet. Generated framing and gaps
-/// have no document location, and must never fall back to unrelated prose.
+/// Anchor diagnostics in the snippet containing their start, clipping ranges
+/// that extend past it. A tool may report one range across several snippets,
+/// but highlighting intervening prose or another included file is misleading.
+/// Generated framing and gaps have no document location.
 pub(crate) fn map_diagnostic_range(
     ctx: &ParseContext<'_>,
     start: usize,
@@ -544,10 +546,19 @@ pub(crate) fn map_diagnostic_range(
     let (start, end) = match ctx.mappings {
         Some(mappings) => {
             let mapping = mappings.iter().find(|mapping| {
-                (mapping.concatenated_range.contains(&start)
-                    || (start == end && mapping.concatenated_range.end == start))
-                    && end <= mapping.concatenated_range.end
+                mapping.concatenated_range.contains(&start)
+                    || (start == end && mapping.concatenated_range.end == start)
             })?;
+            let end = if end > mapping.concatenated_range.end {
+                // Exclude the final newline so the highlight does not reach
+                // the closing fence or the next line's container prefix.
+                start
+                    + ctx.linted_input[start..mapping.concatenated_range.end]
+                        .trim_end_matches(['\r', '\n'])
+                        .len()
+            } else {
+                end
+            };
             let mapping = std::slice::from_ref(mapping);
             (
                 map_concatenated_offset_to_original_with_end_boundary(start, mapping)?,
@@ -683,6 +694,37 @@ mod tests {
             &blocks["python"],
         );
         (result.content, result.mappings)
+    }
+
+    #[test]
+    fn diagnostic_mapper_clips_cross_snippet_ranges_without_mapping_fixes() {
+        let input = "> ```python\r\n> first()\r\n> ```\r\n\r\nUnrelated prose.\r\n\r\n```python\r\nsecond()\r\n```\r\n";
+        let (linted, mappings) = prefixed_block_mapping(input);
+        let ctx = ParseContext {
+            output: "",
+            linted_input: &linted,
+            original_input: input,
+            mappings: Some(&mappings),
+        };
+        let start = linted.find("first()").unwrap();
+        let end = linted.find("second()").unwrap() + "second()".len();
+        let location = map_diagnostic_range(&ctx, start, end).unwrap();
+        assert_eq!(
+            usize::from(location.range.start()),
+            input.find("first()").unwrap()
+        );
+        assert_eq!(
+            usize::from(location.range.end()),
+            input.find("first()").unwrap() + "first()".len()
+        );
+        assert_eq!(
+            map_concatenated_edit_to_original(&linted, start, end, "", &mappings),
+            None
+        );
+        // Padding has no source owner, even when a range ends in real code.
+        assert!(map_diagnostic_range(&ctx, 0, end).is_none());
+        assert!(map_diagnostic_range(&ctx, start, linted.len() + 1).is_none());
+        assert!(map_diagnostic_range(&ctx, end, start).is_none());
     }
 
     #[test]

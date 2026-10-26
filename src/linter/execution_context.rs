@@ -805,6 +805,51 @@ mod tests {
     }
 
     #[test]
+    fn cross_source_diagnostic_stays_in_its_starting_include() {
+        let mut db = SalsaDb::default();
+        let config = config(&db);
+        let parent = root(
+            &mut db,
+            config,
+            "/execution/main.qmd",
+            "{{< include _child.qmd >}}\n\n`r last`\n",
+        );
+        let text = "> ```{r}\r\n> first()\r\n> ```\r\n";
+        root(&mut db, config, "/execution/_child.qmd", text);
+        let plan = execution_plan(&db, parent.file, config);
+        let job = &plan.jobs[0];
+        let start = job.content.find("first()").unwrap();
+        let end = job.content.find("last").unwrap() + 4;
+        let output = serde_json::json!([{
+            "rule": "test", "severity": "Warning",
+            "range": {"start": start, "end": end},
+            "message": {"name": "test", "body": "Spans included sources"},
+            "fix": {"start": start, "end": end, "content": "", "applicability": "safe", "description": "Delete"}
+        }]);
+        let diagnostics = super::super::external_linters::parse_linter_output(
+            "arity",
+            &output.to_string(),
+            &job.content,
+            &plan.original_input,
+            Some(&job.mappings),
+        )
+        .unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        let (occurrence, diagnostic) =
+            project_diagnostic(plan, diagnostics.into_iter().next().unwrap()).unwrap();
+        assert_eq!(
+            plan.sources[occurrence].path,
+            Path::new("/execution/_child.qmd")
+        );
+        assert_eq!(
+            &text[usize::from(diagnostic.location.range.start())
+                ..usize::from(diagnostic.location.range.end())],
+            "first()"
+        );
+        assert!(diagnostic.fix.is_none());
+    }
+
+    #[test]
     fn mapping_restores_prefixed_crlf_and_unicode_source_and_drops_cross_source_fix() {
         let mut db = SalsaDb::default();
         let config = config(&db);

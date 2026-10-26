@@ -69,6 +69,39 @@ mod tests {
     }
 
     #[test]
+    fn r_unreachable_diagnostics_survive_multiple_later_chunks() {
+        if which::which("jarl").is_err() {
+            eprintln!("Skipping R cross-chunk test: jarl is not installed");
+            return;
+        }
+        for later_chunks in 1..=3 {
+            let mut input =
+                "```{r}\n#| label: stop\n#| error: false\nstop(\"expected\")\n```\n".to_string();
+            for index in 0..later_chunks {
+                input.push_str(&format!(
+                    "\nProse between chunks.\n\n> ```{{r}}\n> #| label: later-{index}\n> {} + 1\n> ```\n", index + 1
+                ));
+            }
+            let config = quarto_external_config("r", "jarl");
+            let tree = parse(&input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+            let unreachable: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d.code == "unreachable_code")
+                .collect();
+            assert_eq!(unreachable.len(), 1, "{later_chunks}: {diagnostics:#?}");
+            let diagnostic = unreachable[0];
+            let range = diagnostic.location.range;
+            assert_eq!(usize::from(range.start()), input.find("1 + 1").unwrap());
+            assert_eq!(
+                input[usize::from(range.start())..usize::from(range.end())].trim(),
+                "1 + 1"
+            );
+            assert!(diagnostic.fix.is_none());
+        }
+    }
+
+    #[test]
     fn r_error_chunks_preserve_shared_bindings() {
         if which::which("arity").is_err() {
             return;
