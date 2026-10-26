@@ -9,6 +9,8 @@ use crate::utils::CodeSnippet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnippetKind {
     Block,
+    /// An executable R chunk that allows execution to continue after errors.
+    ErrorHandledBlock,
     /// A displayed fence or a chunk with evaluation disabled.
     DisplayBlock,
     Inline,
@@ -100,6 +102,13 @@ fn concatenate_snippets<'a>(
             current_line += 1;
         }
 
+        if block.kind == SnippetKind::ErrorHandledBlock {
+            // Keep assignments in the shared environment while catching errors
+            // before control reaches the next executable snippet.
+            content.push_str("try({\n");
+            current_line += 1;
+        }
+
         if block.kind == SnippetKind::Inline {
             let binding = format!("{binding_prefix}{binding_index}");
             binding_index += 1;
@@ -145,6 +154,10 @@ fn concatenate_snippets<'a>(
 
         if !block.content.ends_with('\n') {
             content.push('\n');
+            current_line += 1;
+        }
+        if block.kind == SnippetKind::ErrorHandledBlock {
+            content.push_str("}, silent = TRUE)\n");
             current_line += 1;
         }
         if block.kind == SnippetKind::Inline {
@@ -224,6 +237,75 @@ mod tests {
                 assert!(!group.content.contains("#|"), "{fence}");
             }
         }
+    }
+
+    #[test]
+    fn r_error_options_frame_only_literal_true_executable_chunks() {
+        for (fence, catches_errors) in [
+            ("{r}\n#| error: true", true),
+            ("{r, error=TRUE}", true),
+            ("{r, error=FALSE}\n#| error: true", true),
+            ("{r, error=TRUE}\n#| error: false", false),
+            ("{r}\n#| error: 'true'", false),
+            ("{r}\n#| error: !expr true", false),
+            ("{r}\n#| error: !r true", false),
+            ("{r}\n#| error: false", false),
+            ("{r}", false),
+            ("{r}\n#| eval: false\n#| error: true", false),
+            ("r\n#| error: true", false),
+            ("{python}\n#| error: true", false),
+        ] {
+            let input = format!("```{fence}\nbody\n```\n");
+            let config = Config {
+                flavor: Flavor::Quarto,
+                extensions: crate::config::Extensions::for_flavor(Flavor::Quarto),
+                ..Default::default()
+            };
+            let tree = parse(&input, Some(config));
+            let snippets = collect_code_snippets(&tree, &input);
+            let language = if fence.starts_with("{python}") {
+                "python"
+            } else {
+                "r"
+            };
+            let groups = concatenate_for_lint(&snippets[language], Flavor::Quarto);
+            assert_eq!(groups.len(), 1, "{fence}");
+            assert_eq!(
+                groups[0].content.contains("try({"),
+                catches_errors,
+                "{fence}"
+            );
+            if catches_errors {
+                assert!(groups[0].content.ends_with("}, silent = TRUE)\n"));
+            }
+        }
+    }
+
+    #[test]
+    fn error_framing_preserves_nested_crlf_source_mappings() {
+        let input = "> ```{r}\r\n> #| error: true\r\n> x <- 1\r\n> stop(\"expected\")\r\n> ```\r\n\r\nValue `r x`.\r\n\r\n```{r}\r\nprint(x)\r\n```\r\n";
+        let joined = inline_input(input);
+        assert_eq!(joined.mappings.len(), 3);
+        assert!(
+            joined
+                .content
+                .contains("try({\nx <- 1\r\nstop(\"expected\")\r\n}, silent = TRUE)\n")
+        );
+        for needle in ["x <- 1", "stop(\"expected\")", "print(x)"] {
+            let start = joined.content.find(needle).unwrap();
+            assert_eq!(
+                super::super::external_linters::map_concatenated_offset_to_original(
+                    start,
+                    &joined.mappings
+                ),
+                input.find(needle),
+            );
+        }
+        let body = &joined.mappings[0];
+        assert_eq!(
+            &joined.content[body.concatenated_range.clone()],
+            "x <- 1\r\nstop(\"expected\")\r\n"
+        );
     }
 
     #[test]

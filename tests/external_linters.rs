@@ -38,6 +38,82 @@ mod tests {
     }
 
     #[test]
+    fn r_error_chunks_do_not_make_later_chunks_unreachable() {
+        if which::which("jarl").is_err() {
+            eprintln!("Skipping R error semantics test: jarl is not installed");
+            return;
+        }
+        for flavor in [
+            panache::config::Flavor::Quarto,
+            panache::config::Flavor::RMarkdown,
+        ] {
+            for option in ["#| error: true", "#| error: false"] {
+                let input = format!(
+                    "```{{r}}\n{option}\nx <- 1\nstop(\"expected\")\n```\n\n```{{r}}\nprint(x)\n```\n"
+                );
+                let config = Config {
+                    flavor,
+                    extensions: panache::config::Extensions::for_flavor(flavor),
+                    linters: HashMap::from([("r".into(), "jarl".into())]),
+                    ..Config::default()
+                };
+                let tree = parse(&input, Some(config.clone()));
+                let diagnostics = linter::lint_with_external_sync(&tree, &input, &config);
+                assert_eq!(
+                    diagnostics.iter().any(|d| d.code == "unreachable_code"),
+                    option.ends_with("false"),
+                    "{flavor:?}, {option}: {diagnostics:#?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn r_error_chunks_preserve_shared_bindings() {
+        if which::which("arity").is_err() {
+            return;
+        }
+        let input = "```{r}\n#| label: expected-error\n#| error: true\nx <- 1\nstop(\"expected\")\n```\n\n```{r}\n#| label: after-error\nprint(x)\n```\n\nValue `r x`.\n";
+        let config = quarto_external_config("r", "arity");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn r_error_chunks_retain_nested_diagnostics_and_fixes() {
+        if which::which("jarl").is_err() {
+            return;
+        }
+        let input = "> ```{r}\r\n> #| error: true\r\n> any(is.na(x))\r\n> stop(\"expected\")\r\n> ```\r\n\r\n```{r}\r\nany(is.na(y))\r\n```\r\n";
+        let config = quarto_external_config("r", "jarl");
+        let tree = parse(input, Some(config.clone()));
+        let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+        assert!(
+            !diagnostics.iter().any(|d| d.code == "unreachable_code"),
+            "{diagnostics:#?}"
+        );
+        let any_na: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "any_is_na")
+            .collect();
+        assert_eq!(any_na.len(), 2, "{diagnostics:#?}");
+        for (diag, name) in any_na.iter().zip(["x", "y"]) {
+            let expression = format!("any(is.na({name}))");
+            assert_eq!(
+                usize::from(diag.location.range.start()),
+                input.find(&expression).unwrap()
+            );
+            let edit = &diag.fix.as_ref().unwrap().edits[0];
+            assert_eq!(
+                &input[usize::from(edit.range.start())..usize::from(edit.range.end())],
+                expression
+            );
+            assert_eq!(edit.replacement, format!("anyNA({name})"));
+        }
+    }
+
+    #[test]
     fn quarto_displayed_definitions_do_not_conflict_with_execution() {
         if which::which("arity").is_err() {
             return;

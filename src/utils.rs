@@ -171,15 +171,20 @@ fn extract_code_block(node: &SyntaxNode, input: &str) -> Option<CodeSnippet> {
     let language = block.language()?.trim_start_matches('.').to_string();
     let kind = match block.executable_cell() {
         Some(cell) => {
-            let disabled = cell.resolved_options().iter().any(|option| {
-                option.key() == "eval"
-                    && matches!(option.resolution(), CellOptionResolution::Resolved(value)
-                        if !value.is_quoted()
-                            && !matches!(value.yaml_tag(), Some("!expr" | "!r"))
-                            && value.cooked_value().is_some_and(|text| text.trim().eq_ignore_ascii_case("false")))
-            });
-            if disabled {
+            let options = cell.resolved_options();
+            let literal_bool = |key: &str, expected: &str| {
+                options.iter().any(|option| {
+                    option.key() == key
+                        && matches!(option.resolution(), CellOptionResolution::Resolved(value)
+                            if !value.is_quoted()
+                                && !matches!(value.yaml_tag(), Some("!expr" | "!r"))
+                                && value.cooked_value().is_some_and(|text| text.trim().eq_ignore_ascii_case(expected)))
+                })
+            };
+            if literal_bool("eval", "false") {
                 SnippetKind::DisplayBlock
+            } else if language == "r" && literal_bool("error", "true") {
+                SnippetKind::ErrorHandledBlock
             } else {
                 SnippetKind::Block
             }
