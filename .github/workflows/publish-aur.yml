@@ -19,6 +19,9 @@ on:
         default: "1"
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   publish-aur:
     name: Publish panache-bin to AUR
