@@ -1857,7 +1857,28 @@ fn math_badness_audit_matches_committed_report() {
     let expected = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
 
-    similar_asserts::assert_eq!(actual, expected);
+    // Keep oracle provenance in the report without making version-only updates fail.
+    similar_asserts::assert_eq!(report_behavior(&actual), report_behavior(&expected));
+}
+
+fn report_behavior(report: &str) -> (&str, &str) {
+    let (heading, rest) = report
+        .split_once("\nOracle: badness-formatter ")
+        .expect("report contains the oracle version");
+    let (_, behavior) = rest
+        .split_once('\n')
+        .expect("report contains audit results");
+    (heading, behavior)
+}
+
+#[test]
+fn report_comparison_ignores_only_oracle_version() {
+    let original = "Audit\nOracle: badness-formatter =0.10.2\nCases: 108\n";
+    let updated = "Audit\nOracle: badness-formatter =0.11.0\nCases: 108\n";
+    let changed = "Audit\nOracle: badness-formatter =0.11.0\nCases: 109\n";
+
+    assert_eq!(report_behavior(original), report_behavior(updated));
+    assert_ne!(report_behavior(original), report_behavior(changed));
 }
 
 #[test]
