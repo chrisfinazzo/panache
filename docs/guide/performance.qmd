@@ -20,6 +20,9 @@ language-server comparisons use separate Markdown and Quarto workloads to
 measure startup, responses to editor requests, performance after edits, and
 memory use.
 
+The [benchmark suite](benchmarks.qmd) also reports separate parsing and
+formatting times for individual documents.
+
 The timing charts use a logarithmic scale in milliseconds; lower is faster.
 Formatting and linting charts show mean times, with colors identifying documents
 or repositories. Language-server charts show medians, with colors identifying

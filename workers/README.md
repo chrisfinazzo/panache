@@ -4,6 +4,12 @@ This Worker serves Quarto's generated `.llms.md` file when an agent requests
 `text/markdown` at the corresponding page URL. The HTML site remains on GitHub
 Pages. Requests for assets and the playground pass through to GitHub Pages.
 
+The Worker also permanently redirects legacy documentation URLs to their current
+pages and directory `index.html` aliases to their canonical paths. Redirects
+preserve query strings and apply to GET and HEAD requests before Markdown
+negotiation. Deploy the Worker as well as the documentation build to publish
+changes to these redirects.
+
 Run the focused tests before deployment:
 
 ```sh

@@ -3,7 +3,7 @@ title: "Panache"
 title-meta: >-
   Panache: Language Server, Formatter, and Linter for Quarto and Other Markdown
   Flavors
-description-meta: >
+description-meta: >-
   Panache provides a language server, formatter, and linter for Quarto and other
   Markdown flavors, including MyST and R Markdown.
 title-prefix: ""
@@ -95,4 +95,4 @@ to do that.
 - [User Guide](guide/index.qmd): detailed docs for formatting, linting, CLI, and
   editor integration.
 - [Configuration](guide/configure.qmd): tune behavior with `panache.toml`.
-- [Playground](playground/index.html): try formatting directly in the browser.
+- [Playground](playground/): try formatting directly in the browser.

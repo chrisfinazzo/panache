@@ -1,3 +1,25 @@
+const pageRedirects = new Map([
+  ["/user-guide", "/guide/"],
+  ["/user-guide/", "/guide/"],
+  ["/user-guide/index.html", "/guide/"],
+  ["/user-guide/configuration", "/reference/configuration.html"],
+  ["/user-guide/configuration.html", "/reference/configuration.html"],
+  ["/user-guide/integrations", "/guide/integrations.html"],
+  ["/user-guide/integrations.html", "/guide/integrations.html"],
+  ["/user-guide/lsp", "/guide/lsp.html"],
+  ["/user-guide/lsp.html", "/guide/lsp.html"],
+  ["/user-guide/formatting", "/guide/formatting.html"],
+  ["/user-guide/formatting.html", "/guide/formatting.html"],
+  ["/guide/configuration", "/reference/configuration.html"],
+  ["/guide/configuration.html", "/reference/configuration.html"],
+  ["/index.html", "/"],
+  ["/guide/index.html", "/guide/"],
+  ["/reference/index.html", "/reference/"],
+  ["/development/index.html", "/development/"],
+  ["/playground", "/playground/"],
+  ["/playground/index.html", "/playground/"],
+]);
+
 function acceptsMarkdown(header) {
   return header.split(",").some((part) => {
     const [type, ...parameters] = part.trim().toLowerCase().split(";");
@@ -28,9 +50,20 @@ function varyOnAccept(response, markdown = false) {
 }
 
 export async function handleRequest(request, fetchOrigin = fetch) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return fetchOrigin(request);
+  }
+
   const url = new URL(request.url);
+  const redirect = pageRedirects.get(url.pathname);
+  if (redirect) {
+    url.protocol = "https:";
+    url.pathname = redirect;
+    return Response.redirect(url.href, 301);
+  }
+
   const path = markdownPath(url.pathname);
-  if (!path || (request.method !== "GET" && request.method !== "HEAD")) {
+  if (!path) {
     return fetchOrigin(request);
   }
 

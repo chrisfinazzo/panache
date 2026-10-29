@@ -5,6 +5,7 @@ project:
     port: 4200
   post-render:
     - scripts/fix-sitemap.sh
+    - scripts/fix-og-url.sh
     - scripts/fix-logo-alt.sh
     - scripts/fix-tool-aria.sh
 
@@ -15,7 +16,8 @@ website:
     Markdown flavors, including MyST and R Markdown.
 
   site-url: "https://panache.bz"
-  repo-url: "https://github.com/jolars/panache/docs"
+  repo-url: "https://github.com/jolars/panache"
+  repo-subdir: docs
   issue-url: "https://github.com/jolars/panache/issues"
 
   repo-actions: [edit, issue]
@@ -71,7 +73,7 @@ website:
           - text: Ask a question
             icon: "chat-right-text"
             href: "https://github.com/jolars/panache/discussions"
-      - href: playground/index.html
+      - href: playground/
         text: "Playground"
         icon: box-arrow-up-right
         target: _blank
