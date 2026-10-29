@@ -393,6 +393,43 @@ mod tests {
     }
 
     #[test]
+    fn jarl_assignment_spans_survive_chunk_padding_and_container_prefixes() {
+        if which::which("jarl").is_err() {
+            eprintln!("Skipping Jarl span test: jarl is not installed");
+            return;
+        }
+        for (input, line, column) in [
+            ("```{r sample}\nmean(x <- 1)\n```\n", 2, 6),
+            (
+                "- item\n\n    ```{r sample}\n    mean(x <- 1)\n    ```\n",
+                4,
+                10,
+            ),
+            ("> ```{r sample}\r\n> mean(x <- 1)\r\n> ```\r\n", 2, 8),
+        ] {
+            let flavor = panache::config::Flavor::RMarkdown;
+            let config = Config {
+                flavor,
+                extensions: panache::config::Extensions::for_flavor(flavor),
+                linters: HashMap::from([("r".into(), "jarl".into())]),
+                ..Config::default()
+            };
+            let tree = parse(input, Some(config.clone()));
+            let diagnostics = linter::lint_with_external_sync(&tree, input, &config);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "implicit_assignment")
+                .expect("implicit assignment diagnostic");
+            assert_eq!(
+                &input[diagnostic.location.range], "x <- 1",
+                "{input:?}: {diagnostics:#?}"
+            );
+            assert_eq!(diagnostic.location.line, line);
+            assert_eq!(diagnostic.location.column, column);
+        }
+    }
+
+    #[test]
     fn test_jarl_linter_integration() {
         // Skip if jarl not available
         if which::which("jarl").is_err() {

@@ -314,6 +314,59 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   ```
   ````
 
+### Linter findings (CSwR triage, 2026-10)
+
+- [x] Map Jarl diagnostics from their byte ranges rather than their reported
+  columns. Under `--flavor rmarkdown` with `[linters] r = "jarl"`, the
+  following reduced CSwR example highlights `x <- 1` one column too far to
+  the right. Jarl 0.5.0 reports the correct byte range but an inconsistent
+  column when its input starts with one blank line. R's assignment AST
+  confirms the intended span. Regression coverage includes the captured
+  output, a list item, and a blockquote with CRLF line endings.
+
+  ````rmarkdown
+  ```{r sample}
+  mean(x <- 1)
+  ```
+  ````
+
+- [ ] Reduce `swallowed-list-marker` false positives on numbers that end a
+  wrapped sentence. Under `--flavor rmarkdown`, the following warns on
+  `10.`. Pandoc's `markdown` reader and Panache both produce one ordinary
+  paragraph; this is prose, not an intended list. Seen at
+  `CSwR/28-StochasticOptimization.Rmd:2103`. Find a conservative heuristic
+  that preserves useful warnings for single-item lists and list runs.
+
+  ```markdown
+  The runtime increases by roughly a factor
+  10. The other runtimes increase too.
+  ```
+
+- [ ] Recognize xaringan slide syntax when R Markdown front matter selects
+  `xaringan::moon_reader`, or provide a way to select that output dialect.
+  Under `--flavor rmarkdown`, the following reports `yaml-parse-error` on
+  the bullet. The deck's remark.js renderer treats `---` as a slide
+  separator and renders the heading and bullet normally. Plain
+  `pandoc -f markdown -t native` rejects the same input, so changing generic
+  Pandoc metadata detection would be incorrect. Three warnings in
+  `CSwR/solutions/A_solutions_11-13.Rmd` share this cause; the dialect
+  mismatch also hides eight of its 18 chunks inside YAML or table nodes.
+  Verified with remark.js directly because xaringan was unavailable.
+
+  ```rmarkdown
+  ---
+  output: xaringan::moon_reader
+  ---
+
+  ---
+  ## Summary
+
+  * A point.
+
+  ---
+  ## Next
+  ```
+
 ### Configuration
 
 - [ ] Severity levels (error, warning, info)

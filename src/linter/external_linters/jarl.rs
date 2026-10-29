@@ -2,8 +2,8 @@ use rowan::TextRange;
 use serde::Deserialize;
 
 use super::{
-    ExternalLinterParser, LinterError, ParseContext, line_col_to_offset,
-    map_concatenated_edit_to_original, map_diagnostic_range,
+    ExternalLinterParser, LinterError, ParseContext, map_concatenated_edit_to_original,
+    map_diagnostic_range,
 };
 use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, DiagnosticOrigin};
 
@@ -20,7 +20,6 @@ struct JarlDiagnostic {
     #[allow(dead_code)]
     filename: String,
     range: [usize; 2],
-    location: JarlLocation,
     #[serde(default)]
     fix: Option<serde_json::Value>,
 }
@@ -31,12 +30,6 @@ struct JarlMessage {
     body: String,
     #[allow(dead_code)]
     suggestion: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct JarlLocation {
-    row: usize,
-    column: usize,
 }
 
 #[derive(Deserialize)]
@@ -137,14 +130,9 @@ impl ExternalLinterParser for JarlParser {
 
         let mut diagnostics = Vec::new();
         for jarl_diag in output.diagnostics {
-            let line = jarl_diag.location.row;
-            let column = jarl_diag.location.column + 1;
-            let range_len = jarl_diag.range[1].saturating_sub(jarl_diag.range[0]);
-            let Some(start_offset) = line_col_to_offset(ctx.linted_input, line, column) else {
-                continue;
-            };
-            let Some(location) =
-                map_diagnostic_range(ctx, start_offset, start_offset.saturating_add(range_len))
+            // Jarl 0.5 can shift columns after an initial blank line while
+            // its byte ranges still identify the correct source span.
+            let Some(location) = map_diagnostic_range(ctx, jarl_diag.range[0], jarl_diag.range[1])
             else {
                 continue;
             };
@@ -257,6 +245,25 @@ mod tests {
         assert_eq!(diagnostics[0].notes.len(), 1);
         assert_eq!(diagnostics[0].notes[0].kind, DiagnosticNoteKind::Help);
         assert_eq!(diagnostics[0].notes[0].message, "Use anyNA(x) instead");
+    }
+
+    #[test]
+    fn uses_byte_range_when_jarl_reports_an_inconsistent_column() {
+        let input = include_str!("../../../tests/fixtures/jarl/leading-blank.R");
+        let output = include_str!("../../../tests/fixtures/jarl/jarl-0.5.0-leading-blank.json");
+        let diagnostics = JarlParser::parse(&ParseContext {
+            output,
+            linted_input: input,
+            original_input: input,
+            mappings: None,
+        })
+        .unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "implicit_assignment");
+        assert_eq!(&input[diagnostic.location.range], "x <- 1");
+        assert_eq!(diagnostic.location.line, 2);
+        assert_eq!(diagnostic.location.column, 6);
     }
 
     #[test]

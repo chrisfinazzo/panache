@@ -1,0 +1,27 @@
+{
+  "diagnostics": [
+    {
+      "message": {
+        "name": "implicit_assignment",
+        "body": "Avoid implicit assignments in function calls.",
+        "suggestion": null
+      },
+      "filename": "leading-blank.R",
+      "range": [
+        6,
+        12
+      ],
+      "location": {
+        "row": 2,
+        "column": 6
+      },
+      "fix": {
+        "content": "",
+        "start": 0,
+        "end": 0,
+        "to_skip": true
+      }
+    }
+  ],
+  "errors": []
+}

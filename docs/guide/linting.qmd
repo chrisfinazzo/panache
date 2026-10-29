@@ -307,6 +307,9 @@ Timeout
 
 Line accuracy
 :   Diagnostics report exact line and column positions in the original document
+    after mapping the linter's ranges through code chunk and container prefixes.
+    For Jarl, Panache uses byte ranges, which remain accurate when Jarl 0.5
+    reports an inconsistent column after an initial blank line.
 
 Auto-fixes
 :   Supported for external linters that return fix edits with mappable ranges
