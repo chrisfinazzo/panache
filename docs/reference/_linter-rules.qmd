@@ -1721,6 +1721,13 @@ and lists starting at `1` to interrupt a paragraph, but a list starting at `2`
 still needs separation. The rule reports the first line in a consecutive run of
 affected items.
 
+A paragraph with just one possible numbered marker, such as `10.`, stays quiet
+when the preceding line ends in a word or number and the text after the marker
+starts with a capital letter. This can be a number at the end of a wrapped
+sentence, as in `increases by a factor` followed by `10. The other runtimes`.
+Single items after a colon or other punctuation still warn, as do paragraphs
+with multiple marker lines. Bullets and markers ending in `)` also still warn.
+
 Default
 :   On
 
@@ -1749,6 +1756,26 @@ warning: [swallowed-list-marker] '-' looks like a list marker, but the preceding
   | ^
   = note: 2 consecutive lines here start with a list marker; all of them are reflowed into the paragraph above
   = help: Pandoc-markdown never lets a list interrupt a paragraph. Insert a blank line above this line to start a real list, or escape the marker ('\-') if it is meant as prose
+```
+
+The wrapped sentence stays quiet. The numbered item after the colon still needs
+a blank line.
+
+```markdown
+The runtime increases by roughly a factor
+10. The other runtimes increase too.
+
+Choose one option:
+10. The only option.
+```
+
+```text
+warning: [swallowed-list-marker] '10.' looks like a list marker, but the preceding line pulls it into a paragraph
+ --> example.qmd:5:1
+  |
+5 | 10. The only option.
+  | ^^^
+  = help: Pandoc-markdown never lets a list interrupt a paragraph. Insert a blank line above this line to start a real list, or escape the marker ('10\.') if it is meant as prose
 ```
 
 ### `unspaced-list-marker` {#unspaced-list-marker}

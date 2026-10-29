@@ -31,7 +31,7 @@ use rowan::{TextRange, TextSize};
 
 use crate::linter::diagnostics::{Diagnostic, DiagnosticNoteKind, Location};
 use crate::linter::rules::{DiagnosticCode, LintContext, Requirement, Rule, RuleMeta};
-use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+use crate::syntax::{InlineNode, SyntaxElement, SyntaxKind, SyntaxNode};
 
 pub const SWALLOWED_LIST_MARKER: &str = "swallowed-list-marker";
 
@@ -55,6 +55,7 @@ struct Candidate {
     /// Tight span covering just the marker (`-`, `1.`), not the space after it.
     span: TextRange,
     marker: String,
+    continues_sentence: bool,
 }
 
 impl Rule for SwallowedListMarkerRule {
@@ -66,10 +67,17 @@ impl Rule for SwallowedListMarkerRule {
     fn examples(&self) -> &'static [crate::linter::docs::Example] {
         use crate::linter::docs::Example;
         const {
-            &[Example::new(
-                "Choose one option:\n- First choice\n- Second choice\n",
-                &["swallowed-list-marker"],
-            )]
+            &[
+                Example::new(
+                    "Choose one option:\n- First choice\n- Second choice\n",
+                    &["swallowed-list-marker"],
+                ),
+                Example::new(
+                    "The runtime increases by roughly a factor\n10. The other runtimes increase too.\n\nChoose one option:\n10. The only option.\n",
+                    &["swallowed-list-marker"],
+                )
+                .caption("The wrapped sentence stays quiet. The numbered item after the colon still needs a blank line."),
+            ]
         }
     }
 
@@ -107,6 +115,12 @@ impl Rule for SwallowedListMarkerRule {
         {
             candidates.clear();
             collect_candidates(node, &mut candidates);
+
+            // A lone number can finish the sentence above it. Multiple marker
+            // lines remain evidence of a list, including items with wrapped text.
+            if candidates.len() == 1 && candidates[0].continues_sentence {
+                continue;
+            }
 
             // Collapse consecutive marker lines into one diagnostic anchored at
             // the first. The remedy is a single blank line above the run;
@@ -206,11 +220,14 @@ fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
     // Whether the node already has content above this line. A marker on the
     // node's own first line is a genuine block start, not a swallowed one.
     let mut seen_content = false;
+    let mut line_ending = None;
+    let mut previous_line_ending = None;
 
     for elem in node.children_with_tokens() {
         let Some(token) = elem.as_token() else {
             at_line_start = false;
             seen_content = true;
+            line_ending = Some(elem.clone());
             continue;
         };
 
@@ -218,6 +235,7 @@ fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
             SyntaxKind::NEWLINE => {
                 line_idx += 1;
                 at_line_start = true;
+                previous_line_ending = line_ending.take();
             }
             SyntaxKind::LINE_PREFIX | SyntaxKind::WHITESPACE => {}
             SyntaxKind::TEXT => {
@@ -235,19 +253,66 @@ fn collect_candidates(node: &SyntaxNode, out: &mut Vec<Candidate>) {
                             base + TextSize::from(mend as u32),
                         ),
                         marker: text[mstart..mend].to_owned(),
+                        continues_sentence: text[mstart..mend].ends_with('.')
+                            && previous_line_ending
+                                .as_ref()
+                                .and_then(|ending| {
+                                    prose_edge(InlineNode::cast(ending.clone()), true)
+                                })
+                                .is_some_and(char::is_alphanumeric)
+                            && starts_sentence_after(&elem, &text[mend..]),
                     });
                 }
                 at_line_start = false;
                 if !text.trim().is_empty() {
                     seen_content = true;
+                    line_ending = Some(elem.clone());
                 }
             }
             _ => {
                 at_line_start = false;
                 seen_content = true;
+                line_ending = Some(elem.clone());
             }
         }
     }
+}
+
+fn first_sentence_character(text: &str) -> Option<char> {
+    text.trim_start_matches(|ch: char| {
+        ch.is_whitespace() || matches!(ch, '"' | '\'' | '“' | '‘' | '(')
+    })
+    .chars()
+    .next()
+}
+
+fn prose_edge(inline: InlineNode, last: bool) -> Option<char> {
+    match inline {
+        InlineNode::Text(text) if last => text.raw().trim_end().chars().next_back(),
+        InlineNode::Text(text) => first_sentence_character(text.raw()),
+        InlineNode::Emphasis(container) | InlineNode::Strong(container) => {
+            let mut children = container.inline_nodes();
+            let child = if last {
+                children.next_back()
+            } else {
+                children.next()
+            };
+            child.and_then(|child| prose_edge(child, last))
+        }
+        _ => None,
+    }
+}
+
+fn starts_sentence_after(elem: &SyntaxElement, tail: &str) -> bool {
+    if let Some(ch) = first_sentence_character(tail) {
+        return ch.is_uppercase();
+    }
+    std::iter::successors(elem.next_sibling_or_token(), |next| {
+        next.next_sibling_or_token()
+    })
+    .find(|next| next.kind() != SyntaxKind::WHITESPACE)
+    .and_then(|next| prose_edge(InlineNode::cast(next), false))
+    .is_some_and(char::is_uppercase)
 }
 
 /// Whether the marker is followed by list-item content. `tail` is the rest of
@@ -456,6 +521,79 @@ mod tests {
     }
 
     // --- negative ---------------------------------------------------------
+
+    #[test]
+    fn ignores_wrapped_number_at_sentence_end() {
+        for input in [
+            "The runtime increases by roughly a factor\n10. The other runtimes increase too.\n",
+            "The runtime increases by roughly a factor\r\n10. The other runtimes increase too.\r\n",
+            "The runtime increases to exactly\n1. The other runtimes increase too.\n",
+            "The runtime increases by roughly a factor\n10. \"The other runtimes increase too.\"\n",
+            "Le temps augmente d'un facteur\n10. Également, le coût augmente.\n",
+        ] {
+            assert!(parse_and_lint(input).is_empty(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn ignores_wrapped_number_at_formatted_sentence_boundary() {
+        for input in [
+            "The runtime increases by a *factor*\n10. **The** other runtimes increase too.\n",
+            "The runtime increases by a **factor** \n10. *The* other runtimes increase too.\n",
+        ] {
+            assert!(parse_and_lint(input).is_empty(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn ignores_wrapped_numbers_in_containers() {
+        for input in [
+            "> The runtime increases by roughly a factor\n> 10. The other runtimes increase too.\n",
+            "[^note]: The runtime increases by roughly a factor\n    10. The other runtimes increase too.\n",
+        ] {
+            assert!(parse_and_lint(input).is_empty(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn keeps_single_item_warnings_without_sentence_continuation() {
+        for input in [
+            "Choose one option:\n10. The only option.\n",
+            "Choose **one option:**\n10. The only option.\n",
+            "Choose one option.\n10. The only option.\n",
+            "Choose one option\n10) The only option.\n",
+            "Choose one option\n10. the only option\n",
+            "Choose one option\n10. `The only option.`\n",
+            "Choose `one option`\n10. The only option.\n",
+            "Choose $x$\n10. The only option.\n",
+        ] {
+            let diagnostics = parse_and_lint(input);
+            assert_eq!(diagnostics.len(), 1, "{input:?}: {diagnostics:#?}");
+            assert_eq!(diagnostics[0].location.line, 2);
+        }
+    }
+
+    #[test]
+    fn intentional_hard_breaks_stay_quiet() {
+        for input in [
+            "Choose one option  \n10. The only option.\n",
+            "Choose one option\\\n10. The only option.\n",
+        ] {
+            assert!(parse_and_lint(input).is_empty(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn keeps_numbered_runs_with_sentence_shaped_items() {
+        for input in [
+            "Choose an option\n10. The first option.\n11. The second option.\n",
+            "Choose an option\n10. The first option\ncontinues here\n11. The second option.\n",
+        ] {
+            let diagnostics = parse_and_lint(input);
+            assert!(!diagnostics.is_empty(), "{input:?}");
+            assert_eq!(diagnostics[0].location.line, 2);
+        }
+    }
 
     #[test]
     fn real_list_after_blank_line_is_clean() {

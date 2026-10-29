@@ -1188,6 +1188,27 @@ fn test_swallowed_list_marker() {
 }
 
 #[test]
+fn swallowed_list_marker_distinguishes_wrapped_numbers_from_lists() {
+    let input = include_str!("linting/swallowed_list_marker_wrapped_number.Rmd");
+    for flavor in ["rmarkdown", "pandoc", "quarto", "commonmark", "gfm"] {
+        let diagnostics = lint_file_with_config(
+            "swallowed_list_marker_wrapped_number.Rmd",
+            &format!("flavor = \"{flavor}\"\n"),
+        );
+        let issues: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "swallowed-list-marker")
+            .collect();
+        let lines: Vec<_> = issues.iter().map(|issue| issue.location.line).collect();
+        assert_eq!(lines, [5, 8], "{flavor}: {issues:#?}");
+        for issue in issues {
+            assert_eq!(&input[issue.location.range], "10.");
+            assert!(issue.fix.is_none());
+        }
+    }
+}
+
+#[test]
 fn test_swallowed_list_marker_commonmark() {
     // Under CommonMark bullets and `1.` interrupt the paragraph and become
     // real lists, so only the run starting at `2.` is still swallowed.

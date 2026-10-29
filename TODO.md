@@ -330,12 +330,14 @@ analogue; do not re-audit them: call hierarchy, type hierarchy,
   ```
   ````
 
-- [ ] Reduce `swallowed-list-marker` false positives on numbers that end a
-  wrapped sentence. Under `--flavor rmarkdown`, the following warns on
-  `10.`. Pandoc's `markdown` reader and Panache both produce one ordinary
-  paragraph; this is prose, not an intended list. Seen at
-  `CSwR/28-StochasticOptimization.Rmd:2103`. Find a conservative heuristic
-  that preserves useful warnings for single-item lists and list runs.
+- [x] Reduce `swallowed-list-marker` false positives on numbers that end a
+  wrapped sentence. Under `--flavor rmarkdown`, the following stays quiet
+  because `10.` follows unfinished prose and precedes a capitalized
+  sentence. Pandoc's `markdown` reader and Panache both produce one ordinary
+  paragraph. Seen at `CSwR/28-StochasticOptimization.Rmd:2103`. The
+  exception requires a paragraph with just one candidate marker; single
+  items after punctuation, bullets, `)` markers, and list runs retain their
+  warnings.
 
   ```markdown
   The runtime increases by roughly a factor
