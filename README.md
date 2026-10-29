@@ -11,6 +11,8 @@ Code](https://vsmarketplacebadges.dev/version-short/jolars.panache.svg?logo=vsix
 version](https://badge.fury.io/py/panache-cli.svg?icon=si%3Apython)](https://badge.fury.io/py/panache-cli)
 [![npm
 version](https://badge.fury.io/js/@panache-cli%2Fpanache.svg?icon=si%3Anpm)](https://badge.fury.io/js/@panache-cli%2Fpanache)
+[![Software
+DOI](https://img.shields.io/badge/Software_DOI-10.5281%2Fzenodo.18608442-blue)](https://doi.org/10.5281/zenodo.18608442)
 
 Panache is a language server, formatter, and linter for Quarto and other
 Markdown flavors, built in Rust with a lossless CST parser and support for
@@ -310,3 +312,12 @@ The development of Panache has simplified considerably thanks to the extensive
 documentation, well-structured code, and testing infrastructure provided by
 Pandoc. We also owe significant debt to the rust-analyzer project, on which
 Panache is heavily inspired.
+
+## Citation
+
+If you use Panache in your research, please cite the release you used. Select
+that release in the [Zenodo archive](https://doi.org/10.5281/zenodo.18608442)
+and export its citation. To cite Panache generally, use the concept DOI
+`10.5281/zenodo.18608442`.
+
+Machine-readable metadata is available in [CITATION.cff](CITATION.cff).
