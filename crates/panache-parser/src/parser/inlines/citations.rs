@@ -298,9 +298,7 @@ pub fn is_crossref_key(key: &str, custom_prefixes: &[String]) -> bool {
 
 /// Whether `key`'s prefix (the segment before the first `-`) appears in
 /// `custom_prefixes`. Unlike [`is_quarto_crossref_key`], this matches *only*
-/// the configured extension prefixes, so callers can tell an extension-injected
-/// cross-reference (whose target panache can't resolve) apart from a built-in
-/// one (whose target it can and should validate).
+/// the configured prefixes. Matching is case-insensitive.
 pub fn has_custom_crossref_prefix(key: &str, custom_prefixes: &[String]) -> bool {
     if custom_prefixes.is_empty() {
         return false;

@@ -531,10 +531,11 @@ and still works as an alias. The former `[lint] quarto-version` key moved to
 
 Quarto recognizes a fixed set of cross-reference prefixes (`@fig-`, `@tbl-`,
 `@eq-`, `@sec-`, `@thm-`, and so on), and Panache treats keys with those
-prefixes as cross-references rather than citations. Some Quarto extensions
-inject *additional* prefixes that Panache cannot discover on its own---for
-example the [pseudocode](https://github.com/leovan/quarto-pseudocode) extension
-makes `@algo-` a cross-reference. Without help, Panache parses `@algo-cd` as a
+prefixes as cross-references rather than citations. Custom float types and some
+Quarto extensions introduce *additional* prefixes that Panache cannot discover
+on its own---for example the
+[pseudocode](https://github.com/leovan/quarto-pseudocode) extension makes
+`@algo-` a cross-reference. Without help, Panache parses `@algo-cd` as a
 citation and the linter reports it as a [missing bibliography
 key](linter-rules.qmd#missing-bibliography-key).
 
@@ -548,10 +549,12 @@ crossref-prefixes = ["algo"]
 
 :   Extra cross-reference key prefixes (the segment before the first `-`).
     Matching is case-insensitive. Keys with these prefixes parse as
-    cross-references, so the linter no longer flags them as citations. Because
-    their targets are defined by an extension mechanism Panache does not model,
-    such cross-references are also exempt from the
-    [`undefined-references`](linter-rules.qmd#undefined-references) check.
+    cross-references, so the linter no longer flags them as citations. The
+    [`undefined-references`](linter-rules.qmd#undefined-references) rule
+    validates their targets just as it does for built-in prefixes, using IDs and
+    executable chunk labels in the document or project. Panache does not execute
+    extensions to discover generated targets, so references to those targets may
+    be reported as undefined.
 
 ### CLI Cache
 

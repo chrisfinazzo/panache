@@ -705,9 +705,14 @@ warning: [duplicate-reference-labels] Duplicate reference label '[guide]' (first
 
 ### `undefined-references` {#undefined-references}
 
-Warns about reference links and footnotes whose labels have no definition. Add
-the missing definition or correct the label. This includes shortcut links such
-as `[guide]` and collapsed links such as `[guide][]`.
+Warns about reference links, cross-references, and footnotes whose labels have
+no definition. Add the missing definition or correct the label. This includes
+shortcut links such as `[guide]` and collapsed links such as `[guide][]`.
+
+Cross-references with configured `crossref-prefixes` receive the same target
+validation as built-in prefixes. Targets must have a matching ID or executable
+chunk label in the document or project. Panache does not execute code or
+extensions to discover generated targets.
 
 With citations enabled, a narrative citation's suffix, such as `[p. 4]` in
 `@author [p. 4]`, belongs to the citation and needs no reference definition. The
@@ -731,7 +736,7 @@ Diagnostic codes
 
 #### `undefined-reference-label` {#undefined-reference-label}
 
-A reference-style link has no matching definition.
+A reference-style link or cross-reference has no matching definition.
 
 #### `undefined-footnote-id` {#undefined-footnote-id}
 
@@ -761,6 +766,24 @@ warning: [undefined-footnote-id] Footnote '[^missing]' not found
   |
 1 | Text[^missing].
   |     ^^^^^^^^^^
+```
+
+With this configuration:
+
+```toml
+crossref-prefixes = ["qdr"]
+```
+
+```markdown
+See @qdr-missing.
+```
+
+```text
+warning: [undefined-reference-label] Cross-reference label '@qdr-missing' not found
+ --> example.qmd:1:6
+  |
+1 | See @qdr-missing.
+  |      ^^^^^^^^^^^
 ```
 
 ### `undefined-anchor` {#undefined-anchor}

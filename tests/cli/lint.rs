@@ -1428,6 +1428,48 @@ fn test_lint_resolves_anchors_between_excluded_quarto_includes() {
 }
 
 #[test]
+fn test_lint_validates_custom_crossrefs_across_quarto_project() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path();
+    fs::write(root.join("_quarto.yml"), "project:\n  type: book\n").unwrap();
+    fs::write(
+        root.join("panache.toml"),
+        "crossref-prefixes = [\"qdr\"]\n\n[lint]\nselect = [\"undefined-references\", \"missing-bibliography-key\"]\n",
+    )
+    .unwrap();
+    fs::write(root.join("body.qmd"), "See @qdr-example.\n").unwrap();
+
+    for target in [
+        "::: {#qdr-example}\nContent\n:::\n",
+        "```{r}\n#| label: qdr-example\n1\n```\n",
+    ] {
+        fs::write(root.join("defs.qmd"), target).unwrap();
+        cargo_bin_cmd!("panache")
+            .current_dir(root)
+            .args(["lint", "--no-cache", "body.qmd"])
+            .assert()
+            .success();
+
+        fs::write(
+            root.join("defs.qmd"),
+            target.replace("qdr-example", "qdr-other"),
+        )
+        .unwrap();
+        cargo_bin_cmd!("panache")
+            .current_dir(root)
+            .args(["lint", "--no-cache", "body.qmd"])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains("undefined-reference-label"))
+            .stdout(predicate::str::contains(
+                "Cross-reference label '@qdr-example'",
+            ))
+            .stdout(predicate::str::contains("body.qmd:1:"))
+            .stdout(predicate::str::contains("missing-bibliography-key").not());
+    }
+}
+
+#[test]
 fn test_lint_includes_duplicate_reference_definitions() {
     let temp_dir = TempDir::new().unwrap();
     let parent_path = temp_dir.path().join("parent.qmd");
