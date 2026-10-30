@@ -260,6 +260,9 @@ pub enum ConstructKind {
     /// IR's `ConstructPlan`. The dispatcher's legacy `@` and `-@`
     /// branches are gated to CommonMark dialect only.
     BareCitation,
+    /// A delimiter-adjacent citation demoted after emphasis resolution. Its
+    /// suffix must be emitted as ordinary inlines rather than citation content.
+    SuppressedCitation,
     /// Pandoc bracketed span `[content]{attrs}`. Recognised in
     /// `build_ir` under `Dialect::Pandoc` and consumed by the emission
     /// walk via the IR's `ConstructPlan`. The dispatcher's legacy
@@ -350,7 +353,7 @@ pub enum LinkKind {
 pub fn build_ir(text: &str, start: usize, end: usize, config: &ParserOptions) -> Vec<IrEvent> {
     let mut events = Vec::new();
     let hugo = build_hugo_index(text, start, end, config);
-    build_ir_into(text, start, end, config, &mut events, &hugo);
+    build_ir_into(text, start, end, config, &mut events, &hugo, true);
     events
 }
 
@@ -370,6 +373,7 @@ fn build_hugo_index(
 /// Like [`build_ir`] but writes into a caller-provided `Vec<IrEvent>`,
 /// clearing it first. Used by [`build_full_plans`] to amortise the
 /// per-call allocation through a thread-local scratch pool.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_ir_into(
     text: &str,
     start: usize,
@@ -377,6 +381,7 @@ pub(super) fn build_ir_into(
     config: &ParserOptions,
     events: &mut Vec<IrEvent>,
     hugo: &super::hugo::HugoIndex,
+    include_citation_suffixes: bool,
 ) {
     events.clear();
     let bytes = text.as_bytes();
@@ -606,16 +611,26 @@ pub(super) fn build_ir_into(
         if !is_commonmark
             && (b == b'@' || (b == b'-' && pos + 1 < end && bytes[pos + 1] == b'@'))
             && (exts.citations || exts.quarto_crossrefs)
-            && let Some((len, _, _)) = try_parse_bare_citation(text, pos)
+            && let Some((len, key, _)) = try_parse_bare_citation(text, pos)
             && pos + len <= end
         {
+            let citation_end = if include_citation_suffixes
+                && exts.citations
+                && !(exts.quarto_crossrefs
+                    && super::citations::is_crossref_key(key, &config.crossref_prefixes))
+            {
+                super::citations::narrative_suffix_end(text, pos + len, end, config)
+                    .unwrap_or(pos + len)
+            } else {
+                pos + len
+            };
             flush_text!();
             events.push(IrEvent::Construct {
                 start: pos,
-                end: pos + len,
+                end: citation_end,
                 kind: ConstructKind::BareCitation,
             });
-            pos += len;
+            pos = citation_end;
             text_run_start = pos;
             continue;
         }
@@ -2172,6 +2187,8 @@ pub enum ConstructDispo {
     /// `emit_crossref` when `is_quarto_crossref_key` matches and
     /// `extensions.quarto_crossrefs` is enabled).
     BareCitation { end: usize },
+    /// A demoted `@key` followed by a bracket that needs ordinary inline parsing.
+    SuppressedCitation { end: usize },
     /// `[content]{attrs}` — emit via `emit_bracketed_span` after
     /// slicing the inner content and attribute string.
     BracketedSpan { end: usize },
@@ -2226,6 +2243,9 @@ pub fn build_construct_plan(events: &[IrEvent]) -> ConstructPlan {
                 }
                 ConstructKind::BareCitation => {
                     by_pos.insert(*start, ConstructDispo::BareCitation { end: *end });
+                }
+                ConstructKind::SuppressedCitation => {
+                    by_pos.insert(*start, ConstructDispo::SuppressedCitation { end: *end });
                 }
                 ConstructKind::BracketedSpan => {
                     by_pos.insert(*start, ConstructDispo::BracketedSpan { end: *end });
@@ -2299,7 +2319,17 @@ fn demote_bare_citation_after_emphasis_closer(events: &mut [IrEvent], text: &str
             && bytes.get(start) == Some(&b'@')
             && closer_ends.contains(&start)
         {
-            *ev = IrEvent::Text { start, end };
+            *ev = if try_parse_bare_citation(text, start)
+                .is_some_and(|(len, _, _)| start + len < end)
+            {
+                IrEvent::Construct {
+                    start,
+                    end,
+                    kind: ConstructKind::SuppressedCitation,
+                }
+            } else {
+                IrEvent::Text { start, end }
+            };
         }
     }
 }
@@ -2390,6 +2420,27 @@ pub fn build_full_plans(
     end: usize,
     config: &ParserOptions,
 ) -> InlinePlans {
+    build_full_plans_impl(text, start, end, config, true)
+}
+
+/// Boundary lookahead must not recursively plan every later narrative suffix.
+/// Bare citations still protect their keys; the bounded walk handles brackets.
+pub(super) fn build_bracket_content_plans(
+    text: &str,
+    start: usize,
+    end: usize,
+    config: &ParserOptions,
+) -> InlinePlans {
+    build_full_plans_impl(text, start, end, config, false)
+}
+
+fn build_full_plans_impl(
+    text: &str,
+    start: usize,
+    end: usize,
+    config: &ParserOptions,
+    include_citation_suffixes: bool,
+) -> InlinePlans {
     let mut scratch = ScratchEvents::checkout();
     let bundle = scratch.inner.as_mut().unwrap();
     bundle.events.clear();
@@ -2397,7 +2448,15 @@ pub fn build_full_plans(
     bundle.excluded.clear();
 
     let hugo = build_hugo_index(text, start, end, config);
-    build_ir_into(text, start, end, config, &mut bundle.events, &hugo);
+    build_ir_into(
+        text,
+        start,
+        end,
+        config,
+        &mut bundle.events,
+        &hugo,
+        include_citation_suffixes,
+    );
     process_brackets(
         &mut bundle.events,
         text,

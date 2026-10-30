@@ -114,6 +114,7 @@ pub fn parse_inline_text_recursive(
         false,
         suppress_footnote_refs,
         &mask,
+        false,
     );
 
     log::trace!("Recursive inline parsing complete");
@@ -166,6 +167,7 @@ pub fn parse_inline_text(
         suppress_inner_links,
         suppress_footnote_refs,
         &mask,
+        false,
     );
 }
 
@@ -340,6 +342,51 @@ fn advance_char_boundary(text: &str, pos: usize, end: usize) -> usize {
     (pos + ch_len).min(end)
 }
 
+/// Find a closing bracket through the same inline walk used for emission.
+/// A bracket inside a complete inline construct cannot close the caller's range.
+pub(super) fn inline_bracket_end(
+    text: &str,
+    start: usize,
+    end: usize,
+    config: &ParserOptions,
+) -> Option<usize> {
+    let text = &text[..end];
+    struct Discard;
+    impl InlineSink for Discard {
+        fn token(&mut self, _: rowan::SyntaxKind, _: &str) {}
+        fn start_node(&mut self, _: rowan::SyntaxKind) {}
+        fn finish_node(&mut self) {}
+    }
+
+    let mut mask = structural_byte_mask(config);
+    mask[b'[' as usize] = true;
+    mask[b']' as usize] = true;
+    let first_close = start + text[start..end].find(']')?;
+    if first_close == start
+        || try_emit_plain_text_fast_path_with_mask(&mut Discard, &text[start..first_close], &mask)
+    {
+        return Some(first_close);
+    }
+    let plans = super::inline_ir::build_bracket_content_plans(text, start, end, config);
+    let pos = parse_inline_range_impl(
+        text,
+        start,
+        end,
+        config,
+        &mut Discard,
+        false,
+        &plans.emphasis,
+        &plans.brackets,
+        &plans.constructs,
+        &plans.hugo,
+        false,
+        false,
+        &mask,
+        true,
+    );
+    (pos < end && text.as_bytes()[pos] == b']').then_some(pos)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_inline_range_impl(
     text: &str,
@@ -355,7 +402,8 @@ fn parse_inline_range_impl(
     suppress_inner_links: bool,
     suppress_footnote_refs: bool,
     mask: &[bool; 256],
-) {
+    stop_at_bracket: bool,
+) -> usize {
     log::trace!(
         "parse_inline_range: start={}, end={}, text={:?}",
         start,
@@ -365,6 +413,7 @@ fn parse_inline_range_impl(
     let mut pos = start;
     let mut text_start = start;
     let bytes = text.as_bytes();
+    let mut bracket_depth = 0;
 
     while pos < end {
         if !mask[bytes[pos] as usize] {
@@ -377,8 +426,28 @@ fn parse_inline_range_impl(
                 break;
             }
         }
+        if stop_at_bracket && bytes[pos] == b']' && bracket_depth == 0 {
+            break;
+        }
         if let Some(dispo) = construct_plan.lookup(pos) {
             match *dispo {
+                ConstructDispo::SuppressedCitation { end: dispo_end } => {
+                    if dispo_end <= end
+                        && let Some((len, _, _)) = try_parse_bare_citation(text, pos)
+                    {
+                        builder.token(SyntaxKind::TEXT.into(), &text[text_start..pos + len]);
+                        parse_inline_text(
+                            builder,
+                            &text[pos + len..dispo_end],
+                            config,
+                            suppress_inner_links,
+                            suppress_footnote_refs,
+                        );
+                        pos = dispo_end;
+                        text_start = pos;
+                        continue;
+                    }
+                }
                 ConstructDispo::InlineFootnote { end: dispo_end } => {
                     if dispo_end <= end
                         && let Some((len, content)) = try_parse_inline_footnote(&text[pos..])
@@ -450,7 +519,7 @@ fn parse_inline_range_impl(
                 ConstructDispo::BareCitation { end: dispo_end } => {
                     if dispo_end <= end
                         && let Some((len, key, has_suppress)) = try_parse_bare_citation(text, pos)
-                        && pos + len == dispo_end
+                        && pos + len <= dispo_end
                     {
                         let is_crossref = config.extensions.quarto_crossrefs
                             && super::citations::is_crossref_key(key, &config.crossref_prefixes);
@@ -463,9 +532,14 @@ fn parse_inline_range_impl(
                                 super::citations::emit_crossref(builder, key, has_suppress);
                             } else {
                                 log::trace!("IR: matched bare citation at pos {}: {}", pos, key);
-                                emit_bare_citation(builder, key, has_suppress);
+                                super::citations::emit_narrative_citation(
+                                    builder,
+                                    key,
+                                    has_suppress,
+                                    &text[pos + len..dispo_end],
+                                );
                             }
-                            pos += len;
+                            pos = dispo_end;
                             text_start = pos;
                             continue;
                         }
@@ -1429,6 +1503,7 @@ fn parse_inline_range_impl(
                         suppress_inner_links,
                         suppress_footnote_refs,
                         mask,
+                        false,
                     );
                     builder.token(marker_kind.into(), &text[partner..partner + partner_len]);
                     builder.finish_node();
@@ -1531,15 +1606,24 @@ fn parse_inline_range_impl(
             continue;
         }
 
+        if stop_at_bracket {
+            match byte {
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
+                _ => {}
+            }
+        }
         pos = advance_char_boundary(text, pos, end);
     }
 
     if pos > text_start && text_start < end {
-        log::trace!("Emitting remaining TEXT: {:?}", &text[text_start..end]);
-        builder.token(SyntaxKind::TEXT.into(), &text[text_start..end]);
+        let emit_end = pos.min(end);
+        log::trace!("Emitting remaining TEXT: {:?}", &text[text_start..emit_end]);
+        builder.token(SyntaxKind::TEXT.into(), &text[text_start..emit_end]);
     }
 
     log::trace!("parse_inline_range complete: start={}, end={}", start, end);
+    pos
 }
 
 #[cfg(test)]
@@ -1547,6 +1631,19 @@ mod tests {
     use super::*;
     use crate::syntax::{SyntaxKind, SyntaxNode};
     use rowan::GreenNode;
+
+    #[test]
+    fn narrative_suffix_lookahead_does_not_recurse_through_later_citations() {
+        let input = "@a [*p. 4] outside*] ".repeat(32);
+        let tree = crate::parse(&input, None);
+        assert_eq!(tree.text().to_string(), input);
+        assert_eq!(
+            tree.descendants()
+                .filter(|node| node.kind() == SyntaxKind::CITATION)
+                .count(),
+            32,
+        );
+    }
 
     #[test]
     fn test_recursive_simple_emphasis() {

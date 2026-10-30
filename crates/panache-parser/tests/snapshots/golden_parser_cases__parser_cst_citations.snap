@@ -1,6 +1,5 @@
 ---
 source: crates/panache-parser/tests/golden_parser_cases.rs
-assertion_line: 97
 expression: cst_output
 ---
 DOCUMENT@0..1707
@@ -75,16 +74,13 @@ DOCUMENT@0..1707
   BLANK_LINE@476..477
     BLANK_LINE@476..477 "\n"
   PARAGRAPH@477..557
-    CITATION@477..485
+    CITATION@477..493
       CITATION_MARKER@477..478 "@"
       CITATION_KEY@478..485 "smith04"
-    TEXT@485..486 " "
-    UNRESOLVED_REFERENCE@486..493
-      LINK_START@486..487
-        LINK_START@486..487 "["
-      LINK_TEXT@487..492
-        TEXT@487..492 "p. 33"
-      TEXT@492..493 "]"
+      WHITESPACE@485..486 " "
+      CITATION_SUFFIX_START@486..487 "["
+      CITATION_CONTENT@487..492 "p. 33"
+      CITATION_SUFFIX_END@492..493 "]"
     TEXT@493..556 " says blah with a loc ..."
     NEWLINE@556..557 "\n"
   BLANK_LINE@557..558
@@ -261,16 +257,13 @@ DOCUMENT@0..1707
     FOOTNOTE_LABEL_COLON@1610..1611 ":"
     WHITESPACE@1611..1612 " "
     PARAGRAPH@1612..1707
-      CITATION@1612..1624
+      CITATION@1612..1632
         CITATION_MARKER@1612..1613 "@"
         CITATION_KEY@1613..1624 "пункт3"
-      TEXT@1624..1625 " "
-      UNRESOLVED_REFERENCE@1625..1632
-        LINK_START@1625..1626
-          LINK_START@1625..1626 "["
-        LINK_TEXT@1626..1631
-          TEXT@1626..1631 "p. 12"
-        TEXT@1631..1632 "]"
+        WHITESPACE@1624..1625 " "
+        CITATION_SUFFIX_START@1625..1626 "["
+        CITATION_CONTENT@1626..1631 "p. 12"
+        CITATION_SUFFIX_END@1631..1632 "]"
       TEXT@1632..1665 " and a citation witho ..."
       CITATION@1665..1679
         LINK_START@1665..1666 "["

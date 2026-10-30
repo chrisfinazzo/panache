@@ -7,7 +7,52 @@
 //! - Author-in-text: `@doe99` (bare, without brackets)
 
 use super::sink::InlineSink;
-use crate::syntax::SyntaxKind;
+use crate::{options::ParserOptions, syntax::SyntaxKind};
+
+/// Narrative suffixes yield to links, reference shapes, and bracketed spans.
+/// Their closing bracket must be found by parsing inlines, since emphasis and
+/// raw TeX can contain otherwise unmatched closing brackets.
+pub(super) fn narrative_suffix_end(
+    text: &str,
+    key_end: usize,
+    end: usize,
+    config: &ParserOptions,
+) -> Option<usize> {
+    let tail = &text[key_end..end];
+    let rest = tail.trim_start_matches([' ', '\t', '\r', '\n']);
+    if !rest.starts_with('[') {
+        return None;
+    }
+    let open = end - rest.len();
+    let ctx = super::links::LinkScanContext::from_options(config);
+    if config.extensions.inline_links
+        && super::links::try_parse_inline_link_parts(rest, false, ctx).is_some()
+    {
+        return None;
+    }
+    if config.extensions.bracketed_spans
+        && super::bracketed_spans::try_parse_bracketed_span(rest).is_some()
+    {
+        return None;
+    }
+    if config.extensions.reference_links
+        && let Some((_, _, label, _, shortcut)) = super::links::try_parse_reference_link(
+            rest,
+            config.extensions.shortcut_reference_links,
+            config.extensions.inline_links,
+            config.extensions.spaced_reference_links,
+            ctx,
+        )
+        && (!shortcut
+            || config
+                .refdef_labels
+                .as_ref()
+                .is_some_and(|labels| labels.contains(&super::refdef_map::normalize_label(&label))))
+    {
+        return None;
+    }
+    super::core::inline_bracket_end(text, open + 1, end, config).map(|close| close + 1)
+}
 
 /// Try to parse a bracketed citation starting at the current position.
 /// Returns Some((length, content)) if successful, None otherwise.
@@ -584,6 +629,15 @@ fn emit_bracketed_citation_content(builder: &mut impl InlineSink, content: &str)
 
 /// Emit a bare citation node to the builder.
 pub(crate) fn emit_bare_citation(builder: &mut impl InlineSink, key: &str, has_suppress: bool) {
+    emit_narrative_citation(builder, key, has_suppress, "");
+}
+
+pub(super) fn emit_narrative_citation(
+    builder: &mut impl InlineSink,
+    key: &str,
+    has_suppress: bool,
+    suffix: &str,
+) {
     builder.start_node(SyntaxKind::CITATION.into());
 
     if has_suppress {
@@ -598,6 +652,23 @@ pub(crate) fn emit_bare_citation(builder: &mut impl InlineSink, key: &str, has_s
         builder.token(SyntaxKind::CITATION_BRACE_CLOSE.into(), "}");
     } else {
         builder.token(SyntaxKind::CITATION_KEY.into(), key);
+    }
+
+    if !suffix.is_empty() {
+        let content = suffix.trim_start_matches([' ', '\t', '\r', '\n']);
+        let gap = &suffix[..suffix.len() - content.len()];
+        for part in gap.split_inclusive('\n') {
+            let horizontal = part.trim_end_matches(['\r', '\n']);
+            if !horizontal.is_empty() {
+                builder.token(SyntaxKind::WHITESPACE.into(), horizontal);
+            }
+            if horizontal.len() < part.len() {
+                builder.token(SyntaxKind::NEWLINE.into(), &part[horizontal.len()..]);
+            }
+        }
+        builder.token(SyntaxKind::CITATION_SUFFIX_START.into(), "[");
+        emit_bracketed_citation_content(builder, &content[1..content.len() - 1]);
+        builder.token(SyntaxKind::CITATION_SUFFIX_END.into(), "]");
     }
 
     builder.finish_node();

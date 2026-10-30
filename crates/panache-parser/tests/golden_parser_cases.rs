@@ -611,6 +611,7 @@ golden_test_cases!(
     crlf_raw_blocks,
     crlf_yaml_metadata,
     citations,
+    citation_narrative_suffix_590,
     citation_bare_not_after_string,
     citation_code_span_link,
     citation_nested_link_url_at,

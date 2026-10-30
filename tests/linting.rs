@@ -1611,6 +1611,61 @@ fn test_empty_values() {
 }
 
 #[test]
+fn narrative_citation_suffix_is_not_an_undefined_reference() {
+    let input = include_str!("linting/citation_narrative_suffix_590.md");
+    for flavor in ["pandoc", "quarto", "rmarkdown"] {
+        let config: Config = toml::from_str(&format!("flavor = \"{flavor}\"\n")).unwrap();
+        let tree = panache::parse(input, Some(config.clone()));
+        let diagnostics = lint(&tree, input, &config);
+        let missing: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "undefined-reference-label")
+            .map(|d| &input[d.location.range])
+            .collect();
+        assert_eq!(missing, ["[missing]"], "{flavor}: {diagnostics:#?}");
+    }
+}
+
+#[test]
+fn narrative_citation_does_not_hide_other_undefined_references() {
+    for input in [
+        "[missing]",
+        "@a and [missing]",
+        "@a\n\n[missing]",
+        "@a [text][missing]",
+        "@a ![text][missing]",
+        "@a ![missing]",
+        "*em*@a [missing]",
+    ] {
+        let config = Config::default();
+        let tree = panache::parse(input, Some(config.clone()));
+        let diagnostics = lint(&tree, input, &config);
+        let missing: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code == "undefined-reference-label")
+            .collect();
+        assert_eq!(missing.len(), 1, "{input:?}: {diagnostics:#?}");
+        assert!(
+            missing[0].message.contains("[missing]"),
+            "{input:?}: {missing:#?}"
+        );
+    }
+}
+
+#[test]
+fn narrative_citation_suffix_requires_citations() {
+    let input = "@a [missing]";
+    let config: Config = toml::from_str("[extensions]\ncitations = false\n").unwrap();
+    let tree = panache::parse(input, Some(config.clone()));
+    let diagnostics = lint(&tree, input, &config);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == "undefined-reference-label")
+    );
+}
+
+#[test]
 fn test_citation_nonbreaking_space() {
     let diagnostics = lint_file("citation_nonbreaking_space.md");
     let flagged: Vec<_> = diagnostics

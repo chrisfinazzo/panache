@@ -301,6 +301,7 @@ golden_test_cases!(
     crlf_yaml_metadata,
     east_asian_line_breaks,
     citations,
+    citation_narrative_suffix_590,
     citation_colon_paragraph_reflow,
     citation_prefix_paren_escape_idempotency_278,
     definition_body_code_block_blank_line_idempotency,

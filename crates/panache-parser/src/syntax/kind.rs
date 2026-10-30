@@ -125,6 +125,8 @@ pub enum SyntaxKind {
     CITATION_BRACE_CLOSE,    // } for complex keys
     CITATION_CONTENT,        // Text content in bracketed citations
     CITATION_SEPARATOR,      // ; between multiple citations
+    CITATION_SUFFIX_START,   // [ after a narrative citation
+    CITATION_SUFFIX_END,     // ] after a narrative citation suffix
     CROSSREF,                // Quarto cross-reference: @fig-*, @eq-*, etc.
     CROSSREF_MARKER,         // @ or -@ for cross-references
     CROSSREF_KEY,            // Cross-reference key identifier

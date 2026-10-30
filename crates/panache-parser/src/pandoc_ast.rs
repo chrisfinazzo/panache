@@ -3542,9 +3542,6 @@ fn inlines_from(parent: &SyntaxNode) -> Vec<Inline> {
             NodeOrToken::Node(n) if n.kind() == SyntaxKind::LATEX_COMMAND => {
                 emit_latex_command_with_absorb(&n, &mut iter, &mut out);
             }
-            NodeOrToken::Node(n) if n.kind() == SyntaxKind::CITATION => {
-                emit_citation_with_absorb(&n, &mut iter, &mut out);
-            }
             NodeOrToken::Node(n) => push_inline_node(&n, &mut out),
         }
     }
@@ -3552,62 +3549,6 @@ fn inlines_from(parent: &SyntaxNode) -> Vec<Inline> {
         out.pop();
     }
     out
-}
-
-/// Pandoc absorbs `@key [locator]` into a single AuthorInText `Cite` with
-/// the bracketed text becoming the citation's suffix. The parser emits two
-/// separate nodes: `CITATION` (bare `@key`, no surrounding brackets) and an
-/// adjacent `LINK` whose bracketed text has no destination. When the
-/// CITATION is bare and we can verify both the next siblings (a single
-/// `TEXT` whitespace token followed by a `LINK` node lacking
-/// `LINK_DEST_START`), consume both and absorb the link's text as suffix.
-fn emit_citation_with_absorb<I>(
-    node: &SyntaxNode,
-    iter: &mut std::iter::Peekable<I>,
-    out: &mut Vec<Inline>,
-) where
-    I: Iterator<Item = rowan::SyntaxElement<crate::syntax::PanacheLanguage>>,
-{
-    let bracketed = node
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .any(|t| t.kind() == SyntaxKind::LINK_START);
-    if bracketed {
-        render_citation_inline(node, out, None);
-        return;
-    }
-    let next_sibling_pair = node.next_sibling_or_token().and_then(|el1| {
-        let t = el1.as_token().cloned()?;
-        if t.kind() != SyntaxKind::TEXT || !t.text().starts_with(' ') {
-            return None;
-        }
-        let space_text = t.text().to_string();
-        let link_el = t.next_sibling_or_token()?;
-        let link = link_el.as_node().cloned()?;
-        if link.kind() != SyntaxKind::LINK && link.kind() != SyntaxKind::UNRESOLVED_REFERENCE {
-            return None;
-        }
-        let has_dest = link
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .any(|tok| tok.kind() == SyntaxKind::LINK_DEST_START);
-        if has_dest {
-            return None;
-        }
-        let link_text = link
-            .children()
-            .find(|c| c.kind() == SyntaxKind::LINK_TEXT)
-            .map(|tt| tt.text().to_string())
-            .unwrap_or_default();
-        Some((space_text, link_text))
-    });
-    if let Some((_space_text, locator_text)) = next_sibling_pair {
-        iter.next();
-        iter.next();
-        render_citation_inline(node, out, Some(&locator_text));
-    } else {
-        render_citation_inline(node, out, None);
-    }
 }
 
 /// Pandoc's tex inline reader absorbs trailing horizontal whitespace into the
@@ -3656,7 +3597,7 @@ fn push_inline_node(node: &SyntaxNode, out: &mut Vec<Inline>) {
     match node.kind() {
         SyntaxKind::LINK => render_link_inline(node, out),
         SyntaxKind::IMAGE_LINK => render_image_inline(node, out),
-        SyntaxKind::CITATION => render_citation_inline(node, out, None),
+        SyntaxKind::CITATION => render_citation_inline(node, out),
         SyntaxKind::UNRESOLVED_REFERENCE => render_unresolved_reference_inline(node, out),
         _ => out.push(inline_from_node(node)),
     }
@@ -3755,14 +3696,9 @@ fn render_unresolved_reference_inline(node: &SyntaxNode, out: &mut Vec<Inline>) 
 /// `Str "N"` (just the digits — surrounding parens come from adjacent
 /// source bytes which our coalesce pass merges back in). Otherwise we
 /// project the CITATION node as a proper `Cite [Citation, ...] [Inline,
-/// ...]` per pandoc's citation reader. `extra_suffix_text` carries an
-/// absorbed `[locator]` (pandoc absorbs `@key [locator]` into the Cite as
-/// the citation's suffix); the literal text reflects the absorbed bytes.
-fn render_citation_inline(
-    node: &SyntaxNode,
-    out: &mut Vec<Inline>,
-    extra_suffix_text: Option<&str>,
-) {
+/// ...]` per pandoc's citation reader, including any narrative suffix
+/// captured in the citation node.
+fn render_citation_inline(node: &SyntaxNode, out: &mut Vec<Inline>) {
     let first_key = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -3784,13 +3720,15 @@ fn render_citation_inline(
     let mut builders: Vec<CitationBuilder> = Vec::new();
     let mut current: Option<CitationBuilder> = None;
     let mut pending_prefix = String::new();
+    let mut in_brackets = bracketed;
     for el in node.children_with_tokens() {
         let token = match el {
             NodeOrToken::Token(t) => t,
             _ => continue,
         };
         match token.kind() {
-            SyntaxKind::LINK_START | SyntaxKind::LINK_DEST => {}
+            SyntaxKind::LINK_START | SyntaxKind::LINK_DEST | SyntaxKind::CITATION_SUFFIX_END => {}
+            SyntaxKind::CITATION_SUFFIX_START => in_brackets = true,
             SyntaxKind::CITATION_BRACE_OPEN | SyntaxKind::CITATION_BRACE_CLOSE => {}
             SyntaxKind::CITATION_MARKER => {
                 if let Some(c) = current.take() {
@@ -3798,7 +3736,7 @@ fn render_citation_inline(
                 }
                 let mode = if token.text() == "-@" {
                     CitationMode::SuppressAuthor
-                } else if bracketed {
+                } else if in_brackets {
                     CitationMode::NormalCitation
                 } else {
                     CitationMode::AuthorInText
@@ -3832,15 +3770,6 @@ fn render_citation_inline(
         builders.push(c);
     }
 
-    if let Some(extra) = extra_suffix_text
-        && let Some(last) = builders.last_mut()
-    {
-        if !last.suffix_raw.is_empty() && !extra.starts_with(' ') {
-            last.suffix_raw.push(' ');
-        }
-        last.suffix_raw.push_str(extra);
-    }
-
     let note_offset: u32 = node.text_range().start().into();
     let note_num = REFS_CTX
         .with(|c| {
@@ -3856,12 +3785,19 @@ fn render_citation_inline(
         .map(|b| b.into_citation(note_num))
         .collect();
 
-    let mut literal = node.text().to_string();
-    if let Some(extra) = extra_suffix_text {
-        literal.push(' ');
-        literal.push('[');
-        literal.push_str(extra);
-        literal.push(']');
+    let mut literal = String::new();
+    for token in node.children_with_tokens().filter_map(|el| el.into_token()) {
+        match token.kind() {
+            SyntaxKind::LINE_PREFIX => {}
+            SyntaxKind::CITATION_SUFFIX_START => {
+                if !literal.ends_with(char::is_whitespace) {
+                    literal.push(' ');
+                }
+                literal.push('[');
+            }
+            SyntaxKind::CITATION_MARKER if !bracketed && literal.is_empty() => literal.push('@'),
+            _ => literal.push_str(token.text()),
+        }
     }
     let text_inlines = literal_inlines(&literal);
 
@@ -5490,6 +5426,23 @@ mod tests {
         let tree = parse(input, None);
         let s = to_pandoc_json(&tree);
         serde_json::from_str(&s).expect("to_pandoc_json must emit valid JSON")
+    }
+
+    #[test]
+    fn narrative_citation_projects_suffix_and_preserves_the_following_reference() {
+        let output = parse_to_json("@a\n[p. 4; @b] and [missing]");
+        let inlines = &output["blocks"][0]["c"];
+        let citations = &inlines[0]["c"][0];
+        assert_eq!(citations[0]["citationId"], "a");
+        assert_eq!(citations[0]["citationMode"]["t"], "AuthorInText");
+        assert_eq!(
+            citations[0]["citationSuffix"],
+            json!([{"t": "Str", "c": "p.\u{a0}4"}])
+        );
+        assert_eq!(citations[1]["citationId"], "b");
+        assert_eq!(citations[1]["citationMode"]["t"], "NormalCitation");
+        assert_eq!(inlines[0]["c"][1][1]["t"], "SoftBreak");
+        assert_eq!(inlines[4], json!({"t": "Str", "c": "[missing]"}));
     }
 
     fn pandoc_options() -> crate::options::ParserOptions {
